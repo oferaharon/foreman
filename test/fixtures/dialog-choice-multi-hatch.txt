@@ -1,0 +1,40 @@
+
+❯ Use the AskUserQuestion tool right now to ask me which colour I prefer: red, green or blue. Give
+  each option a two-sentence description so it wraps. Do nothing else.
+
+⏺ User declined to answer questions
+  ⎿  · Which colour do you prefer? (Red / Green / Blue)
+
+⏺ What would you like to clarify before picking a colour?
+
+✻ Worked for 6s
+
+❯ Ask me again with the AskUserQuestion tool: which colour, red green or blue. Nothing else.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which colour do you prefer? → teal, obviously
+
+⏺ Teal it is — trust you to pick the one option not on the menu.
+
+✻ Crunched for 4s
+
+❯ Use AskUserQuestion once more, this time with multiSelect true: which colours do you like — red,
+  green, blue? Nothing else.
+────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Colours  ✔ Submit  →
+
+Which colours do you like?
+
+❯ 1. [ ] Red
+  Bold and warm.
+  2. [ ] Green
+  Calm and natural.
+  3. [ ] Blue
+  Cool and classic.
+  4. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

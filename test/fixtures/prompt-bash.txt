@@ -1,0 +1,15 @@
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   chmod 700 sample.txt
+   Set sample.txt permissions to 700
+
+ This command requires approval
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don’t ask again for: chmod 700 *
+   3. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain
+

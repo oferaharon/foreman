@@ -1,0 +1,585 @@
+/*
+ * cards.css — item 7. The answer cards.
+ *
+ * The palette comes from `/tokens.css`, shared with the desktop; no colour is spelled out
+ * here except the two `color-mix` tints, which are computed from tokens so they follow the
+ * theme rather than pinning it.
+ *
+ * The one measurement that is not taste: **48px minimum on every row that sends a
+ * keystroke into a terminal on another machine.** The desktop's answer rows were laid out
+ * for a mouse, which is a large part of why this view exists at all; a mis-tap here does
+ * not select the wrong menu item, it approves the wrong thing.
+ */
+
+/* ================================================================ card === */
+
+.m-card {
+  /* The card is mounted into a flex column above the composer, beside a transcript that
+     is `flex: 1`. Without this it is a flex item with `min-height: auto` and gets
+     squeezed to whatever is left over — which on a full screen is a permission prompt
+     three lines tall with its buttons cut off the bottom. */
+  flex: none;
+  margin: 0 0 0.75rem;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--decision);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 0.8rem 0.85rem 0.85rem;
+  /* The card sits above item 6's composer, and a long permission diff or a twelve-option
+     question must not push the box to type in off the screen. */
+  max-height: 62vh;
+  max-height: 62dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A plan approval is not an alarm — it is a decision — so it wears the accent rather than
+   the decision red. The one row on it that *is* an alarm says so itself. */
+.m-card.is-plan { border-left-color: var(--accent); }
+
+/* Nothing to press. Muted edge on purpose: a refusal card that shouted would read as a
+   thing to act on, and the whole point of it is that there is no action here. */
+.m-card.is-refusal { border-left-color: var(--rule-strong); }
+
+.m-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+
+.m-card-kind {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--decision);
+}
+
+.m-card.is-plan .m-card-kind { color: var(--accent); }
+.m-card.is-refusal .m-card-kind { color: var(--ink-faint); }
+
+/* The subject is the command, the file, the thing being asked about. It gets the room the
+   header has left and is cut rather than wrapped — the question below carries the meaning,
+   and a header that grows to four lines pushes the buttons under the fold. */
+.m-card-subject {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-card-q {
+  font-family: var(--serif);
+  font-size: 0.98rem;
+  line-height: 1.45;
+  color: var(--ink);
+  margin-bottom: 0.6rem;
+}
+
+/* The command, the diff, the detail lines — verbatim, and scrolling sideways rather than
+   wrapping, because a wrapped diff line stops being a diff line. */
+.m-card-detail {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  margin-bottom: 0.6rem;
+  max-height: 11rem;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre;
+}
+
+.m-card-detail .add { color: var(--idle); }
+.m-card-detail .del { color: var(--decision); }
+
+/* ============================================================= options === */
+
+.m-opts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/*
+ * One answer. Full width, its own digit on the left, and never below 48px however short
+ * the label — a two-word `No` and a forty-word `Yes, and don't ask again for…` are the
+ * same size of decision and must be the same size of target.
+ */
+.m-opt {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.15rem 0.6rem;
+  width: 100%;
+  min-height: 48px;
+  padding: 0.6rem 0.7rem;
+  text-align: left;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.m-opt:active { background: var(--accent-soft); }
+
+.m-opt:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/*
+ * The digit, drawn as well as sent.
+ *
+ * This is the cross-check: whatever order the card chose to draw the rows in, the number
+ * on the button is the number on the terminal, and that is the one thing a human can
+ * verify from across the room. Tabular figures so a `1` and a `2` sit in the same place.
+ */
+.m-opt-num {
+  grid-column: 1;
+  justify-self: center;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.m-opt-body {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.m-opt-label {
+  font-family: var(--serif);
+  font-size: 0.92rem;
+  line-height: 1.35;
+  color: var(--ink);
+  /* Wrapped, never truncated. A label cut mid-clause is how you approve the wrong thing. */
+  overflow-wrap: anywhere;
+}
+
+.m-opt-desc {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* ---- tones -------------------------------------------------------------- */
+
+.m-opt.tone-approve .m-opt-num,
+.m-opt.tone-narrow .m-opt-num { color: var(--idle); }
+
+.m-opt.tone-deny .m-opt-num { color: var(--ink-muted); }
+
+/*
+ * Every row that costs more than the call in front of you: a permission box's broader
+ * yeses ("don't ask again", "allow reading from /private/tmp", "switch to auto mode") and
+ * a plan box's danger row ("clear context and bypass permissions", which throws the
+ * conversation away *and* stops the session ever asking again).
+ *
+ * Keyed on `needs-arming` and not on a tone, deliberately: that class is set by the same
+ * decision that makes the row ask twice, so the warning colour cannot drift out of step
+ * with the behaviour. A row that looked calm and asked twice would be merely confusing; a
+ * row that looked alarming and fired on one tap would be a lie.
+ */
+.m-opt.needs-arming {
+  border-color: color-mix(in srgb, var(--working) 45%, var(--rule));
+  background: color-mix(in srgb, var(--working) 10%, var(--surface));
+}
+
+.m-opt.needs-arming .m-opt-num { color: var(--working); }
+
+.m-opt.tone-refine .m-opt-num { color: var(--mode-edits); }
+
+/* The safest row on a plan box leads, and says so quietly — a heavier outline, not a
+   filled button, because a filled primary is the thing a thumb reaches for unread. */
+.m-opt.is-primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.m-opt.is-primary .m-opt-num { color: var(--accent); }
+
+/* Armed: the label stays exactly where it was — you have to be able to re-read the row
+   while deciding whether to tap it again — and `sure?` arrives underneath it. */
+.m-opt.is-armed {
+  border-color: var(--decision);
+  background: color-mix(in srgb, var(--decision) 14%, var(--surface));
+}
+
+.m-opt.is-armed .m-opt-num { color: var(--decision); }
+
+.m-opt-confirm {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+/* ---- a question's own rows ---------------------------------------------- */
+
+/* A ticked multi-select row. The mark in the digit column is `☑`, so the row itself only
+   has to be visibly *held* — the accent border does that without a fill fighting the
+   armed-state tint that may be on a sibling. */
+.m-opt.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.m-opt.is-on .m-opt-num { color: var(--accent); }
+
+/* ================================================== bars, notes, errors === */
+
+/* The plan box's feedback field. Full width because a `<textarea>` sizes itself from the
+   `cols` attribute otherwise and comes out about half the card — which on a phone reads as
+   a disabled control rather than the way to say "not this, do that instead". */
+.m-card-text {
+  display: block;
+  width: 100%;
+  margin-top: 0.7rem;
+  padding: 0.55rem 0.65rem;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.m-card-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.m-card-submit {
+  min-height: 48px;
+  padding: 0.55rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+
+.m-card-submit:disabled {
+  color: var(--ink-faint);
+  background: var(--surface-sunk);
+  border-color: var(--rule);
+  cursor: default;
+}
+
+.m-card-ghost {
+  min-height: 48px;
+  padding: 0.55rem 0.9rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--ink-muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.m-card-ghost:active { background: var(--accent-soft); }
+
+.m-card-ghost:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.m-card-note {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+}
+
+.m-card-said {
+  margin: 0.7rem 0 0;
+  font-family: var(--serif);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+/* The server's own sentence, verbatim. It carries the one fact nothing else can — whether
+   the pane was left half-answered — so it is never replaced with a generic failure. */
+.m-card-err {
+  margin-top: 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+/* ========================================================= plan reader === */
+
+.m-plan-file {
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--surface-sunk);
+}
+
+.m-plan-file > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--accent);
+  cursor: pointer;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+.m-plan-file > summary::-webkit-details-marker { display: none; }
+
+.m-plan-file > summary::before {
+  content: '▸';
+  margin-right: 0.45rem;
+  color: var(--ink-faint);
+}
+
+.m-plan-file[open] > summary::before { content: '▾'; }
+
+/*
+ * The plan itself. It is the document being approved, so it is readable at length — its own
+ * scroller, capped, with `overscroll-behavior: contain` so reaching its end does not start
+ * scrolling the card behind it.
+ */
+.m-plan-md {
+  max-height: 45vh;
+  max-height: 45dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 0.7rem 0.7rem;
+  border-top: 1px solid var(--rule);
+  font-family: var(--serif);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.m-plan-md h1,
+.m-plan-md h2,
+.m-plan-md h3 {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink-muted);
+  margin: 1rem 0 0.35rem;
+}
+
+.m-plan-md p,
+.m-plan-md ul,
+.m-plan-md ol { margin: 0.5rem 0; }
+
+.m-plan-md ul,
+.m-plan-md ol { padding-left: 1.2rem; }
+
+.m-plan-md code {
+  font-family: var(--mono);
+  font-size: 0.8em;
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.05em 0.3em;
+}
+
+/* Wide code and wide tables scroll inside themselves. The card must never scroll
+   sideways — a horizontal pan on a phone is how you leave the screen you were reading. */
+.m-plan-md pre {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  background: var(--code-bg);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+}
+
+.m-plan-md pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.72rem;
+  line-height: 1.5;
+}
+
+.m-plan-md table {
+  display: block;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.m-plan-md th,
+.m-plan-md td {
+  border: 1px solid var(--rule);
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+}
+
+.m-plan-md blockquote {
+  margin: 0.5rem 0;
+  padding-left: 0.7rem;
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-muted);
+}
+
+.m-plan-md a { color: var(--accent); }
+
+/* ====================================================== question extras === */
+
+/* Where you are in a set of questions. Without it, answering one and watching another
+   appear reads like the phone did something wrong. */
+.m-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+}
+
+.m-step {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  color: var(--ink-faint);
+}
+
+.m-step.is-done {
+  color: var(--idle);
+  border-color: color-mix(in srgb, var(--idle) 45%, var(--rule));
+}
+
+/* What is about to be sent, on the review screen. */
+.m-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-sunk);
+  border-radius: 8px;
+}
+
+.m-review-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.m-review-q {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.m-review-a {
+  font-family: var(--serif);
+  font-size: 0.9rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+/* ---- the escape hatches -------------------------------------------------- */
+
+/* Below the rule, because that is where they are on screen: outside the numbered run, and
+   the only way to answer a question in words while the composer is queueing. */
+.m-hatch {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+
+/* The preview-panel layout has neither hatch (T8), which left a rule and a gap under the
+   options with nothing beneath them — a divider that divides nothing reads as something
+   that failed to load. Caught on the bench against a real preview box. */
+.m-hatch:empty { display: none; }
+
+.m-hatch-text {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.m-hatch-text input {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+/* ============================================== the boxes with no buttons === */
+
+/*
+ * The trust gate, and any other box the panel will not answer.
+ *
+ * What is inside `.m-gate-screen` is a transcript of what the Mac is showing, not a set of
+ * controls — flat text on a sunk ground, no borders, no rounded rows, nothing that invites
+ * a thumb. Its options are listed for one reason: knowing that the terminal says
+ * `1. Yes, I trust this folder / 2. No, exit` is exactly what makes the walk worth making.
+ */
+.m-gate-screen {
+  padding: 0.6rem 0.7rem;
+  background: var(--code-bg);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.m-gate-title {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.m-gate-path {
+  margin-top: 0.2rem;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.m-gate-line {
+  margin-top: 0.45rem;
+  overflow-wrap: anywhere;
+}
+
+.m-gate-opts {
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink-faint);
+}
+
+.m-gate-opt { overflow-wrap: anywhere; }

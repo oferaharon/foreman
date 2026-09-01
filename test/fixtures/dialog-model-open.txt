@@ -1,0 +1,47 @@
+╭─── Claude Code v2.1.232 ───────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                              │
+╭─── Claude Code v2.1.232 ───────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                              │
+│                 Welcome back Alex!                 │ Run /init to create a CLAUDE.md file with instructio… │
+│                                                    │ ───────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                            │
+╭─── Claude Code v2.1.232 ───────────────────────────────────────────────────────────────────────────────────╮
+│                                          │ Tips for getting started                                        │
+│            Welcome back Alex!            │ Run /init to create a CLAUDE.md file with instructions for Cla… │
+│                                          │ ─────────────────────────────────────────────────────────────── │
+│                  ▐▛███▜▌                 │ What's new                                                      │
+│                 ▝▜█████▛▘                │ Added GitLab merge request URL support to the `--worktree` fla… │
+│                   ▘▘ ▝▝                  │ Added an opt-in `forward_user_identity` apps gateway setting o… │
+│                                          │ Added opt-in memory cgroup support for Bash tool commands on L… │
+│   Haiku 4.5 · Claude Max · Alex Morgan   │ /release-notes for more                                         │
+│          /…/scratchpad/plantest          │                                                                 │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ /model
+  ⎿  Set model to Sonnet 5 and saved as your default for new sessions
+
+❯ /model
+  ⎿  Set model to Haiku 4.5 for this session only
+
+❯ /model
+────────────────────────────────────────────────────────────────────────────────────────────────── plantest ──
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Select model
+  Switch between Claude models. Your pick becomes the default for new sessions. For other/previous model
+  names, specify with --model.
+
+    1. Default (recommended)  Opus 5 with 1M context · Best for everyday, complex tasks
+    2. Opus (1M context)      Opus 5 with 1M context · Best for everyday, complex tasks
+    3. Fable                  Fable 5 · Most capable for your hardest and longest-running tasks
+    4. Sonnet                 Sonnet 5 · Efficient for routine tasks
+  ❯ 5. Haiku ✔                Haiku 4.5 · Fastest for quick answers
+
+  ○ Effort not supported for Haiku
+
+  Use /fast to turn on Fast mode (Opus 5).
+
+  Enter to set as default · s to use this session only · Esc to cancel
+

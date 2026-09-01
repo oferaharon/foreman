@@ -1,0 +1,281 @@
+/*
+ * tasks.css — item 8. Task rows and the read-only brief modal.
+ *
+ * Every class here is prefixed `m-tk-` so nothing collides with `lead.css` / `cards.css`,
+ * written by two other workers at the same time. `.m-scroll` and `.m-note` are the shared
+ * utility classes item 5 put in `m.css`; reused, not redefined.
+ */
+
+.m-tk {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * `mountTasks` (`tasks.js`) sets `host.className = 'm-tk'` on the very element `lead.js`
+ * toggles with `.hidden` — which replaces `m-lead-tasks` outright, so the `[hidden]` rule
+ * `lead.css` carries for that class no longer matches once this tab has ever been mounted.
+ * `hidden` itself is a UA-stylesheet `display: none` and this class rule beats it, so
+ * without this the tasks panel never hides again after its first mount.
+ */
+.m-tk[hidden] { display: none; }
+
+.m-tk-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* No five-row cap here — a phone scrolls naturally, and there is no room below this list
+   the way there is on the desktop. */
+.m-tk-row {
+  cursor: pointer;
+  padding: 0.7rem 1rem;
+  border-bottom: 1px solid var(--rule);
+  min-height: 44px;
+}
+
+.m-tk-row:active { background: var(--surface-sunk); }
+
+.m-tk-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.m-tk-chip {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.03em;
+  line-height: 1.3;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  color: var(--ink-faint);
+  flex: none;
+}
+
+.m-tk-chip.is-working, .m-tk-chip.is-dispatched { color: var(--working); border-color: currentColor; }
+.m-tk-chip.is-review { color: var(--accent); border-color: currentColor; }
+.m-tk-chip.is-done { color: var(--idle); border-color: currentColor; }
+.m-tk-chip.is-blocked, .m-tk-chip.is-failed { color: var(--decision); border-color: currentColor; }
+
+/* Merged vs live here: green only once the code is actually running in front of you,
+   amber for both halves of the gap between "merged" and "running". */
+.m-tk-chip.is-deployed { color: var(--idle); border-color: currentColor; }
+.m-tk-chip.is-unpulled, .m-tk-chip.is-restart {
+  color: var(--working);
+  border-color: currentColor;
+  background: color-mix(in srgb, var(--working) 8%, transparent);
+}
+
+/* The answer to "collapsing must not hide a stuck worker" on the desktop; here it's the
+   only mark this screen has for one at all. `m.css`'s global reduced-motion rule
+   (`* { animation: none !important }`) already covers turning this off — nothing to
+   redeclare. */
+.m-tk-chip.is-stuck {
+  color: var(--decision);
+  border-color: currentColor;
+  animation: m-tk-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes m-tk-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.m-tk-id {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink);
+  flex: 1 1 auto;
+  min-width: 3rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-tk-pr {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  flex: none;
+  padding: 0.15rem 0.25rem;
+}
+
+.m-tk-branch {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  margin-top: 0.3rem;
+  overflow-wrap: anywhere; /* a long branch name must wrap, never force page-wide scroll */
+}
+
+/* ------------------------------------------------------------- brief modal --- */
+
+.m-tk-modal-back {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+/*
+ * One scroller for the whole box, deliberately — not the desktop's brief-scroller plus
+ * plan-scroller pair. That split existed to protect a fixed 70vh chrome budget on a
+ * two-column page; a phone has no such budget, and splitting it here would only
+ * reintroduce the bug it caused there: `.plan-md` inside a `<details>` sizes to its own
+ * content and ignores a flex-resolved height, clipping its last lines with nothing on
+ * screen to say so (`decisions.md`, 2026-08-26). `overscroll-behavior: contain` keeps a
+ * scroll that runs out at the top or bottom of this box from leaking to the page under it.
+ */
+.m-tk-modal {
+  width: min(94vw, 32rem);
+  max-height: min(88vh, 88dvh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 50%);
+  padding: 1.1rem 1.1rem calc(1.1rem + env(safe-area-inset-bottom));
+}
+
+.m-tk-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.9rem;
+}
+
+.m-tk-modal-head h2 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.m-tk-modal-x {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -0.6rem -0.5rem 0 0;
+  font-size: 1rem;
+  color: var(--ink-muted);
+  border-radius: 8px;
+}
+
+.m-tk-modal-x:active { background: var(--surface-sunk); }
+
+/* One short line per fact; label and value in their own columns, so a long `why` wraps
+   under itself instead of under its label. A fact that isn't there draws no row at all. */
+.m-tk-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.2rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  margin: 0 0 0.9rem;
+}
+
+.m-tk-meta dt { color: var(--ink-faint); }
+.m-tk-meta dd { margin: 0; overflow-wrap: anywhere; }
+
+.m-tk-body { margin-bottom: 0.9rem; }
+.m-tk-body.is-faint { color: var(--ink-faint); }
+.m-tk-body.is-error-text { color: var(--decision); }
+
+/* Rendered-markdown typography, shared by the brief and the plan reader below it — one
+   set of heading/list/code rules rather than two drifting ones. */
+.m-tk-md {
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.m-tk-md h1, .m-tk-md h2, .m-tk-md h3 { font-size: 0.95rem; margin: 0.8rem 0 0.35rem; }
+.m-tk-md p, .m-tk-md ul, .m-tk-md ol { margin: 0.5rem 0; }
+.m-tk-md :first-child { margin-top: 0; }
+
+.m-tk-md pre {
+  overflow-x: auto; /* a wide code block scrolls inside itself, never the page */
+  background: var(--code-bg);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+}
+
+.m-tk-md code { font-family: var(--mono); font-size: 0.85em; }
+
+/* A markdown table is the other thing wide enough to force page-wide scroll if let loose;
+   `display: block` plus its own `overflow-x` keeps it inside the modal instead. */
+.m-tk-md table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 0.5rem 0;
+  border-collapse: collapse;
+}
+
+.m-tk-md th, .m-tk-md td {
+  border: 1px solid var(--rule);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+}
+
+/* A planner's deliverable, collapsed below its brief — a brief is a few hundred words, a
+   plan runs to thousands, and this modal has no fixed chrome budget to protect the way
+   the desktop's does, but opening straight into a wall of markdown is still the wrong
+   default. */
+.m-tk-plan {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  border-top: 1px solid var(--rule);
+  padding-top: 0.6rem;
+  margin-top: 0.2rem;
+}
+
+.m-tk-plan > summary {
+  cursor: pointer;
+  color: var(--ink-muted);
+  padding: 0.4rem 0.2rem;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.m-tk-plan > summary:active { color: var(--accent); }
+
+.m-tk-plan-md {
+  margin-top: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--surface-sunk);
+}
+
+.m-tk-plan-path {
+  margin-top: 0.4rem;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,30 @@
+  description. Nothing else.
+──────────────────────────────────────────────────────────────────────────
+ ☐ Grouping
+
+When displaying the list of sessions in the sidebar rail, should they be
+grouped by the filesystem folder they were launched from, or by the git
+repository they belong to, so that related work stays visually clustered
+together?
+
+❯ 1. By folder
+     Sessions are grouped under the exact working directory they were
+     started in. This keeps worktrees and subdirectories separate even
+     when they share a repo. It's the most literal mapping, but can
+     fragment one project into many groups.
+  2. By repository
+     Sessions are grouped by the git repository root, regardless of which
+     subfolder they launched from. Worktrees and subdirectory sessions
+     collapse into one project group. Non-repo sessions would need a
+     fallback bucket, likely their folder.
+  3. Hybrid
+     Group by repository when one is detected, and fall back to folder
+     grouping otherwise. This gives clean project clustering without
+     orphaning non-repo sessions. It's slightly more logic, but probably
+     matches user intuition best.
+  4. Type something.
+──────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

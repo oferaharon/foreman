@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- `viewport-fit=cover` is what makes `env(safe-area-inset-*)` non-zero on a notched
+         iPhone; without it the composer and the list's last row sit under the home
+         indicator. `initial-scale=1` with no `maximum-scale` on purpose — pinch-zoom is an
+         accessibility control and is not ours to take away. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#111219" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f5f5f8" media="(prefers-color-scheme: light)" />
+    <meta name="apple-mobile-web-app-title" content="Leads" />
+    <title>Leads · Foreman</title>
+
+    <!--
+      The palette, and *only* the palette. `web/styles.css` is deliberately not linked here:
+      `body { overflow: hidden }` and `.app { grid-template-columns: 20rem 1fr; height: 100vh }`
+      would each break a phone on their own. `web/tokens.css` is the shared file both pages
+      link so the colours cannot drift into two sources of truth.
+    -->
+    <link rel="stylesheet" href="/tokens.css" />
+
+    <!--
+      One stylesheet per scope, each owned by exactly one build item, all five linked here
+      once. This file is written by item 5 and no later item edits it — that is what stops
+      items 6, 7 and 8 colliding in a shared <head>.
+    -->
+    <link rel="stylesheet" href="/m/m.css" />
+    <link rel="stylesheet" href="/m/lead.css" />
+    <link rel="stylesheet" href="/m/cards.css" />
+    <link rel="stylesheet" href="/m/tasks.css" />
+
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='5' fill='%234a50c4'/></svg>"
+    />
+  </head>
+  <body>
+    <div class="m-app" id="app"></div>
+    <script type="module" src="/m/app.js"></script>
+  </body>
+</html>

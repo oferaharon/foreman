@@ -1,0 +1,40 @@
+
+──────────────────────────────────────────────────────────────────────
+ Accessing workspace:
+
+ /private/tmp/claude-501/-Users-alexmorgan--agenticdevui-worktrees-Ag
+ enticDevUI-trust-gate-fixture/fb8c4e50-400a-4194-a9af-b6f7ee45efb5/s
+ cratchpad/trust-gate-fresh-5588
+
+ Quick safety check: Is this a project you created or one you trust?
+ (Like your own code, a well-known open source project, or work from
+ your team). If not, take a moment to review what's in this folder
+ first.
+
+ Claude Code'll be able to read, edit, and execute files here.
+
+ Security guide
+
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
+
+ Enter to confirm · Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

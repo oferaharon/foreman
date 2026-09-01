@@ -1,0 +1,40 @@
+╭─── Claude Code v2.1.232 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+│                 Welcome back Alex!                 │ Ask Claude to create a new app or clone a repository            │
+│                                                    │ ─────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                      │
+│                      ▝▜█████▛▘                     │ Added GitLab merge request URL support to the `--worktree` fla… │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_user_identity` apps gateway setting o… │
+│ Opus 5 (1M context) with low … · Claude Max · Alex │ Added opt-in memory cgroup support for Bash tool commands on L… │
+│ Morgan                                             │ /release-notes for more                                         │
+│                 /…/scratchpad/qbox                 │                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ Ask me ONE multi-select question with 4 options about breakfast, using AskUserQuestion. Nothing else.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☒ Breakfast  ✔ Submit  →
+
+Review your answers
+
+ ● What are you in the mood for at breakfast?
+   → Pastry & coffee, Just coffee
+
+Ready to submit your answers?
+
+❯ 1. Submit answers
+  2. Cancel
+
+
+
+
+
+
+
+
+
+
+
+

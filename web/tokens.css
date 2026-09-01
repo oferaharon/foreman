@@ -1,0 +1,75 @@
+:root {
+  --ground: #f5f5f8;
+  --surface: #ffffff;
+  --surface-sunk: #eeeef4;
+  --ink: #16171e;
+  --ink-muted: #5b5e70;
+  --ink-faint: #8a8d9c;
+  --rule: #e1e2ea;
+  --rule-strong: #c9cbd8;
+  --accent: #4a50c4;
+  --accent-soft: #ecedfa;
+  --idle: #2f8f5b;
+  --working: #b0761a;
+  --decision: #bc403a;
+  --code-bg: #f0f0f5;
+  --mode-edits: #1d7d86;
+
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
+  --rail: 20rem;
+
+  /* An open group's block, lifted off the rail. Mixed rather than hard-coded so it tracks
+     both themes from one line — 4% of the ink colour darkens white and lightens the dark
+     surface, which is "slightly different" either way round. Deliberately not
+     `--surface-sunk`: that is what a row's hover uses, and a group whose rows stopped
+     reacting to the cursor would be a bad trade for a tint. */
+  --shelf: color-mix(in srgb, var(--ink) 4%, var(--surface));
+
+  /* The selected row. `--accent-soft` was doing this job and could not: it is a *button*
+     hover tint, a couple of points off the surface, and the rail asks it to be legible
+     across three different backgrounds at once — plain surface, `--shelf` inside an open
+     group, and `--surface-sunk` under the cursor. At 22% of the accent it clears all three
+     by a wide margin and still tracks both themes from one line, since `--accent` and
+     `--surface` are the pair that flip. */
+  --row-open: color-mix(in srgb, var(--accent) 22%, var(--surface));
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #111219;
+    --surface: #191a22;
+    --surface-sunk: #14151c;
+    --ink: #e7e8f0;
+    --ink-muted: #8f93a6;
+    --ink-faint: #6b6f82;
+    --rule: #282a36;
+    --rule-strong: #3a3d4d;
+    --accent: #8d95f2;
+    --accent-soft: #1e2030;
+    --idle: #4fbe85;
+    --working: #dda044;
+    --decision: #e8746e;
+    --code-bg: #14151c;
+    --mode-edits: #4fc3cf;
+  }
+}
+
+:root[data-theme="dark"] {
+  --ground: #111219;
+  --surface: #191a22;
+  --surface-sunk: #14151c;
+  --ink: #e7e8f0;
+  --ink-muted: #8f93a6;
+  --ink-faint: #6b6f82;
+  --rule: #282a36;
+  --rule-strong: #3a3d4d;
+  --accent: #8d95f2;
+  --accent-soft: #1e2030;
+  --idle: #4fbe85;
+  --working: #dda044;
+  --decision: #e8746e;
+  --code-bg: #14151c;
+  --mode-edits: #4fc3cf;
+}

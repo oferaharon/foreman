@@ -1,0 +1,50 @@
+╭─── Claude Code v2.1.232 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+│                 Welcome back Alex!                 │ Ask Claude to create a new app or clone a repository            │
+│                                                    │ ─────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                      │
+│                      ▝▜█████▛▘                     │ Added GitLab merge request URL support to the `--worktree` fla… │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_user_identity` apps gateway setting o… │
+│ Opus 5 (1M context) with low … · Claude Max · Alex │ Added opt-in memory cgroup support for Bash tool commands on L… │
+│ Morgan                                             │ /release-notes for more                                         │
+│             /…/scratchpad/adu-scratch              │                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ Use the AskUserQuestion tool right now to ask me one multi-select question with 4 options about which fruits I like.
+  Do nothing else.
+
+⏺ User declined to answer questions
+  ⎿  · Which fruits do you like? (Mango / Strawberry / Apple / Watermelon)
+
+✻ Worked for 31s
+
+❯ Use AskUserQuestion for ONE single-select question, 3 options, about my favourite colour. Nothing else.
+
+⏺ User declined to answer questions
+  ⎿  · What's your favourite colour? (Blue / Green / Red)
+
+✻ Baked for 49s
+
+❯ Use AskUserQuestion for ONE multi-select question, 4 options, about which fruits I like. Nothing else.
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Fruits  ✔ Submit  →
+
+Which fruits do you like?
+
+❯ 1. [ ] Mango
+  Sweet, tropical, requires a sink nearby
+  2. [ ] Strawberry
+  Classic berry, good in everything
+  3. [ ] Apple
+  Dependable, unglamorous, always in the bowl
+  4. [ ] Watermelon
+  Mostly water, entirely worth it
+  5. [ ] Type something
+     Submit
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

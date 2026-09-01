@@ -1,0 +1,64 @@
+  294
+  295
+  296
+  297
+  298
+  299
+  300
+
+✻ Crunched for 6s
+
+⏺ Background command "Sleep for 25 seconds" completed (exit code 0)
+
+⏺ The 25-second sleep finished, exit code 0. Riveting stuff.
+
+✻ Cooked for 1s
+
+❯ /model
+  ⎿  Kept model as Opus 5 (1M context)
+
+❯ /effort
+  ⎿  Cancelled
+
+❯ /config
+  ⎿  Config dialog dismissed
+
+❯ /resume
+  ⎿  Resume cancelled
+
+❯ Think carefully and write one paragraph about tmux pane ids.
+
+⏺ A tmux pane id is %N — a monotonically increasing integer prefixed with a percent sign, assigned once when the pane is
+  created and never reused within a server's lifetime, which makes it the only genuinely stable handle tmux gives you.
+
+✳ Orbiting… (3s · ↓ 153 tokens)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  AgenticDevUI (main) | Opus 5 (1M context) | ctx: 4%                                                              /rc
+  ⏸ manual mode on · ← 1 agent
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

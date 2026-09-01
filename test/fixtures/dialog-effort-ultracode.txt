@@ -1,0 +1,34 @@
+╭─── Claude Code v2.1.232 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+╭─── Claude Code v2.1.232 ─────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                        │
+│                 Welcome back Alex!                 │ Run /init to create a CLAUDE.md file with instructions for Cla… │
+│                                                    │ ─────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                      │
+│                      ▝▜█████▛▘                     │ Added GitLab merge request URL support to the `--worktree` fla… │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_user_identity` apps gateway setting o… │
+│ Opus 5 (1M context) with low … · Claude Max · Alex │ Added opt-in memory cgroup support for Bash tool commands on L… │
+│ Morgan                                             │ /release-notes for more                                         │
+│               /…/scratchpad/plantest               │                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ /effort
+──────────────────────────────────────────────────────────────────────────────────────────────────────────── plantest ──
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Effort
+
+                             Faster                                                 Smarter
+                             ───────────────────────────────────────────┆─────────▲────────
+                             low     medium     high     xhigh      max       ultracode
+                                                                          xhigh + workflows
+
+  ←/→ to adjust · Enter to confirm · Esc to cancel
+
+
+
+
+
+

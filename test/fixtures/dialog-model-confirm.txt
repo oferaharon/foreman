@@ -1,0 +1,50 @@
+╭─── Claude Code v2.1.232 ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started                                                                                                                                            │
+│                 Welcome back Alex!                 │ Ask Claude to create a new app or clone a repository                                                                                                                │
+│                                                    │ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new                                                                                                                                                          │
+│                      ▝▜█████▛▘                     │ Added GitLab merge request URL support to the `--worktree` flag and the `claude agents` view (where MRs display as `!N`)                                            │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_user_identity` apps gateway setting on Anthropic upstreams that sends the signed-in user's identity as headers, so a proxy behind the gat… │
+│    Sonnet 5 with low effort · Claude Max · Alex    │ Added opt-in memory cgroup support for Bash tool commands on Linux (`CLAUDE_CODE_TOOL_MEMORY_LIMIT`) so a runaway build can't stall the session                     │
+│    Morgan                                          │ /release-notes for more                                                                                                                                             │
+│             /…/scratchpad/modelconfirm             │                                                                                                                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ /model
+  ⎿  Set model to Sonnet 5 for this session only
+
+❯ reply with just: ok
+
+⏺ ok
+
+✻ Crunched for 1s
+
+❯ /model
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── modelconfirm ──
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Switch model?
+  Your next response will be slower and use more tokens
+
+  This conversation is cached for the current model. Switching to Opus 5 (1M context) means the full history gets re-read on your next message.
+
+  ❯ 1. Yes, switch to Opus 5 (1M context)
+    2. No, go back
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

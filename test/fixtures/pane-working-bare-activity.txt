@@ -1,0 +1,50 @@
+ ▐▛███▛█   Claude Code v2.1.247
+▝▜██████▀  Opus 5 (1M context) with xhigh effort · Claude Max
+  ▝▝ ▝▝    /private/tmp/claude-501/-Users-alexmorgan--agenticdevui-worktrees-AgenticDevUI-rail-duration-format/7dfe896b-0f89-428e-b7d0-5080d12b8000/scratchpad/adu-activity-scratch
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ Run bash 'sleep 2 && echo one', wait for it, then bash 'sleep 2 && echo two'.
+
+✶ Nebulizing…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  adu-activity-scratch | Opus 5 (1M context)                                                                                                                                                             ◉ xhigh · /effort
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent                                                                                                                                                                     /rc
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

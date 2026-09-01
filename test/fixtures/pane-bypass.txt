@@ -1,0 +1,56 @@
+╭─── Claude Code v2.1.232 ──────────────────────────────────────────────────────
+────────────────────────────────────────────────────────────────────────────────
+───────────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting started
+
+                                                           │
+│                 Welcome back Alex!                 │ Run /init to create a CLA
+UDE.md file with instructions for Claude
+                                                           │
+│                                                    │ ─────────────────────────
+────────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────────── │
+│                       ▐▛███▜▌                      │ What's new
+
+                                                           │
+│                      ▝▜█████▛▘                     │ Added GitLab merge reques
+t URL support to the `--worktree` flag and the `claude agents` view (where MRs d
+isplay as `!N`)                                            │
+│                        ▘▘ ▝▝                       │ Added an opt-in `forward_
+user_identity` apps gateway setting on Anthropic upstreams that sends the signed
+-in user's identity as headers, so a proxy behind the gat… │
+│ Opus 5 (1M context) with low … · Claude Max · Alex │ Added opt-in memory cgrou
+p support for Bash tool commands on Linux (`CLAUDE_CODE_TOOL_MEMORY_LIMIT`) so a
+ runaway build can't stall the session                     │
+│ Morgan                                             │ /release-notes for more
+
+                                                           │
+│          ~/Projects/foreman-sandbox/gamma          │
+
+                                                           │
+╭─── Claude Code v2.1.232 ─────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                 Welcome back Alex!                 │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ What's new              │
+│                        ▘▘ ▝▝                       │ Added GitLab merge req… │
+│ Opus 5 (1M context) with low … · Claude Max · Alex │ Added an opt-in `forwa… │
+│ Morgan                                             │ Added opt-in memory cg… │
+│          ~/Projects/foreman-sandbox/gamma          │ /release-notes for more │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+ ⚠ 1 MCP server needs authentication · run /mcp
+
+❯ Hi
+
+⏺ Hi — what are we doing today?
+
+✻ Cooked for 1s
+
+───────────────────────────────────────────────────────────────────── gamma-1 ──
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  gamma | Opus 5 (1M context) | ctx: 4%                                    /rc
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 1 agent
+

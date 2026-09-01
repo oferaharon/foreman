@@ -1,0 +1,40 @@
+❯ /model
+  ⎿  Kept model as Fable 5
+
+❯ /model
+────────────────────────────────── modelconfirm ──
+
+──────────────────────────────────────────────────
+  Switch model?
+  Your next response will be slower and use more
+  tokens
+
+  This conversation is cached for the current
+  model. Switching to Opus 5 (1M context)
+  (default) means the full history gets re-read
+  on your next message.
+
+  ❯ 1. Yes, switch to Opus 5 (1M context)
+       (default)
+    2. No, go back
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

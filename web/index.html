@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Foreman</title>
+    <link rel="stylesheet" href="/tokens.css" />
+    <link rel="stylesheet" href="/styles.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='5' fill='%234a50c4'/></svg>"
+    />
+  </head>
+  <body>
+    <div class="app" id="app" data-view="main">
+      <aside class="rail">
+        <div class="rail-head">
+          <div class="brand">
+            Foreman
+            <span class="link" id="conn">●</span>
+          </div>
+          <div class="rail-stat" id="railStat"></div>
+          <div class="rail-actions">
+            <button class="new-session" id="newSession" title="Start a new Claude session">+ new</button>
+            <button class="new-session" id="snapshot" title="Save this set of sessions, or put it back">
+              snapshot
+            </button>
+            <button class="new-session rail-toggle" id="flatRail" aria-pressed="false">recent</button>
+            <button class="new-session" id="settings" title="Who can reach this panel, and which browsers may write to it">settings</button>
+          </div>
+        </div>
+        <div class="rail-list" id="railList"></div>
+      </aside>
+
+      <main class="main" id="main"></main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,467 @@
+/*
+ * m.css — item 5. The reset, the page shell, and the home list.
+ *
+ * Scope note: this sheet owns the frame every screen sits in and the list of teams.
+ * The lead screen, the answer cards and the tasks tab each have their own file
+ * (`lead.css`, `cards.css`, `tasks.css`) owned by items 6, 7 and 8.
+ *
+ * The palette comes from `/tokens.css`, which is shared with the desktop. `web/styles.css`
+ * is not linked and must never be: it is written for a two-column 100vh grid with a
+ * non-scrolling body, and each of those three facts breaks a phone by itself.
+ */
+
+/* ============================================================== reset === */
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 16px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  /* Safari grows text in landscape unless this is pinned. */
+  -webkit-text-size-adjust: 100%;
+  /* No rubber-band on the page itself — the screens do their own scrolling, and a body
+     that bounces makes a pinned header look detached mid-swipe. */
+  overscroll-behavior-y: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  /* iOS gives every button a rounded grey chrome and a 300ms tap delay otherwise. */
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+}
+
+/*
+ * Sixteen pixels is not a taste decision. Safari zooms the whole page in when a focused
+ * input's font-size is below 16px, and it does not zoom back out — the page is then wider
+ * than the screen for the rest of the session. Set here, in the shell, so item 6's
+ * composer and item 8's filters inherit it rather than each rediscovering it.
+ */
+input,
+textarea,
+select {
+  font: inherit;
+  font-size: 16px;
+  color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ============================================================== shell === */
+
+/*
+ * `100vh` on iOS Safari is the viewport *with the address bar counted as absent* — the
+ * page is taller than what you can see, so a bottom-anchored composer sits under the bar
+ * until you scroll. `100dvh` is the honest number; the `100vh` line above it is the
+ * fallback for anything that has not got `dvh` yet, and must stay first.
+ */
+.m-app {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.m-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  /* The status bar on a notched phone lives in this inset. */
+  padding-top: calc(0.7rem + env(safe-area-inset-top));
+  padding-left: calc(0.9rem + env(safe-area-inset-left));
+  padding-right: calc(0.9rem + env(safe-area-inset-right));
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+/* `display: flex` above is a class rule and beats the UA stylesheet's `[hidden]`, so the
+   header stayed on screen on a route that had explicitly hidden it. Caught on the bench,
+   with the shell's "Leads" bar sitting over the lead screen's own. */
+.m-head[hidden] { display: none; }
+
+.m-title {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The socket's own state. A phone has no other way to tell a quiet team from a dead
+   connection, which is the failure mode the desktop learned about the expensive way. */
+.m-conn {
+  flex: none;
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--idle);
+}
+
+.m-conn.is-down { color: var(--decision); }
+
+/* Header controls: 44px is Apple's own minimum target, and the whole reason this view
+   exists is that the desktop's controls were laid out for a mouse. */
+.m-icon-btn {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 1rem;
+  color: var(--ink-muted);
+  border-radius: 8px;
+}
+
+.m-icon-btn:active { background: var(--surface-sunk); }
+.m-icon-btn.is-busy { color: var(--working); }
+
+/* One screen at a time. Screens are appended here and manage their own scrolling — the
+   shell never scrolls, or the header would leave with the list. */
+.m-screen {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.m-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  /* The home indicator sits over the last row without this. */
+  padding-bottom: calc(1.2rem + env(safe-area-inset-bottom));
+}
+
+.m-note {
+  padding: 1.4rem 1.1rem;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.m-note.is-error { color: var(--decision); }
+
+/* =========================================================== home list === */
+
+.m-teams {
+  display: flex;
+  flex-direction: column;
+}
+
+.m-team {
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/*
+ * One grid for the whole row: the dot's gutter, the text, and a trailing control column
+ * that the badge takes on line 1 and the launch button on line 2.
+ *
+ * `0.9rem` first column matches the rail's dot gutter, so the dot reads as a mark beside
+ * the name rather than part of it. 60px minimum on the body: the whole reason this view
+ * exists is that the desktop's rows were laid out for a mouse.
+ */
+.m-team-body {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  grid-template-columns: 0.9rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.15rem 0.65rem;
+  padding: 0.7rem 1rem;
+  min-height: 60px;
+}
+
+button.m-team-body:active { background: var(--surface-sunk); }
+
+/*
+ * The name takes the trailing column too unless the badge is actually there. A grid's
+ * columns are shared down the rows, so the launch button on line 2 sizes column 3 for
+ * line 1 as well — and the row that most needs reading, the one you are about to launch
+ * into, was the one whose name ellipsised.
+ */
+.m-team-body:not(.has-badge) .m-team-name { grid-column: 2 / -1; }
+
+.m-team-name {
+  grid-column: 2;
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-team-meta {
+  grid-column: 2;
+  grid-row: 2;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Amber, and the same token the desktop's own review mark uses — a task in `review` is the
+ * 2026-08-27 indicator and it must read as one fact in two places, not two colours.
+ *
+ * Boxed on purpose — the maintainer's own call, 2026-08-30, kept after they saw it in a
+ * screenshot and said so ("I like it like that it makes it stand out"): the one row on this
+ * list that wants them gets a shape none of the others have. It used to be unstated — this
+ * class shared its name with the answer card's review list in `cards.css`, which draws the
+ * box, and that sheet loading after this one is the only reason it ever looked like this.
+ * Its own name now, so the two rules can never collide again; the values below are read off
+ * the rendered page, not copied from the other sheet.
+ */
+.m-team-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.6rem 0.7rem;
+  background: var(--surface-sunk);
+  border-radius: 8px;
+  color: var(--working);
+}
+
+/*
+ * How long an idle lead has been idle, riding inline in the meta line right after the state
+ * word. Its own name, deliberately — the boxed `.m-team-review` is in this same line and
+ * takes a third row of the card; an age that borrowed that class would take the box with
+ * it. Nothing here changes the line's height.
+ *
+ * `nowrap` is the only thing it really needs: at 390px the meta line ellipsises, and a
+ * ` · 2h` that broke between the separator and the number would read as two facts.
+ */
+.m-team-age {
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.m-team-state.is-blocked { color: var(--decision); }
+
+/*
+ * The gutter: two slots, always both there.
+ *
+ * The top slot is the 2026-08-27 indicator and its rule has not moved — a box the lead is
+ * holding, or a task in review, and never `unread`, which is the *viewer's* read state and
+ * is cleared by anyone scrolling a transcript to the bottom on any device. That mistake
+ * cost a waiting PR once already.
+ *
+ * The bottom slot is the other question: *is anything happening*. The two are reserved
+ * independently and an unlit slot is simply unpainted, so neither dot can ever be found in
+ * the other's position — which is the whole reason there are two fixed rows here rather
+ * than a flow that centres whatever it is given.
+ */
+.m-dots {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  justify-self: center;
+  align-self: center;
+  display: grid;
+  grid-template-rows: 9px 9px;
+  gap: 5px;
+}
+
+.m-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.m-dot-wait.is-on { background: var(--decision); }
+
+/*
+ * The desktop's working dot, to the value: `--working`, and `pulse 1.4s ease-in-out
+ * infinite`. `web/styles.css` is not loaded on this route and `/m` shares no render code
+ * with it by ruling, so the keyframes are redeclared here with the desktop's own numbers
+ * rather than imported — this is the same animation, not a second one. (`m-tk-pulse` in
+ * `tasks.css` *is* a different one, at a different depth, and is not this.)
+ *
+ * Turning it off costs nothing: `m.css`'s blanket reduced-motion rule below is
+ * `* { animation: none !important }`, so there is nothing to redeclare per-rule and
+ * nothing that can be forgotten when the next animation lands.
+ */
+.m-dot-work.is-on {
+  background: var(--working);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.28; }
+}
+
+/*
+ * The unread badge answers a different question — *the lead has said something since I
+ * last looked* — so it is deliberately a different shape and a quiet one. Muted, never
+ * amber, never the dot's red.
+ */
+.m-badge {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink-muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.25rem 0.45rem;
+  min-width: 1.5rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * How full this lead's context is, at the right-hand end of the state line.
+ *
+ * Deliberately unremarkable: `--ink-faint`, the same muted ink the line it sits on already
+ * uses, and **no colour by fullness**. The desktop has a `ctx-warn` and this is not it — a
+ * threshold is a decision about when the maintainer should care, and nobody has taken it.
+ *
+ * Row 2 of the trailing column, which is the launch button's cell — they never coexist, a
+ * percentage needing a lead and the button being built only when there is none. Its font is
+ * smaller than the meta line beside it, so the grid row is sized by the meta and adding this
+ * cannot make a team row taller. That is the whole reason it is here and not on a line of
+ * its own: a row that changes height as a number appears and vanishes is the layout-moves
+ * failure this project keeps relearning.
+ *
+ * `tabular-nums` so 9% → 10% → 100% does not shuffle the digits sideways every poll.
+ */
+.m-team-ctx {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* The launch control lives on the row itself: the home list *is* the folder menu, so a
+   team with no lead offers the one thing you can do with it without a second screen. */
+.m-team-launch {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  min-height: 44px;
+  padding: 0.5rem 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+
+.m-team-launch:active { background: var(--surface-sunk); }
+
+.m-team-launch.is-busy {
+  color: var(--working);
+  cursor: default;
+}
+
+/* A launch failure is the server's own sentence, verbatim — "not a git repository" and
+   "this project already has a team lead" are both real answers and both are actionable. */
+.m-team-error {
+  padding: 0 1rem 0.85rem 1.9rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--decision);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; }
+}
+
+/*
+ * A route that draws its own header — the lead screen (item 6) — hides the shell's, and
+ * would otherwise put its first row under the status bar on a notched phone. The inset
+ * moves to the frame for exactly as long as the shell header is absent, so neither route
+ * pays it twice.
+ */
+.m-app.no-head { padding-top: env(safe-area-inset-top); }
+
+/* The whole screen a route gets when the shell header stands down. */
+.m-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* The session behind an open lead screen stopped existing — /exit at the Mac, or a
+   crash. Said plainly rather than left as a screen that quietly never updates again. */
+.m-gone {
+  padding: 2rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.m-gone-text {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+
+.m-back {
+  min-height: 44px;
+  padding: 0.5rem 0.9rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}

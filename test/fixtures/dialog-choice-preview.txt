@@ -1,0 +1,40 @@
+⏺ Correct in effect, though the panel derives it rather than being told: the rail groups by path.basename(cwd) off the transcript
+  (server/sessions.js:214), so "the folder the wrapper launched it in" is just what that resolves to. One consequence worth knowing —
+  two different repos whose folders share a basename would silently merge into one group.
+
+✻ Cogitated for 7s · 2 monitors still running
+
+❯ ok - i'd like to have the ability to create groups manually, attach "folder groups" to them and be able to collapse them - ack
+  that you understand before we continue
+
+⏺ Understood: named groups you create yourself, each holding one or more of the existing folder groups (not individual sessions), and
+  collapsible — presumably with the collapse state persisted server-side like pins. The one thing I'd pin down before building:
+  inside a manual group, do the folder groups stay visible as sub-headings, or flatten into one list of sessions?
+
+✻ Crunched for 6s · 2 monitors still running
+
+❯ folder groups should stay visible when the group is open
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+←  ☐ Assign UI  ☐ Collapse  ✔ Submit  →
+
+How do you want to put a folder group into a manual group?
+
+❯ 1. Hover menu on the folder     ┌──────────────────────────────────────────┐
+    heading                       │ ALPHA             ▾                      │
+  2. Drag the heading onto a      │   ┌─────────────────┐                    │
+    group                         │   │ ✓ Work          │                    │
+  3. A 'manage groups' editor     │   │   Side projects │                    │
+                                  │   │ ─────────────── │                    │
+                                  │   │ + New group…    │                    │
+                                  │   │ ✕ Ungroup       │                    │
+                                  │   └─────────────────┘                    │
+                                  └──────────────────────────────────────────┘
+
+                                  Notes: press n to add notes
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Chat about this
+
+Enter to select · ↑/↓ to navigate · n to add notes · Tab to switch questions · Esc to cancel
+

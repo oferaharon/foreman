@@ -1,0 +1,64 @@
+  287
+  288
+  289
+  290
+  291
+  292
+  293
+  294
+  295
+  296
+  297
+  298
+  299
+  300
+
+✻ Crunched for 6s
+
+⏺ Background command "Sleep for 25 seconds" completed (exit code 0)
+
+⏺ The 25-second sleep finished, exit code 0. Riveting stuff.
+
+✻ Cooked for 1s
+
+❯ /model
+  ⎿  Kept model as Opus 5 (1M context)
+
+❯ /effort
+  ⎿  Cancelled
+
+❯ /config
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Settings  Status   Config   Usage   Stats
+
+
+  ╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │ ⌕ Search settings…                                                                                               │
+  ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+    Auto-compact                               true
+    Switch models when a message is flagged    true
+    Show tips                                  true
+    Reduce motion                              false
+    Thinking mode                              true
+    Fast mode (Opus 5)                         false
+    Prompt suggestions                         true
+    Session recap                              true
+    Rewind code (checkpoints)                  true
+    Dynamic workflows                          true
+    Ultracode keyword trigger                  true
+    Dynamic workflow size                      medium (default)
+    Artifacts                                  true
+    Verbose output                             false
+    Terminal progress bar                      true
+    Show turn duration                         true
+    Default permission mode                    Manual
+    Worktree base ref                          fresh
+    Use auto mode during plan                  true
+    Respect .gitignore in file picker          true
+  ↓ 20 more below
+
+  Type to filter · Enter/↓ to select · ↑ to tabs · Esc to clear
+
+

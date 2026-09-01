@@ -1,0 +1,29 @@
+{
+  "name": "foreman",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "Foreman — one local panel for every Claude Code session on this machine.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test 'test/*.test.js'",
+    "dev": "node --watch server/index.js",
+    "install-hook": "node server/install-hook.js",
+    "uninstall-hook": "node server/install-hook.js --remove",
+    "install-agent": "node server/install-agent.js",
+    "uninstall-agent": "node server/install-agent.js --remove",
+    "restart-panel": "launchctl kickstart -k gui/$(id -u)/dev.foreman.panel",
+    "stop-panel": "launchctl bootout gui/$(id -u)/dev.foreman.panel",
+    "backup-state": "scripts/backup-state.sh"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "marked": "^15.0.6",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

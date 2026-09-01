@@ -1,0 +1,40 @@
+
+✻ Crunched for 1s
+
+❯ /model
+  ⎿  Set model to Opus 5 (1M context) for this session only
+
+❯ /model
+  ⎿  Set model to Fable 5 for this session only
+
+❯ reply with just: ok
+
+⏺ ok
+
+✻ Crunched for 2s
+
+❯ /model
+────────────────────────────────────────────────────── modelconfirm ──
+
+──────────────────────────────────────────────────────────────────────
+  Switch model?
+  Your next response will be slower and use more tokens
+
+  This conversation is cached for the current model. Switching to
+  Sonnet 5 means the full history gets re-read on your next message.
+
+  ❯ 1. Yes, switch to Sonnet 5
+    2. No, go back
+
+
+
+
+
+
+
+
+
+
+
+
+

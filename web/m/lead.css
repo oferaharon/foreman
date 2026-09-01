@@ -1,0 +1,877 @@
+/*
+ * lead.css — item 6. The lead screen: header, tab strip, conversation, composer.
+ *
+ * Scope: this sheet owns everything between the shell's frame and the answer card. The
+ * card's own styles are `cards.css` (item 7) and the tasks tab's are `tasks.css` (item 8);
+ * this file draws the slot each of them mounts into and nothing inside it.
+ *
+ * The palette is `/tokens.css`, shared with the desktop. `web/styles.css` is not linked on
+ * this page and must never be — it is written for a two-column 100vh grid with a
+ * non-scrolling body, and each of those three facts breaks a phone by itself.
+ */
+
+/* ============================================================== frame === */
+
+/*
+ * `.m-lead` is the shell's `.m-host`, which is already a `flex: 1` column with
+ * `overflow: hidden`. All this adds is the keyboard inset.
+ *
+ * `--m-kb` is written by `lead.js` off `visualViewport`. It is padding rather than a
+ * height because `box-sizing: border-box` is set globally in `m.css`, so a flex child's
+ * resolved height already includes it — bottom padding lifts the composer by exactly the
+ * strip the keyboard covers, and the conversation above it shrinks to match.
+ *
+ * It is zero everywhere the keyboard is not up, which is every desktop browser and every
+ * phone with the keyboard closed.
+ */
+.m-lead {
+  padding-bottom: var(--m-kb, 0px);
+}
+
+/*
+ * `hidden` is a UA-stylesheet `display: none` and any class rule with a `display` beats it.
+ * `m.css` already learned this once, with the shell's own header sitting on top of this
+ * screen's — so every box here that is ever hidden says so explicitly.
+ */
+.m-lead-stream[hidden],
+.m-lead-tasks[hidden],
+.m-composer[hidden],
+.m-card-slot[hidden],
+.m-mq[hidden],
+.m-queue[hidden],
+.m-send-error[hidden] {
+  display: none;
+}
+
+/* ============================================================== header === */
+
+.m-lead-head {
+  flex: none;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Row 1: the way out, who this is, and what it is running on. */
+.m-lead-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0.7rem 0.15rem 0.15rem;
+}
+
+/*
+ * The back chevron. The shell hides its own header on this route, so this is the only
+ * control that leaves — 44px square, Apple's own minimum, and the whole reason this view
+ * exists is that the desktop's controls were laid out for a mouse.
+ */
+.m-lead-back {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--ink-muted);
+  border-radius: 8px;
+}
+
+.m-lead-back:active { background: var(--surface-sunk); }
+
+.m-lead-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * `Opus 5 · 34%`, and an empty box is a normal reading — both halves are scraped off the
+ * composer footer and any box covers it, so a blocked lead reports neither for as long as
+ * it is blocked. Nothing here reserves width for it: a fixed slot would leave a hole on
+ * exactly the screen somebody opened because the lead was waiting on them.
+ */
+.m-lead-model {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45vw;
+}
+
+/*
+ * The socket. Quiet when it is fine — a 9px dot in the idle green — and a word when it is
+ * not, because a dot that changes colour is exactly what you do not notice on a phone, and
+ * this is the one thing on the screen that says the conversation has stopped updating.
+ */
+.m-lead-conn {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--idle);
+}
+
+.m-lead-conn.is-down,
+.m-lead-conn.is-unknown {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--decision);
+  border: 1px solid var(--decision);
+  border-radius: 999px;
+  padding: 0.15rem 0.4rem;
+}
+
+.m-lead-conn.is-unknown { color: var(--ink-faint); border-color: var(--rule-strong); }
+
+/* Row 2: the two tabs, and the one control. */
+.m-lead-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0.7rem 0.55rem 0.7rem;
+}
+
+/*
+ * A fixed basis, not `flex: 1`, and that is the whole reason the activity beside it is
+ * affordable. The tabs used to take whatever was left; with something that appears and
+ * disappears sharing the row, that would move both tap targets sideways every time the
+ * lead started or stopped working — under a thumb, on the control you press without
+ * looking. 10.5rem is measured: two 34px-tall targets, and `tasks 2` still clears its own
+ * label by a comfortable margin at 390px.
+ */
+.m-tabs {
+  flex: 0 0 10.5rem;
+  display: flex;
+  gap: 0.3rem;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+  padding: 0.2rem;
+}
+
+.m-tab {
+  flex: 1;
+  min-height: 34px;
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+}
+
+.m-tab.is-on {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+}
+
+/*
+ * How many workers are running behind this conversation — the one thing the chat tab
+ * cannot otherwise tell you, since the phone shows leads only and there is no worker row
+ * anywhere on this device.
+ *
+ * Deliberately quiet: `--ink-muted`, no amber, no pulse, no pill. Amber and motion are the
+ * home list's second dot, which answers *is something happening*; this answers *how many*
+ * and is information rather than a summons. Empty at zero, and `:empty` is what removes
+ * its own leading space — a `tasks ` with a trailing gap would be a badge you can't see.
+ */
+.m-tab-count {
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The gap is padding rather than a space in the string, the same way the elapsed below
+   spells it — one idiom, and the one that cannot be trimmed by a layout. */
+.m-tab-count:not(:empty) { padding-left: 0.4em; }
+
+/*
+ * `Deciphering… 16m 10s`, between the tabs and the interrupt button.
+ *
+ * On this row and not on row 1: at 390px the top row spends 44px on the back chevron and
+ * ~87px on `Opus 5 · 34%` before the team name gets anything, and the name — the line that
+ * says which team you are looking at — is what an activity word would have eaten. Here it
+ * has the row's whole slack and nothing above it moves.
+ *
+ * Only the word may shrink. `min-width: 0` on the word alone plus `flex: none` on the
+ * elapsed means a long word ellipsises and the duration always survives, which is the
+ * right way round: a clipped word still says the lead is working, a clipped duration is
+ * the half you opened the screen for.
+ *
+ * The slot is always in the DOM and is empty most of the time. That is deliberate — the
+ * tabs and the interrupt button are both fixed, so nothing on this row moves when the word
+ * arrives or goes.
+ */
+.m-lead-activity {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--working);
+  white-space: nowrap;
+}
+
+.m-lead-activity-word {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * The gap is `padding-left`, not a leading space in the string, and that is a measured
+ * correction rather than a preference: a flex item has its own leading white space
+ * trimmed, so ` 16m 10s` written as text renders as `Deliberating…16m 10s` with the two
+ * welded together. `:not(:empty)` is what keeps the padding off a slot with nothing in it.
+ */
+.m-lead-activity-elapsed {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.m-lead-activity-elapsed:not(:empty) { padding-left: 0.35em; }
+
+/*
+ * Interrupt, and nothing else in this header. No `/exit`, no duplicate, no mode picker, no
+ * `/model`, no `/effort` — a phone is where you answer a lead, not where you administer
+ * one. (The merge queue below is not a counter-example: it asks the lead to merge, in the
+ * decisions slot above the composer, and it is not in this header.)
+ *
+ * At the far end of the screen from the send button on purpose: stopping what a session is
+ * doing and adding to what it is doing are opposite acts, and one of the two gets tapped
+ * without looking.
+ */
+.m-lead-stop {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  color: var(--ink-muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 9px;
+}
+
+/* `currentColor` fill means the icon follows every state below for free — no separate
+   rule to keep in sync with `.m-lead-stop`'s own colour. */
+.m-lead-stop-icon {
+  width: 1.15em;
+  height: 1.15em;
+  fill: currentColor;
+}
+
+.m-lead-stop:active { background: var(--surface); }
+.m-lead-stop.is-busy { color: var(--working); }
+
+.m-lead-stop:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ============================================================ the panes === */
+
+.m-lead-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.m-lead-stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* The composer is right underneath; a bounce that pulls the transcript over it reads as
+     the layout coming apart. */
+  overscroll-behavior: contain;
+}
+
+.m-lead-tasks {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.m-lead-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.9rem;
+  padding-left: calc(0.9rem + env(safe-area-inset-left));
+  padding-right: calc(0.9rem + env(safe-area-inset-right));
+}
+
+.m-lead-empty,
+.m-lead-error {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  padding: 1.2rem 0;
+}
+
+.m-lead-error { color: var(--decision); }
+
+.m-earlier {
+  align-self: stretch;
+  min-height: 40px;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  border: 1px dashed var(--rule-strong);
+  border-radius: 8px;
+  padding: 0.4rem;
+}
+
+.m-earlier:active { color: var(--accent); border-color: var(--accent); }
+.m-earlier:disabled { opacity: 0.5; }
+
+/* ========================================================= the messages === */
+
+/*
+ * The maintainer's own turns, laned right. The desktop draws them full width with a left
+ * rule; on a 390px screen the lane is what makes a conversation scannable without reading
+ * it, and it is the one thing on this screen that never wraps to the far edge.
+ */
+.m-msg-user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 12px 12px 3px 12px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.94rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A pasted screenshot the phone is not drawing. An empty bubble reads as a bug; this
+   reads as a picture you are not being shown. */
+.m-msg-tag {
+  display: block;
+  margin-top: 0.2rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+/* The lead's own replies: full width, and the only place on this screen with prose in it. */
+.m-msg-assistant {
+  font-size: 0.95rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.m-msg-assistant > :first-child { margin-top: 0; }
+.m-msg-assistant > :last-child { margin-bottom: 0; }
+
+.m-msg-assistant p { margin: 0 0 0.75em; }
+.m-msg-assistant ul,
+.m-msg-assistant ol { margin: 0 0 0.75em; padding-left: 1.2em; }
+.m-msg-assistant li { margin-bottom: 0.25em; }
+
+.m-msg-assistant h1,
+.m-msg-assistant h2,
+.m-msg-assistant h3,
+.m-msg-assistant h4 {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 1.2em 0 0.5em;
+}
+
+.m-msg-assistant code {
+  font-family: var(--mono);
+  font-size: 0.82em;
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.05em 0.3em;
+}
+
+/* A code block scrolls inside itself. Without this one line a single long command line
+   makes the whole conversation scroll sideways, on the axis a thumb uses for `back`. */
+.m-msg-assistant pre {
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.6;
+  background: var(--code-bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 0.7rem 0.8rem;
+  overflow-x: auto;
+  margin: 0 0 0.75em;
+}
+
+.m-msg-assistant pre code { background: none; border: none; padding: 0; }
+
+.m-msg-assistant blockquote {
+  margin: 0 0 0.75em;
+  padding-left: 0.8em;
+  border-left: 2px solid var(--rule-strong);
+  color: var(--ink-muted);
+}
+
+/* Same reason as `pre`: a wide table must take its own scrollbar, not the page's. */
+.m-msg-assistant table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.82em;
+  margin: 0 0 0.75em;
+}
+
+.m-msg-assistant th,
+.m-msg-assistant td {
+  border: 1px solid var(--rule);
+  padding: 0.3em 0.5em;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.m-msg-assistant a { color: var(--accent); }
+.m-msg-assistant img { max-width: 100%; }
+
+/*
+ * A tool call, and this is the whole rendering decision the plan is built on. One line —
+ * the tool's name and its one-line summary — with no body, no diff and no result. Nine
+ * tenths of a transcript frame is tool output; drawing it is what makes the screen
+ * unreadable, and dropping it is free because the bytes arrive either way.
+ */
+.m-msg-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  overflow: hidden;
+}
+
+.m-tool-name {
+  flex: none;
+  color: var(--ink-muted);
+}
+
+.m-tool-summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A slash command and what it printed back — one quiet line each, the command register. */
+.m-msg-command {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.m-msg-command.is-output {
+  color: var(--ink-faint);
+  padding-left: 0.8rem;
+  white-space: pre-wrap;
+}
+
+/* The panel's own [room] poke at a lead. Centred, because nobody typed it — it is an
+   event in the conversation rather than a turn of it. */
+.m-msg-event {
+  align-self: center;
+  max-width: 90%;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* ============================================================== the card === */
+
+/* Item 7 mounts into this. Above the composer and below the conversation, so the answer
+   and the box you would otherwise type into are in the same glance. */
+.m-card-slot {
+  flex: none;
+  max-height: 55vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* ======================================================= the merge queue === */
+
+/*
+ * The PRs waiting on the maintainer, between the answer card and the composer — the slot
+ * their eye already uses for decisions, which is the whole reason the block is here and not
+ * on the tasks tab.
+ *
+ * **The cap was measured, not guessed.** `.m-card-slot` above is already `55vh`, and three
+ * slots plus a composer on a 390×844 screen can leave no conversation at all — benched
+ * with a real four-option Bash prompt and three PRs waiting, they left **50px** of it. So
+ * the block stands down entirely while a card is up (`syncMergeSlot` in `lead.js` carries
+ * that measurement), and what is left to trade against is the conversation alone.
+ *
+ * Against that, `34vh`. The plan's starting figure was 26vh on an estimate of three
+ * *one-line* rows; measured, a row is three lines at 390px — a task id is most of a line
+ * on its own — and the withheld-batch sentence is four more, so the block's natural height
+ * with three PRs is 445px. 26vh (219px) showed the header, the sentence and one row; 34vh
+ * (287px) shows two full rows and still leaves the conversation 387px, a hair under half
+ * the screen. Past that it scrolls, so six PRs cost no more room than three.
+ *
+ * `flex: none` matters as much as the height: this is a flex column and a slot that grew
+ * would take the conversation's `min-height: 0` with it.
+ */
+.m-mq {
+  flex: none;
+  max-height: 34vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.5rem 0.7rem 0.55rem;
+  padding-left: calc(0.7rem + env(safe-area-inset-left));
+  padding-right: calc(0.7rem + env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* `N in review` on the left — deliberately the rail's own words for the same count — and
+   `merge all` on the right, when there is one to draw. */
+.m-mq-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 34px;
+}
+
+.m-mq-count {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-faint);
+}
+
+/*
+ * Why the batch is withheld, in the control's place — absent, not disabled. A greyed
+ * button invites a second tap and a hunt for the reason; this is the reason, and it is the
+ * server's own sentence naming the two tasks and the file they share.
+ *
+ * Amber, the same tone the overlap clause on a row carries and the same the conflict line
+ * in the room already uses: this is not an error, it is the panel saying a human should
+ * look at these two together.
+ */
+.m-mq-why {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--working);
+  background: color-mix(in srgb, var(--working) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--working) 35%, var(--rule));
+  border-radius: 7px;
+  padding: 0.4rem 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+/* No lead: the rows still draw and the links still work, there is just nothing to type
+   into. Quiet, because it is a fact about the folder rather than something gone wrong. */
+.m-mq-nolead {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* One PR. Three lines at 390px — id, PR and button; then the title; then the clauses —
+   because a task id is most of a line here on its own. */
+.m-mq-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--rule-strong);
+  border-radius: 7px;
+  padding: 0.4rem 0.45rem 0.45rem 0.55rem;
+}
+
+/* `review` is the accent, exactly as the rail and the tasks tab draw it; the amber states
+   take the left edge instead, so a row that wants a second look says so before it is read. */
+.m-mq-row.is-ready { border-left-color: var(--accent); }
+.m-mq-row.is-rebase-first,
+.m-mq-row.is-unreadable { border-left-color: var(--working); }
+.m-mq-row.is-sent,
+.m-mq-row.is-merged { border-left-color: var(--rule-strong); opacity: 0.75; }
+
+.m-mq-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 34px;
+}
+
+/* The id is the handle, and it is long — it takes the slack and ellipsises, so the link
+   and the button never move between rows. */
+.m-mq-id {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-mq-pr {
+  flex: none;
+  min-width: 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.m-mq-pr:active { background: var(--surface); }
+
+/*
+ * The press. 16px is not a taste decision on this page — Safari zooms the whole page in
+ * when a focused control is under it and does not zoom back out — and 44px is Apple's own
+ * minimum for a thumb. Both apply to a button that types a merge into a running lead.
+ */
+.m-mq-go {
+  flex: none;
+  min-width: 68px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 16px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0 0.6rem;
+}
+
+.m-mq-go.is-all { min-width: 96px; }
+.m-mq-go:active { background: var(--surface); }
+.m-mq-go:disabled { opacity: 0.45; }
+
+/* Armed. The label *is* replaced here, unlike the answer card's rows — `merge` is a word
+   rather than a sentence you have to re-read while deciding, and only one control in the
+   block can be armed at a time, so there is nothing to tell apart. */
+.m-mq-go.is-armed {
+  color: var(--decision);
+  border-color: var(--decision);
+  background: color-mix(in srgb, var(--decision) 14%, var(--surface));
+}
+
+/* The brief's first line. One line, ellipsised: this is the row saying *which* change,
+   not the place to read a brief — the tasks tab opens the whole thing. */
+.m-mq-title {
+  font-size: 0.76rem;
+  line-height: 1.4;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The state clause, verbatim from the server. It wraps and is never clipped — an overlap
+ * or a moved base is the reason a row is annotated rather than refused, and half of that
+ * sentence is worse than none of it.
+ */
+.m-mq-note {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.m-mq-note.is-warn { color: var(--working); }
+.m-mq-note.is-sent { color: var(--ink-faint); font-style: italic; }
+
+/* A refusal, in the server's own words. It names the tasks and says what moved. */
+.m-mq-err {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================== the composer === */
+
+.m-composer {
+  flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.55rem 0.7rem;
+  padding-left: calc(0.7rem + env(safe-area-inset-left));
+  padding-right: calc(0.7rem + env(safe-area-inset-right));
+  /* With `viewport-fit=cover` the home indicator sits over the last few millimetres of the
+     screen, which is precisely where the send button is. */
+  padding-bottom: calc(0.55rem + env(safe-area-inset-bottom));
+}
+
+.m-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+/*
+ * 16px, and it is not a taste decision: Safari zooms the whole page in when a focused
+ * input's font-size is under 16px and does not zoom back out, leaving the page wider than
+ * the screen for the rest of the session. `m.css` sets it for every input on this page;
+ * it is repeated here because this is the one that actually gets focused.
+ */
+.m-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.45;
+  resize: none;
+  overflow-y: auto;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+}
+
+.m-input::placeholder { color: var(--ink-faint); }
+
+.m-send {
+  flex: none;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.m-send:active { background: var(--surface-sunk); }
+
+.m-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.m-send-error {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--decision);
+  padding: 0 0.1rem 0.5rem;
+}
+
+/* ============================================================== the queue === */
+
+/*
+ * What is waiting, in delivery order, with the head marked — the one that goes the moment
+ * this lead is free. Server-held, so it is the same list on every device and it survives
+ * closing the tab; the endpoint that drops one is the same one the desktop uses.
+ */
+.m-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-bottom: 0.5rem;
+}
+
+.m-queue-head {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  padding-bottom: 0.15rem;
+}
+
+.m-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--rule-strong);
+  border-radius: 6px;
+  padding: 0.3rem 0.3rem 0.3rem 0.5rem;
+}
+
+.m-queue-item.is-next { border-left-color: var(--working); }
+
+.m-queue-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-queue-err {
+  flex: none;
+  color: var(--working);
+  font-size: 0.66rem;
+}
+
+.m-queue-drop {
+  flex: none;
+  min-width: 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  color: var(--ink-faint);
+  border-radius: 6px;
+}
+
+.m-queue-drop:active { color: var(--decision); background: var(--surface); }
+.m-queue-drop:disabled { opacity: 0.4; }

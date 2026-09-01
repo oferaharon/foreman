@@ -1,0 +1,137 @@
+/**
+ * Where launchd puts the panel's output, and the one thing that stops it growing forever.
+ *
+ * Two jobs, and they are here together because the second cannot be written without the
+ * first: `install-agent.js` builds the plist that *names* these files, `index.js` has to
+ * trim them at boot, and two copies of `~/Library/Logs/foreman.log` in two modules
+ * is how a scratch label silently starts rotating the real log. `install-agent.js`
+ * imports the naming from here rather than the other way round — it runs `install()` at
+ * the bottom of the file, so importing *it* from the boot path would install the
+ * LaunchAgent every time the panel started.
+ *
+ * ## Why truncate and not rename
+ *
+ * **launchd opens the log file once and holds the descriptor.** Renaming or moving it
+ * does not make the daemon reopen anything — it keeps writing to the same inode under its
+ * new name, and the "fresh" log stays empty forever. So `mv foreman.log
+ * foreman.log.1` is the obvious fix, does nothing useful, and looks like it worked;
+ * `test/logs.test.js` reproduces exactly that against a real child process before proving
+ * the copy-then-truncate path.
+ *
+ * Truncation is what an open descriptor follows, so the order is: copy the file aside,
+ * then truncate the original to zero. Never rename, never unlink.
+ *
+ * ## What is kept
+ *
+ * One previous copy, `<name>.1`, overwritten each time. No `.2`, no dated archive, no
+ * compression — the maintainer's call, and the point is a bounded floor rather than an
+ * archive system. Whatever is in `.1` at the moment you look is the last full threshold's
+ * worth of history, which is the thing you actually read.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { HOME } from './config.js';
+
+/**
+ * Overridable for the same reason `install-agent.js` allows it: every launchd finding
+ * behind this file was measured with a throwaway label, and a bench that wrote into the
+ * real log would leave its noise there permanently — launchd appends across restarts and,
+ * until this file existed, nothing ever took anything away.
+ */
+export const DEFAULT_AGENT_LABEL = 'dev.foreman.panel';
+export const AGENT_LABEL = process.env.FOREMAN_AGENT_LABEL || DEFAULT_AGENT_LABEL;
+
+const LOG_BASE = AGENT_LABEL === DEFAULT_AGENT_LABEL ? 'foreman' : AGENT_LABEL;
+const LOGS_DIR = path.join(HOME, 'Library', 'Logs');
+
+export const LOG_OUT = path.join(LOGS_DIR, `${LOG_BASE}.log`);
+export const LOG_ERR = path.join(LOGS_DIR, `${LOG_BASE}-error.log`);
+
+const MB = 1024 * 1024;
+
+/**
+ * Two files, two thresholds, because they fail in different shapes.
+ *
+ * **stdout — 1 MiB.** Measured on the real log: a boot writes 172 bytes (the URL line,
+ * the hook line, the `Triggers:` verdict), so 1 MiB is around six thousand boots. At the
+ * handful of restarts a working day actually produces that is years, and it will never
+ * fire on the case it is nominally for. That is the point — if this log is over a
+ * megabyte then something is writing to stdout that is not the boot block, and *that*
+ * noise is what wants preserving in `.1`, not the years of boot lines behind it.
+ *
+ * **stderr — 5 MiB.** This is the one that runs away, and both measured runaways set the
+ * number. A crash-loop writes 1,254 bytes of stack trace per attempt at `ThrottleInterval`
+ * 10 — 430 KB/hour — so 5 MiB is about twelve hours of it. The `[roster]` case (the panel
+ * before Gitea PR #28: healthy, serving, unable to find `tmux`, one error every 2-second poll —
+ * 43,000 lines a day, and the real error log's one line is exactly 60 bytes) is ~2.6
+ * MB/day, so 5 MiB is about two days of that. Twelve hours is the number that matters: a
+ * loop that starts after you go to bed is still whole in `.1` at breakfast, which is the
+ * only moment anybody reads these files. Smaller and the evidence is gone before it is
+ * looked at; larger and `.1` stops being a thing you can page through.
+ *
+ * The floor is two files each, so 12 MiB total. A laptop never notices it, and it is
+ * flat — which is the entire ask.
+ */
+export const LOG_FILES = [
+  { file: LOG_OUT, limit: 1 * MB },
+  { file: LOG_ERR, limit: 5 * MB },
+];
+
+/** `12.4 MB`. Decimal MB in the report because that is what Finder and `ls -lh` say. */
+export function formatBytes(bytes) {
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1000 * 1000) return `${(bytes / 1000).toFixed(1)} KB`;
+  return `${(bytes / (1000 * 1000)).toFixed(1)} MB`;
+}
+
+/**
+ * Copy aside and truncate every log that is over its threshold. Prints nothing.
+ *
+ * Returns `{ rotated, notes }`: one entry per file that was actually rotated, and notes
+ * for anything that went wrong. The caller does the talking, the way `readTokenFile` in
+ * `config.js` does — a module imported by the boot path must not decide where its own
+ * output goes.
+ *
+ * **A missing file is a no-op, not an error.** A panel started by hand with `npm start`
+ * has no launchd log at all, and neither does a scratch label on its first run.
+ *
+ * There is a race here and it is the reason this is boot-only: between the copy and the
+ * truncate, anything appended is lost. At boot the writer is this process and it has not
+ * written yet, which is as close to nobody-is-writing as this ever gets. A timer doing
+ * the same thing mid-session would be throwing away lines as it went.
+ */
+export function rotateLogs(targets = LOG_FILES) {
+  const rotated = [];
+  const notes = [];
+
+  for (const { file, limit } of targets) {
+    let bytes;
+    try {
+      bytes = fs.statSync(file).size;
+    } catch (err) {
+      if (err.code !== 'ENOENT') notes.push(`[logs] could not read ${file}: ${err.code || err.message}`);
+      continue;
+    }
+    if (bytes <= limit) continue;
+
+    const keep = `${file}.1`;
+    try {
+      // Overwrites `.1` — that is the whole retention policy, and `copyFileSync` does it
+      // by default. Copy first: a truncate whose copy failed has thrown the history away
+      // for nothing.
+      fs.copyFileSync(file, keep);
+      fs.truncateSync(file, 0);
+    } catch (err) {
+      notes.push(`[logs] could not rotate ${file}: ${err.code || err.message}`);
+      continue;
+    }
+    rotated.push({ file, keep, bytes });
+  }
+
+  return { rotated, notes };
+}
+
+/** `Rotated foreman-error.log (12.4 MB → foreman-error.log.1)`, one per file. */
+export const rotationLines = (rotated) => rotated.map(
+  ({ file, keep, bytes }) => `Rotated ${path.basename(file)} (${formatBytes(bytes)} → ${path.basename(keep)})`,
+);
