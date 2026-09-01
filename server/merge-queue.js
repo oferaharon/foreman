@@ -53,8 +53,10 @@ const git = (dir, args) => run('git', ['-C', dir, ...args]);
  * quotes the space. `conflicts.js` strips outer quotes on the porcelain side only, which
  * happens to fix the space case and *cannot* fix the non-ASCII one — the two sides never
  * compare equal. `-z` returns raw bytes and no quoting at all, which is what
- * `deployed.js:88` already does and says why. (That `conflicts.js` blind spot is recorded
- * as its own task, deliberately not fixed here.)
+ * `deployed.js:88` already does and says why. (That `conflicts.js` blind spot was recorded
+ * as its own task and has since been fixed the same way — both its sides read `-z` now.
+ * The trap it paid for that this side does not: `-z` also changes the porcelain rename
+ * encoding to `XY new\0old\0`. There is no porcelain here, deliberately — see below.)
  *
  * **There is no dirty side, and that is the difference from `conflicts.js`.** `taskPaths`
  * unions the branch diff with `git status --porcelain` inside the worker's worktree —
