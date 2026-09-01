@@ -11,7 +11,7 @@ import test from 'node:test';
 process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'foreman-conflicts-'));
 const { createWorktree } = await import('../server/worktree.js');
 const { TaskStore } = await import('../server/tasks.js');
-const { taskPaths, createConflictScanner } = await import('../server/conflicts.js');
+const { taskPaths, createConflictScanner, parsePorcelainZ } = await import('../server/conflicts.js');
 
 const repo = path.join(process.env.FOREMAN_STATE_DIR, 'repo');
 let wtA;
@@ -118,4 +118,97 @@ test('a vanished worktree is skipped, not fatal', async () => {
   });
   await scanner.scan({ now: 1 }); // must not throw
   assert.equal(calls.length, 0, 'one readable worktree cannot conflict with itself');
+});
+
+/*
+ * Path encoding — the bug this file's `-z` change exists for.
+ *
+ * These build their own worktrees (`nz-a`/`nz-b`) and their own task store rather than
+ * reusing wtA/wtB: the tests above mutate the shared pair in order, and a scan is over
+ * *every* task in a repo, so borrowing them would make each suite's expectations depend
+ * on the other's. Real git throughout, per the rule at the top.
+ */
+
+const CAFE = 'web/café.js'; // non-ASCII: quoted *and* octal-escaped by both commands
+const SPACED = 'web/my file.js'; // a space: bare from diff, quoted from porcelain
+
+async function encodingPair() {
+  const a = await createWorktree({ repo, label: 'nz-a' });
+  const b = await createWorktree({ repo, label: 'nz-b' });
+  // a commits both paths on its branch — this is the `git diff` side.
+  fs.mkdirSync(path.join(a.dir, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(a.dir, CAFE), 'a\n');
+  fs.writeFileSync(path.join(a.dir, SPACED), 'a\n');
+  git(['add', '-A'], a.dir);
+  git(['commit', '-m', 'a touches both'], a.dir);
+  // b leaves them uncommitted — this is the `git status --porcelain` side.
+  fs.mkdirSync(path.join(b.dir, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(b.dir, CAFE), 'b\n');
+  fs.writeFileSync(path.join(b.dir, SPACED), 'b\n');
+
+  const tasks = new TaskStore(path.join(process.env.FOREMAN_STATE_DIR, `tasks-nz-${Math.random().toString(36).slice(2)}.json`));
+  for (const [id, wt] of [['nz-a', a], ['nz-b', b]]) {
+    tasks.create({ id, repo, branch: wt.branch, worktree: wt.dir, base: wt.base });
+    tasks.update(id, { state: 'working' });
+  }
+  return { a, b, tasks };
+}
+
+test('a non-ASCII path matches across the diff and porcelain sides', async () => {
+  const { a, b, tasks } = await encodingPair();
+
+  // Both sides name the path in its real bytes — not `"web/caf\303\251.js"` from the
+  // diff and `web/caf\303\251.js` from porcelain, which is how they used to differ.
+  const committed = await taskPaths({ repo, base: 'main', branch: a.branch, worktree: a.dir });
+  const dirty = await taskPaths({ repo, base: 'main', branch: b.branch, worktree: b.dir });
+  assert.ok(committed.has(CAFE), `diff side must name ${CAFE} unescaped, got ${JSON.stringify([...committed])}`);
+  assert.ok(dirty.has(CAFE), `porcelain side must name ${CAFE} unescaped, got ${JSON.stringify([...dirty])}`);
+
+  const calls = [];
+  const scanner = createConflictScanner({
+    tasks,
+    readTeam: () => ({ toggles: { flagConflicts: true } }),
+    postConflict: (_r, info) => calls.push(info),
+  });
+  await scanner.scan({ now: 1 });
+  assert.equal(calls.length, 1, 'two workers on the same non-ASCII path is one conflict');
+  // The space case came out right before this change and is here as the regression guard:
+  // quote-stripping on the porcelain side alone happened to fix it, which is exactly why
+  // the non-ASCII case went unnoticed.
+  assert.deepEqual(calls[0].paths, [CAFE, SPACED].sort());
+});
+
+test('parsePorcelainZ reads a rename as two fields, not two entries', async () => {
+  const wt = await createWorktree({ repo, label: 'nz-rename' });
+  fs.mkdirSync(path.join(wt.dir, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(wt.dir, 'web', 'old-name.js'), 'r\n');
+  fs.writeFileSync(path.join(wt.dir, 'web', 'after.js'), 'k\n');
+  git(['add', '-A'], wt.dir);
+  git(['commit', '-m', 'a file to rename'], wt.dir);
+
+  // Staged, because an *unstaged* move is not a rename to git — it comes back as two
+  // ordinary entries (` D old`, `?? new`) and never exercises the second field.
+  git(['mv', 'web/old-name.js', 'web/moved.js'], wt.dir);
+  fs.writeFileSync(path.join(wt.dir, 'web', 'after.js'), 'edited\n'); // an entry behind it
+  fs.writeFileSync(path.join(wt.dir, CAFE), 'u\n'); // and a non-ASCII one
+
+  const raw = execFileSync('git', ['status', '--porcelain', '-uall', '-z'], { cwd: wt.dir, encoding: 'utf8' });
+  assert.match(raw, /R.? web\/moved\.js\0web\/old-name\.js\0/, 'the shape this parse is written against');
+
+  const paths = parsePorcelainZ(raw);
+  assert.ok(paths.has('web/moved.js'), 'the new name');
+  assert.ok(paths.has('web/old-name.js'), 'the old name — a rename touches both');
+  // The trap: split on NUL and treat every field as an entry, and the original path is
+  // read as a status line, `web/old-name.js` becoming the code `we` and the path
+  // `/old-name.js`. Nothing on screen would say so.
+  assert.ok(!paths.has('/old-name.js'), 'the original path is a field, not an entry');
+  assert.ok(paths.has('web/after.js'), 'the entry after a rename is not swallowed');
+  assert.ok(paths.has(CAFE), 'and non-ASCII arrives in its real bytes');
+
+  // Exactly those four; the extra field minted nothing of its own.
+  assert.deepEqual([...paths].sort(), [CAFE, 'web/after.js', 'web/moved.js', 'web/old-name.js'].sort());
+});
+
+test('parsePorcelainZ on an empty tree is empty, not a phantom path', () => {
+  assert.equal(parsePorcelainZ('').size, 0);
 });

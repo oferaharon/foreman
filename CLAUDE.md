@@ -1270,17 +1270,38 @@ job wrote to scratch logs while the panel inside it computed the default paths: 
 bench of the rotation would have deleted the real panel's history. Found while setting the
 bench up, not by it. Anything else derived from the label has the same shape.
 
-**`git diff` and `git status` quote paths differently, and only one caller was fixed.**
-Measured in a throwaway repo: `diff --name-only` leaves a space bare (`web/my file.js`)
-but quotes *and* octal-escapes non-ASCII (`"web/caf\303\251.js"`); `status --porcelain
--uall` quotes the space (`"web/new file.js"`). `-z` on either side returns the raw bytes
-and sidesteps all of it — which is what `merge-queue.js`'s `mergePaths` uses. `conflicts.js`
-still does not: it strips outer quotes on the porcelain side only, which happens to fix
-the space case and cannot fix the non-ASCII one, because the diff side arrives quoted
-*and* escaped while the porcelain side is only escaped — they never compare equal. Two
-workers editing `web/café.js` are never flagged. Recorded as the pending task
-`conflicts-nonascii-paths`, not fixed here — a defect found outside a task's own scope is
-recorded, not folded in.
+**`git diff` and `git status` quote paths differently, and the fix has its own trap
+inside it.** Measured in a throwaway repo: `diff --name-only` leaves a space bare
+(`web/my file.js`) but quotes *and* octal-escapes non-ASCII (`"web/caf\303\251.js"`);
+`status --porcelain -uall` quotes and escapes both. `conflicts.js` stripped outer quotes
+on the **porcelain side only**, so the two spellings of `web/café.js` differed by exactly
+the two quote characters and never compared equal — while the space case came out right,
+which is why its tests passed and nobody noticed. Two workers editing `web/café.js` were
+never flagged, and nothing-found is indistinguishable from nothing-there. Both sides now
+read **`-z`**, which returns raw bytes with no quoting and no escaping, the same reasoning
+`merge-queue.js`'s `mergePaths` and `deployed.js`'s `branchFacts` already carry. Note
+stripping quotes on *both* sides would also have made those two strings equal and is still
+wrong: the path kept is then `web/caf\303\251.js`, and that escaped spelling is what the
+room post names at the maintainer.
+
+**And `-z` changes the porcelain rename encoding, which is the silent half.** A rename is
+`XY new\0old\0` — two NUL-separated fields, **new first** — not the `XY old -> new` arrow
+of the plain form. Split on NUL and treat every field as an entry and the original path is
+read as a status line: `web/old-name.js` becomes the code `we` and the path
+`/old-name.js`, on exactly the entries a rename produces, with nothing on screen saying
+so. `parsePorcelainZ` in `conflicts.js` is the one place that parse lives, and it is a
+named export for that reason alone. Two things it pins that reasoning would get wrong:
+`R`/`C` ride in the **index** column only (`RM` is renamed-in-index, modified-in-worktree,
+and no unmerged code carries either letter), and an *unstaged* move is not a rename to git
+at all — it arrives as two ordinary entries, ` D old` and `?? new`. `test/conflicts.test.js`
+pins the non-ASCII match, the space case as a regression guard, and the rename; all three
+against real throwaway repos, and all three verified to fail against the old parse.
+
+**A gap this deliberately did not close:** `diff --name-only` has rename detection on by
+default, so a *committed* rename reports only the new name, while the porcelain side
+reports both. A worker that committed `web/x.js` → `web/y.js` therefore does not collide
+with one editing `web/x.js`. Different defect, different fix (`--no-renames` on the diff
+side), recorded rather than folded in.
 
 **`composerSig` does not know about tasks, and a merge block built inside `buildComposer`
 would freeze on stale data.** The composer is only rebuilt when that signature changes,
