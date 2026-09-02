@@ -2686,7 +2686,15 @@ function createPane(slot, host) {
     // what stops the in-flight config fetch clobbering the press that beat it home.
     settingsOpen: null,
     settingsEl: null,
+    // The wrapper that actually animates. The block itself keeps its own padding and
+    // border; the fold around it is the grid whose single row goes 0fr ↔ 1fr.
+    settingsFoldEl: null,
     settingsGearEl: null,
+    // Backstop for the re-pin at the end of the fold. `transitionend` is the real signal
+    // and normally arrives first; this covers the case where there is no transition to end
+    // — `prefers-reduced-motion`, where the duration is 0 and the event never fires at all.
+    // pinRoom is idempotent, so both firing costs nothing.
+    settingsPinTimer: null,
     follow: true, // is the room list pinned to its newest line? see renderRoom
     unseen: 0, // entries that arrived while you were reading further up
     painted: 0, // how many were on screen last paint — the diff is what `unseen` counts
@@ -2921,6 +2929,73 @@ function createPane(slot, host) {
   }
 
   /**
+   * How long the SETTINGS fold takes, in milliseconds. It is spelled here *and* in
+   * `.team-settings-fold`'s transition, and the two have to agree — this copy exists only
+   * to time the backstop re-pin, so drifting apart costs a room that re-pins early rather
+   * than anything visible. Long enough to read as motion, short enough that a control
+   * panel does not make you wait for it.
+   */
+  const SETTINGS_FOLD_MS = 200;
+
+  /**
+   * The gear, drawn rather than typed — the same reasoning `bindingMark` carries.
+   *
+   * `⚙` was a font glyph: it sits on a baseline rather than in its own box, so it never
+   * centred in the hit area without hand-nudging, and every platform draws a different
+   * gear (Apple's is a flat outline, some fonts hand you a colour emoji). A path at a
+   * fixed viewBox is the same shape everywhere and scales with `font-size` alone.
+   *
+   * Eight teeth, because the button rotates 60° when the block opens and eight teeth put
+   * a 45° pitch under that — the resting state lands a third of a tooth off where it was,
+   * which reads as *moved* rather than as a redraw. Six teeth would map 60° exactly onto
+   * itself and the open state would be indistinguishable from the closed one.
+   */
+  function gearMark() {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('aria-hidden', 'true');
+
+    // Eight radial strokes from r=4.9 to r=6.5 about (8,8), every 45°. Round caps, so a
+    // tooth is a lozenge rather than a spike — at sixteen pixels a square cap reads as
+    // aliasing. Written out rather than looped: the coordinates are the drawing.
+    const teeth = document.createElementNS(SVG_NS, 'path');
+    teeth.setAttribute(
+      'd',
+      'M12.9 8 L14.5 8 M11.47 11.47 L12.6 12.6 M8 12.9 L8 14.5 M4.53 11.47 L3.4 12.6 '
+        + 'M3.1 8 L1.5 8 M4.53 4.53 L3.4 3.4 M8 3.1 L8 1.5 M11.47 4.53 L12.6 3.4',
+    );
+    teeth.setAttribute('fill', 'none');
+    teeth.setAttribute('stroke', 'currentColor');
+    teeth.setAttribute('stroke-width', '1.7');
+    teeth.setAttribute('stroke-linecap', 'round');
+    svg.append(teeth);
+
+    // The rim, sitting *under* the teeth's inner ends so the two merge into one body
+    // rather than showing eight joins.
+    const rim = document.createElementNS(SVG_NS, 'circle');
+    rim.setAttribute('cx', '8');
+    rim.setAttribute('cy', '8');
+    rim.setAttribute('r', '4.6');
+    rim.setAttribute('fill', 'none');
+    rim.setAttribute('stroke', 'currentColor');
+    rim.setAttribute('stroke-width', '1.5');
+    svg.append(rim);
+
+    // The axle, filled. An outlined hub at this size is two hairlines a pixel apart and
+    // reads as a smudge; a solid dot with clear daylight around it reads as a gear.
+    const hub = document.createElementNS(SVG_NS, 'circle');
+    hub.setAttribute('cx', '8');
+    hub.setAttribute('cy', '8');
+    hub.setAttribute('r', '1.55');
+    hub.setAttribute('fill', 'currentColor');
+    svg.append(hub);
+
+    return svg;
+  }
+
+  /**
    * The SETTINGS header: the label, and the gear that folds the block away.
    *
    * Folded is the default, and the reason is arithmetic. The dials below are set once
@@ -2945,7 +3020,8 @@ function createPane(slot, host) {
     // area and its own title. The header line toggling too is a courtesy, not the control.
     const gear = document.createElement('button');
     gear.className = 'room-head-gear';
-    gear.textContent = '⚙';
+    gear.setAttribute('aria-label', 'Team settings');
+    gear.append(gearMark());
     gear.onclick = (e) => {
       e.stopPropagation(); // or the header behind it toggles straight back
       toggleSettings();
@@ -2958,26 +3034,54 @@ function createPane(slot, host) {
   }
 
   /**
-   * Draw the fold. `hidden` rather than a height animation: the room takes what this
-   * block leaves (`flex: 1` against `flex: none`), so the space comes back for free the
-   * moment the block stops taking any.
+   * Draw the fold, over ~200ms rather than in one frame.
    *
-   * And it ends in `pinRoom`, which is the whole trap this feature had to walk past. The
-   * room follows its newest line *by intention*, and every other thing that changes this
-   * aside's height re-pins for it — see pinRoom's own comment for the 454px it cost to
-   * learn. Folding SETTINGS is now the third such thing. A reader up in the history is
-   * still not yanked: pinRoom refuses while `follow` is false.
+   * It used to be `hidden`, on the reasoning that the room takes what this block leaves
+   * (`flex: 1` against `flex: none`) so the space comes back for free. It does — it just
+   * came back in a single frame, and a panel-sized block appearing and vanishing under a
+   * click is the thing the maintainer asked to stop.
+   *
+   * The animated property is `grid-template-rows` on the wrapper, `0fr` ↔ `1fr`, not a
+   * height. A height animation needs a number, and this block's height is whatever its
+   * content is — measuring it means reading layout on every toggle, and a stale
+   * `max-height` clips the block the day someone adds a row. `1fr` in an auto-height grid
+   * resolves to the row's own content height, so nothing here knows how tall the settings
+   * are and nothing has to be updated when they change.
+   *
+   * `inert` is doing what `hidden` used to. A block folded to zero height with
+   * `overflow: hidden` is invisible but still *focusable* — Tab would walk into
+   * checkboxes nobody can see — and still read out by a screen reader. `hidden` covered
+   * both for free; losing it means saying so.
+   *
+   * And it re-pins the room twice, which is the trap this feature has to walk past a
+   * second time. The room follows its newest line *by intention* and every other thing
+   * that changes this aside's height re-pins for it (see pinRoom's own comment for the
+   * 454px it cost to learn) — but a transition means the height keeps changing for 200ms
+   * after the click, so one pin at the start would leave the room a block short of its
+   * newest line for as long as the block is open. Pin at the start, so nothing jumps, and
+   * again at the end, where the geometry has settled. A reader up in the history is still
+   * not yanked either time: pinRoom refuses while `follow` is false.
    */
   function applySettingsOpen() {
     const open = roomView.settingsOpen === true;
-    if (roomView.settingsEl) roomView.settingsEl.hidden = !open;
+    const fold = roomView.settingsFoldEl;
+    if (fold) {
+      fold.classList.toggle('is-open', open);
+      fold.inert = !open;
+    }
     const gear = roomView.settingsGearEl;
     if (gear) {
       gear.setAttribute('aria-expanded', String(open));
       gear.title = open ? 'Fold the team settings away' : 'Open the team settings';
       gear.classList.toggle('is-open', open);
     }
-    pinRoom(); // this box just changed height; the room below it moved with it
+    pinRoom(); // the box is about to change height; hold the bottom before it starts
+    // …and again once it has stopped. `transitionend` on the wrapper is the accurate
+    // signal and is wired once in buildRoomPanel; this timer is the backstop for where it
+    // never arrives, which is reduced motion — a 0s transition ends no event. Restarted
+    // per toggle so a fast open/close doesn't leave one armed over the next state.
+    clearTimeout(roomView.settingsPinTimer);
+    roomView.settingsPinTimer = setTimeout(pinRoom, SETTINGS_FOLD_MS + 60);
   }
 
   /**
@@ -3134,7 +3238,13 @@ function createPane(slot, host) {
       }
       modelPick.disabled = false;
     };
-    modelRow.append(modelText, modelPick);
+    // The picker is de-nativised (`appearance: none`, so the OS chevron goes with it) and
+    // the caret is drawn back on this wrapper's `::after`. It has to be a wrapper: the
+    // caret is a pseudo-element, and a `select` cannot carry one.
+    const modelWrap = document.createElement('span');
+    modelWrap.className = 'team-select';
+    modelWrap.append(modelPick);
+    modelRow.append(modelText, modelWrap);
     elm.append(modelRow);
     // Setup is shown, never typed — the maintainer's ruling (2026-08-26): a control the user
     // cannot answer correctly should not be a control. The server detects it from the
@@ -3518,6 +3628,26 @@ function createPane(slot, host) {
     const settings = document.createElement('div');
     settings.className = 'team-settings';
     roomView.settingsEl = settings;
+    // Three elements, and the middle one is not decoration. The *fold* is the grid whose
+    // one row runs 0fr ↔ 1fr. The *clip* is the grid item, and it carries nothing — no
+    // padding, no border — because a grid item can never be shorter than its own padding
+    // and border, and `.team-settings` has 0.5rem of the first and a rule along the
+    // bottom. Measured with the block as the item directly: shut, it stayed **17px**
+    // tall, which is exactly 8 + 8 + 1, and read as an empty band under the heading.
+    const settingsFold = document.createElement('div');
+    settingsFold.className = 'team-settings-fold';
+    const settingsClip = document.createElement('div');
+    settingsClip.className = 'team-settings-clip';
+    settingsClip.append(settings);
+    settingsFold.append(settingsClip);
+    roomView.settingsFoldEl = settingsFold;
+    // Wired once, here, rather than per toggle: `applySettingsOpen` runs on every flip and
+    // on the first config answer, and a listener added there would stack. The property
+    // guard matters — a control inside the block finishing its own transition bubbles up
+    // here, and re-pinning the room off a checkbox is exactly the yank pinRoom avoids.
+    settingsFold.addEventListener('transitionend', (e) => {
+      if (e.target === settingsFold && e.propertyName === 'grid-template-rows') pinRoom();
+    });
     // Head first, and the fold applied, *before* the config fetch starts: the gear has to
     // exist for the response to draw itself onto, and the block has to start closed so a
     // team that keeps it closed never flashes it open.
@@ -3565,7 +3695,7 @@ function createPane(slot, host) {
     // sit, and the room still opens on its newest line rather than 454px short of it.
     panel.append(
       settingsHead,
-      settings,
+      settingsFold,
       section('tasks', 'Every task this team holds — stored state joined with what the pane shows now.'),
       tasksList,
       section('room', 'Workers and the lead coordinate here. View only — talk to the lead in the composer.'),

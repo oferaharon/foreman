@@ -1072,17 +1072,31 @@ button {
 }
 .room-head.is-foldable:hover { color: var(--ink); }
 .room-head-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The drawing is `1em` of the button's own font-size, so 1.1rem here is 17.6px of gear —
+   up from a 0.82rem font glyph that read as a speck. The *box* is 1.5rem square whatever
+   the glyph does, which is the hit target; the negative margins keep that box from
+   growing the header line, so SETTINGS still sits exactly as tall as `tasks` and `room`
+   two headings below it. The gear overhangs into the header's own 0.45rem padding and
+   stays well inside its border. */
 .room-head-gear {
-  font-size: 0.82rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -0.35rem -0.2rem -0.35rem 0;
+  font-size: 1.1rem;
   line-height: 1;
   color: var(--ink-faint);
   background: none;
   border: none;
+  border-radius: 3px;
   cursor: pointer;
   flex: none;
-  padding: 0 0.1rem;
-  transition: transform 120ms ease, color 120ms ease;
+  padding: 0;
+  transition: transform 160ms ease, color 120ms ease;
 }
+.room-head-gear svg { display: block; width: 1em; height: 1em; }
 .room-head.is-foldable:hover .room-head-gear { color: var(--ink-muted); }
 .room-head-gear:hover, .room-head-gear.is-open { color: var(--accent); }
 .room-head-gear.is-open { transform: rotate(60deg); }
@@ -1375,6 +1389,29 @@ button {
   white-space: nowrap;
 }
 
+/* The fold, and the reason it is a grid rather than a height: `1fr` in an auto-height
+   grid resolves to the row's own content, so this animates between "nothing" and
+   "whatever the block turns out to be" without anything measuring it. A `max-height`
+   would need a number, and the number is wrong the day somebody adds a row — too small
+   clips the block, too large spends the transition on empty space. */
+.team-settings-fold {
+  flex: none;
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows 200ms ease;
+}
+.team-settings-fold.is-open { grid-template-rows: 1fr; }
+/* The grid item, and it is deliberately bare. `min-height: auto` is a grid item's default
+   and would hold the row open at content height — the fold would never close at all. And
+   even at `min-height: 0` an item cannot be shorter than its own padding and border, so
+   the padded, ruled `.team-settings` cannot be the item: measured, it left a 17px band
+   (0.5rem twice, plus the 1px rule) under the heading with the block shut. */
+.team-settings-clip { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .team-settings-fold { transition: none; }
+}
+
 .team-settings {
   flex: none;
   padding: 0.5rem 0.7rem;
@@ -1384,39 +1421,149 @@ button {
   border-bottom: 1px solid var(--rule);
   font-size: 0.8rem;
 }
-/* Folded. `hidden` alone loses to the `display: flex` above it, and the room only gains
-   the space if this block genuinely stops taking any. */
-.team-settings[hidden] { display: none; }
-.team-toggle-row { display: flex; gap: 0.5rem; align-items: baseline; cursor: pointer; }
+.team-toggle-row { display: flex; gap: 0.5rem; align-items: center; cursor: pointer; }
 /* The always-visible fine print under a toggle that carries a real consequence —
    trust handed over, or a change that only lands at the next lead launch. */
 .team-toggle-note {
   color: var(--ink-faint);
   font-size: 0.7rem;
   margin-top: -0.3rem;
-  padding-left: 1.35rem;
+  /* Lines up under the label: the switch (1.65rem) plus the row's gap (0.5rem). */
+  padding-left: 2.15rem;
 }
-.team-knob-row { display: flex; gap: 0.5rem; align-items: baseline; justify-content: space-between; }
-.team-knob-row select {
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  color: var(--ink);
-  background: var(--ground);
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-  padding: 0.1rem 0.3rem;
+
+/* ---- the autonomy switches ----
+   Still a real `input[type=checkbox]` — checked, focused, toggled by Space and read out
+   as a checkbox, all for free — with `appearance: none` turning the box itself into the
+   track and `::before` into the knob. Nothing is drawn by a sibling element, so there is
+   no second node that can disagree with the input's state.
+
+   The stock control is what the maintainer was looking at: on a dark panel macOS draws a
+   white box, and checks it in *system* blue, which is not this panel's accent and not any
+   colour in tokens.css. */
+.team-toggle-row input[type='checkbox'] {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 1.65rem;
+  height: 0.95rem;
+  margin: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.team-toggle-row input[type='checkbox']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0.13rem;
+  width: 0.63rem;
+  height: 0.63rem;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transform: translateY(-50%);
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+.team-toggle-row input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* The travel, since it is arithmetic rather than a guess: the padding box is 24.4px wide
+   (1.65rem less two 1px borders), the knob is 10.08px, and it sits 2.08px in at each end
+   — so 24.4 − 2.08 − 10.08 − 2.08 = 10.16px, which is 0.635rem. */
+.team-toggle-row input[type='checkbox']:checked::before {
+  background: var(--surface);
+  transform: translate(0.635rem, -50%);
+}
+.team-toggle-row:hover input[type='checkbox']:not(:disabled) { border-color: var(--ink-faint); }
+/* Disabled is not a stored state here — it is the beat while the PATCH is in flight — so
+   it reads as "not settled yet" rather than as "you may not". */
+.team-toggle-row input[type='checkbox']:disabled { cursor: default; opacity: 0.55; }
+.team-toggle-row input[type='checkbox']:disabled:checked {
+  background: var(--ink-faint);
+  border-color: var(--ink-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+  .team-toggle-row input[type='checkbox'],
+  .team-toggle-row input[type='checkbox']::before { transition: none; }
+}
+
+.team-knob-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; }
+/* The picker's own chrome is off (`appearance: none`), so the caret is drawn back on the
+   wrapper — a `select` cannot carry a pseudo-element of its own. `color-scheme` is the
+   one thing the page cannot draw: the open dropdown is an OS window, and without this it
+   comes up as a white list over a dark panel. */
+.team-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
   max-width: 60%;
 }
-.team-knob-row input {
+.team-select select {
+  appearance: none;
+  width: 100%;
   font-family: var(--mono);
   font-size: 0.74rem;
   color: var(--ink);
   background: var(--ground);
   border: 1px solid var(--rule);
   border-radius: 3px;
-  padding: 0.1rem 0.3rem;
-  width: 4.5rem;
+  padding: 0.15rem 1.25rem 0.15rem 0.35rem;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  color-scheme: light dark;
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
+:root[data-theme='dark'] .team-select select { color-scheme: dark; }
+:root[data-theme='light'] .team-select select { color-scheme: light; }
+.team-select::after {
+  content: '';
+  position: absolute;
+  right: 0.45rem;
+  top: 50%;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-right: 1.5px solid var(--ink-faint);
+  border-bottom: 1.5px solid var(--ink-faint);
+  transform: translateY(-70%) rotate(45deg);
+  pointer-events: none;
+  transition: border-color 120ms ease;
+}
+.team-select:hover select:not(:disabled) { border-color: var(--rule-strong); }
+.team-select:hover::after { border-color: var(--ink-muted); }
+.team-select select:disabled { color: var(--ink-faint); cursor: default; }
+.team-knob-row input {
+  appearance: none;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.15rem 0.35rem;
+  width: 4.5rem;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+/* Chrome's number stepper is its own pseudo-element and survives `appearance: none` on
+   the input. Left in, it is a pair of OS arrows sitting inside a box drawn on this
+   panel's tokens — and it shoves the `--mono` value off centre. */
+.team-knob-row input::-webkit-inner-spin-button,
+.team-knob-row input::-webkit-outer-spin-button { appearance: none; margin: 0; }
+.team-knob-row input:hover:not(:disabled) { border-color: var(--rule-strong); }
+/* The global focus ring is right for the switches — a 2px outline round a pill — and
+   wrong for a box whose own border is the shape you are focusing. Same trade the two
+   other text inputs in the panel already make (`.menu-form input:focus`), with a soft
+   halo added so the indicator is more than a one-pixel colour change. */
+.team-knob-row input:focus-visible,
+.team-select select:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.team-knob-row input:disabled { color: var(--ink-faint); cursor: default; }
 .team-knob-row input.team-knob-wide { width: 55%; }
 /* Setup is read-only by design: detected from the project's files, never typed. */
 .team-setup-row { display: flex; gap: 0.5rem; align-items: baseline; justify-content: space-between; }
