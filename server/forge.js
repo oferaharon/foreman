@@ -90,6 +90,69 @@ export function remoteHost(url) {
   }
 }
 
+/**
+ * The **web page** for a git remote — what a browser opens, not what git clones — or
+ * `null` when the remote names no such page.
+ *
+ * A sibling of `remoteHost` above and written against the same three spellings, because
+ * they are the three git accepts. What it has to get right beyond the host:
+ *
+ *   - **A `user@` is git's, not the web's.** `git@` is the SSH login; a browser sent to
+ *     `https://git@host/...` would be handed a credential prompt for a name that is not a
+ *     person.
+ *   - **A trailing `.git` is git's too**, and both forges 302 away from it — but only
+ *     after a round trip, and the link is on screen where it will be read.
+ *   - **An http(s) remote keeps its scheme *and* its port**, because on a self-hosted
+ *     forge they are the address: a Gitea on `http://host:3002/o/r.git` is not reachable
+ *     at `https://host/o/r`, and dropping either turns a working link into a hang. A
+ *     `ssh://` or scp-like remote is the opposite case — its port is SSH's and means
+ *     nothing to a browser — so those become plain `https://host/o/r`, which is the one
+ *     guess this makes and the one both forges are set up to answer.
+ *
+ * Pure, and deliberately not asked to decide *whether* a link is shown: `detectForge`
+ * gates that on the reading, so `push only` and `no remote` draw nothing (the maintainer's
+ * standing rule — showing nothing beats showing something wrong).
+ */
+export function webUrlFor(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+
+  // A path is what makes a page: `https://host` alone names no repository. Trailing
+  // slashes and a `.git` suffix are both git's spelling of the same path.
+  const cleanPath = (p) => {
+    const trimmed = String(p || '').replace(/^\/+/, '').replace(/\/+$/, '').replace(/\.git$/i, '');
+    return trimmed || null;
+  };
+
+  if (!raw.includes('://')) {
+    // scp-like: `user@host:owner/repo.git`. Same shape `remoteHost` recognises, and the
+    // same reason `URL` cannot be used on it — it has no scheme to parse.
+    const m = /^(?:[^@/]+@)?([^/:]+):(?!\/)(.*)$/.exec(raw);
+    if (!m) return null;
+    const path = cleanPath(m[2]);
+    return path ? `https://${m[1].toLowerCase()}/${path}` : null;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  const host = parsed.hostname ? parsed.hostname.toLowerCase() : null;
+  if (!host) return null; // `file:///path` — a local mirror has no page
+  const path = cleanPath(parsed.pathname);
+  if (!path) return null;
+
+  const scheme = parsed.protocol.replace(/:$/, '').toLowerCase();
+  // http and https are already web addresses: keep them whole, port included.
+  if (scheme === 'http' || scheme === 'https') {
+    return `${scheme}://${host}${parsed.port ? `:${parsed.port}` : ''}/${path}`;
+  }
+  // `ssh://`, `git://` — a transport, not a site. Its port is the transport's.
+  return `https://${host}/${path}`;
+}
+
 /** github.com and its `www.` spelling. Nothing else — Enterprise is self-hosted. */
 const isGitHubHost = (host) => host === 'github.com' || host === 'www.github.com';
 
@@ -271,7 +334,15 @@ export async function detectForge(repo, deps = {}) {
     githubMcp: Boolean(servers?.github),
     giteaMcp: Boolean(servers?.gitea),
   };
-  return { ...readingFor({ remote, host: remoteHost(remote), tools }), remote, tools };
+  const reading = readingFor({ remote, host: remoteHost(remote), tools });
+  // The repository's own page, for the link in a lead's header. Gated on the *reading*
+  // rather than on the URL being parseable: `push only` and `no remote` draw nothing at
+  // all, so a GitLab remote — perfectly linkable — still gets `null` here. That is the
+  // maintainer's ruling and not an oversight; the two readings that carry tools are the
+  // two the panel claims to understand, and a link on the other two would be the panel
+  // implying support it does not have.
+  const webUrl = reading.forge ? webUrlFor(remote) : null;
+  return { ...reading, remote, tools, webUrl };
 }
 
 /**

@@ -3012,6 +3012,11 @@ function createPane(slot, host) {
         const team = await res.json();
         if (!res.ok) throw new Error(team.error || 'No team config.');
         roomView.config = team;
+        // This is the one request that ever learns the forge, and the header was built
+        // before it went out — so the answer has to be carried back up there rather than
+        // waited for. Deliberately not a second fetch from `buildHead`: one request per
+        // folder is already in flight for exactly this.
+        paintForge();
       } catch (err) {
         elm.textContent = err.message;
         // A block folded shut over an error is an error nobody reads. There is nothing
@@ -4019,7 +4024,139 @@ function createPane(slot, host) {
     syncAttach(meta, s);
 
     head.append(meta);
+    // Last, because it goes *between* the name and `.head-meta` and needs both on the
+    // page to place itself. Usually draws nothing on this first pass: the forge arrives
+    // with the team config, which `buildRoomPanel` has not asked for yet — see
+    // `syncForgeLink`.
+    syncForgeLink(head, s);
     return head;
+  }
+
+  /**
+   * The forge's mark in a lead's header, linking to the repository's own web page.
+   *
+   * Add-or-drop rather than build-once, for the reason the attach button beside it is:
+   * `renderHead` patches this header in place on every roster beat and never rebuilds it,
+   * so a control whose *presence* changes has to be synced rather than drawn. Here it
+   * changes for a reason nothing else in the header has — the header is appended by
+   * `renderMain` **before** `syncRoom` and `buildSettings` have fetched the team config,
+   * so at first draw the forge is simply not known yet. `paintForge` is what calls this
+   * again when the answer lands; the roster beat is the backstop.
+   *
+   * Two guards worth keeping:
+   *
+   *   - **The config is matched against the repo it belongs to.** `roomView.config` is
+   *     per pane and cleared by `syncRoom` — but `renderMain` builds the header first, so
+   *     on the beat a second lead is opened it still holds the *previous* team's answer.
+   *     Without the `roomView.repo === s.paneCwd` test one lead's header would link to
+   *     another lead's repository for a frame, which is the panel's oldest rule broken in
+   *     miniature: showing nothing beats showing something wrong.
+   *   - **`webUrl` is the whole test.** The server has already refused it for `push only`
+   *     and `no remote`, so there is no reading to re-decide here and no second place for
+   *     that ruling to be spelled differently.
+   */
+  function syncForgeLink(head, s) {
+    if (!head) return;
+    const existing = head.querySelector('.head-forge');
+    const forge = s?.isLead && roomView.repo && roomView.repo === s.paneCwd ? roomView.config?.forgeResolved : null;
+    const url = forge?.webUrl || null;
+    if (!url) return existing?.remove();
+    if (existing?.dataset.url === url) return; // already this link — the common beat
+    existing?.remove();
+    head.insertBefore(forgeLink(url, forge.reading), head.querySelector('.head-meta'));
+  }
+
+  /** Redraw the header's forge link now that the team config has an answer. */
+  function paintForge() {
+    const s = current();
+    if (s) syncForgeLink(host.querySelector('.main-head'), s);
+  }
+
+  /**
+   * The anchor itself. Opens in a new tab — the panel is a thing you leave running, and
+   * navigating it away would drop every subscription in both panes.
+   */
+  function forgeLink(url, reading) {
+    const a = document.createElement('a');
+    a.className = 'head-forge';
+    a.href = url;
+    a.dataset.url = url; // what `syncForgeLink` compares, so a repaint is a no-op
+    a.target = '_blank';
+    a.rel = 'noopener';
+    // `owner/repo` off the link's own path rather than a second field from the server:
+    // one source for the address means the hover can never name a different repository
+    // from the one the click opens.
+    let where = url;
+    try {
+      where = new URL(url).pathname.replace(/^\/+/, '') || url;
+    } catch {
+      /* the server built this string; if it is unparseable the whole URL is the honest label */
+    }
+    a.title = `${where} on ${reading}`;
+    a.setAttribute('aria-label', `Open ${where} on ${reading}`);
+    a.append(reading === 'GitHub' ? githubMark() : forgeMark());
+    return a;
+  }
+
+  /** GitHub's own mark — the `mark-github` octicon, MIT, drawn in `currentColor`. */
+  function githubMark() {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute(
+      'd',
+      'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z',
+    );
+    path.setAttribute('fill', 'currentColor');
+    svg.append(path);
+    return svg;
+  }
+
+  /**
+   * A branching graph, for every forge that is not GitHub.
+   *
+   * Deliberately generic and drawn here rather than fetched: shipping a third-party logo
+   * means shipping its licence and its trademark policy too, and this repo is public.
+   * A git graph says "this is the repository" without claiming to be anyone's brand.
+   */
+  function forgeMark() {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16');
+    svg.setAttribute('width', '14');
+    svg.setAttribute('height', '14');
+    svg.setAttribute('aria-hidden', 'true');
+
+    // The trunk, and the branch leaving it and coming back — one stroke each, so the
+    // whole glyph carries the same weight as the GitHub mark beside it in the code.
+    const line = (d) => {
+      const p = document.createElementNS(SVG_NS, 'path');
+      p.setAttribute('d', d);
+      p.setAttribute('fill', 'none');
+      p.setAttribute('stroke', 'currentColor');
+      p.setAttribute('stroke-width', '1.5');
+      p.setAttribute('stroke-linecap', 'round');
+      return p;
+    };
+    const node = (cx, cy) => {
+      const c = document.createElementNS(SVG_NS, 'circle');
+      c.setAttribute('cx', String(cx));
+      c.setAttribute('cy', String(cy));
+      c.setAttribute('r', '1.9');
+      c.setAttribute('fill', 'currentColor');
+      return c;
+    };
+
+    svg.append(
+      line('M4 5.4 V10.6'),
+      line('M12 5.4 V6.6 a2.6 2.6 0 0 1-2.6 2.6 H6.6 A2.6 2.6 0 0 0 4 11.8'),
+      node(4, 3.5),
+      node(4, 12.5),
+      node(12, 3.5),
+    );
+    return svg;
   }
 
   /**
@@ -4246,9 +4383,10 @@ function createPane(slot, host) {
       head.querySelector('h1').textContent = s.title;
       renderHeadStatus(head.querySelector('.head-status'), s);
       paintPinBtn(head.querySelector('.pin-toggle'), s);
-      // The only control here that appears and disappears on its own, so it is the only
-      // one this patch-in-place path has to add or remove rather than just repaint.
+      // The two controls here that appear and disappear on their own, so they are the
+      // only ones this patch-in-place path has to add or remove rather than just repaint.
       syncAttach(head.querySelector('.head-meta'), s);
+      syncForgeLink(head, s);
     }
 
     // The task list rides the roster beat: renderHead is what every `sessions` frame

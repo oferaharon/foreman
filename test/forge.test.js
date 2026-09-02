@@ -13,6 +13,7 @@ import {
   remoteHost,
   resetForgeCache,
   resolveForge,
+  webUrlFor,
 } from '../server/forge.js';
 
 /*
@@ -39,6 +40,50 @@ test('a remote host is read out of both spellings, and out of neither', () => {
   assert.equal(remoteHost('file:///Users/x/Code/mirror.git'), null);
   assert.equal(remoteHost(''), null);
   assert.equal(remoteHost(null), null);
+});
+
+test('a remote becomes the page a browser opens, in all three spellings', () => {
+  // The three spellings git accepts, which is why `remoteHost` above parses all three.
+  assert.equal(webUrlFor('https://github.com/alpha/alpha.git'), 'https://github.com/alpha/alpha');
+  assert.equal(webUrlFor('git@github.com:alpha/alpha.git'), 'https://github.com/alpha/alpha', 'scp-like, no scheme');
+  assert.equal(webUrlFor('ssh://git@github.com/alpha/alpha.git'), 'https://github.com/alpha/alpha');
+
+  // The `.git` is git's spelling, not the page's — and it is optional in every form.
+  assert.equal(webUrlFor('https://github.com/alpha/alpha'), 'https://github.com/alpha/alpha');
+  assert.equal(webUrlFor('git@github.com:alpha/alpha'), 'https://github.com/alpha/alpha');
+  assert.equal(webUrlFor('https://github.com/alpha/alpha/'), 'https://github.com/alpha/alpha', 'and so is a trailing slash');
+
+  // The `git@` is the SSH login. A browser sent to `https://git@host/...` is handed a
+  // credential prompt for a name that is not a person.
+  assert.equal(webUrlFor('https://alpha@github.com/alpha/alpha.git'), 'https://github.com/alpha/alpha');
+
+  assert.equal(webUrlFor('GIT@GitHub.com:alpha/alpha.git'), 'https://github.com/alpha/alpha', 'the host case folds');
+});
+
+test('a self-hosted forge keeps its scheme and its port, and an SSH one does not', () => {
+  // The whole reason this is not just `https://<host>/<path>`: a Gitea on a port is only
+  // reachable on that port, and only over the scheme it was cloned with. Drop either and
+  // a working link becomes a hang.
+  assert.equal(webUrlFor('http://git.example.com:3002/admin/api.git'), 'http://git.example.com:3002/admin/api');
+  assert.equal(webUrlFor('https://git.example.com:8443/admin/api.git'), 'https://git.example.com:8443/admin/api');
+  assert.equal(webUrlFor('https://git.example.com/admin/api.git'), 'https://git.example.com/admin/api');
+
+  // `ssh://` and `git://` are transports, not sites — their port is SSH's and means
+  // nothing to a browser, so it is dropped and the scheme becomes https.
+  assert.equal(webUrlFor('ssh://git@git.example.com:2222/admin/api.git'), 'https://git.example.com/admin/api');
+  assert.equal(webUrlFor('git://git.example.com/admin/api.git'), 'https://git.example.com/admin/api');
+});
+
+test('a remote that names no page reads null rather than a guess', () => {
+  // Same set `remoteHost` answers `null` for, plus the host-with-no-path case: a page
+  // needs a repository, and `https://host` alone is not one.
+  assert.equal(webUrlFor('/Users/x/Code/mirror.git'), null, 'a local path has no page');
+  assert.equal(webUrlFor('../sibling'), null);
+  assert.equal(webUrlFor('file:///Users/x/Code/mirror.git'), null);
+  assert.equal(webUrlFor('https://git.example.com'), null, 'a host is not a repository');
+  assert.equal(webUrlFor('https://git.example.com/'), null);
+  assert.equal(webUrlFor(''), null);
+  assert.equal(webUrlFor(null), null);
 });
 
 test('the pair is what decides, and there are exactly four readings', () => {
@@ -160,6 +205,38 @@ test('a self-hosted origin plus a registered gitea server reads Gitea', async ()
   // Mac too (same IP by coincidence, different port), which is why "match them" is not a
   // detector and the two questions stay independent.
   assert.equal(seen.host, 'git.example.com');
+});
+
+test('only a forge the panel understands carries a link, off the real .git/config', async () => {
+  // The two readings with tools get `webUrl`; the other two get nothing, by the
+  // maintainer's ruling — a link on a `push only` remote would be the panel implying
+  // support it does not have.
+  const gh = await detectForge(path.join(scratch, 'gh-repo'), { mcp: async () => ({}), hasGh: () => true });
+  assert.equal(gh.reading, READINGS.github);
+  assert.equal(gh.webUrl, 'https://github.com/oferaharon/foreman-bench');
+
+  const gitea = await detectForge(path.join(scratch, 'self-hosted'), {
+    mcp: async () => ({ gitea: { type: 'http', url: 'http://mcp.example.com:8093/mcp' } }),
+    hasGh: () => false,
+  });
+  assert.equal(gitea.reading, READINGS.gitea);
+  assert.equal(gitea.webUrl, 'http://git.example.com:3002/admin/api', 'the port is the address here');
+
+  // The same github.com repo with nothing installed: `push only`, and no link, even
+  // though the remote parses perfectly well.
+  const push = await detectForge(path.join(scratch, 'gh-repo'), { mcp: async () => ({}), hasGh: () => false });
+  assert.equal(push.reading, READINGS.push);
+  assert.equal(push.webUrl, null);
+
+  // And a GitLab remote, which is the case `push only` was ruled for.
+  const lab = repoWith('gitlab-repo', 'https://gitlab.com/alpha/alpha.git');
+  const seen = await detectForge(lab, { mcp: async () => ({ gitea: {} }), hasGh: () => true });
+  assert.equal(seen.reading, READINGS.push);
+  assert.equal(seen.webUrl, null);
+
+  const bare = await detectForge(path.join(scratch, 'bare'), { mcp: async () => ({}), hasGh: () => true });
+  assert.equal(bare.reading, READINGS.none);
+  assert.equal(bare.webUrl, null, 'no remote, nothing to link to');
 });
 
 test('a not-a-repo answers `no remote` rather than throwing', async () => {
