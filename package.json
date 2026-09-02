@@ -5,6 +5,11 @@
   "license": "MIT",
   "type": "module",
   "description": "Foreman — one local panel for every Claude Code session on this machine.",
+  "homepage": "https://github.com/oferaharon/foreman",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oferaharon/foreman.git"
+  },
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   readConfigFile,
@@ -271,3 +272,70 @@ export const TRIGGER_NOTES = trigger.notes;
 /** How long an identical phrase from the same team is treated as a retry, not a second
  *  event. Guards the one failure that actually happens: a webhook retrying on a timeout. */
 export const TRIGGER_DEDUPE_MS = 10 * 60_000;
+
+/* ------------------------------------------------------- the panel itself --- */
+
+/**
+ * Where `package.json` is, from this file rather than from the working directory.
+ *
+ * `server/index.js` already resolves `web/` this way (`__dirname` + `..`) and for the same
+ * reason: the panel runs under launchd, whose working directory is not the checkout, so
+ * anything read relative to `process.cwd()` is read from somewhere else entirely.
+ */
+const PACKAGE_FILE = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'package.json');
+
+/**
+ * A git remote spelling turned into something a browser can open.
+ *
+ * Done here rather than in the page for the reason every derived constant in this file is:
+ * `web/` must not carry a second copy of a fact `package.json` already states, or the
+ * footer goes on naming last month's repository after a fork. Three spellings arrive in
+ * the wild and all three are `repository.url` values npm itself accepts — `git+https://…`,
+ * a bare `https://…`, and the scp-like `git@host:owner/repo` — so the trailing `.git` and
+ * the `git+` prefix come off, and the SSH form is rewritten to `https://`.
+ *
+ * Anything it cannot read comes back `null`, and the footer then draws no link at all. A
+ * dead link in the one piece of chrome that says what this software *is* would be worse
+ * than no link: showing nothing beats showing something wrong, here as everywhere else.
+ */
+export function browsableRepoUrl(spec) {
+  if (typeof spec !== 'string') return null;
+  let url = spec.trim();
+  if (!url) return null;
+  url = url.replace(/^git\+/, '');
+  // `git@github.com:owner/repo.git` — no scheme, and the colon is a path separator rather
+  // than a port, which is exactly what `remoteHost` in `forge.js` has to untangle too.
+  const scp = url.match(/^[^@/]+@([^:/]+):(.+)$/);
+  if (scp) url = `https://${scp[1]}/${scp[2]}`;
+  url = url.replace(/^ssh:\/\/[^@/]+@/, 'https://').replace(/^git:\/\//, 'https://');
+  url = url.replace(/\.git$/, '').replace(/\/+$/, '');
+  // Only ever a link the browser can follow. A `file://` or a bare path is not one.
+  return /^https?:\/\/\S+$/.test(url) ? url : null;
+}
+
+function readPackage(file = PACKAGE_FILE) {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const spec = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url;
+    return {
+      version: typeof pkg.version === 'string' ? pkg.version : null,
+      // `homepage` first: it is the page a human should land on, and `repository` is a
+      // clone URL that merely usually doubles as one.
+      repoUrl: browsableRepoUrl(pkg.homepage) || browsableRepoUrl(spec),
+    };
+  } catch {
+    // Never fatal. Every server module imports this file, so a throw here is a panel that
+    // will not boot — over a footer.
+    return { version: null, repoUrl: null };
+  }
+}
+
+const pkg = readPackage();
+
+/** The version in `package.json`, drawn in the rail's footer and served on
+ *  `GET /api/config`. `null` if the file could not be read. */
+export const VERSION = pkg.version;
+
+/** The project's own public address, derived from `package.json` and never spelled in
+ *  `web/`. `null` if there isn't one, and the footer then draws the mark without a link. */
+export const REPO_URL = pkg.repoUrl;

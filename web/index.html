@@ -30,6 +30,36 @@
           </div>
         </div>
         <div class="rail-list" id="railList"></div>
+
+        <!-- A sibling of the list, never inside it: an open group's tint is tiled from
+             three full-width rows in `.rail-list`, and anything joining that flow would
+             have to answer to it. Out here the footer is just the last thing in the
+             column. The href and the version text are filled from `GET /api/config` at
+             boot — `web/` may not carry a second copy of what `package.json` says. -->
+        <div class="rail-foot">
+          <a class="rail-repo" id="railRepo" rel="noreferrer noopener" target="_blank">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+              <path
+                fill="currentColor"
+                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+              />
+            </svg>
+            <span class="rail-repo-name">GitHub</span>
+          </a>
+          <span class="rail-version" id="railVersion"></span>
+        </div>
+
+        <!-- The rail's right edge, and the only thing in the panel you drag. Last in the
+             column so it paints over the footer and the list; positioned against `.rail`,
+             which is what gives it the full height. -->
+        <div
+          class="rail-grip"
+          id="railGrip"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Rail width"
+          title="Drag to set the rail's width · double-click to reset"
+        ></div>
       </aside>
 
       <main class="main" id="main"></main>

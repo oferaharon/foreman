@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 
-import { PORT, HOST, HOST_SOURCE, SESSION_PREFIX, SESSION_PREFIX_SOURCE, STATE_DIR, STATE_DIR_SOURCE, HOME, USER_CLAUDE_CONFIG, CONFIG_FILE, CONFIG_NOTES, ALLOWED_ORIGINS, TRIGGER_TOKEN, TRIGGER_SOURCE, TRIGGER_NOTES, TRIGGER_DEDUPE_MS } from './config.js';
+import { PORT, HOST, HOST_SOURCE, SESSION_PREFIX, SESSION_PREFIX_SOURCE, STATE_DIR, STATE_DIR_SOURCE, HOME, USER_CLAUDE_CONFIG, CONFIG_FILE, CONFIG_NOTES, ALLOWED_ORIGINS, TRIGGER_TOKEN, TRIGGER_SOURCE, TRIGGER_NOTES, TRIGGER_DEDUPE_MS, VERSION, REPO_URL } from './config.js';
 import { StatusEngine } from './status.js';
 import { SessionRegistry } from './sessions.js';
 import { ReadState } from './read-state.js';
@@ -2736,6 +2736,14 @@ app.get('/api/config', (req, res) => {
   res.json({
     file: CONFIG_FILE,
     exists,
+    // What this software *is*, read off `package.json` at boot. Here rather than in the
+    // page because `web/` may not carry a second copy of a fact the manifest already
+    // states — the rail's footer would otherwise go on naming last month's repository
+    // after a fork, and its version would drift from the tag by exactly one forgotten
+    // edit. Both are `null` when the manifest could not be read, and the footer then
+    // draws what it has: the mark with no link, or no version.
+    version: VERSION,
+    repoUrl: REPO_URL,
     // What the file holds, `null` for a key it does not have — which is a different fact
     // from the default and is drawn differently: "not set, using X" rather than "X".
     bindHost: typeof config.bindHost === 'string' ? config.bindHost : null,
