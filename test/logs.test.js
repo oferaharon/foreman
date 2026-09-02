@@ -336,6 +336,48 @@ test('all three copies of the launchd label agree', async () => {
 });
 
 /*
+ * …and it has to *find* `logs.js` before it can read the label off it.
+ *
+ * It used to look via `git rev-parse --show-toplevel`, which answers nothing when the
+ * script is not inside a checkout — so the node read was skipped and the hardcoded
+ * fallback above stood in, silently, for whatever label that install had actually set.
+ * The wrong label means the wrong plist in the archive, or none. `$SCRIPT_DIR/../server`
+ * is true in a checkout and equally true under a package manager's `libexec`, which is
+ * the only place this can be read from that is true of every install.
+ *
+ * The git read stays for section 5, whose subject genuinely is the checkout.
+ */
+test('backup-state.sh finds logs.js beside itself, not through git', () => {
+  const sh = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'scripts', 'backup-state.sh'), 'utf8');
+  assert.ok(
+    sh.includes('$SCRIPT_DIR/../server/logs.js'),
+    'backup-state.sh should resolve server/logs.js relative to its own directory',
+  );
+  assert.ok(
+    !/REPO_DIR[^\n]*logs\.js/.test(sh),
+    'the label read must not depend on being inside a git checkout',
+  );
+  assert.ok(
+    sh.includes('rev-parse --show-toplevel'),
+    'the git read stays — the repository section of the manifest is genuinely checkout-only',
+  );
+});
+
+/*
+ * And the restart instructions it prints have to match the install it is running from.
+ * Under Homebrew there is no `npm run stop-panel`: `brew services` owns the job, and a
+ * `restart` there regenerates the plist rather than kickstarting it.
+ */
+test('backup-state.sh knows both ways to stop and start the panel', () => {
+  const sh = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'scripts', 'backup-state.sh'), 'utf8');
+  assert.ok(sh.includes('BREW_FORMULA="foreman-panel"'), 'the formula name should be spelled once, in a variable');
+  assert.ok(sh.includes('brew services stop $BREW_FORMULA'), 'no Homebrew stop instruction');
+  assert.ok(sh.includes('brew services start $BREW_FORMULA'), 'no Homebrew start instruction');
+  assert.ok(sh.includes('npm run stop-panel'), 'the checkout instructions must survive');
+  assert.ok(sh.includes('npm run install-agent'), 'the checkout instructions must survive');
+});
+
+/*
  * …and `backup-state.sh` carries a second copy of the state-dir rungs, for the same reason
  * it carries the label: bash cannot import, and a copy of the script without the repo
  * beside it still has to find the directory the panel is actually reading. A drift here is
