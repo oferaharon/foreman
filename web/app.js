@@ -3242,6 +3242,147 @@ function openGallery(sessionId, sessionTitle) {
   })();
 }
 
+/* ========================================================= confirmation === */
+
+/**
+ * The one way this panel asks "are you sure" about a destructive control.
+ *
+ * It replaces an idiom that was hand-rolled in three places and said nothing: the first
+ * click turned the label into `sure?`, a second click within four seconds performed the
+ * action, and the only way to say no was to wait. Fast, and mute about what the second
+ * click did — the label it overwrote was the only thing naming the target, so a row asking
+ * `sure?` had stopped saying what it was about, and a stack of them said it three times.
+ * The maintainer's issue #11 is the whole argument.
+ *
+ * What replaces it: the control's node is swapped **in place** for a short question naming
+ * the action and its target — `merge #12?`, `abandon issue-8?` — with a **yes** in the
+ * decision colour and a plain **no**. In place, and never a dialog: the merge block sits
+ * above the composer, and a modal over it would move the one row this panel promises never
+ * moves.
+ *
+ * Everything else about the old idiom is kept, because every part of it was load-bearing:
+ *
+ *   **One armed control at a time** — arming any control disarms whatever else was asking.
+ *   Module scope rather than per block, which is wider than the thing it replaces and
+ *   deliberately so: two questions on screen at once is a screen where a press cannot be
+ *   attributed, and split view can put them in two different panes.
+ *
+ *   **A repaint disarms**, scoped to the block being repainted (`within`). The node is
+ *   about to be replaced, and a question carried across a repaint is a question about a
+ *   row that may not be the same row any more. Scoped, because with one registry for the
+ *   whole window an unscoped disarm would let a repaint in one pane answer for a question
+ *   in the other.
+ *
+ *   **Four seconds, then it lets go by itself.** The fallback for nobody answering; what
+ *   changed is that there is now something to answer.
+ *
+ * Keyboard: `yes` takes focus on arm, so Enter confirms; Escape inside the group is `no`;
+ * both are ordinary buttons, so Tab reaches them and Shift+Tab goes back. Focus returns to
+ * the restored control only when it was inside the group — a four-second timeout that
+ * yanked the caret out of the composer would be its own small bug.
+ *
+ * The phone's merge block has the same idiom in `web/m/lead.js` and not this code: those
+ * two blocks share no code by ruling, and every sentence they both show is composed
+ * server-side. What is shared here is the shape, not a module.
+ */
+const CONFIRM_MS = 4000;
+
+/** `{btn, group, timer}` — the one question on screen, or null. */
+let confirmArmed = null;
+
+/**
+ * Put the control back.
+ *
+ * `within` scopes it: given an element, this disarms only a question inside it, which is
+ * what lets one pane repaint its own block without answering for the other's.
+ */
+function disarmConfirm(within = null) {
+  if (!confirmArmed) return;
+  const { btn, group, timer } = confirmArmed;
+  if (within && !within.contains(group)) return;
+  clearTimeout(timer);
+  confirmArmed = null;
+  // A repaint can get here first, in which case the group is already detached and the
+  // fresh row has drawn its own button; putting this one back would be a second copy.
+  if (!group.isConnected) return;
+  const hadFocus = group.contains(document.activeElement);
+  group.replaceWith(btn);
+  if (hadFocus) btn.focus({ preventScroll: true });
+}
+
+/**
+ * Swap `btn` for the question, and run `onYes` only if the answer is yes.
+ *
+ * `question` names the action and its target and is the entire point of the change — it is
+ * what `sure?` could not say. It ellipsises rather than wrapping, because the merge block
+ * must not grow a line, and carries its full text as a `title`. `yes` inherits the
+ * control's own tooltip: that sentence already says exactly what the press does, and a
+ * second wording of it is how two accounts of one fact start.
+ */
+function armConfirm(btn, question, onYes) {
+  disarmConfirm();
+
+  const group = document.createElement('span');
+  group.className = 'confirm';
+  group.setAttribute('role', 'group');
+  group.setAttribute('aria-label', question);
+
+  const q = document.createElement('span');
+  q.className = 'confirm-q';
+  q.textContent = question;
+  q.title = question;
+
+  const yes = document.createElement('button');
+  yes.type = 'button';
+  yes.className = 'confirm-yes';
+  yes.textContent = 'yes';
+  yes.title = btn.title;
+
+  const no = document.createElement('button');
+  no.type = 'button';
+  no.className = 'confirm-no';
+  no.textContent = 'no';
+  no.title = 'Leave it alone.';
+
+  group.append(q, yes, no);
+
+  // On the group rather than on the document: Escape means "no" for as long as the
+  // question holds focus, which it does from the moment it is armed, and a document-level
+  // capture would also swallow the Escape that closes whatever is opened next.
+  group.onkeydown = (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      disarmConfirm();
+      return;
+    }
+    // The keyboard twin of the `stopPropagation` below, and it is not decoration: a task
+    // row is itself `role="button"` and opens its brief on Enter *or* Space, and its
+    // handler calls `preventDefault()`. Left to bubble, Enter on `yes` would open a dialog
+    // over the row and cancel the button's own activation on the way — the press that says
+    // yes would do everything except that. Stop the bubble, never the default: the default
+    // is the press.
+    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+  };
+  // The same reason every control in these two blocks stops the bubble: a merge row is a
+  // live strip, and a task row opens its brief on a click anywhere in it.
+  group.onclick = (e) => e.stopPropagation();
+
+  no.onclick = () => disarmConfirm();
+  yes.onclick = () => {
+    // Restore first, then act: `onYes` is handed the original button and disables it, so
+    // it has to be back in the document before it runs.
+    disarmConfirm();
+    onYes();
+  };
+
+  btn.replaceWith(group);
+  confirmArmed = { btn, group, timer: setTimeout(() => disarmConfirm(), CONFIRM_MS) };
+  // The control was just pressed, so it is on screen and nothing needs scrolling to reach
+  // it — and the merge block's rows and the transcript below both have scroll positions
+  // this must not disturb.
+  yes.focus({ preventScroll: true });
+}
+
 /* ============================================================== a pane === */
 
 /**
@@ -4158,6 +4299,11 @@ function createPane(slot, host) {
     const list = roomView.tasksEl;
     if (!list || !list.isConnected) return;
     const keepScroll = list.scrollTop; // a repaint must not lose the reader's place
+    // The merge block's rule, and for the same reason: every row here is about to be
+    // replaced, so a question left standing would be a question about a row that may not
+    // be the same row any more — or about a task that has just closed. Scoped to this
+    // list, so a repaint here never answers for the other pane.
+    disarmConfirm(list);
     list.replaceChildren();
     if (!roomView.tasks.length) {
       const quiet = document.createElement('div');
@@ -4237,24 +4383,11 @@ function createPane(slot, host) {
           t.state === 'pending'
             ? `Drop ${t.id}: nothing is running, no worktree to remove.`
             : `Abandon ${t.id}: end its session, remove its worktree`;
-        // The rail's armed pattern: destructive things ask once, in place.
-        let armed = false;
-        close.onclick = async (e) => {
-          // Explicitly, on the button — not left to the luck of layout. Without it the
-          // first click both arms the delete *and* opens the brief modal on top of it.
-          // With it the two can never be up at once, so the modal needs no disarming.
-          e.stopPropagation();
-          if (!armed) {
-            armed = true;
-            close.textContent = 'sure?';
-            close.classList.add('armed');
-            setTimeout(() => {
-              armed = false;
-              close.textContent = '✕';
-              close.classList.remove('armed');
-            }, 4000);
-            return;
-          }
+        // The panel's confirmation idiom: destructive things ask, in place, and can be
+        // told no. The two words are the two facts the `title` already distinguishes —
+        // dropping a pending task ends nothing, abandoning a live one ends a session and
+        // removes a worktree — and a glyph cannot say which of those a press is about.
+        const drop = async () => {
           close.disabled = true;
           try {
             await postJSON(`/api/team/tasks/${encodeURIComponent(t.id)}/close`, {});
@@ -4263,6 +4396,13 @@ function createPane(slot, host) {
             close.disabled = false;
             errLine(row, err.message); // the 409's human message must surface
           }
+        };
+        close.onclick = (e) => {
+          // Explicitly, on the button — not left to the luck of layout. Without it the
+          // first click both arms the delete *and* opens the brief modal on top of it.
+          // With it the two can never be up at once, so the modal needs no disarming.
+          e.stopPropagation();
+          armConfirm(close, `${t.state === 'pending' ? 'drop' : 'abandon'} ${t.id}?`, drop);
         };
         line.append(close);
       }
@@ -6109,34 +6249,16 @@ function createPane(slot, host) {
    */
 
   /**
-   * The one armed control in the block, and how to put it back.
+   * Take the question down, if the one on screen belongs to this block.
    *
-   * Only one at a time, across rows *and* `merge all`: arming a second disarms the first,
-   * because a stack of rows all saying `sure?` is genuinely confusing about which press
-   * lands where. `renderMergeQueue` disarms before it paints — the node is about to be
-   * replaced, and a `sure?` carried across a repaint is a promise about a row that may not
-   * be the same row any more.
+   * The arming itself is `armConfirm`, module scope, shared with the task list — see the
+   * confirmation section above. What stays here is the *scope*: this block's own way of
+   * saying "whatever I was asking is about to stop being true". Two callers, both for the
+   * same reason — the rows are about to be replaced, or the room they belong to has
+   * changed team — and both pass `merge` so a question in the other pane is left alone.
    */
-  let mergeArmed = null; // {el, label}
-  let mergeArmTimer = null;
-
   function disarmMerge() {
-    clearTimeout(mergeArmTimer);
-    mergeArmTimer = null;
-    if (mergeArmed) {
-      mergeArmed.el.textContent = mergeArmed.label;
-      mergeArmed.el.classList.remove('armed');
-    }
-    mergeArmed = null;
-  }
-
-  /** The rail's armed idiom, matching `team-task-close`: `sure?`, four seconds, then off. */
-  function armMerge(el, label) {
-    disarmMerge();
-    mergeArmed = { el, label };
-    el.textContent = 'sure?';
-    el.classList.add('armed');
-    mergeArmTimer = setTimeout(disarmMerge, 4000);
+    if (composerEl?.merge) disarmConfirm(composerEl.merge);
   }
 
   /**
@@ -6412,9 +6534,12 @@ function createPane(slot, host) {
     btn.title = `Ask the lead to merge ${row.prNumber ? `PR #${row.prNumber}` : row.pr} — it merges, pulls, verifies and closes ${row.id}.`;
     btn.onclick = (e) => {
       e.stopPropagation();
-      if (mergeArmed?.el !== btn) return armMerge(btn, 'merge');
-      disarmMerge();
-      sendMerge([row], btn, row);
+      // The PR number is the thing a person recognises, and it is what the lead's sentence
+      // will name. With no number there is no honest short handle for the PR, so the
+      // branch stands in — it is the row's own `title` already — and the task id last,
+      // which is the one thing a row always has.
+      const target = row.prNumber ? `#${row.prNumber}` : row.branch || row.id;
+      armConfirm(btn, `merge ${target}?`, () => sendMerge([row], btn, row));
     };
     return btn;
   }
@@ -6460,9 +6585,9 @@ function createPane(slot, host) {
     btn.title = `Ask the lead to merge ${named.length} PRs in order: ${named.map((r) => r.id).join(', ')}.`;
     btn.onclick = (e) => {
       e.stopPropagation();
-      if (mergeArmed?.el !== btn) return armMerge(btn, 'merge all');
-      disarmMerge();
-      sendMerge(named, btn, null);
+      // The count, not the ids: five task ids is a paragraph, and the `title` beside it
+      // already lists them in the order they would go.
+      armConfirm(btn, `merge all ${named.length}?`, () => sendMerge(named, btn, null));
     };
     foot.append(btn);
     return foot;
@@ -7214,10 +7339,14 @@ function createPane(slot, host) {
    * `web/m/cards.css` argues for and for the same reason: set by the very decision that
    * makes the row ask twice, so a calm-looking row can never fire on one click.
    *
-   * **The label is never replaced by `sure?`.** The rail's bin swaps its glyph, which is
-   * fine for a glyph; here the label is the thing you are re-reading while you decide
-   * whether to click again, so the confirmation arrives underneath it and the row stays
-   * put. Four seconds, then it disarms itself.
+   * **The label is never replaced, and this card keeps its own idiom deliberately.**
+   * Everywhere else a destructive control is swapped for a question naming the action
+   * (`armConfirm`), because the thing it replaced — a glyph or the word `merge` — named
+   * nothing. Here the label already *is* the sentence, and it is the sentence you are
+   * re-reading while you decide whether to click again:
+   * `Yes, clear context (34% used) and bypass permissions` must not be taken off screen by
+   * the very press that asks you to think about it. So the confirmation arrives underneath
+   * it and the row stays put. Four seconds, then it disarms itself.
    */
   function buildPermOption(s, o) {
     const broad = o.kind === 'approve-always' || o.kind === 'approve-mode';

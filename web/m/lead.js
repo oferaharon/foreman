@@ -847,7 +847,11 @@ function mergeHead(rows, q) {
     const all = document.createElement('button');
     all.type = 'button';
     all.className = 'm-mq-go is-all';
-    armMerge(all, 'merge all', () => pressMerge(q.batch.tasks, all));
+    // The count, not the ids: on 390px a list of task ids is the whole screen, and the
+    // rows below already name them in the order they would go.
+    armMerge(all, 'merge all', `merge all ${q.batch.tasks.length}?`, () =>
+      pressMerge(q.batch.tasks, all),
+    );
     head.append(all);
   }
   return head;
@@ -901,7 +905,12 @@ function mergeRow(row, q) {
     const go = document.createElement('button');
     go.type = 'button';
     go.className = 'm-mq-go';
-    armMerge(go, 'merge', () => pressMerge([row.id], go));
+    // The PR number is what a person recognises and what the lead's sentence will name.
+    // With no number there is no honest short handle for the PR, so the task id — which
+    // is the row's own first word — stands in.
+    armMerge(go, 'merge', `merge ${row.prNumber ? `#${row.prNumber}` : row.id}?`, () =>
+      pressMerge([row.id], go),
+    );
     line.append(go);
   }
 
@@ -943,45 +952,76 @@ const NOTE_TONE = {
   'no-pr': '',
 };
 
-/* --- arming ------------------------------------------------------------- */
+/* --- asking ------------------------------------------------------------- */
 
 /**
- * One armed control at a time, across the whole block.
+ * One question at a time, across the whole block.
  *
- * Module scope rather than per-button because that is the whole rule: arming a second
- * disarms the first, or a stack of armed rows is a screen where a thumb cannot tell which
- * press is the one that sends. Four seconds, then it lets go by itself.
+ * This replaces the idiom the desktop and this screen used to share: a first tap turned
+ * the label into `sure?`, a second within four seconds sent, and the only way to say no
+ * was to wait. It was fast and it said nothing — `sure?` overwrote the one word naming the
+ * action — and on a phone the cost is sharper, because a thumb is wider than a cursor and
+ * the undo was "hold still for four seconds". Issue #11 is the argument; the desktop's
+ * `armConfirm` in `web/app.js` is the same shape in the other client, and deliberately not
+ * the same code: these two blocks share no module by ruling, and every sentence they both
+ * show is composed server-side.
+ *
+ * What is kept from the old idiom, because each part was load-bearing: **one at a time**
+ * (module scope — arming a second disarms the first, or a stack of asking rows is a screen
+ * where a thumb cannot tell which tap is the one that sends), **a rebuild disarms** (the
+ * node is about to be replaced, and a question carried across a repaint is a question
+ * about a row that may not be the same row), and **four seconds, then it lets go by
+ * itself** — the fallback for nobody answering, except that now there is something to
+ * answer.
  */
 let armedMerge = null;
 
 function disarmMerge() {
   if (!armedMerge) return;
   clearTimeout(armedMerge.timer);
-  // The node may already be detached by a rebuild; resetting it then is harmless and
-  // resetting it always is one fewer branch to get wrong.
-  armedMerge.reset();
+  // The group may already be detached by a rebuild, in which case the fresh row has drawn
+  // its own button and putting this one back would be a second copy.
+  if (armedMerge.group.isConnected) armedMerge.group.replaceWith(armedMerge.btn);
   armedMerge = null;
 }
 
-function armMerge(btn, label, fire) {
+/**
+ * `label` is what the control says at rest; `question` is what it asks when tapped, naming
+ * the action and its target — the thing `sure?` could not say.
+ */
+function armMerge(btn, label, question, fire) {
   btn.textContent = label;
   btn.onclick = () => {
-    if (armedMerge?.btn === btn) {
+    disarmMerge();
+
+    const group = document.createElement('div');
+    group.className = 'm-mq-ask';
+    group.setAttribute('role', 'group');
+    group.setAttribute('aria-label', question);
+
+    const q = document.createElement('span');
+    q.className = 'm-mq-q';
+    q.textContent = question;
+
+    const yes = document.createElement('button');
+    yes.type = 'button';
+    yes.className = 'm-mq-yes';
+    yes.textContent = 'yes';
+    yes.onclick = () => {
+      // Put the button back before firing: `pressMerge` was handed it and disables it.
       disarmMerge();
       fire();
-      return;
-    }
-    disarmMerge();
-    btn.textContent = 'sure?';
-    btn.classList.add('is-armed');
-    armedMerge = {
-      btn,
-      timer: setTimeout(disarmMerge, ARM_MS),
-      reset: () => {
-        btn.textContent = label;
-        btn.classList.remove('is-armed');
-      },
     };
+
+    const no = document.createElement('button');
+    no.type = 'button';
+    no.className = 'm-mq-no';
+    no.textContent = 'no';
+    no.onclick = () => disarmMerge();
+
+    group.append(q, yes, no);
+    btn.replaceWith(group);
+    armedMerge = { btn, group, timer: setTimeout(disarmMerge, ARM_MS) };
   };
 }
 
