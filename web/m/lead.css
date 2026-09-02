@@ -811,6 +811,62 @@
   gap: 0.5rem;
 }
 
+/* ---- the ghost-text suggestion ---- */
+
+/* Claude Code's own guess at the next prompt, directly above the box, in the panel's
+   "present but not asking for anything" ink. Quiet on purpose: it is an offer that expires
+   and it is a poll behind, so it must never read as loudly as a queued message or a card
+   that is actually waiting on you. No border and no fill — the tag and the ink are all
+   that mark it. */
+.m-ghost {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding-bottom: 0.45rem;
+  color: var(--ink-faint);
+  font-size: 0.78rem;
+}
+
+.m-ghost-tag {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* One terminal line is up to a couple of hundred characters and this row is one line tall,
+   so it ellipsises. `min-width: 0` on both this and the flex parent is what actually lets
+   it shrink — without it the row grows past the screen and takes the page's horizontal
+   scroll with it, which on a phone is the worst kind of layout bug to ship. */
+.m-ghost-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 44px is the thumb target the rest of this view is built to; this one is deliberately
+   smaller. It is an offer, not an answer — the buttons that reach that size here are the
+   ones on a card that is blocking a lead, and a suggestion must not compete with them. It
+   still clears 32px, which is comfortably above the accidental-tap floor. */
+.m-ghost-use {
+  flex: none;
+  min-height: 32px;
+  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.m-ghost-use:active { background: var(--surface-sunk); color: var(--ink); }
+
 /*
  * 16px, and it is not a taste decision: Safari zooms the whole page in when a focused
  * input's font-size is under 16px and does not zoom back out, leaving the page wider than

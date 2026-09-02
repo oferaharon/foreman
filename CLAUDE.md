@@ -35,6 +35,13 @@ folder-trust gate parses as an ordinary permission box — full prompt, no `dial
 answer endpoint. See the trap under Traps; it is the one screen where reading it correctly
 and offering a button are the same mistake.
 
+**And one seventh thing that is a parser but is not a screen.** `ghost.js` reads the
+composer's *suggested next prompt* — dim text inside the input line rather than a box over
+it — so it refuses nothing and is refused by nothing; it simply answers `null` for every
+pane that is not idle with a suggestion in it. It is the only reader in this repo of
+`capture-pane -pe`, and the only one that would be wrong to fold into `parsePane`. Its trap
+is under Traps and it is sharper than its size suggests.
+
 ---
 
 ## The substrate
@@ -49,7 +56,7 @@ There is no API. Everything is assembled from three places:
 
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
-`effort.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
+`effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
 `team.js`, `room.js`, `worktree.js`, `setup-detect.js`, `forge.js`, `base-branch.js`, `watch.js`, `conflicts.js`,
 `gc.js` and `launch.js`. Run them before touching any of them, and note that `test/fixtures/` holds
 real `capture-pane` output, not reconstructions — and that the git wrappers are tested
@@ -378,6 +385,51 @@ null threw *inside* `buildComposer` — after it had decided to draw the questio
 unwound the whole build. No card, no textarea, and every later roster broadcast threw again
 in `updateComposerHint`, so the pane never healed. The one session you could not answer was
 the one asking you something. Both halves are fixed; keep both.
+
+**Ghost text is one line, it is not one dim run, and the terminal truncates it — three
+separate measurements, and getting any of them wrong ships a wrong suggestion.** The
+composer's suggested next prompt is `❯` + U+00A0 + the text, dim, and `server/ghost.js` is
+the only thing in this repo that reads the attribute. Measured on v2.1.257 at 220, 70 and
+34 columns:
+
+- **The attribute is re-emitted per word as often as not.** The same phrase came back as
+  one `\e[2m…\e[0m` in one capture and as `\e[2mfix\e[0m \e[2mslugify\e[0m …` in the
+  next, spaces between the runs carrying nothing at all. "Read the first dim run" therefore
+  answers `fix` on one capture and the whole phrase on the other — from the *same session
+  at the same width*. The rule is **every non-blank character after the caret must be dim**,
+  which comes out identical everywhere, and the tests pin that both widths spell one string.
+- **Typing removes the dim entirely**, so that structural test *is* the "only when the box
+  is empty" guard rather than a second check beside it. A working session draws the same
+  empty input line with no dim run, so it answers nothing here either.
+- **It truncates rather than wrapping.** At 34 columns the suggestion read
+  `fix slugify and add a test for …` — an ellipsis, no second line to collect. A read
+  ending in one is **refused**: prefilling somebody's composer with a literal `…`, or with
+  auto-send on *sending* it, is the "showing something wrong" this file keeps choosing
+  against. So a narrow terminal shows no line at all, which is correct and is not a bug.
+- **`38;5;2` is an ordinary 256-colour green whose colour index is 2.** A parser reading
+  each `;`-separated number on its own takes that for SGR 2 and hands back typed text as a
+  suggestion — the one false positive that ends with the panel offering to send somebody's
+  half-written message. The extended-colour forms are consumed, not scanned.
+
+Two things about where it sits. It takes its **own** `capture-pane -pe`, gated on the pane
+being plainly `idle` and riding inside the roster poll's existing `Promise.all` (2.9ms) —
+switching the shared `capturePane` to `-e` would put ANSI bytes in front of all five
+numbered-screen parsers to buy a muted line, and `-p` output was measured byte-identical to
+stripped `-pe` output, which is exactly the kind of "it'll be fine" that this file is a list
+of. And `rememberGhost` **drops** the suggestion the moment the pane stops being idle rather
+than holding it the way `rememberFooter` holds a model: a stale model is a wrong label, a
+stale suggestion is a wrong *button*.
+
+On the client it is above the composer and **never in the transcript** — an offer that
+expires is not something that happened — it is deliberately outside `composerSig` (a
+suggestion changes at the end of every turn, and a signature carrying it would tear the
+textarea down under a reader's cursor), it goes **before** the interrupt button so that
+button still never moves, and it is gone while the box has anything in it, which is what
+makes "use" unable to destroy a half-written message. The auto-send flag is half its
+repaint signature, not decoration: without it a button reading `use` stays behind a setting
+that now sends — and it lives in `web/prefs.js`, imported by the desktop and by both phone
+files, because `/` and `/m/` are one origin and two spellings of one `localStorage` key is
+a setting that appears to work. `web/trust-gate.js`'s reasoning, one floor down.
 
 **The footer's right-hand slot rotates.** It shows `/rc`, "new task? /clear to save…",
 and *sometimes* effort. Read effort from the transcript (`effort` on every assistant
@@ -1649,6 +1701,8 @@ opens that session — and it did. It cannot press "Add to Dock".
   next prompt as dim ghost text in the composer; plain capture strips the attribute, so it
   reads as though someone typed it. Use `capture-pane -pe` and look for `\e[2m` if it
   matters. Harmless to sending — `C-u` clears the line first — but it will fool you.
+  `server/ghost.js` is now the one reader of that attribute; read its trap under Traps
+  before reaching for the dim run yourself — the run is not one run.
 - **Effort has no session-only setting. At all.** `/effort` offers `←/→ to adjust · Enter
   to confirm` and nothing else, and that Enter writes `effortLevel` into
   `~/.claude/settings.json` — Claude Code says so itself: *"saved as your default for new

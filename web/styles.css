@@ -2849,6 +2849,71 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .composer-above.has-merge > .ghost-btn { align-self: flex-end; }
 
+/* The ghost-text line needs the same column, for the same reason: it is full width and
+   interrupt has to stay the last thing on its own row at the right. Two classes rather than
+   one shared name because each is set by the function that decides it, beside the append
+   that puts its own block there — and either can be there without the other. */
+.composer-above.has-ghost {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.composer-above.has-ghost > .ghost-btn { align-self: flex-end; }
+
+/* ---- the ghost-text suggestion ---- */
+
+/* Claude Code's own guess at the next prompt, in the panel's "present but not asking for
+   anything" ink. Deliberately quiet: it is an offer that expires, it is a poll behind, and
+   it must never read as loudly as a queued message or a prompt that is actually waiting.
+   No border and no fill — the tag and the ink are the whole of what marks it. */
+.ghost-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+}
+
+.ghost-line-tag {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+/* One terminal line is up to a couple of hundred characters and this row is one line tall,
+   so the text ellipsises and carries the whole of itself in its `title`. `min-width: 0` on
+   both this and the flex parent is what actually lets it shrink — without it the row grows
+   past the composer and takes the pane's horizontal scroll with it. */
+.ghost-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ghost-line-use {
+  flex: none;
+  border: 1px solid var(--rule);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 0.7rem;
+  padding: 0.1rem 0.45rem;
+  cursor: pointer;
+}
+
+.ghost-line-use:hover {
+  background: var(--surface-sunk);
+  color: var(--ink);
+}
+
 /* ---- the merge queue ---- */
 
 /* Three parts, and only the rows scroll. The head says what the block is, the foot carries

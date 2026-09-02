@@ -37,6 +37,9 @@
 
 import { marked } from '/vendor/marked.js';
 import { buildCard } from './cards.js';
+// The ghost-text auto-send flag, shared with the desktop's settings modal — see
+// `web/prefs.js`. `/` and `/m/` are one origin, so one browser gives one answer.
+import { ghostSend } from '../prefs.js';
 import { mountTasks } from './tasks.js';
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -81,6 +84,8 @@ const view = {
   last: null,
   /** What the mounted card was built from, so it is not rebuilt under a thumb. */
   cardSig: null,
+  /** Same for the ghost-text line, which also carries a button somebody is reaching for. */
+  ghostSig: null,
   /** The last `GET /api/team/merge` answer, and what the block was built from. */
   merge: null,
   mergeSig: null,
@@ -170,6 +175,7 @@ export function mountLead(host, ctx) {
     tab: 'chat',
     last: ctx.session(),
     cardSig: null,
+    ghostSig: null,
     merge: null,
     mergeSig: null,
     mergeErr: null,
@@ -376,6 +382,22 @@ function build(host) {
   el.err.className = 'm-send-error';
   el.err.hidden = true;
 
+  /*
+   * The ghost-text line: what Claude Code is offering as the next prompt, which on a phone
+   * is the whole point of the feature — the alternative is thumb-typing it.
+   *
+   * Directly above the input row and inside the composer, which is where the terminal draws
+   * it too. **Not** in the conversation: a suggestion is an offer that expires, not
+   * something that happened, and the stream above is history.
+   *
+   * `hidden` rather than membership here — the phone's composer is a plain column with no
+   * `:empty` rule hanging off it, so there is nothing for a permanent child to break, and a
+   * node that stays put is one less thing to re-append under a thumb.
+   */
+  el.ghost = document.createElement('div');
+  el.ghost.className = 'm-ghost';
+  el.ghost.hidden = true;
+
   const row = document.createElement('div');
   row.className = 'm-composer-row';
 
@@ -390,6 +412,10 @@ function build(host) {
     setDraft(view.ctx?.sessionId, el.ta.value);
     autoGrow();
     syncSend();
+    // Typing puts the suggestion away, the way it does in the terminal — and it is what
+    // makes the button safe to press without thinking, since the offer is only ever on
+    // screen while there is nothing of yours for it to overwrite.
+    renderGhost();
   });
 
   el.send = document.createElement('button');
@@ -400,7 +426,7 @@ function build(host) {
   el.send.addEventListener('click', submit);
 
   row.append(el.ta, el.send);
-  composer.append(el.queue, el.err, row);
+  composer.append(el.queue, el.err, el.ghost, row);
 
   host.append(head, body, el.card, el.merge, composer);
   return el;
@@ -454,6 +480,9 @@ function setTab(tab) {
   el.card.hidden = tab !== 'chat' || !el.card.firstChild;
   syncMergeSlot();
   el.composer.hidden = tab !== 'chat';
+  // The line is a fact about the composer, so it goes where the composer goes. Its own
+  // signature would otherwise say "already drawn" and leave it under the task list.
+  renderGhost();
   el.tabChat.classList.toggle('is-on', tab === 'chat');
   el.tabTasks.classList.toggle('is-on', tab === 'tasks');
 
@@ -511,6 +540,7 @@ export function updateLead(session) {
   el.stop.disabled = !session;
   syncSend();
   renderQueue(session);
+  renderGhost(session);
   renderCard(session);
   autoGrow();
 }
@@ -600,6 +630,104 @@ function modelLine(s) {
   const model = typeof s.model === 'string' ? s.model.replace(/\s*\(.*\)\s*$/, '').trim() : '';
   const pct = Number.isFinite(s.contextPct) ? `${Math.round(s.contextPct)}%` : '';
   return [model, pct].filter(Boolean).join(' · ');
+}
+
+/**
+ * The suggestion Claude Code is offering in the lead's own composer.
+ *
+ * Read straight off the roster row (`ghost`, written by `server/ghost.js`), so it arrives
+ * on the frame it changes on and needs no endpoint and no poll of its own.
+ *
+ * Three things decide whether it is drawn, and each is the point:
+ *
+ *   • **The server only ever sets it on an idle pane**, and drops it the moment the pane
+ *     stops being idle. A working or blocked lead has no composer to suggest into, so there
+ *     is nothing here to guard against beyond passing the value through.
+ *   • **Nothing while the box has text of yours.** "Use" replaces what is in the box, and an
+ *     offer that can only appear over an empty box cannot destroy a half-written message —
+ *     which is why there is no confirmation and no disabled state on the button.
+ *   • **Chat tab only.** The tasks tab hides the composer, and a line hanging under a task
+ *     list would be an offer about a box that is not on screen.
+ *
+ * Repainted against a signature for the same reason the card is: `updateLead` runs on every
+ * roster frame, and this row carries a button somebody is reaching for.
+ *
+ * @param {any} [session] the live roster row, or undefined on a repaint driven by typing
+ */
+function renderGhost(session) {
+  const el = view.el;
+  if (!el?.ghost) return;
+  const s = session === undefined ? view.last : session || view.last;
+
+  const text = view.tab === 'chat' && !el.ta.value.trim() ? s?.ghost || null : null;
+  // The flag is half the signature, not decoration: it changes what the button says and
+  // what pressing it does, and a key holding only the text would leave a button reading
+  // `use` behind a setting that now sends.
+  const sig = text ? `${ghostSend.on ? 'send' : 'use'}|${text}` : '';
+  if (sig === view.ghostSig) return;
+  view.ghostSig = sig;
+
+  if (!text) {
+    el.ghost.replaceChildren();
+    el.ghost.hidden = true;
+    return;
+  }
+
+  const stick = isNearBottom();
+
+  const tag = document.createElement('span');
+  tag.className = 'm-ghost-tag';
+  tag.textContent = 'suggested';
+
+  const body = document.createElement('span');
+  body.className = 'm-ghost-text';
+  body.textContent = text;
+
+  const use = document.createElement('button');
+  use.type = 'button';
+  use.className = 'm-ghost-use';
+  /*
+   * The button says what pressing it does. With auto-send on this is a one-tap send into a
+   * live session, and a control that sends should not be labelled as though it fills a box
+   * — the setting picks the behaviour and the label follows it rather than hiding it.
+   */
+  use.textContent = ghostSend.on ? 'send' : 'use';
+  use.setAttribute(
+    'aria-label',
+    ghostSend.on ? 'Send this suggestion now' : 'Put this suggestion in the box',
+  );
+  use.addEventListener('click', () => useGhost(text));
+
+  el.ghost.replaceChildren(tag, body, use);
+  el.ghost.hidden = false;
+  // The line appearing takes height from the conversation above it, which would otherwise
+  // slide the last reply up out of sight.
+  if (stick) pinBottom();
+}
+
+/**
+ * Take the suggestion up.
+ *
+ * Through the phone's own send path in both cases — the same `POST /send` everything else
+ * here goes through, which claims the pane, clears the line and types. The terminal's own
+ * Tab is never driven: it would race the `C-u` that the server leads with, and the panel
+ * does not mirror keystrokes into a pane it is also typing into.
+ */
+function useGhost(text) {
+  const el = view.el;
+  if (!el?.ta) return;
+  el.ta.value = text;
+  setDraft(view.ctx?.sessionId, text);
+  autoGrow();
+  syncSend();
+  if (ghostSend.on) {
+    submit();
+    return;
+  }
+  // Deliberately no `focus()`. On a phone that throws the keyboard up over half the screen
+  // — including over the conversation the suggestion is about — and the next thing a thumb
+  // wants is usually the send button, not a caret.
+  renderGhost();
 }
 
 /**
