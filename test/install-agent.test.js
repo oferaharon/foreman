@@ -70,6 +70,19 @@ test('the omit-when-default rule holds for the port, the state dir and the label
   assert.ok(!('FOREMAN_HOST' in scratch));
 });
 
+test('the log directory reaches the job too, or the plist and the process trim different files', () => {
+  // `StandardOutPath` is `LOG_OUT`, which is `$FOREMAN_LOG_DIR` plus a basename derived
+  // from the label — so the directory has to travel with the label for exactly the reason
+  // the label has to travel at all. Left behind, an install run with the variable set
+  // writes a plist naming one pair of files while the panel inside it computes the
+  // default pair — the real panel's — and truncates *those* at boot.
+  const scratch = jobEnvironment({ logDir: '/tmp/foreman-scratch/logs' });
+  assert.equal(scratch.FOREMAN_LOG_DIR, '/tmp/foreman-scratch/logs');
+
+  const plain = jobEnvironment({ host: '127.0.0.1', port: 48770, stateDir: DEFAULT_STATE_DIR, label: DEFAULT_AGENT_LABEL });
+  assert.ok(!('FOREMAN_LOG_DIR' in plain), 'the omit-when-default rule holds here too');
+});
+
 test('PATH is always written, and never carries npm’s node_modules/.bin chain', () => {
   // launchd's own PATH is four directories and `npm` is in none of them. The filtered
   // entries are an artifact of having been started by `npm run`, and would let a daemon

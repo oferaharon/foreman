@@ -11,6 +11,9 @@
     "url": "https://github.com/oferaharon/foreman.git"
   },
   "main": "server/index.js",
+  "bin": {
+    "foreman-panel": "bin/foreman-panel.js"
+  },
   "scripts": {
     "start": "node server/index.js",
     "test": "node --test 'test/*.test.js'",

@@ -122,6 +122,44 @@ if [[ -n "$VERIFY_TARGET" ]]; then
 fi
 
 # ---------------------------------------------------------------------------
+# Which install this is
+# ---------------------------------------------------------------------------
+#
+# Resolved from where this script sits, because the install location is the fact — there
+# is no marker file and no flag to go looking for. It decides two things below: which
+# restart instructions the refusal prints, and (further down) where server/logs.js is.
+#
+# `pwd -P` for the physical path: a symlinked checkout under a Homebrew prefix would
+# otherwise read as an ordinary one, and vice versa.
+
+BREW_FORMULA="foreman-panel"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR_REAL="$(cd "$SCRIPT_DIR" && pwd -P)"
+
+UNDER_HOMEBREW=0
+if [[ -n "${HOMEBREW_PREFIX:-}" ]]; then
+  BREW_PREFIXES=("$HOMEBREW_PREFIX")
+else
+  BREW_PREFIXES=("/opt/homebrew" "/usr/local")
+fi
+for prefix in "${BREW_PREFIXES[@]}"; do
+  # The trailing slash on both sides is what stops /usr/local-scratch matching /usr/local.
+  if [[ "$SCRIPT_DIR_REAL/" == "$prefix/"* ]]; then
+    UNDER_HOMEBREW=1
+    break
+  fi
+done
+
+if [[ "$UNDER_HOMEBREW" -eq 1 ]]; then
+  RESTART_STOP="brew services stop $BREW_FORMULA"
+  RESTART_START="brew services start $BREW_FORMULA"
+else
+  RESTART_STOP="npm run stop-panel"
+  RESTART_START="npm run install-agent   (or: npm run restart-panel, if it's already installed)"
+fi
+
+# ---------------------------------------------------------------------------
 # Refuse while the panel is live
 # ---------------------------------------------------------------------------
 #
@@ -152,9 +190,9 @@ Every store in server/ is a Map behind a debounced flush. A backup taken now can
 a state dir mid-write: a snapshot of a moment that's about to be overwritten from memory.
 
 To take a real backup:
-  1. npm run stop-panel
+  1. ${RESTART_STOP}
   2. re-run this script
-  3. npm run install-agent   (or: npm run restart-panel, if it's already installed)
+  3. ${RESTART_START}
 
 Or pass --force to back up anyway — the archive will record that it was taken live.
 EOF
@@ -183,22 +221,28 @@ fi
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 CLAUDE_JSON="$HOME/.claude.json"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The git read stays, and stays only for section 5 below — the branch, the sha and the
+# uncommitted patch are genuinely checkout-only facts, and saying "not running from inside
+# a git checkout" is the right answer when there is no checkout.
 REPO_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || REPO_DIR=""
 
 # server/logs.js is the source of truth for the LaunchAgent label (DEFAULT_AGENT_LABEL,
-# overridable by $FOREMAN_AGENT_LABEL). Derive it from there when the repo is available;
-# fall back to the hardcoded default logs.js itself ships, so a copy of this script
-# without the repo beside it still finds the real plist.
+# overridable by $FOREMAN_AGENT_LABEL). Found **beside this script**, never via git:
+# `$SCRIPT_DIR/../server/logs.js` is true in a checkout and equally true under a package
+# manager's libexec, where `git rev-parse` answers nothing at all — and an empty answer
+# there used to fall silently through to the hardcoded default, which is the wrong label
+# for any install that set one, and so the wrong plist (or none) in the archive.
+# The fallback stays for a copy of this script carried off on its own.
+LOGS_JS="$SCRIPT_DIR/../server/logs.js"
 DEFAULT_AGENT_LABEL="dev.foreman.panel"
 AGENT_LABEL=""
-if [[ -n "$REPO_DIR" && -f "$REPO_DIR/server/logs.js" ]] && command -v node >/dev/null 2>&1; then
+if [[ -f "$LOGS_JS" ]] && command -v node >/dev/null 2>&1; then
   AGENT_LABEL=$(node -e "
     const { pathToFileURL } = require('url');
     import(pathToFileURL(process.argv[1]).href)
       .then((m) => process.stdout.write(m.AGENT_LABEL || ''))
       .catch(() => {});
-  " "$REPO_DIR/server/logs.js" 2>/dev/null) || AGENT_LABEL=""
+  " "$LOGS_JS" 2>/dev/null) || AGENT_LABEL=""
 fi
 AGENT_LABEL="${AGENT_LABEL:-${FOREMAN_AGENT_LABEL:-$DEFAULT_AGENT_LABEL}}"
 PLIST_PATH="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"

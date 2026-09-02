@@ -238,6 +238,71 @@ test('FOREMAN_AGENT_LABEL moves the logs somewhere a bench cannot hurt the real 
 });
 
 /*
+ * `FOREMAN_LOG_DIR` — the *directory*, told to the process rather than derived.
+ *
+ * The label above moves both files by renaming them; this moves both files by relocating
+ * them, and the two are independent on purpose. `install-agent.js` writes the plist from
+ * the same two constants, so a checkout install cannot disagree with itself — but a
+ * Homebrew service's plist is generated from a formula in **another repository**, which
+ * nothing here can read or pin, and a second derivation of these paths over there is how
+ * a panel ends up trimming two files nobody writes to while the ones launchd is really
+ * appending to grow without bound.
+ *
+ * Read at import, like the label, so every case below takes a subprocess.
+ */
+
+/** `LOG_OUT` and `LOG_ERR` as a *fresh* process resolves them, with a clean environment. */
+async function logPaths(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  // Whatever the suite was run with must not leak into the default case.
+  for (const key of ['FOREMAN_LOG_DIR', 'FOREMAN_AGENT_LABEL']) {
+    if (!(key in overrides)) delete env[key];
+  }
+  const { stdout } = await run(process.execPath, [
+    '--input-type=module',
+    '-e', "import { LOG_OUT, LOG_ERR } from './server/logs.js'; console.log(LOG_OUT); console.log(LOG_ERR);",
+  ], { cwd: path.resolve(import.meta.dirname, '..'), env });
+  const [out, err] = stdout.trim().split('\n');
+  return { out, err };
+}
+
+test('with FOREMAN_LOG_DIR unset the two paths are byte-identical to what they always were', async () => {
+  const { out, err } = await logPaths();
+  assert.equal(out, path.join(os.homedir(), 'Library', 'Logs', 'foreman.log'));
+  assert.equal(err, path.join(os.homedir(), 'Library', 'Logs', 'foreman-error.log'));
+});
+
+test('FOREMAN_LOG_DIR moves both files and leaves both basenames alone', async () => {
+  const { out, err } = await logPaths({ FOREMAN_LOG_DIR: '/tmp/foreman-scratch/logs' });
+  assert.equal(path.dirname(out), '/tmp/foreman-scratch/logs');
+  assert.equal(path.dirname(err), '/tmp/foreman-scratch/logs');
+  // One variable, not two: the formula spells a location, and the naming rule stays here.
+  assert.equal(path.basename(out), 'foreman.log');
+  assert.equal(path.basename(err), 'foreman-error.log');
+});
+
+test('an empty FOREMAN_LOG_DIR is not an answer — it falls back rather than resolving to the cwd', async () => {
+  const { out } = await logPaths({ FOREMAN_LOG_DIR: '   ' });
+  assert.equal(path.dirname(out), path.join(os.homedir(), 'Library', 'Logs'));
+});
+
+test('a relative FOREMAN_LOG_DIR is resolved, because a service manager’s cwd is not yours', async () => {
+  const repo = path.resolve(import.meta.dirname, '..');
+  const { out } = await logPaths({ FOREMAN_LOG_DIR: 'scratch-logs' });
+  assert.ok(path.isAbsolute(out), `expected an absolute path, got ${out}`);
+  assert.equal(path.dirname(out), path.join(repo, 'scratch-logs'));
+});
+
+test('the directory and the label are independent — one moves the folder, the other the names', async () => {
+  const { out, err } = await logPaths({
+    FOREMAN_LOG_DIR: '/tmp/foreman-scratch/logs',
+    FOREMAN_AGENT_LABEL: 'com.example.foreman-scratch',
+  });
+  assert.equal(out, '/tmp/foreman-scratch/logs/com.example.foreman-scratch.log');
+  assert.equal(err, '/tmp/foreman-scratch/logs/com.example.foreman-scratch-error.log');
+});
+
+/*
  * The label has **three** copies, and two of them are outside JavaScript.
  *
  * `logs.js` owns it; `package.json` bakes it into the `restart-panel` and `stop-panel`
@@ -268,6 +333,48 @@ test('all three copies of the launchd label agree', async () => {
     sh.includes(`DEFAULT_AGENT_LABEL="${DEFAULT_AGENT_LABEL}"`),
     'backup-state.sh hardcodes a different label',
   );
+});
+
+/*
+ * …and it has to *find* `logs.js` before it can read the label off it.
+ *
+ * It used to look via `git rev-parse --show-toplevel`, which answers nothing when the
+ * script is not inside a checkout — so the node read was skipped and the hardcoded
+ * fallback above stood in, silently, for whatever label that install had actually set.
+ * The wrong label means the wrong plist in the archive, or none. `$SCRIPT_DIR/../server`
+ * is true in a checkout and equally true under a package manager's `libexec`, which is
+ * the only place this can be read from that is true of every install.
+ *
+ * The git read stays for section 5, whose subject genuinely is the checkout.
+ */
+test('backup-state.sh finds logs.js beside itself, not through git', () => {
+  const sh = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'scripts', 'backup-state.sh'), 'utf8');
+  assert.ok(
+    sh.includes('$SCRIPT_DIR/../server/logs.js'),
+    'backup-state.sh should resolve server/logs.js relative to its own directory',
+  );
+  assert.ok(
+    !/REPO_DIR[^\n]*logs\.js/.test(sh),
+    'the label read must not depend on being inside a git checkout',
+  );
+  assert.ok(
+    sh.includes('rev-parse --show-toplevel'),
+    'the git read stays — the repository section of the manifest is genuinely checkout-only',
+  );
+});
+
+/*
+ * And the restart instructions it prints have to match the install it is running from.
+ * Under Homebrew there is no `npm run stop-panel`: `brew services` owns the job, and a
+ * `restart` there regenerates the plist rather than kickstarting it.
+ */
+test('backup-state.sh knows both ways to stop and start the panel', () => {
+  const sh = fs.readFileSync(path.resolve(import.meta.dirname, '..', 'scripts', 'backup-state.sh'), 'utf8');
+  assert.ok(sh.includes('BREW_FORMULA="foreman-panel"'), 'the formula name should be spelled once, in a variable');
+  assert.ok(sh.includes('brew services stop $BREW_FORMULA'), 'no Homebrew stop instruction');
+  assert.ok(sh.includes('brew services start $BREW_FORMULA'), 'no Homebrew start instruction');
+  assert.ok(sh.includes('npm run stop-panel'), 'the checkout instructions must survive');
+  assert.ok(sh.includes('npm run install-agent'), 'the checkout instructions must survive');
 });
 
 /*
