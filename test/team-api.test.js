@@ -837,6 +837,14 @@ function writeMergeTasks(state, repo) {
       'no-pr-yet': rec('no-pr-yet', { pr: null, branch: null, updatedAt: '2026-08-30T10:30:00.000Z' }),
       'shape-it': rec('shape-it', { kind: 'plan', pr: null, branch: null, updatedAt: '2026-08-30T10:45:00.000Z' }),
       'long-done': rec('long-done', { state: 'done', pr: 'http://box/pulls/40', updatedAt: '2026-08-29T10:00:00.000Z' }),
+      // Another team's task, in the same store — which is the ordinary state of
+      // `tasks.json`, since one panel serves every repo on the Mac. `POST .../merge-check`
+      // takes a `folder` and refuses a task that is not in it, so this is the record that
+      // proves the scoping rather than a hypothetical.
+      'other-repo-task': rec('other-repo-task', {
+        repo: path.join(path.dirname(repo), 'OtherRepo'),
+        branch: 'agent/mobile-stop-icon', pr: 'http://box/pulls/60', updatedAt: '2026-08-30T11:00:00.000Z',
+      }),
     }, null, 2),
   );
 }
@@ -1060,6 +1068,281 @@ test('a press with no lead is not deduped — the stamp is for a line that actua
   assert.equal(res.body.duplicate, undefined);
   assert.match(res.body.error, /No lead is running/);
   assert.equal(mergeRoom().length, before + 1);
+});
+
+/* ------------------------------------------------------- the self-merge --- */
+
+/*
+ * `PATCH /api/team/config`'s two new keys, and `POST /api/team/tasks/:id/merge-check`.
+ *
+ * On the merge-queue panel above rather than a fourth one, because it already has exactly
+ * what a verdict needs and nothing reachable over HTTP could build it: **review tasks with
+ * real branches**, in a real checkout, with a fake `origin` and a scratch `.claude.json`
+ * that make the forge reading the suite's own fact with no network touched.
+ *
+ * Nothing here talks to a forge, and there is nothing to fake: the panel holds no
+ * credential and makes no call (the maintainer's ruling, 2026-08-30). `mergeable` and
+ * `checks` arrive in the request body, from the lead, and are checked against an enum.
+ *
+ * These run in file order and share one `team.json`, so the toggle is flipped on and off
+ * deliberately — and the first of them proves the default before anything touches it.
+ */
+
+const teamConfig = () =>
+  JSON.parse(fs.readFileSync(path.join(mergeState, 'teams', teamKeyFor(mergeRepo), 'team.json'), 'utf8'));
+
+/** The real tip of a branch in the scratch checkout — what a lead would read off the forge. */
+const tipOf = (branch) => execFileSync('git', ['-C', mergeRepo, 'rev-parse', branch], { encoding: 'utf8' }).trim();
+
+/** Everything the lead has to say, all of it fine, so a test can spoil exactly one thing. */
+const grounds = {
+  mergeable: 'clean',
+  checks: 'green',
+  evidence: 'PR #53: mergeable clean, every check success on this head',
+  reason: 'one file, no interface change, the worker reported the suite green',
+};
+
+const checkMerge = (id, body) =>
+  mergeApi('POST', `/api/team/tasks/${id}/merge-check`, { folder: mergeRepo, ...body });
+
+test('a team.json written before this shipped reads the new keys at their defaults', async () => {
+  // The file on disk was written as `{ repo }` in the before hook — the shape an older
+  // team.json has. Nothing has patched it yet.
+  assert.equal(teamConfig().humanReviewPaths, undefined, 'absent on disk');
+  const res = await mergeApi('GET', `/api/team/config?folder=${encodeURIComponent(mergeRepo)}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.toggles.leadDecidesMerges, false, 'off, and off is what absent means');
+  assert.deepEqual(res.body.humanReviewPaths, [], 'and nothing is reserved');
+  assert.equal(res.body.toggles.humanReviewPaths, undefined, 'top-level, never an autonomy dial');
+});
+
+test('the review paths round-trip through PATCH, tidied to one spelling', async () => {
+  const res = await mergeApi('PATCH', '/api/team/config', {
+    folder: mergeRepo,
+    humanReviewPaths: ['./server/', 'server', '/SECURITY.md', '  web/m  '],
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.humanReviewPaths, ['SECURITY.md', 'server', 'web/m'], 'de-duplicated and sorted');
+  assert.deepEqual(teamConfig().humanReviewPaths, ['SECURITY.md', 'server', 'web/m'], 'and that is what landed on disk');
+
+  // Cleared, so the tests below start from nothing reserved.
+  const cleared = await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, humanReviewPaths: [] });
+  assert.deepEqual(cleared.body.humanReviewPaths, []);
+});
+
+test('a bad review path is a 400 that names the entry, and nothing lands', async () => {
+  const glob = await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, humanReviewPaths: ['server', 'web/**'] });
+  assert.equal(glob.status, 400);
+  assert.match(glob.body.error, /"web\/\*\*"/, 'the entry, not "invalid" — a maintainer has to know which line');
+  assert.match(glob.body.error, /prefixes, not globs/);
+
+  const escape = await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, humanReviewPaths: ['../etc'] });
+  assert.equal(escape.status, 400);
+  assert.match(escape.body.error, /"\.\.\/etc"/);
+
+  // The whole list is refused, so the good entry beside the bad one is not quietly kept —
+  // a shorter safety list fails towards merging something the maintainer wanted to see.
+  assert.deepEqual(teamConfig().humanReviewPaths, [], 'nothing was written');
+});
+
+test('the toggle flips, and mergePRs is still stripped out from under it', async () => {
+  const on = await mergeApi('PATCH', '/api/team/config', {
+    folder: mergeRepo, toggles: { leadDecidesMerges: true, mergePRs: true },
+  });
+  assert.equal(on.status, 200);
+  assert.equal(on.body.toggles.leadDecidesMerges, true);
+  // `mergePRs` means *the panel merges on a trigger* and is a different thing entirely.
+  // It stays deleted from every patch, and this feature does not give it a way in.
+  assert.equal(on.body.toggles.mergePRs, false, 'still refused, right beside a toggle that was just accepted');
+  assert.equal(teamConfig().toggles.mergePRs, false);
+
+  // And it is a boolean, not a truthy value: `"false"` is the string a form control hands
+  // you, and it must not turn a merge toggle on.
+  const junk = await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, toggles: { leadDecidesMerges: 'false' } });
+  assert.equal(junk.status, 400);
+  assert.match(junk.body.error, /true or false/);
+  assert.equal(teamConfig().toggles.leadDecidesMerges, true, 'and the stored value was not touched');
+
+  const off = await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, toggles: { leadDecidesMerges: false } });
+  assert.equal(off.body.toggles.leadDecidesMerges, false);
+});
+
+test('with the toggle off the check refuses, names the toggle, and still posts to the room', async () => {
+  const before = mergeRoom().length;
+  const res = await checkMerge('mobile-stop-icon', { head: tipOf('agent/mobile-stop-icon'), ...grounds });
+
+  // A refusal is a 200: the verdict *is* the answer, and a 4xx would report a failure
+  // where the panel did exactly its job.
+  assert.equal(res.status, 200);
+  assert.equal(res.body.allowed, false);
+  assert.match(res.body.reasons[0], /"leadDecidesMerges" toggle is off/);
+  assert.match(res.body.reasons[0], /however good it looks/);
+
+  // The room line goes on a refusal too — otherwise "the lead never tried" and "the lead
+  // tried, was told no, and went round" look identical afterwards.
+  const lines = mergeRoom();
+  assert.equal(lines.length, before + 1);
+  const entry = lines.at(-1);
+  assert.equal(entry.kind, 'system');
+  assert.equal(entry.event, 'self-merge', 'keyed on `event`, so a reword can never turn its colour off');
+  assert.equal(entry.allowed, false);
+  assert.equal(entry.about, 'mobile-stop-icon');
+  assert.equal(entry.pr, 'http://box/pulls/53');
+  assert.match(entry.text, /Self-merge refused for PR #53/);
+  assert.match(entry.text, /toggle is off/);
+  assert.match(entry.text, /Evidence: PR #53: mergeable clean/, 'what the lead claimed is on the record either way');
+
+  // Recorded on the task, so a `done` task with no decision on it is visible later.
+  const task = (await mergeApi('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'mobile-stop-icon');
+  assert.equal(task.selfMerge.allowed, false);
+  assert.ok(task.selfMerge.at > 0);
+  assert.match(task.selfMerge.reasons[0], /toggle is off/);
+  assert.equal(task.state, 'review', 'and no state was added or changed — TASK_STATES is untouched');
+});
+
+test('with the toggle on and nothing reserved, a review PR is allowed', async () => {
+  await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, toggles: { leadDecidesMerges: true } });
+  const head = tipOf('agent/mobile-stop-icon');
+  const before = mergeRoom().length;
+
+  const res = await checkMerge('mobile-stop-icon', { head, ...grounds });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.allowed, true);
+  assert.equal(res.body.head, head, 'the verdict is bound to the sha it was taken on');
+  assert.equal(res.body.forge, 'Gitea');
+  assert.deepEqual(res.body.paths, ['server/own.js'], "the panel's own three-dot diff, never the forge's");
+  assert.match(res.body.reasons.join('\n'), /empty humanReviewPaths/);
+
+  const entry = mergeRoom().at(-1);
+  assert.equal(mergeRoom().length, before + 1, 'one line per call, allowed or not');
+  assert.equal(entry.event, 'self-merge');
+  assert.equal(entry.allowed, true);
+  assert.equal(entry.head, head);
+  assert.match(entry.text, /Self-merge allowed for PR #53 \(mobile-stop-icon\)/);
+
+  // Nothing merged, and nothing could have: this endpoint returns a verdict and the panel
+  // holds no forge credential. The task is still in review, waiting for the lead's own tool.
+  const task = (await mergeApi('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'mobile-stop-icon');
+  assert.equal(task.state, 'review');
+  assert.equal(task.selfMerge.allowed, true);
+});
+
+test('…and reserving `server` refuses the same PR, naming the file', async () => {
+  await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, humanReviewPaths: ['server'] });
+  const res = await checkMerge('mobile-stop-icon', { head: tipOf('agent/mobile-stop-icon'), ...grounds });
+  assert.equal(res.body.allowed, false);
+  assert.match(res.body.reasons[0], /server\/own\.js/);
+  assert.match(res.body.reasons[0], /under humanReviewPaths \(server\)/);
+  assert.match(res.body.reasons[0], /the maintainer looks at these themselves/);
+
+  // The near-miss, at the endpoint: `server` reserves `server/own.js` and does not reserve
+  // a sibling that merely starts with the same letters. `trust-gate` changes `web/`.
+  const other = await checkMerge('trust-gate', { head: tipOf('agent/trust-gate'), ...grounds });
+  assert.equal(other.body.allowed, true, 'a reserved folder reserves that folder, not the repo');
+
+  await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, humanReviewPaths: [] });
+});
+
+test('a plan, a done task, another team\'s task and a stale head each refuse by their own clause', async () => {
+  const head = tipOf('agent/mobile-stop-icon');
+
+  // A planner is refused **by kind** — it has no PR either, so the next clause would
+  // catch it, and a rule that holds by accident stops holding when the data changes.
+  const plan = await checkMerge('shape-it', { head, ...grounds });
+  assert.equal(plan.body.allowed, false);
+  assert.match(plan.body.reasons[0], /is a plan — it is read and approved, not merged/);
+  assert.doesNotMatch(plan.body.reasons[0], /no PR recorded/);
+
+  const done = await checkMerge('long-done', { head, ...grounds });
+  assert.match(done.body.reasons[0], /long-done is done, not in review/);
+
+  const noPr = await checkMerge('no-pr-yet', { head, ...grounds });
+  assert.match(noPr.body.reasons[0], /no PR recorded/);
+
+  // Another team's task, reachable by id in the shared store and refused by folder. This
+  // is the wall that stops one lead deciding another team's merges.
+  const foreign = await checkMerge('other-repo-task', { head, ...grounds });
+  assert.match(foreign.body.reasons[0], /other-repo-task is not a task in this folder/);
+  const foreignRec = (await mergeApi('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'other-repo-task');
+  assert.equal(foreignRec.selfMerge, undefined, "and nothing was written onto another team's record");
+
+  // A sha that resolves but is not the branch tip — "checked yesterday, merged today".
+  const elsewhere = tipOf('agent/trust-gate');
+  const stale = await checkMerge('mobile-stop-icon', { head: elsewhere, ...grounds });
+  assert.equal(stale.body.allowed, false);
+  assert.match(stale.body.reasons[0], /is not the tip of agent\/mobile-stop-icon/);
+  assert.match(stale.body.reasons[0], /vouching for a different commit/);
+
+  const unknown = await checkMerge('mobile-stop-icon', { head: 'f'.repeat(40), ...grounds });
+  assert.match(unknown.body.reasons[0], /does not resolve in this checkout/);
+
+  // Every one of those is a call, and every call is a line the maintainer can read.
+  const events = mergeRoom().filter((e) => e.event === 'self-merge');
+  assert.equal(events.filter((e) => e.allowed).length >= 1, true);
+  assert.deepEqual(
+    mergeRoom().slice(-6).map((e) => e.event),
+    ['self-merge', 'self-merge', 'self-merge', 'self-merge', 'self-merge', 'self-merge'],
+  );
+});
+
+test('the lead\'s own facts are checked against an enum and nothing more', async () => {
+  const head = tipOf('agent/mobile-stop-icon');
+  const bad = await Promise.all([
+    checkMerge('mobile-stop-icon', { head, ...grounds, mergeable: 'unknown' }),
+    checkMerge('mobile-stop-icon', { head, ...grounds, mergeable: 'CLEAN' }),
+    checkMerge('mobile-stop-icon', { head, ...grounds, checks: 'pending' }),
+    checkMerge('mobile-stop-icon', { head, ...grounds, checks: 'none' }),
+    checkMerge('mobile-stop-icon', { head, ...grounds, evidence: '  ' }),
+    checkMerge('mobile-stop-icon', { head, ...grounds, reason: '' }),
+  ]);
+  assert.deepEqual(bad.map((r) => r.status), [200, 200, 200, 200, 200, 200]);
+  assert.deepEqual(bad.map((r) => r.body.allowed), [false, false, false, false, false, false]);
+  assert.match(bad[0].body.reasons[0], /reported the PR as "unknown"/);
+  assert.match(bad[1].body.reasons[0], /not something this accepts for mergeable/);
+  assert.match(bad[2].body.reasons[0], /reported the checks as "pending"/);
+  assert.match(bad[3].body.reasons[0], /quote it in suiteQuote/);
+  assert.match(bad[4].body.reasons[0], /no evidence given/);
+  assert.match(bad[5].body.reasons[0], /no reason given/);
+
+  // The live path on a repo with no CI at all: `none` passes only with the worker's own
+  // words about the suite, quoted rather than asserted.
+  const quoted = await checkMerge('mobile-stop-icon', {
+    head, ...grounds, checks: 'none', suiteQuote: 'npm test: 731 pass, 0 fail',
+  });
+  assert.equal(quoted.body.allowed, true);
+  assert.match(quoted.body.reasons.join('\n'), /731 pass, 0 fail/);
+});
+
+test('the check needs an absolute folder, a known task and a team — and those are errors, not verdicts', async () => {
+  const head = tipOf('agent/mobile-stop-icon');
+  const noFolder = await mergeApi('POST', '/api/team/tasks/mobile-stop-icon/merge-check', { head, ...grounds });
+  assert.equal(noFolder.status, 400);
+  assert.match(noFolder.body.error, /absolute path/);
+
+  const relative = await mergeApi('POST', '/api/team/tasks/mobile-stop-icon/merge-check', {
+    folder: 'MergeRepo', head, ...grounds,
+  });
+  assert.equal(relative.status, 400);
+
+  const unknown = await checkMerge('no-such-task', { head, ...grounds });
+  assert.equal(unknown.status, 404);
+  assert.match(unknown.body.error, /Unknown task/);
+
+  // A folder with no team has no toggle to read — and `room.post` would create the team
+  // directory as a side effect of saying no, which is worse than saying nothing.
+  const before = mergeRoom().length;
+  const noTeam = await mergeApi('POST', '/api/team/tasks/mobile-stop-icon/merge-check', {
+    folder: path.join(mergeState, 'NotATeam'), head, ...grounds,
+  });
+  assert.equal(noTeam.status, 404);
+  assert.match(noTeam.body.error, /No team for this folder/);
+  assert.equal(fs.existsSync(path.join(mergeState, 'teams', teamKeyFor(path.join(mergeState, 'NotATeam')))), false);
+  assert.equal(mergeRoom().length, before, 'and no line went anywhere');
+
+  // Leave the bench as it was found: off is the default, and off is what a maintainer who
+  // never touches this sees.
+  await mergeApi('PATCH', '/api/team/config', { folder: mergeRepo, toggles: { leadDecidesMerges: false } });
+  assert.equal(teamConfig().toggles.leadDecidesMerges, false);
 });
 
 /* ------------------------------------------- the forge, and the close gate --- */
