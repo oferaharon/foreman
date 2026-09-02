@@ -327,6 +327,13 @@ body.row-dragging * { cursor: row-resize !important; }
   border-radius: 6px;
   box-shadow: 0 20px 60px rgb(0 0 0 / 50%);
   padding: 1.2rem 1.3rem 1rem;
+  /* `.modal` is a flex child of `.modal-back` (centered), so an unbreakable child string —
+     a long path, say — sets the flex item's automatic minimum size and pushes the card
+     itself wider than `width` rather than wrapping. `overflow-wrap` is inherited, so this
+     one declaration gives every child text node (`.field-hint` included) a break
+     opportunity anywhere, which caps the min-content size at the card's own width instead
+     of the string's. */
+  overflow-wrap: anywhere;
 }
 
 .modal h2 {
