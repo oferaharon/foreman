@@ -49,11 +49,12 @@
           <span class="rail-version" id="railVersion"></span>
         </div>
 
-        <!-- The rail's right edge, and the only thing in the panel you drag. Last in the
-             column so it paints over the footer and the list; positioned against `.rail`,
-             which is what gives it the full height. -->
+        <!-- The rail's right edge. Last in the column so it paints over the footer and
+             the list; positioned against `.rail`, which is what gives it the full height.
+             `pane-grip grip-col` is the shared divider (see `resizer` in app.js); the
+             lead aside builds its two the same way, in script. -->
         <div
-          class="rail-grip"
+          class="pane-grip grip-col rail-grip"
           id="railGrip"
           role="separator"
           aria-orientation="vertical"
