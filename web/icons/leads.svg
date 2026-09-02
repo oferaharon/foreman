@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Foreman">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e2030"/>
+      <stop offset="1" stop-color="#101119"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="512" height="512" rx="114" fill="url(#tile)"/>
+  <rect x="112" y="136" width="288" height="56" rx="28" fill="#8d95f2"/>
+  <rect x="168" y="228" width="208" height="56" rx="28" fill="#8d95f2" opacity="0.5"/>
+  <rect x="168" y="320" width="168" height="56" rx="28" fill="#8d95f2" opacity="0.5"/>
+</svg>
