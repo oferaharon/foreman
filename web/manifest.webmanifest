@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Foreman",
+  "short_name": "Foreman",
+  "description": "One local panel for every Claude Code session on this Mac.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#111219",
+  "background_color": "#111219",
+  "icons": [
+    { "src": "/icons/mark.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

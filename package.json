@@ -14,6 +14,7 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node --test 'test/*.test.js'",
+    "icons": "node scripts/make-icons.mjs",
     "dev": "node --watch server/index.js",
     "install-hook": "node server/install-hook.js",
     "uninstall-hook": "node server/install-hook.js --remove",

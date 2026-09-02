@@ -575,6 +575,21 @@ body.row-dragging * { cursor: row-resize !important; }
    `min-height`, so it takes no room and the box does not jump when it appears. */
 .settings-flag.is-restart:not(:empty) { color: var(--accent); margin-top: 0.5rem; }
 
+/* The notifications section's footer line: why it can or can't work, with the test button
+   parked at the end of it. `align-items: center` rather than `baseline` because the flag is
+   often two or three wrapped lines and the button should sit beside the block, not beside
+   its first line. The button keeps its own size — `flex: none` — so a long reason wraps
+   instead of squeezing it. */
+.settings-notify-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.settings-notify-state .settings-flag { flex: 1 1 auto; }
+.settings-notify-state .ghost-btn { flex: none; }
+
 .settings-list { display: flex; flex-direction: column; gap: 0.25rem; }
 
 .settings-row {

@@ -31,10 +31,33 @@
     <link rel="stylesheet" href="/m/cards.css" />
     <link rel="stylesheet" href="/m/tasks.css" />
 
-    <link
-      rel="icon"
-      href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='5' fill='%234a50c4'/></svg>"
-    />
+    <!--
+      Its own app, not the desktop panel's: `id` and `scope` are `/m/`, and the icon is the
+      leads variant of the same mark — one row with two indented under it — so the two sit
+      apart on a Home Screen rather than being told apart by their titles. `display:
+      standalone` in the manifest is what "Add to Home Screen" reads; the
+      `apple-mobile-web-app-*` metas above and below are what older iOS reads for the same
+      thing, which is why both are here.
+
+      No notifications reach this view and none is offered. `Notification` needs a secure
+      context, a phone reaches the panel over plain http on the LAN, and a Home Screen web
+      app would need a push service besides — see the note over `web/notify.js`. The
+      Home Screen icon is what this half of the issue was for.
+    -->
+    <link rel="manifest" href="/m/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <!--
+      `black`, not `black-translucent`. The translucent one is the prettier answer and would
+      probably work — this view is already built for `viewport-fit=cover` and reads
+      `safe-area-inset-top` in two places — but it is the one value that moves the layout,
+      by putting the page *under* the status bar, and there is no way to check that from
+      this bench. `black` gives a near-`--ground` bar and changes nothing. Worth revisiting
+      with a phone in hand, which is the only place the difference is visible.
+    -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+
+    <link rel="icon" type="image/svg+xml" href="/icons/leads.svg" />
+    <link rel="apple-touch-icon" href="/icons/leads-apple-touch-icon.png" />
   </head>
   <body>
     <div class="m-app" id="app"></div>
