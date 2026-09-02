@@ -1,5 +1,6 @@
 import { marked } from '/vendor/marked.js';
 import { isTrustGate, buildTrustNotice } from './trust-gate.js';
+import { step, alertText } from './notify.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -439,6 +440,147 @@ async function fillRailFooter() {
   }
 }
 
+/* ------------------------------------------------------- notifications --- */
+
+/**
+ * A system notification when something needs a human, opt-in and off by default.
+ *
+ * The decision — what counts, and when it became true — is `web/notify.js`, which is pure
+ * and tested in node. This is the wiring: the browser's permission, the remembered opt-in,
+ * and the one place a `Notification` is actually constructed.
+ *
+ * **Three gates, and all three have to be open before anything fires.** The API has to
+ * exist; the page has to be a secure context; and the browser has to have granted
+ * permission. They are separate because they fail for different reasons and a reader
+ * deserves to be told which — `notifyReason` below is what the settings box prints, and
+ * the issue asked for exactly that rather than a control that silently does nothing.
+ *
+ * The secure-context one is the interesting gate. `http://127.0.0.1` counts as secure by
+ * specification and `http://<a LAN address>` does not, so this works in the panel opened on
+ * the Mac it runs on and cannot work from the phone or another machine — which follows
+ * from the 2026-08-27 ruling rather than being a gap in it: the panel is plain `http://`
+ * on the LAN deliberately, and nothing here should be an argument for changing that.
+ */
+const notifier = {
+  /** `null` until the first roster frame — see `step`, which treats that frame as a baseline. */
+  marks: null,
+  enabled: loadFlag('foreman.notify'),
+};
+
+const notifySupported = () => typeof Notification !== 'undefined' && window.isSecureContext;
+
+/** `granted` is the only word that arms anything; the other two are shown, not assumed. */
+const notifyPermission = () => (typeof Notification === 'undefined' ? 'unsupported' : Notification.permission);
+
+const notifyArmed = () => notifier.enabled && notifySupported() && notifyPermission() === 'granted';
+
+/**
+ * Why this browser cannot do it, in words a reader can act on — or `null` when it can.
+ *
+ * The address is read off `location` rather than asserted, because "open it at 127.0.0.1"
+ * is only useful advice next to where they actually are.
+ */
+function notifyReason() {
+  if (typeof Notification === 'undefined') {
+    return 'This browser has no notifications API. Safari and Chrome on the Mac do; Safari on iOS does not.';
+  }
+  if (!window.isSecureContext) {
+    return (
+      `Notifications need a secure context and this page is at ${location.origin}. ` +
+      `Open the panel at http://127.0.0.1:${location.port || '48770'} on the Mac it runs on — ` +
+      `loopback counts as secure, a LAN address over plain http does not.`
+    );
+  }
+  if (Notification.permission === 'denied') {
+    return 'This browser is blocking notifications for this page. Turn them back on in its site settings — asking again from here will not prompt.';
+  }
+  return null;
+}
+
+/**
+ * Turn it on, from a click and only from a click.
+ *
+ * `Notification.requestPermission()` is only allowed to prompt from a user gesture, so this
+ * is called straight out of the checkbox's own handler and never from a roster frame, a
+ * timer, or the boot. Returns what happened so the box can say it.
+ */
+async function notifyEnable() {
+  if (!notifySupported()) return 'unsupported';
+  let permission = Notification.permission;
+  if (permission === 'default') {
+    try {
+      permission = await Notification.requestPermission();
+    } catch {
+      return 'unsupported'; // an older callback-only implementation, or a browser refusing outright
+    }
+  }
+  if (permission !== 'granted') return permission; // 'denied', and the browser will not ask again
+  notifier.enabled = true;
+  notifyPersist();
+  return 'granted';
+}
+
+function notifyDisable() {
+  notifier.enabled = false;
+  notifyPersist();
+}
+
+function notifyPersist() {
+  try {
+    localStorage.setItem('foreman.notify', notifier.enabled ? '1' : '0');
+  } catch {
+    /* storage blocked — this window still behaves, the answer just won't survive a reload */
+  }
+}
+
+/**
+ * Show one, and make clicking it worth something.
+ *
+ * A notification you can only dismiss is an interruption with no exit; this one focuses
+ * the window and opens the session it is about, which is the whole action you were going
+ * to take anyway. Wrapped because constructing a `Notification` throws in more situations
+ * than the three gates cover — a browser with the API present and the feature disabled by
+ * policy among them — and a throw here is inside the socket's message handler, where it
+ * would take the roster render down with it.
+ */
+function notifyShow(alert) {
+  const { title, body, tag } = alertText(alert);
+  try {
+    const n = new Notification(title, {
+      body,
+      tag,
+      // Without this a replacement on the same tag arrives silently, which for a genuinely
+      // new transition on a session you already had a notification for is the same as not
+      // arriving at all.
+      renotify: true,
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-32.png',
+    });
+    n.onclick = () => {
+      window.focus();
+      if (state.sessions.some((s) => s.id === alert.id)) focused().open(alert.id);
+      n.close();
+    };
+  } catch {
+    /* the browser declined to construct it — nothing to recover, and nothing to break */
+  }
+}
+
+/**
+ * Every roster frame, armed or not.
+ *
+ * The marks are kept up to date even with the opt-in off, which is the point: turning it
+ * on should not then announce everything that was already sitting there, and a baseline
+ * taken at the moment of the click would still miss nothing. `step` is what decides; this
+ * only decides whether to show.
+ */
+function notifyRoster(sessions) {
+  const { marks, alerts } = step(notifier.marks, sessions);
+  notifier.marks = marks;
+  if (!notifyArmed()) return;
+  for (const alert of alerts) notifyShow(alert);
+}
+
 /* ---------------------------------------------------------- websocket --- */
 
 let ws = null;
@@ -480,6 +622,9 @@ function handle(msg) {
     state.sessions = msg.sessions;
     if (msg.groups) state.groups = msg.groups;
     if (msg.snapshot) state.snapshot = msg.snapshot;
+    // Before the render, so a notification is never held up behind a rail repaint — and
+    // before `adopt`, which can change what is on screen but never what happened.
+    notifyRoster(msg.sessions);
     for (const pane of panes) pane.adopt();
     renderRail();
     for (const pane of panes) pane.renderHead();
@@ -1141,6 +1286,103 @@ async function openSettings() {
     'It is not editable here: changing it would unname every session already running.';
   prefSec.append(prefCap, prefRow, prefHint);
   body.append(prefSec);
+
+  /* ────────────────────────────────────────────────────────────── notifications ── */
+
+  /*
+   * The odd one out in this box, and it says so.
+   *
+   * Everything above is panel state on disk, written by `save` and gated on the request
+   * having arrived over loopback. This is a preference belonging to *this browser* — the
+   * permission it holds is the browser's, not the panel's, and no other client can be
+   * given it from here — so it lives in `localStorage`, applies on the click, and is
+   * deliberately not wired to `save`. It is also the one control on the page a LAN visitor
+   * may still use, for the same reason: it changes nothing about the panel.
+   *
+   * Nothing is enabled that cannot work. Where a gate is shut the checkbox is disabled and
+   * `notifyReason` prints which one and what to do about it — the maintainer's standing
+   * rule that a control somebody cannot answer correctly should not be a control, applied
+   * to a case where "answering it" would mean clicking a box that then silently does
+   * nothing.
+   */
+  const noteSec = document.createElement('section');
+  noteSec.className = 'settings-sec';
+  const noteCap = document.createElement('h3');
+  noteCap.textContent = 'Notifications on this Mac';
+  noteSec.append(noteCap);
+
+  const noteWrap = document.createElement('label');
+  noteWrap.className = 'settings-choice';
+  const noteBox = document.createElement('input');
+  noteBox.type = 'checkbox';
+  noteBox.checked = notifyArmed();
+  noteBox.disabled = !notifySupported() || notifyPermission() === 'denied';
+  const noteText = document.createElement('span');
+  const noteTitle = document.createElement('span');
+  noteTitle.className = 'settings-choice-title';
+  noteTitle.textContent = 'Tell me when a session needs a human';
+  const noteHint = document.createElement('span');
+  noteHint.className = 'settings-choice-hint';
+  noteHint.textContent =
+    'A permission prompt, a question Claude is asking, a plan waiting for approval, the ' +
+    'folder-trust gate, or a worker reporting for review. One notification per thing, when ' +
+    'it happens — not a reminder. Clicking it opens that session. A worker’s own prompts ' +
+    'stay quiet until it goes stuck, the same rule the rail follows.';
+  noteText.append(noteTitle, noteHint);
+  noteWrap.append(noteBox, noteText);
+  noteSec.append(noteWrap);
+
+  const noteState = document.createElement('div');
+  noteState.className = 'settings-notify-state';
+  const noteFlag = document.createElement('p');
+  noteFlag.className = 'settings-flag';
+  const noteTest = document.createElement('button');
+  noteTest.className = 'ghost-btn';
+  noteTest.type = 'button';
+  noteTest.textContent = 'test';
+  noteTest.title = 'Show one now, so you can see where it lands and what it looks like';
+  noteState.append(noteFlag, noteTest);
+  noteSec.append(noteState);
+
+  const paintNotify = (extra) => {
+    const reason = notifyReason();
+    noteBox.checked = notifyArmed();
+    // `denied` disables it too: the browser will not prompt again, so a box that could be
+    // ticked and would then do nothing is worse than one that is plainly unavailable with
+    // the reason under it. `default` is the one un-granted state that stays clickable —
+    // that click is what asks.
+    noteBox.disabled = !notifySupported() || notifyPermission() === 'denied';
+    noteTest.disabled = !notifyArmed();
+    noteFlag.textContent =
+      extra ||
+      reason ||
+      (notifier.enabled
+        ? 'On, in this browser. Remembered here only — every browser and every device answers for itself.'
+        : 'Off. This is a browser preference, not a panel setting: it applies the moment you tick it and Save does not touch it.');
+    noteFlag.classList.toggle('is-restart', Boolean(extra));
+  };
+  paintNotify();
+
+  noteBox.onchange = async () => {
+    // The gesture the permission prompt has to be asked from is this one. Anything that
+    // deferred the request — a save button, a promise chain off a roster frame — would be
+    // refused by the browser, silently, and read as "it just doesn't work here".
+    if (noteBox.checked) {
+      const outcome = await notifyEnable();
+      if (outcome === 'granted') paintNotify('On. Try the test button.');
+      else paintNotify();
+    } else {
+      notifyDisable();
+      paintNotify();
+    }
+  };
+
+  noteTest.onclick = () => {
+    notifyShow({ id: 'test', kind: 'test', title: 'Foreman', branch: null, task: null });
+    paintNotify('Sent one. If nothing appeared, macOS is holding it — check Notifications in System Settings.');
+  };
+
+  body.append(noteSec);
 
   /* ───────────────────────────────────────────────────────────── the buttons ── */
 
