@@ -25,6 +25,17 @@ import { readOptionBlock } from './question.js';
  * in the terminal, where you can see what you are doing.
  */
 
+/**
+ * How a Claude model is spelled on the composer footer — `| Opus 5 (1M context) | ctx: 14%`.
+ *
+ * It lives here rather than in `tmux.js`, which is the only place that scrapes that line,
+ * because this file has to *predict* what the line will say: the panel can commit a model
+ * faster than the terminal redraws its footer. Two spellings of one naming contract is the
+ * `isLeadName` mistake in another costume, so there is one pattern and both readers share
+ * it. See `footerModelName` below.
+ */
+export const FOOTER_MODEL_RE = /\b((?:Opus|Sonnet|Haiku|Fable)\s+[\d.]+(?:\s*\([^)]*\))?)/;
+
 /** The heading, and the footer that tells you what the keys do. Both, or it isn't this box. */
 const TITLE_RE = /^\s*Select model\s*$/i;
 const FOOTER_RE = /to set as default\s*·\s*s to use this session only/i;
@@ -106,6 +117,38 @@ export function parseModelDialog(text) {
     cursorIndex: options.find((o) => o.cursor)?.index ?? null,
     currentIndex: options.find((o) => o.current)?.index ?? null,
   };
+}
+
+/**
+ * What the composer footer will call an option, worked out from the option itself.
+ *
+ * The picker and the footer do not spell a model the same way, and neither is wrong: a
+ * picker row names a **choice** — `Default (recommended)`, `Opus (1M context)`, `Sonnet` —
+ * while the footer names the **model** — `Opus 5 (1M context)`, `Sonnet 5`. The bridge is
+ * the row's own blurb, which already speaks the footer's vocabulary (`Sonnet 5 · Efficient
+ * for routine tasks`), so it is read with the footer's own pattern rather than a second one
+ * written to match it.
+ *
+ * Why the panel needs to guess at all: setting a model takes a couple of keystrokes and the
+ * terminal redraws its footer some unknowable time afterwards, so the roster frame that
+ * lands next still names the model the session was on a moment ago. This is what lets the
+ * click's own answer be shown immediately, and seeded, instead of the label sitting a switch
+ * behind. `Opus (1M context)` is the one row where the two strings differ after this —
+ * `Opus 5` here, `Opus 5 (1M context)` once scraped — and they are the same on screen,
+ * because `shortModel` in the client drops exactly that trailing parenthetical.
+ *
+ * Null rather than a guess when the row carries no blurb, or a blurb naming no model. That
+ * is a floor for a layout nobody has met, not a description of a narrow terminal: measured
+ * at 70 columns the blurb *wraps* but survives, and the model name sits at its front
+ * (`Fable 5.1 · Most capable for your`), so it is the half that is never cut. Declining
+ * costs the label one poll; a wrong name shown confidently is worse.
+ *
+ * @param {{label: string, description: string|null}} option a row from `parseModelDialog`
+ * @returns {string|null}
+ */
+export function footerModelName(option) {
+  const m = FOOTER_MODEL_RE.exec(option?.description ?? '');
+  return m ? m[1].trim() : null;
 }
 
 /**

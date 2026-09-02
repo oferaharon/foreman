@@ -33,7 +33,13 @@ import { keyForOption } from './permission.js';
 import { isTrustGate } from '../web/trust-gate.js';
 import { parseQuestion, planAnswer, planChat, planFreeText } from './question.js';
 import { parsePlanPrompt, approvalKeys } from './plan.js';
-import { parseModelDialog, parseModelConfirm, confirmNames, stepToward } from './model.js';
+import {
+  parseModelDialog,
+  parseModelConfirm,
+  confirmNames,
+  stepToward,
+  footerModelName,
+} from './model.js';
 import { parseEffortDialog, nudgeToward } from './effort.js';
 import { MessageQueue } from './queue.js';
 import { PaneLock } from './claim.js';
@@ -2435,6 +2441,23 @@ app.post('/api/sessions/:id/model/cancel', async (req, res) => {
 });
 
 /**
+ * Tell the roster what was just picked, and say what the label should read meanwhile.
+ *
+ * Both halves of the same fact, so they cannot disagree: the seed the next roster frame is
+ * built from, and the name the answer carries back for the browser to paint straight away.
+ * The model in the roster is scraped off the composer footer, which the terminal redraws in
+ * its own time — until it does, the honest source for "what is this session running" is the
+ * key this panel just pressed. A row `footerModelName` cannot read yields null, and then
+ * nothing is seeded and nothing is painted: the label lags by a poll, exactly as it did
+ * before, rather than being confidently wrong.
+ */
+function noteSwitched(paneId, target) {
+  const footerModel = footerModelName(target);
+  registry.noteModel(paneId, footerModel);
+  return footerModel;
+}
+
+/**
  * Pick a model for this session, and only this session.
  *
  * The cursor is stepped one press at a time and the pane re-read after each, so a layout
@@ -2495,16 +2518,18 @@ app.post('/api/sessions/:id/model', async (req, res) => {
               error: 'The switch is still waiting on a confirmation in the terminal.',
             });
           }
+          const footerModel = noteSwitched(session.paneId, target);
           registry.refresh().catch(() => {});
-          return res.json({ ok: true, model: target.label, reread: true });
+          return res.json({ ok: true, model: target.label, footerModel, reread: true });
         }
 
         // No confirmation, so the picker should be gone. Still up means `s` didn't take.
         if (parseModelDialog(await capturePane(session.paneId, 40))) {
           return res.status(502).json({ error: 'The picker did not accept the change.' });
         }
+        const footerModel = noteSwitched(session.paneId, target);
         registry.refresh().catch(() => {});
-        return res.json({ ok: true, model: target.label });
+        return res.json({ ok: true, model: target.label, footerModel });
       }
       await sendKeys(session.paneId, key);
       await new Promise((r) => setTimeout(r, 180));

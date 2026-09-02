@@ -299,6 +299,28 @@ export class SessionRegistry extends EventEmitter {
     return this.bypassing.get(paneId) ?? false;
   }
 
+  /**
+   * Record a model this panel has just set, ahead of the terminal redrawing the line it
+   * would otherwise be read off.
+   *
+   * The model in the roster is scraped from the composer footer, and a session that has
+   * been sitting in the `/model` picker has had no footer to scrape — so `rememberFooter`
+   * is holding the model it was on *before* the switch, and hands that back on the very
+   * next poll. The panel is the one party that knows better: it pressed the key. Seeding
+   * here is what makes the frame that lands a moment later name the model that was picked
+   * instead of the one that was replaced.
+   *
+   * It is a seed, not an assertion: the next poll that actually reads a footer overwrites
+   * it, so a switch that silently failed corrects itself rather than being remembered
+   * forever. `contextPct` is carried over untouched — the two move together because they
+   * are one line, and nothing here has read that line.
+   */
+  noteModel(paneId, model) {
+    if (!paneId || !model) return;
+    const prev = this.footers.get(paneId);
+    this.footers.set(paneId, { model, contextPct: prev?.contextPct ?? null });
+  }
+
 
   async refresh() {
     const [metas, panes] = await Promise.all([this.#scanTranscripts(), listClaudePanes()]);
@@ -560,6 +582,11 @@ export class SessionRegistry extends EventEmitter {
         JSON.stringify(prev.question) !== JSON.stringify(s.question) ||
         queueSig(prev.queued) !== queueSig(s.queued) ||
         JSON.stringify(prev.prompt) !== JSON.stringify(s.prompt) ||
+        // Without this a model that changed and nothing else never reaches a browser: the
+        // roster goes on saying what the session used to be running until some unrelated
+        // field happens to move. It is the same reasoning as `effort` and `contextPct`
+        // directly below, and it was missing.
+        prev.model !== s.model ||
         prev.contextPct !== s.contextPct ||
         prev.effort !== s.effort ||
         prev.lastActivity !== s.lastActivity ||
