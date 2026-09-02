@@ -18,6 +18,7 @@
  * every future desktop change a phone change too.
  */
 
+import { ghostSend } from '../prefs.js';
 import { mountLead, updateLead } from './lead.js';
 
 /* ------------------------------------------------------------- state --- */
@@ -262,6 +263,11 @@ function enterHome() {
   homeList = document.createElement('div');
   homeList.className = 'm-teams';
   scroll.appendChild(homeList);
+  // Below the teams, outside `homeList`, and that placement is the whole of what keeps it
+  // safe: `renderHome` calls `replaceChildren` on the list every time its signature moves,
+  // which on a busy morning is every couple of seconds — a checkbox living inside it would
+  // be torn out from under the thumb that was pressing it.
+  scroll.appendChild(buildPrefs());
   el.screen.appendChild(scroll);
 
   // Mounted first, painted second. Anything that measures itself before its container is
@@ -276,6 +282,59 @@ function enterHome() {
   // silent rather than visible — which is exactly why it gets an explicit stop.
   clearInterval(homeTick);
   homeTick = setInterval(renderHome, HOME_TICK_MS);
+}
+
+/**
+ * The one preference this device has, at the bottom of the only screen that can hold it.
+ *
+ * The phone has no settings sheet and does not want one for a single flag. Here it is out
+ * of the way of the teams, read once when the screen mounts, and applied the moment it is
+ * tapped — the desktop's settings modal has the same control with the same words and they
+ * are the same stored answer, because `/` and `/m/` are one origin.
+ *
+ * Off by default and deliberately so: with it on, one tap on a muted line above the lead's
+ * composer sends a message the model wrote into a live session.
+ */
+function buildPrefs() {
+  const sec = document.createElement('section');
+  sec.className = 'm-prefs';
+
+  const cap = document.createElement('h2');
+  cap.className = 'm-prefs-cap';
+  cap.textContent = 'Suggested prompts';
+
+  const row = document.createElement('label');
+  row.className = 'm-prefs-row';
+
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'm-prefs-box';
+  box.checked = ghostSend.on;
+
+  const text = document.createElement('span');
+  const title = document.createElement('span');
+  title.className = 'm-prefs-title';
+  title.textContent = 'Send a suggestion straight away';
+  const hint = document.createElement('span');
+  hint.className = 'm-prefs-hint';
+  text.append(title, hint);
+  row.append(box, text);
+
+  const paint = () => {
+    box.checked = ghostSend.on;
+    hint.textContent = ghostSend.on
+      ? 'On, in this browser. The button above the box reads “send” and goes on one tap.'
+      : 'Off. The button reads “use” and fills the box, so you can read it before it goes.';
+  };
+  paint();
+
+  box.addEventListener('change', () => {
+    ghostSend.set(box.checked);
+    paint();
+  });
+
+  sec.append(cap, row);
+  return sec;
 }
 
 /**

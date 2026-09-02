@@ -6,6 +6,7 @@ import { parsePrompt } from './permission.js';
 import { parseQuestion } from './question.js';
 import { parsePlanPrompt } from './plan.js';
 import { FOOTER_MODEL_RE } from './model.js';
+import { parseGhost } from './ghost.js';
 
 const run = promisify(execFile);
 
@@ -118,6 +119,32 @@ export async function listClaudePanes() {
 export async function capturePane(paneId, lines = 40) {
   const stdout = await tmux(['capture-pane', '-p', '-t', paneId, '-S', `-${lines}`]);
   return stdout;
+}
+
+/**
+ * The suggestion Claude Code is offering in this pane's composer, or `null` for none.
+ *
+ * A second capture, and deliberately so. The dim attribute is the only thing that tells a
+ * suggestion from typed text, and it only survives `capture-pane -pe` — but feeding `-e`
+ * output to `capturePane` above would put ANSI bytes in front of all five numbered-screen
+ * parsers, which is a large blast radius to buy a muted line above the composer. So the
+ * ghost read pays for its own call, and `sessions.js` only makes it for a pane that is
+ * plainly `idle`.
+ *
+ * Ten lines is the whole composer box plus its footer; the parser trims trailing blanks and
+ * then searches upward from the last rule, so there is nothing to gain by capturing more.
+ *
+ * `undefined` — not `null` — when the capture itself failed, so the caller can tell a tmux
+ * hiccup from a composer with nothing in it. See `rememberGhost`.
+ *
+ * @returns {Promise<string|null|undefined>}
+ */
+export async function readGhost(paneId, lines = 10) {
+  try {
+    return parseGhost(await tmux(['capture-pane', '-pe', '-t', paneId, '-S', `-${lines}`]));
+  } catch {
+    return undefined;
+  }
 }
 
 /*

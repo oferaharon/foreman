@@ -1,0 +1,16 @@
+
+  The bug: [38;5;153mslugify[39m claims to "strip punctuation" but its regex
+  [38;5;153m[^a-z0-9]+[39m treats every non-ASCII letter as punctuation, so [38;5;153m'café[39m [38;5;153mau
+[39m  [38;5;153mlait'[39m becomes [38;5;153mcaf-au-lait[39m. It lowercases Unicode correctly and then
+  throws the letters away. Runner-up in the same file: [38;5;153mtruncate[39m
+  slices by UTF-16 code unit and will chop an emoji in half
+  ([38;5;153mtruncate('😀😀😀',[39m [38;5;153m2)[39m returns a lone surrogate plus the ellipsis),
+  and a missing [38;5;153mmax[39m returns just [38;5;153m'…'[39m.
+
+[38;5;246m✻[39m [38;5;246mCrunched[39m [38;5;246mfor[39m [38;5;246m35s[39m [38;5;246m·[39m [38;5;246mdone[39m [38;5;246m1:13[39m [38;5;246mAM[39m
+
+[38;5;244m─────────────────────────────────────────────────────────[39m [38;5;244malpha-main[39m [38;5;244m─
+[39m❯ [2mfix[0m [2mslugify[0m [2mand[0m [2madd[0m [2ma[0m [2mtest[0m [2mfor[0m [2mit
+[0m[38;5;244m──────────────────────────────────────────────────────────────────────
+[39m  [38;5;246malpha[39m [38;5;246m(main)[39m [38;5;246m|[39m [38;5;246mFable[39m [38;5;246m5.1[39m [38;5;246m|[39m [38;5;246mctx:[39m [38;5;246m5%[39m                             [38;5;114m]8;id=aaaaaa;https://claude.ai/code/session_XXXXXXXXXXXXXXXXXXXXXXXX?from=cli\/rc[39m]8;;\
+  [38;5;220m⏵⏵[39m [38;5;220mauto[39m [38;5;220mmode[39m [38;5;220mon[38;5;246m (shift+tab[39m [38;5;246mto[39m [38;5;246mcycle)[39m [38;5;246m·[39m [38;5;246m←[39m [38;5;246m1[39m [38;5;246magent[39m

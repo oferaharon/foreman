@@ -1,6 +1,10 @@
 import { marked } from '/vendor/marked.js';
 import { isTrustGate, buildTrustNotice } from './trust-gate.js';
 import { step, alertText } from './notify.js';
+// The ghost-text auto-send flag. In `web/prefs.js` rather than here because the phone's
+// lead screen reads the same key, and two spellings of one setting is a setting that
+// appears to work — see that file's header.
+import { ghostSend } from './prefs.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -1390,6 +1394,63 @@ async function openSettings() {
   };
 
   body.append(noteSec);
+
+  /* ───────────────────────────────────────────────────────── ghost-text send ── */
+
+  /*
+   * The second browser-local preference in this box, and it sits beside the first for the
+   * same reason: it decides what a click in *this* window does, and the phone and the
+   * desktop are allowed to answer differently. Save does not touch it — it applies on the
+   * click, like the notifications one above.
+   *
+   * Off by default and deliberately so: with it on, one press on a muted line sends a
+   * message the model wrote into a live session. That is a real thing to hand a control,
+   * and it is worth having to ask for.
+   */
+  const gsSec = document.createElement('section');
+  gsSec.className = 'settings-sec';
+  const gsCap = document.createElement('h3');
+  gsCap.textContent = 'Suggested prompts';
+  gsSec.append(gsCap);
+
+  const gsWrap = document.createElement('label');
+  gsWrap.className = 'settings-choice';
+  const gsBox = document.createElement('input');
+  gsBox.type = 'checkbox';
+  gsBox.checked = ghostSend.on;
+  const gsText = document.createElement('span');
+  const gsTitle = document.createElement('span');
+  gsTitle.className = 'settings-choice-title';
+  gsTitle.textContent = 'Send a suggestion straight away';
+  const gsHint = document.createElement('span');
+  gsHint.className = 'settings-choice-hint';
+  gsHint.textContent =
+    'An idle session offers a guess at your next prompt, and the panel shows it as a muted ' +
+    'line above the box. Off, the button reads “use” and puts it in the box to edit. On, it ' +
+    'reads “send” and goes to the session on one press.';
+  gsText.append(gsTitle, gsHint);
+  gsWrap.append(gsBox, gsText);
+  gsSec.append(gsWrap);
+
+  const gsFlag = document.createElement('p');
+  gsFlag.className = 'settings-flag';
+  const paintGhostSend = () => {
+    gsBox.checked = ghostSend.on;
+    gsFlag.textContent = ghostSend.on
+      ? 'On, in this browser. One press sends — remembered here only, every device answers for itself.'
+      : 'Off. The button fills the box and waits for you.';
+  };
+  paintGhostSend();
+  gsSec.append(gsFlag);
+
+  gsBox.onchange = () => {
+    ghostSend.set(gsBox.checked);
+    paintGhostSend();
+    // The line itself repaints on the next roster frame — its signature carries the flag,
+    // so the button relabels itself without anything here reaching across into a pane.
+  };
+
+  body.append(gsSec);
 
   /* ───────────────────────────────────────────────────────────── the buttons ── */
 
@@ -5498,6 +5559,7 @@ function createPane(slot, host) {
       composerEl.autoGrow();
     } else {
       renderQueue();
+      renderGhostLine();
       updateComposerHint();
     }
     lastComposerSig = sig;
@@ -6022,6 +6084,10 @@ function createPane(slot, host) {
       autoGrow();
       saveDraft(s.id);
       updateCompletion();
+      // Typing puts the line away, the way typing puts the terminal's own ghost text away.
+      // It is also what makes "use" safe to press without thinking: the offer is only ever
+      // on screen while there is nothing of yours for it to overwrite.
+      renderGhostLine();
     };
 
     ta.onkeydown = (e) => {
@@ -6109,8 +6175,21 @@ function createPane(slot, host) {
     const merge = document.createElement('div');
     merge.className = 'merge-queue';
 
+    /*
+     * And the ghost-text line, on the same terms — built empty, appended only when there is
+     * a suggestion, so a session that is offering nothing is byte-identical to the layout
+     * before this existed.
+     *
+     * `ghost-line`, and note `ghost-btn` two lines below is something else entirely: that
+     * is the panel's generic muted-button class, on the interrupt button and half the
+     * controls in the app. Nothing here is one of those.
+     */
+    const ghost = document.createElement('div');
+    ghost.className = 'ghost-line';
+
+    let stop = null;
     if (s.interactive) {
-      const stop = document.createElement('button');
+      stop = document.createElement('button');
       stop.className = 'ghost-btn';
       stop.textContent = 'interrupt';
       stop.title = 'Stop what this session is doing (Escape)';
@@ -6144,7 +6223,7 @@ function createPane(slot, host) {
     inner.append(queue, strip, above, ta, row);
 
     closeCompletion();
-    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, autoGrow };
+    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, stop, autoGrow };
     lastComposerSig = composerSig(s);
     renderAttachments();
     renderQueue();
@@ -6154,8 +6233,120 @@ function createPane(slot, host) {
     // guards on `isConnected` and nothing here measures the document. The room and the
     // task list do both, which is why `renderMain` mounts before it paints them.
     renderMergeQueue();
+    renderGhostLine();
     updateComposerHint();
     return wrap;
+  }
+
+  /**
+   * The ghost-text line: Claude Code's own guess at your next prompt, offered above the box.
+   *
+   * Three rules, and each of them is the point rather than a detail.
+   *
+   * **It is not in the transcript.** A suggestion is an offer that expires, not something
+   * that happened — putting it in the message stream would be the same mistake as reading
+   * ghost text as typed text, one layer up. It lives above the composer and nowhere else.
+   *
+   * **It is not in `composerSig`.** A suggestion appears and changes at the end of every
+   * turn; a signature carrying it would tear the whole textarea down and rebuild it under
+   * a reader's cursor each time. Same trap the merge queue's own comment names, and this
+   * is the second thing to ride `renderHead`'s roster beat for that reason.
+   *
+   * **It is gone the moment there is anything in the box.** The terminal's own ghost text
+   * behaves that way, and here it does a second job: "use" replaces what the composer is
+   * holding, so an offer that could only ever appear over an empty box is one that cannot
+   * destroy a half-written message. That is why there is no disabled state and no
+   * confirmation — the destructive case does not exist.
+   *
+   * Membership rather than `hidden`, like the merge block, because `.composer-above:empty`
+   * is what collapses the strip for a read-only session.
+   */
+  function renderGhostLine() {
+    if (!composerEl?.ghost) return;
+    const s = current();
+    const { ghost, above, ta, stop } = composerEl;
+
+    const text = s?.interactive && !ta.value.trim() ? s.ghost : null;
+    if (!text) {
+      ghost.replaceChildren();
+      ghost.remove();
+      above.classList.remove('has-ghost');
+      return;
+    }
+    // Nothing to repaint if it already says this. The line sits directly above a textarea
+    // somebody may be about to click into, and a `replaceChildren` on every roster frame
+    // would drop a focused button out from under a press.
+    //
+    // The auto-send flag is half the key, not decoration: it changes what the button says
+    // and what pressing it does, and a signature holding only the text would leave a button
+    // reading `use` behind a setting that now sends. Joined with a visible `|` for the
+    // reason `mergeSig` learned the hard way — three control bytes inside a pair of quotes
+    // read as an empty-string join in every editor there is.
+    const sig = `${ghostSend.on ? 'send' : 'use'}|${text}`;
+    if (ghost.dataset.sig === sig && ghost.isConnected) return;
+    ghost.dataset.sig = sig;
+
+    ghost.replaceChildren();
+
+    const tag = document.createElement('span');
+    tag.className = 'ghost-line-tag';
+    tag.textContent = 'suggested';
+
+    const body = document.createElement('span');
+    body.className = 'ghost-line-text';
+    body.textContent = text;
+    // One terminal line can be two hundred characters and the strip is one line tall, so
+    // the ellipsis is CSS and the whole of it is here for a reader who wants it.
+    body.title = text;
+
+    const use = document.createElement('button');
+    use.className = 'ghost-line-use';
+    use.type = 'button';
+    /*
+     * The button says what pressing it does. With the setting on this is a one-press send
+     * into a live session, and a control that sends should not be labelled as though it
+     * fills a box — the setting picks the behaviour and the label follows it rather than
+     * hiding it.
+     */
+    use.textContent = ghostSend.on ? 'send' : 'use';
+    use.title = ghostSend.on
+      ? 'Send this to the session now — “send a suggestion straight away” is on for this browser'
+      : 'Put this in the box below, to edit or send';
+    use.onclick = () => useGhost(text);
+
+    ghost.append(tag, body, use);
+    // Before the interrupt button, never after it. Interrupt's whole design is that it
+    // never moves, and a line that came and went underneath it would shift it by its own
+    // height at the end of every turn — on the one control that gets pressed without
+    // looking. The merge block is prepended for the same reason, one step further up.
+    if (stop && stop.parentNode === above) above.insertBefore(ghost, stop);
+    else above.append(ghost);
+    above.classList.add('has-ghost');
+  }
+
+  /**
+   * Take the suggestion up.
+   *
+   * Through the panel's own send path in both cases — `submit` claims the pane, clears the
+   * line and types, the same as anything else you write here. The terminal's own Tab is
+   * never driven: it would race the `C-u` that `sendText` leads with, and the panel does
+   * not mirror keystrokes into a pane it is also typing into.
+   */
+  function useGhost(text) {
+    const s = current();
+    if (!s?.interactive || !composerEl) return;
+    composerEl.ta.value = text;
+    composerEl.autoGrow();
+    saveDraft(s.id);
+    if (ghostSend.on) {
+      submit();
+      return;
+    }
+    // Cursor at the end, so the next keystroke continues the suggestion rather than
+    // landing in front of it.
+    composerEl.ta.focus();
+    composerEl.ta.setSelectionRange(text.length, text.length);
+    renderGhostLine();
   }
 
   /**

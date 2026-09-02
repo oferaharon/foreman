@@ -181,6 +181,47 @@ select {
   flex-direction: column;
 }
 
+/* ---- the one preference this device has ---- */
+
+/* Under the teams, outside the list that repaints itself, and quiet enough that it never
+   competes with a team row for a thumb. It is the only thing on this screen that is not a
+   team, so it carries a heading rather than sitting bare. */
+.m-prefs {
+  margin: 1.4rem 0 0.6rem;
+  padding: 0.9rem 0.9rem 1rem;
+  padding-left: calc(0.9rem + env(safe-area-inset-left));
+  padding-right: calc(0.9rem + env(safe-area-inset-right));
+  border-top: 1px solid var(--rule);
+}
+
+.m-prefs-cap {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.m-prefs-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  /* The whole row is the label, so the tap target is the sentence and not the 20px box. */
+  min-height: 44px;
+}
+
+.m-prefs-box {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  margin-top: 0.15rem;
+}
+
+.m-prefs-title { display: block; font-size: 0.9rem; color: var(--ink); }
+.m-prefs-hint { display: block; margin-top: 0.2rem; font-size: 0.78rem; color: var(--ink-faint); }
+
+
 .m-team {
   border-bottom: 1px solid var(--rule);
   background: var(--surface);

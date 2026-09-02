@@ -2,13 +2,14 @@ import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { PROJECTS_DIR, RECENT_WINDOW_MS, ROSTER_POLL_MS, SESSION_PREFIX } from './config.js';
-import { listClaudePanes, readPaneState } from './tmux.js';
+import { listClaudePanes, readGhost, readPaneState } from './tmux.js';
 import { bindPanes, unboundReason } from './binding.js';
 import { defaultSessionTitle } from './git.js';
 import { shellConfigMtime } from './wrapper.js';
 import { probe } from './transcript.js';
 import { slugFor, isLeadName } from './launch.js';
 import { OPEN_STATES } from './tasks.js';
+import { rememberGhost } from './ghost.js';
 
 /*
  * A lead is recognised by the naming contract, not by a stored flag — `isLeadName` in
@@ -108,6 +109,11 @@ export class SessionRegistry extends EventEmitter {
     // holding a question box has no footer to scrape. Effort escapes this by living in
     // the transcript; these two have nowhere else to come from.
     this.footers = new Map();
+    // paneId -> the suggestion Claude Code is currently offering in that pane's composer.
+    // Same memory shape as `footers`, one rule stricter: it is dropped the moment the pane
+    // stops being `idle`, because a stale suggestion is a stale *button*. `ghost.js` owns
+    // both the parse and that rule.
+    this.ghosts = new Map();
     // Set by index.js once the team watcher exists — the watcher takes the registry, so
     // it cannot be handed over at construction. Null until then, and a null reads as
     // "not stuck", which is the safe direction: a row nobody has judged yet is quiet.
@@ -338,6 +344,9 @@ export class SessionRegistry extends EventEmitter {
       for (const paneId of this.footers.keys()) {
         if (!live.has(paneId)) this.footers.delete(paneId);
       }
+      for (const paneId of this.ghosts.keys()) {
+        if (!live.has(paneId)) this.ghosts.delete(paneId);
+      }
     }
 
     // Latest file wins if a session id somehow appears twice.
@@ -373,9 +382,24 @@ export class SessionRegistry extends EventEmitter {
     // as "working" while a permission box is actually up — PreToolUse fires, then the
     // tool blocks — and only the pane carries the box and its options.
     const scraped = new Map();
+    const ghosted = new Map();
     await Promise.all(
       [...paneOf.entries()].map(async ([sid, bind]) => {
-        scraped.set(sid, await readPaneState(bind.pane.paneId));
+        const state = await readPaneState(bind.pane.paneId);
+        scraped.set(sid, state);
+        // The composer's ghost text, and only for a pane that is plainly idle. It is a
+        // second `capture-pane`, with `-e` this time, so it rides inside this same
+        // `Promise.all` rather than costing the poll another round trip — and it is skipped
+        // outright for a session that is working, blocked or holding a picker, which is
+        // most of the ones you are watching when it matters.
+        const eligible = state.state === 'idle';
+        ghosted.set(
+          sid,
+          rememberGhost(this.ghosts, bind.pane.paneId, {
+            eligible,
+            ghost: eligible ? await readGhost(bind.pane.paneId) : undefined,
+          }),
+        );
       }),
     );
 
@@ -469,6 +493,10 @@ export class SessionRegistry extends EventEmitter {
         question: scrape?.question || null,
         model: footer.model,
         contextPct: footer.contextPct,
+        // Claude Code's own guess at the next prompt, offered as dim text in its composer.
+        // An offer, never history — it is drawn above the panel's composer and never in the
+        // transcript, for the same reason ghost text is not typed text.
+        ghost: ghosted.get(meta.sessionId) ?? null,
         effort: meta.effort || scrape?.effort || null,
         activity: scrape?.state === 'working' ? scrape.activity : null,
         activitySeconds: scrape?.state === 'working' ? scrape.activitySeconds ?? null : null,
@@ -506,6 +534,11 @@ export class SessionRegistry extends EventEmitter {
       const scrape = await readPaneState(pane.paneId);
       const reason = unboundReason(pane, [...bySession.values()]);
       const footer = rememberFooter(this.footers, pane.paneId, scrape);
+      const ghostEligible = scrape.state === 'idle';
+      const ghost = rememberGhost(this.ghosts, pane.paneId, {
+        eligible: ghostEligible,
+        ghost: ghostEligible ? await readGhost(pane.paneId) : undefined,
+      });
       const team = this.#team(pane.tmuxSession, pane.cwd);
 
       next.set(id, {
@@ -532,6 +565,7 @@ export class SessionRegistry extends EventEmitter {
         question: scrape.question || null,
         model: footer.model,
         contextPct: footer.contextPct,
+        ghost,
         effort: scrape.effort || null,
         activity: scrape.state === 'working' ? scrape.activity : null,
         activitySeconds: scrape.state === 'working' ? scrape.activitySeconds ?? null : null,
@@ -588,6 +622,10 @@ export class SessionRegistry extends EventEmitter {
         // directly below, and it was missing.
         prev.model !== s.model ||
         prev.contextPct !== s.contextPct ||
+        // Without this a suggestion that appeared, changed or went away never reaches a
+        // browser until some unrelated field happens to move — and the line above the
+        // composer would go on offering a prompt the session has stopped suggesting.
+        prev.ghost !== s.ghost ||
         prev.effort !== s.effort ||
         prev.lastActivity !== s.lastActivity ||
         // A task closing, or a lead's count moving, changes the row's third line and

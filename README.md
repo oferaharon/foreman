@@ -461,6 +461,31 @@ with a session when it earns its real id, and are restored to full height rather
 crammed into a two-row box. A send that fails puts the text back rather than swallowing
 it.
 
+### Suggested prompts
+
+An idle session offers a guess at your next prompt as dim ghost text inside its own
+composer, which Tab accepts in the terminal. The panel shows it as one muted line above
+the box, on the desktop and on the phone, with a button that takes it up.
+
+It is an **offer, not history** — it never goes into the transcript, and it disappears the
+moment the session starts working, is blocked on anything, or you type something of your
+own. That last one is what makes the button safe to press without thinking: it only ever
+appears over an empty box, so there is nothing of yours for it to replace.
+
+By default the button reads **use** and puts the text in the box, to edit or send. A
+setting — *Suggested prompts* in the panel's settings, and at the bottom of the phone's
+home screen — makes it read **send** and go on one press instead. It is off by default,
+stored per browser (your phone and your Mac answer separately), and applies the moment
+you tick it.
+
+The text goes through the panel's normal send path, the same as anything else you type
+here. The terminal's own Tab is never driven.
+
+Two honest limits. It is a poll behind, like everything else the panel scrapes off a
+pane. And a suggestion the terminal had to truncate to fit its own width — which it does
+with an ellipsis, at around 34 columns and below — is not offered at all, because the
+panel cannot spell it in full and would otherwise prefill your box with a literal `…`.
+
 ### Effort
 
 The selected session shows its effort level in the header, beside the model. Not in the
