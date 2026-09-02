@@ -238,6 +238,71 @@ test('FOREMAN_AGENT_LABEL moves the logs somewhere a bench cannot hurt the real 
 });
 
 /*
+ * `FOREMAN_LOG_DIR` — the *directory*, told to the process rather than derived.
+ *
+ * The label above moves both files by renaming them; this moves both files by relocating
+ * them, and the two are independent on purpose. `install-agent.js` writes the plist from
+ * the same two constants, so a checkout install cannot disagree with itself — but a
+ * Homebrew service's plist is generated from a formula in **another repository**, which
+ * nothing here can read or pin, and a second derivation of these paths over there is how
+ * a panel ends up trimming two files nobody writes to while the ones launchd is really
+ * appending to grow without bound.
+ *
+ * Read at import, like the label, so every case below takes a subprocess.
+ */
+
+/** `LOG_OUT` and `LOG_ERR` as a *fresh* process resolves them, with a clean environment. */
+async function logPaths(overrides = {}) {
+  const env = { ...process.env, ...overrides };
+  // Whatever the suite was run with must not leak into the default case.
+  for (const key of ['FOREMAN_LOG_DIR', 'FOREMAN_AGENT_LABEL']) {
+    if (!(key in overrides)) delete env[key];
+  }
+  const { stdout } = await run(process.execPath, [
+    '--input-type=module',
+    '-e', "import { LOG_OUT, LOG_ERR } from './server/logs.js'; console.log(LOG_OUT); console.log(LOG_ERR);",
+  ], { cwd: path.resolve(import.meta.dirname, '..'), env });
+  const [out, err] = stdout.trim().split('\n');
+  return { out, err };
+}
+
+test('with FOREMAN_LOG_DIR unset the two paths are byte-identical to what they always were', async () => {
+  const { out, err } = await logPaths();
+  assert.equal(out, path.join(os.homedir(), 'Library', 'Logs', 'foreman.log'));
+  assert.equal(err, path.join(os.homedir(), 'Library', 'Logs', 'foreman-error.log'));
+});
+
+test('FOREMAN_LOG_DIR moves both files and leaves both basenames alone', async () => {
+  const { out, err } = await logPaths({ FOREMAN_LOG_DIR: '/tmp/foreman-scratch/logs' });
+  assert.equal(path.dirname(out), '/tmp/foreman-scratch/logs');
+  assert.equal(path.dirname(err), '/tmp/foreman-scratch/logs');
+  // One variable, not two: the formula spells a location, and the naming rule stays here.
+  assert.equal(path.basename(out), 'foreman.log');
+  assert.equal(path.basename(err), 'foreman-error.log');
+});
+
+test('an empty FOREMAN_LOG_DIR is not an answer — it falls back rather than resolving to the cwd', async () => {
+  const { out } = await logPaths({ FOREMAN_LOG_DIR: '   ' });
+  assert.equal(path.dirname(out), path.join(os.homedir(), 'Library', 'Logs'));
+});
+
+test('a relative FOREMAN_LOG_DIR is resolved, because a service manager’s cwd is not yours', async () => {
+  const repo = path.resolve(import.meta.dirname, '..');
+  const { out } = await logPaths({ FOREMAN_LOG_DIR: 'scratch-logs' });
+  assert.ok(path.isAbsolute(out), `expected an absolute path, got ${out}`);
+  assert.equal(path.dirname(out), path.join(repo, 'scratch-logs'));
+});
+
+test('the directory and the label are independent — one moves the folder, the other the names', async () => {
+  const { out, err } = await logPaths({
+    FOREMAN_LOG_DIR: '/tmp/foreman-scratch/logs',
+    FOREMAN_AGENT_LABEL: 'com.example.foreman-scratch',
+  });
+  assert.equal(out, '/tmp/foreman-scratch/logs/com.example.foreman-scratch.log');
+  assert.equal(err, '/tmp/foreman-scratch/logs/com.example.foreman-scratch-error.log');
+});
+
+/*
  * The label has **three** copies, and two of them are outside JavaScript.
  *
  * `logs.js` owns it; `package.json` bakes it into the `restart-panel` and `stop-panel`

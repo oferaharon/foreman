@@ -96,7 +96,8 @@ import {
   uniqueSessionName,
 } from './launch.js';
 import { saveImage, resolveImage, pruneImages } from './uploads.js';
-import { rotateLogs, rotationLines } from './logs.js';
+import { rotateLogs, rotationLines, LOG_OUT, LOG_ERR } from './logs.js';
+import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
 import { findFiles } from './files.js';
 import { scanImages, readImage } from './images.js';
@@ -3752,6 +3753,17 @@ function portAnswering(port) {
 }
 
 /*
+ * Which install this is, asked once.
+ *
+ * It changes nothing the panel *does* — only the commands it prints, in the two places a
+ * boot prints any: the stand-down block below and the hook line further down. Both are
+ * printed by both installs, and `npm run …` is advice you cannot follow without a
+ * checkout. Everything else in `install-agent.js` that prints `npm run` lines is right as
+ * it is: those only ever run from one.
+ */
+const IS_HOMEBREW = panelIsHomebrew();
+
+/*
  * Stand down rather than become the second panel.
  *
  * First thing in the boot block, before the roster starts and — the part that matters —
@@ -3774,8 +3786,8 @@ if (await portAnswering(PORT)) {
   console.error('binds 127.0.0.1, both succeed, and they split traffic by interface — hooks and');
   console.error('lead tool calls to one, your phone to the other. So this one is standing down.');
   console.error('');
-  console.error('  restart the panel:  npm run restart-panel');
-  console.error(`  a scratch panel:    FOREMAN_PORT=${PORT + 1} FOREMAN_STATE_DIR=/tmp/scratch npm start`);
+  console.error(`  restart the panel:  ${IS_HOMEBREW ? `brew services restart ${FORMULA}` : 'npm run restart-panel'}`);
+  console.error(`  a scratch panel:    FOREMAN_PORT=${PORT + 1} FOREMAN_STATE_DIR=/tmp/scratch ${IS_HOMEBREW ? `${FORMULA} serve` : 'npm start'}`);
   process.exit(0);
 }
 
@@ -3857,7 +3869,9 @@ gcFailedWorktrees({ tasks, room, groups })
 
 server.listen(PORT, HOST, () => {
   console.log(`Foreman  →  http://${HOST}:${PORT}`);
-  console.log('Register the status hook once with:  npm run install-hook');
+  // The one command a fresh install still has to be told to run — and the only reason it
+  // is conditional is that there is no `npm run` to type when there is no checkout.
+  console.log(`Register the status hook once with:  ${IS_HOMEBREW ? `${FORMULA} install-hook` : 'npm run install-hook'}`);
 
   // Which directory this panel is reading, and which rung of the resolver answered.
   // Printed rather than derived for the same reason the origins below are: the resolver
@@ -3865,6 +3879,16 @@ server.listen(PORT, HOST, () => {
   // this project used to have, and a panel that quietly picked the other one looks exactly
   // like a panel whose tasks, room and rulings have vanished.
   console.log(`State: ${STATE_DIR} (${STATE_DIR_SOURCE})`);
+
+  // …and where its output goes, in the same breath and for the same reason. These two
+  // paths are already the answer to "where do I look when this misbehaves", and under a
+  // service manager whose plist this repository cannot read they are the one fact the
+  // service definition could get wrong silently: `FOREMAN_LOG_DIR` is what the plist uses
+  // to tell the process, and this line is where the two are seen to agree. Printed on
+  // every boot, including `npm start`, where they are simply the files that would be used
+  // if launchd were the one starting this.
+  console.log(`Logs: ${LOG_OUT}`);
+  console.log(`      ${LOG_ERR}`);
 
   // What the boot did to its own logs, in the same breath as `Triggers:` below and for
   // the same reason: the state of the environment, at the one moment somebody is reading

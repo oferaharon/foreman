@@ -40,7 +40,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PORT, HOST, HOST_SOURCE, STATE_DIR, HOME, CONFIG_FILE, TRIGGER_TOKEN_FILE, readTokenFile, resolveStateDir } from './config.js';
 import { DEFAULT_BIND_HOST } from './settings-file.js';
-import { AGENT_LABEL as LABEL, DEFAULT_AGENT_LABEL, LOG_OUT, LOG_ERR } from './logs.js';
+import { AGENT_LABEL as LABEL, DEFAULT_AGENT_LABEL, LOG_DIR, DEFAULT_LOG_DIR, LOG_OUT, LOG_ERR } from './logs.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENTRY = path.join(REPO, 'server', 'index.js');
@@ -143,6 +143,7 @@ export function jobEnvironment({
   port = PORT,
   stateDir = STATE_DIR,
   label = LABEL,
+  logDir = LOG_DIR,
 } = {}) {
   const env = {};
   if (host !== DEFAULT_BIND_HOST) env.FOREMAN_HOST = host;
@@ -159,6 +160,18 @@ export function jobEnvironment({
    * two files or the rotation is pointed at somebody else's.
    */
   if (label !== DEFAULT_AGENT_LABEL) env.FOREMAN_AGENT_LABEL = label;
+  /*
+   * …and so does the log *directory*, for the identical reason and by the identical rule.
+   *
+   * `StandardOutPath` below is `LOG_OUT`, which is now `$FOREMAN_LOG_DIR` plus a basename
+   * derived from the label. Carry the label and not the directory and an install run with
+   * `FOREMAN_LOG_DIR` set writes a plist pointing at one pair of files while the panel
+   * inside it computes the default pair — `~/Library/Logs`, the real panel's — and
+   * truncates those at boot. That is the same trap one line up wearing a different hat,
+   * and the rule this file already carries is that anything the plist derives has to
+   * reach the job.
+   */
+  if (logDir !== DEFAULT_LOG_DIR) env.FOREMAN_LOG_DIR = logDir;
   return env;
 }
 
