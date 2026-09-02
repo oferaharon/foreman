@@ -1325,6 +1325,54 @@ button {
 .room-system.is-pending {
   border-style: dashed;
 }
+/* A lead that merged without the maintainer's word — the fourth machinery colour, and the
+   one that had to be spent: this is the line where something that used to need them
+   happened without them, and it must be findable in a scroll of grey cards.
+
+   `--accent` rather than a fifth hue, because the room already spends it on exactly this
+   idea: `.room-answer .room-bubble` carries an accent edge, with the comment "an
+   autonomous answer — the accent edge marks the audit trail". A self-merge is the same
+   family, one shape over. It also leaves the three status colours meaning what they mean —
+   green a worker started, amber two workers on one file, red something failed — instead of
+   borrowing one of them for a fourth idea.
+
+   The mix is the conflict/dispatch recipe unchanged (45% border, 7% ground), and it clears
+   AA for body text in both themes, which neither of the other two does: measured off the
+   rendered card in a headless window, **5.87:1 light and 5.72:1 dark**, against the amber
+   and green recorded above (3.55 / 6.79 and 3.71 / 6.70). Only the allowed line
+   takes it — `roomEntryNode` matches `event` and `allowed` together, so a refusal stays
+   the plain grey card, which is right: the panel refusing is the panel working. */
+.room-system.is-self-merge {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+/* What the verdict actually checked, under the sentence that announces it. A step smaller
+   than the sentence and in the card's own ink, so it reads as the evidence rather than as
+   the announcement — and inheriting that ink is what makes an allowed self-merge one block
+   instead of a grey list bolted under a tinted line.
+
+   No bullet glyph: the room is already dense at 0.74rem and a `disc` column would cost
+   more width than the marker earns. The hanging dash is drawn with `::before` so the
+   wrapped second line of a long reason lines up under the first word, not under the dash.
+
+   The size step and the dash are the whole of the hierarchy — there is deliberately **no
+   `opacity`** under them. A 0.85 was tried and measured off the rendered list, and it puts
+   all four combinations at or under AA (4.55 / 4.48 dark, 4.33 / 4.49 light); the
+   self-merge card in the light theme was the worst of them. Fading the one part of the
+   card the maintainer is meant to read back a week later is the wrong thing to buy a
+   little hierarchy with, and the smaller type already says what it is. Without it the list
+   inherits the card's own colour and its measured contrast: 5.87 light, 5.72 dark. */
+.room-reasons {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  max-width: 100%;
+}
+.room-reasons li { padding-left: 0.7rem; overflow-wrap: anywhere; }
+.room-reasons li::before { content: '—'; float: left; margin-left: -0.7rem; }
 
 /* Agent speech, laned by direction — worker→lead left, lead→worker right; the reader
    is neither party. Wide with an offset, never two thin columns hugging the edges. */
@@ -1580,9 +1628,15 @@ button {
   transform: translate(0.635rem, -50%);
 }
 .team-toggle-row:hover input[type='checkbox']:not(:disabled) { border-color: var(--ink-faint); }
-/* Disabled is not a stored state here — it is the beat while the PATCH is in flight — so
-   it reads as "not settled yet" rather than as "you may not". */
+/* Disabled is two things now. Mostly it is still the beat while the PATCH is in flight, so
+   it reads as "not settled yet" rather than as "you may not". `leadDecidesMerges` on a repo
+   with no forge is the other one — genuinely unanswerable, for as long as the repo has no
+   PR to merge — and that row carries `.is-unavailable` as well, which dims its label too so
+   the row reads as a whole rather than as a live label beside a greyed switch. Its note
+   says why; nothing here has to. */
 .team-toggle-row input[type='checkbox']:disabled { cursor: default; opacity: 0.55; }
+.team-toggle-row.is-unavailable { cursor: default; }
+.team-toggle-row.is-unavailable > span { color: var(--ink-faint); }
 .team-toggle-row input[type='checkbox']:disabled:checked {
   background: var(--ink-faint);
   border-color: var(--ink-faint);
@@ -1667,6 +1721,51 @@ button {
 }
 .team-knob-row input:disabled { color: var(--ink-faint); cursor: default; }
 .team-knob-row input.team-knob-wide { width: 55%; }
+
+/* The "always review myself" list. A column rather than the knobs' label-then-box row:
+   the value is several lines and a right-aligned multi-line box beside a caption would
+   leave the shortest entry floating in the middle of the block. Everything else is the
+   knobs' own chrome — `--mono` on `--ground` inside a `--rule` border, the accent halo on
+   focus — because it is the same kind of thing: a value you type that the server may
+   refuse.
+
+   It sits under `leadDecidesMerges` and lines up with that row's note (the switch's
+   1.65rem plus the row's 0.5rem gap), so the caption reads as belonging to the toggle
+   rather than as the next setting down. */
+.team-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-left: 2.15rem;
+  margin-top: -0.15rem;
+}
+.team-paths-cap { color: var(--ink-muted); font-size: 0.72rem; cursor: pointer; }
+.team-paths-input {
+  appearance: none;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.25rem 0.35rem;
+  /* Vertical only: a horizontal drag would take the box past the aside's width, and the
+     entries are folder names — they wrap rather than run. */
+  resize: vertical;
+  min-height: 3.2rem;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.team-paths-input::placeholder { color: var(--ink-faint); font-family: inherit; }
+.team-paths-input:hover:not(:disabled) { border-color: var(--rule-strong); }
+.team-paths-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+/* Disabled here is only ever the beat while the PATCH is in flight, same as the knobs. */
+.team-paths-input:disabled { color: var(--ink-faint); cursor: default; }
 /* Setup is read-only by design: detected from the project's files, never typed. */
 .team-setup-row { display: flex; gap: 0.5rem; align-items: baseline; justify-content: space-between; }
 .team-setup-value {
