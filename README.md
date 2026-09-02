@@ -21,23 +21,45 @@ request, from here: `+ new`, a row's `⧉`, a restored snapshot, or a lead dispa
 worker. The panel starts nothing on its own initiative; everything else it does is observe
 and inject.
 
-There is nothing to install from a package registry. Clone the repository, then:
+**Use it:**
 
 ```
+brew install oferaharon/tap/foreman-panel
+foreman-panel install-hook
+brew services start foreman-panel
+```
+
+Then open **http://127.0.0.1:48770**.
+
+**Work on it** — the contributor path, unchanged:
+
+```
+git clone https://github.com/oferaharon/foreman.git
+cd foreman
 npm install
 npm run install-hook     # once — registers the status hook, backs up settings.json
 npm run install-agent    # once — runs the panel as a LaunchAgent → http://127.0.0.1:48770
 npm test                 # parsers, stores, binding, launch naming, and the team modules
 ```
 
-Then open **http://127.0.0.1:48770**. `npm start` still works, but it is the scratch-server
-command now, not how the real panel runs — see
-[Running it under launchd](#running-it-under-launchd).
+`npm start` still works, but it is the scratch-server command, not how the real panel
+runs — see [Running it under launchd](#running-it-under-launchd).
+
+There is no signed installer package and no bundled Node runtime, and that's deliberate:
+Homebrew owns the runtime and the dependency graph for the first path, and the second
+needs the same Node and tmux it always has. Revisit a `.pkg` only if non-Homebrew users
+turn up.
 
 Read [SECURITY.md](SECURITY.md) before you make the panel reachable from anything but this
 machine. It has no login, deliberately, and says so plainly.
 
 ## Prerequisites
+
+Under Homebrew, `node`, `tmux` and `git` arrive as formula dependencies and `gh` is named
+in the caveats rather than required; installing from a checkout, all of the below are
+yours to provide. Either way, **Claude Code is not a Homebrew dependency** — it isn't
+packaged there, and the panel is useless without it, so it stays a prerequisite you install
+yourself.
 
 - **macOS.** This is not portable and does not pretend to be. The launcher opens Terminal
   windows through `/usr/bin/osascript` and `/usr/bin/open -a Terminal`
@@ -1624,6 +1646,23 @@ it starts listening and refuses to boot (exit 0, so launchd doesn't crash-loop i
 anything already answers there — `npm start` while the LaunchAgent is up prints what it
 found and exits cleanly instead of starting a second panel.
 
+### Under Homebrew
+
+A Homebrew install runs under `brew services` instead of `install-agent`/`restart-panel` —
+same launchd underneath, different mechanism, and three things about it are worth knowing
+before you reach for a command that doesn't apply:
+
+- **`brew services restart foreman-panel` is both restart and reinstall.** It's `stop` then
+  `start`, and `start` regenerates `~/Library/LaunchAgents/homebrew.mxcl.foreman-panel.plist`
+  from the formula — the one command covers what `restart-panel` and `install-agent` are two
+  separate commands for in a checkout.
+- **A non-default port or state dir goes in an `.env` file, not the plist.**
+  `~/.homebrew/services/foreman-panel.env` (`KEY=value` per line, mode `600` — Homebrew
+  skips a group- or world-writable file and only warns), not
+  `~/Library/LaunchAgents/homebrew.mxcl.foreman-panel.plist`.
+- **`brew upgrade` does not restart the service.** The new version lands on disk; the old
+  process keeps running until you `brew services restart foreman-panel` yourself.
+
 ## Which browsers may write to it
 
 **A browser guard, not authentication.** The panel has no login and is not getting one: on
@@ -1671,9 +1710,12 @@ npm run backup-state -- --verify <archive>
 
 It **refuses while the panel is up** (an HTTP probe of `127.0.0.1:$FOREMAN_PORT`, the same
 check the boot guard uses) — every store in `server/` is a Map behind a debounced flush,
-so a live backup can capture a state dir mid-write. `npm run stop-panel`, run it, then
-`npm run install-agent` (or `restart-panel`) to bring it back. `--force` overrides the
-refusal and records in the manifest that it did.
+so a live backup can capture a state dir mid-write. Stop it, run the backup, then bring it
+back — the script itself prints the right pair, `npm run stop-panel` /
+`npm run install-agent` from a checkout or `brew services stop foreman-panel` /
+`brew services start foreman-panel` under Homebrew, detected the same way `foreman-panel`
+itself detects its install. `--force` overrides the refusal and records in the manifest
+that it did.
 
 The archive lands at `~/foreman-backups/foreman-backup-<timestamp>.tar.gz`, mode `600`
 in a `700` directory, **never** under this repo or inside a cloud-sync folder — it contains

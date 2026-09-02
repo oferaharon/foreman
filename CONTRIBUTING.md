@@ -94,3 +94,39 @@ pattern also matches the panel somebody is using.
 No issue templates and no PR template. They are forge-specific furniture and can be added
 when they earn it; what actually helps is what you saw, what you expected, and enough to
 reproduce it.
+
+## Releasing
+
+Semver. A release gets cut when there's something worth announcing, not on a schedule.
+
+1. One small "release vX.Y.Z" PR bumps `package.json` and `package-lock.json`. Nothing
+   else goes in it.
+2. The maintainer merges it.
+3. The lead tags that merge and runs
+   `gh release create vX.Y.Z --target <sha> --generate-notes`, with a paragraph on top of
+   the generated notes.
+4. The tag always matches `package.json` — `vX.Y.Z` for version `X.Y.Z`, no exceptions.
+5. **Bump the formula**, once the release above is published — never before. In the tap
+   repository (`oferaharon/homebrew-tap`), edit `Formula/foreman-panel.rb`:
+
+   ```
+   url    https://github.com/oferaharon/foreman/archive/refs/tags/vX.Y.Z.tar.gz
+   sha256 <the checksum below>
+   ```
+
+   Compute the checksum against the published tag, never against a local file:
+
+   ```
+   curl -fsSL https://github.com/oferaharon/foreman/archive/refs/tags/vX.Y.Z.tar.gz | shasum -a 256
+   ```
+
+   Commit to the tap's default branch with the message `foreman-panel X.Y.Z`. Then verify:
+
+   ```
+   brew update && brew upgrade foreman-panel && brew services restart foreman-panel
+   ```
+
+The ordering in step 5 is the whole point, not a formality: the checksum is taken over the
+tarball GitHub generates *for that tag*, and those bytes only exist once the tag does. A
+formula bumped before the tag is published points at a 404, which Homebrew reports as a
+plain download failure — nothing in the error says the release just isn't out yet.
