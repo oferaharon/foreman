@@ -247,6 +247,45 @@ and `test/permission.test.js` pins the refusals: misaligned by two columns, and 
 at all. It shipped inside the classifier PR rather than on its own, because the brief's
 "committed at both widths" could not be met while the narrow capture parsed as nothing.
 
+**…and the box's own advice used to win the subject slot, on exactly the prompts where the
+command matters most.** Claude Code prints a tip *inside* the box, between the title and
+the subject — `Tip: auto mode handles these prompts for you — choose "switch to auto mode"
+below` — and the body walk took the first line under the title, so the tip became `subject`
+and the command was demoted into `detail`. The card header read `Bash command · Tip: auto
+mode handles these prompts for you — choose "switch to`, truncated mid-word, on the desktop
+and with less room still on the phone. And it appeared **only** on the prompts that offer
+the auto-mode row — the ones that grant something broad — so the loudest slot on the card
+showed advice where reading the command matters most. Nothing about the digit or the
+classification was ever wrong; only the line a human reads, which is the whole of "prefer
+showing nothing over showing something wrong".
+
+`dropTip` removes it rather than keeping it as a field, and the reason is that **nothing is
+lost**: the tip's whole sentence is already on the card, carried by the option it is advice
+about (`3. Yes, and switch to auto mode · auto mode handles these prompts for you`), sitting
+against the button that acts on it — and the panel classes that option `approve-mode`, the
+broadest thing on the box, and arms it behind a second click, so repeating the nudge in the
+card's own voice would be the panel arguing for the thing it guards against. A `tip` field
+nobody renders is dead weight that invites a later reader to render it.
+
+Three measurements it rests on, taken on v2.1.257 in the sandbox. **The tip wraps, flush.**
+At 220 it is one line, at 70 two, at 40 three, and every continuation sits at the *title's*
+own column while the subject and detail are indented past it — so a walk that dropped only
+the line matching `Tip:` would leave `auto mode" below` as the subject, the same defect one
+line down. **Two independent stops**, either first: a blank line (the box puts one between
+the tip and the subject at every width) and a deeper indent. Each is pinned on its own in
+`test/permission.test.js` — remove either and a test fails. **And only auto-mode-offering
+prompts carry a tip at all**: `Edit file` and `Create file` offer `switch to accept edits`
+and get none, which is why the fixtures are Bash prompts. The honest limit, since no rule
+could cover it: a tip followed with no blank by a subject at the tip's own column would be
+indistinguishable from a wrap. No prompt shape produces that today.
+
+The match is anchored and narrow (`^Tip:\s`) on purpose, and note it runs the *opposite* way
+to `classify` one function up. There, a phrase list is the wrong shape because a yes wrongly
+called narrow is a standing grant. Here the asymmetry inverts: a tip we fail to recognise
+costs one wrong header line — today's bug — while a body line wrongly taken for a tip loses
+the command from the card entirely. Same reasoning, opposite answer, because the cost of
+each mistake is opposite.
+
 **Exposure is the one thing a LAN peer may not change, and the check is the socket, not
 the header.** `PATCH /api/config` — the settings modal — writes `bindHost` and
 `allowedOrigins`, and both decide who can reach this panel at all. The 2026-08-27 ruling
