@@ -20,6 +20,13 @@
 
   --rail: 20rem;
 
+  /* The lead's aside, dragged from its left edge. Here rather than in the resizer for the
+     same reason `--rail` is: a reset *removes* the custom property, so this is the only
+     place the default is spelled. 21.25rem is the 340px the aside shipped at.
+     `--tasks-h`, the Tasks/Room split inside it, deliberately has no default — unset means
+     the Tasks block is content-height under its five-row cap, which is what it was. */
+  --aside: 21.25rem;
+
   /* An open group's block, lifted off the rail. Mixed rather than hard-coded so it tracks
      both themes from one line — 4% of the ink colour darkens white and lightens the dark
      surface, which is "slightly different" either way round. Deliberately not

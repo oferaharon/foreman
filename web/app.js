@@ -92,134 +92,294 @@ const el = {
   main: document.getElementById('main'),
 };
 
-/* ---------------------------------------------------------- rail width --- */
+/* ----------------------------------------------------------- resizers --- */
 
-/*
- * The rail's width, dragged from its right edge and remembered in this browser.
+/**
+ * One draggable divider, three of them on screen.
  *
- * One value drives everything: `--rail` is the first column of the `.app` grid, so the
- * main area — and both panes of a split, which share `1fr 1fr` of whatever is left — follow
- * from it with nothing else to keep in step. The default lives in `tokens.css` and is the
- * value used when nothing is stored, so clearing the preference is *removing* the custom
- * property rather than writing 20rem back: two spellings of one default is how they drift.
+ * The rail's right edge shipped first (#4) and this is that code generalised, not a
+ * second copy of it: the rail, the lead's aside and the Tasks/Room split inside it all
+ * want the same five things — a floor, a live ceiling, a preference remembered in this
+ * browser, a double-click that forgets it, and a grip you can see. What differs is only
+ * *which* number the pointer is asking for and where that number lands, so those two are
+ * functions and everything else is shared.
  *
- * Kept in `localStorage` beside `foreman.flatRail`, and for the same reason — this is a
- * fact about the window you are looking at, not about your filing, and a phone and a
- * 34-inch monitor want different answers. A group's collapse state is on the server
- * because it is the other kind.
+ * Four rules carried over from the rail, each of which was learned there:
  *
- * The preference and the applied width are deliberately two numbers. The ceiling is
- * `min(RAIL_MAX, half the viewport)`, so narrowing the window has to narrow the rail —
- * but it must not *overwrite* what you chose, or resizing a window for five seconds
- * costs you the width you set on the big monitor. `applyRail` clamps; only a drag or a
- * reset writes.
+ * - **The preference and the applied size are two numbers.** The ceiling depends on the
+ *   window — and, for the aside, on the pane it is in — so narrowing the window has to
+ *   narrow the divider. It must not *overwrite* what you chose, or resizing a window for
+ *   five seconds costs you the width you set on the big monitor. `applyNow` clamps; only
+ *   a drag or a reset writes.
+ * - **Nothing stored means the stylesheet answers.** A reset *removes* the custom
+ *   property rather than writing the default back into it: two spellings of one default
+ *   is how they drift.
+ * - **Sizes are stored in rem**, so a browser text-size change carries them, and every
+ *   read is wrapped. A browser with site data blocked has to render the panel, not throw
+ *   at module scope and leave a blank page.
+ * - **Nothing a drag moves may have a transition.** A width that eased into place lags
+ *   the cursor, which reads as the drag having been dropped. The grip's own hover colour
+ *   is the only thing here that animates, and reduced motion turns that off.
+ *
+ * A preference is keyed by its storage key rather than held on the instance, because
+ * split view can mount two lead asides at once and two copies of one number is two
+ * answers to "how wide did I make it".
  */
 
-/** rem, and the floor/ceiling the drag is clamped to. `RAIL_DEFAULT` is `--rail` in
- *  `tokens.css` — it is here only to recognise "the same as the default" on a reset, and
- *  is never written into the property. */
-const RAIL_MIN = 14;
-const RAIL_MAX = 40;
-
-/** The root font size in px, read rather than assumed: the preference is stored in rem so
- *  it survives a browser text-size change, and this is what converts it. */
+/** The root font size in px, read rather than assumed: preferences are stored in rem so
+ *  they survive a browser text-size change, and this is what converts them. */
 const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
 
-/** What this browser last chose, in rem. `null` means "never dragged" — the CSS default. */
-let railPref = readRailPref();
+/** Every mounted resizer. The rail's lives as long as the page; the aside's two are
+ *  rebuilt whenever `renderMain` rebuilds the aside, so `applyResizers` prunes the ones
+ *  whose handle has left the document rather than holding detached nodes for ever. */
+const resizers = new Set();
 
-function readRailPref() {
+/** storageKey → rem, or `null` for "never dragged". Read through once and then held, so
+ *  a drag is not a `localStorage` round trip per pointermove. */
+const prefs = new Map();
+
+function readPref(key, min, max) {
+  if (prefs.has(key)) return prefs.get(key);
+  let value = null;
   try {
-    const raw = Number(localStorage.getItem('foreman.railWidth'));
-    // Anything unparseable, zero, negative or absurd falls back to the CSS default rather
-    // than to a clamp of nonsense — a stored value nobody wrote is not a preference.
-    return Number.isFinite(raw) && raw >= RAIL_MIN && raw <= RAIL_MAX ? raw : null;
+    const raw = Number(localStorage.getItem(key));
+    // Anything unparseable, zero, negative or absurd falls back to the stylesheet's own
+    // value rather than to a clamp of nonsense — a stored number nobody wrote is not a
+    // preference. `localStorage.getItem` itself throws where site data is blocked, which
+    // is why even this read is inside the try.
+    if (Number.isFinite(raw) && raw >= min && raw <= max) value = raw;
   } catch {
     /* private mode, or storage denied — the default is a perfectly good answer */
-    return null;
   }
+  prefs.set(key, value);
+  return value;
 }
 
-/** The ceiling, in rem: never more than half the viewport, so the rail can't swallow the
- *  conversation on a laptop even when the stored width came from a wider screen. */
-const railCeiling = () => Math.max(RAIL_MIN, Math.min(RAIL_MAX, window.innerWidth / remPx() / 2));
-
-/** Put `railPref` on the page, clamped to what this viewport can afford. No preference
- *  means removing the property, so `tokens.css` answers. */
-function applyRail() {
-  if (railPref == null) {
-    document.documentElement.style.removeProperty('--rail');
-    return;
-  }
-  const rem = Math.min(Math.max(railPref, RAIL_MIN), railCeiling());
-  document.documentElement.style.setProperty('--rail', `${rem}rem`);
-}
-
-function setRailWidth(px, { persist = false } = {}) {
-  railPref = Math.min(Math.max(px / remPx(), RAIL_MIN), railCeiling());
-  applyRail();
-  if (persist) persistRail();
-}
-
-function persistRail() {
+function persistPref(key) {
   try {
-    if (railPref == null) localStorage.removeItem('foreman.railWidth');
-    else localStorage.setItem('foreman.railWidth', String(Math.round(railPref * 100) / 100));
+    const value = prefs.get(key);
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(Math.round(value * 100) / 100));
   } catch {
     /* quota or private mode — this window still behaves, it just won't survive a reload */
   }
 }
 
-if (el.railGrip) {
+/** Put a size on the page, or take the custom property off so `tokens.css` answers. */
+function setRootVar(name, rem) {
+  if (rem == null) document.documentElement.style.removeProperty(name);
+  else document.documentElement.style.setProperty(name, `${rem}rem`);
+}
+
+/**
+ * Make one divider draggable.
+ *
+ * `min`/`max` bound the *preference* — they are what a stored value has to look like to
+ * be believed. `ceiling()` is the live bound this layout can actually afford right now,
+ * re-asked on every move and every window resize, and never written down.
+ */
+function resizer({ handle, axis, storageKey, min, max, ceiling, measure, apply, onMove }) {
+  if (!handle) return null;
+
+  const bound = () => Math.max(min, Math.min(max, ceiling()));
+  const clamped = () => {
+    const pref = readPref(storageKey, min, max);
+    return pref == null ? null : Math.min(Math.max(pref, min), bound());
+  };
+
+  const entry = {
+    handle,
+    applyNow() {
+      if (!handle.isConnected) return false;
+      apply(clamped());
+      return true;
+    },
+  };
+
   let dragging = false;
 
-  el.railGrip.addEventListener('pointerdown', (e) => {
-    // Left button only. A right-click here is the context menu, and a middle-click is a
+  handle.addEventListener('pointerdown', (e) => {
+    // Left button only. A right-click here is the context menu and a middle-click is a
     // paste on some setups — neither should start a drag that only ends on pointerup.
     if (e.button !== 0) return;
     e.preventDefault();
     dragging = true;
     // Capture, so the drag survives the pointer leaving the 7px strip — which it does
-    // immediately, and which is the whole reason this is pointer events and not mousemove
-    // on the document.
-    el.railGrip.setPointerCapture(e.pointerId);
-    el.app.classList.add('rail-dragging');
+    // immediately, and which is the whole reason this is pointer events and not
+    // mousemove on the document.
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add('is-dragging');
+    document.body.classList.add(axis === 'x' ? 'col-dragging' : 'row-dragging');
   });
 
-  el.railGrip.addEventListener('pointermove', (e) => {
-    // The rail starts at the viewport's left edge, so the pointer's x *is* the width it
-    // is asking for. Live, with no transition anywhere on `--rail` — a width that eased
-    // into place would lag the cursor, which reads as the drag having been dropped.
-    if (dragging) setRailWidth(e.clientX);
+  handle.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    prefs.set(storageKey, Math.min(Math.max(measure(e) / remPx(), min), bound()));
+    apply(clamped());
+    onMove?.();
   });
 
   const end = (e) => {
     if (!dragging) return;
     dragging = false;
     try {
-      el.railGrip.releasePointerCapture(e.pointerId);
+      handle.releasePointerCapture(e.pointerId);
     } catch {
       /* already released — the capture is gone either way */
     }
-    el.app.classList.remove('rail-dragging');
-    persistRail();
+    handle.classList.remove('is-dragging');
+    document.body.classList.remove('col-dragging', 'row-dragging');
+    persistPref(storageKey);
+    onMove?.();
   };
-  el.railGrip.addEventListener('pointerup', end);
-  el.railGrip.addEventListener('pointercancel', end);
+  handle.addEventListener('pointerup', end);
+  handle.addEventListener('pointercancel', end);
 
-  // Back to the width in `tokens.css`, and forget the preference entirely — the way every
-  // other reset-to-default in a browser behaves.
-  el.railGrip.addEventListener('dblclick', () => {
-    railPref = null;
-    applyRail();
-    persistRail();
+  // Back to the size in the stylesheet, and forget the preference entirely — the way
+  // every other reset-to-default in a browser behaves.
+  handle.addEventListener('dblclick', () => {
+    prefs.set(storageKey, null);
+    persistPref(storageKey);
+    apply(null);
+    onMove?.();
   });
+
+  resizers.add(entry);
+  entry.applyNow();
+  return entry;
 }
 
-// A stored width from a wider screen has to shrink to fit this one; the preference itself
-// is left alone, so it comes back when the window does.
-window.addEventListener('resize', applyRail);
-applyRail();
+/** A size stored on a wider screen has to shrink to fit this one; the preference itself
+ *  is left alone, so it comes back when the window does. */
+function applyResizers() {
+  for (const entry of resizers) if (!entry.applyNow()) resizers.delete(entry);
+}
+window.addEventListener('resize', applyResizers);
+
+/**
+ * Build a grip: the strip you drag, and the mark that says you can.
+ *
+ * `role="separator"` with an `aria-orientation` is what a resizable divider is; the
+ * class is a separate hook rather than an attribute selector, so restyling one never
+ * depends on getting the ARIA right (and vice versa).
+ */
+function paneGrip(axis, label, title) {
+  const grip = document.createElement('div');
+  grip.className = `pane-grip ${axis === 'x' ? 'grip-col' : 'grip-row'}`;
+  grip.setAttribute('role', 'separator');
+  grip.setAttribute('aria-orientation', axis === 'x' ? 'vertical' : 'horizontal');
+  grip.setAttribute('aria-label', label);
+  grip.title = title;
+  return grip;
+}
+
+/* ------------------------------------------------------------ the rail --- */
+
+/*
+ * The rail's width, dragged from its right edge and remembered in this browser.
+ *
+ * One value drives everything: `--rail` is the first column of the `.app` grid, so the
+ * main area — and both panes of a split, which share `1fr 1fr` of whatever is left —
+ * follow from it with nothing else to keep in step. The default lives in `tokens.css`
+ * and is the value used when nothing is stored.
+ *
+ * `localStorage` rather than the server, and for the same reason `foreman.flatRail` is:
+ * this is a fact about the window you are looking at, not about your filing, and a phone
+ * and a 34-inch monitor want different answers. A group's collapse state is on the server
+ * because it is the other kind.
+ */
+
+/** rem. `RAIL_MAX` also bounds what a stored value may say; the live ceiling is below. */
+const RAIL_MIN = 14;
+const RAIL_MAX = 40;
+
+resizer({
+  handle: el.railGrip,
+  axis: 'x',
+  storageKey: 'foreman.railWidth',
+  min: RAIL_MIN,
+  max: RAIL_MAX,
+  // Never more than half the viewport, so the rail can't swallow the conversation on a
+  // laptop even when the stored width came from a wider screen.
+  ceiling: () => window.innerWidth / remPx() / 2,
+  // The rail starts at the viewport's left edge, so the pointer's x *is* the width it is
+  // asking for.
+  measure: (e) => e.clientX,
+  apply: (rem) => setRootVar('--rail', rem),
+});
+
+/* ------------------------------------------------- the lead's two edges --- */
+
+/** rem. The aside's floor and the ceiling on a stored value; the live ceiling is the
+ *  pane's own width less `LEAD_LEFT_MIN`, so the transcript never collapses. Mirrored in
+ *  `.room-panel`'s `min-width`/`max-width`, which is the per-pane guarantee — see there. */
+const ASIDE_MIN = 15;
+const ASIDE_MAX = 40;
+const LEAD_LEFT_MIN = 20;
+
+/** rem. The Tasks block's floor and the room's, either side of the split inside the
+ *  aside. `TASKS_MAX` bounds a stored value; what the panel can actually afford is
+ *  measured off it at drag time. */
+const TASKS_MIN = 3;
+const TASKS_MAX = 40;
+const ROOM_MIN = 8;
+
+/** How many task rows the block shows before it stops growing and scrolls. */
+const TASKS_VISIBLE = 5;
+
+/**
+ * Stop the block growing at five rows. The maintainer ran seven tasks in one evening and
+ * the list pushed the room off the bottom of the panel; a long-lived team has dozens.
+ *
+ * Measured rather than declared, because a task row is one line or two — the branch
+ * line only exists once a worktree does — so "five rows" has no fixed height. The cut
+ * is taken from the sixth row's own top: five rows, four gaps, the list's padding,
+ * and nothing of the sixth. Reading a rect forces layout, which is the point — this
+ * runs synchronously inside the paint that appended the rows, never behind a
+ * `requestAnimationFrame`, which an automated Chrome window never fires because it
+ * reports `visibilityState: 'hidden'` (see CLAUDE.md).
+ *
+ * Under six rows nothing is set at all: an empty scroll gutter on a three-task team
+ * is worse than the problem this solves.
+ */
+function capTaskList(list, nodes) {
+  list.style.maxHeight = '';
+  // A dragged Tasks/Room divider is an explicit answer to the question this cap is
+  // guessing at, so it wins outright: the block's height comes from `--tasks-h` and the
+  // five-row cut is not taken at all. Leaving the cut on as well would clip a block
+  // somebody had just deliberately made taller.
+  if (readPref('foreman.tasksHeight', TASKS_MIN, TASKS_MAX) != null) {
+    list.classList.remove('is-capped');
+    return;
+  }
+  list.classList.toggle('is-capped', nodes.length > TASKS_VISIBLE);
+  if (nodes.length <= TASKS_VISIBLE) return;
+  const cs = getComputedStyle(list);
+  const gap = parseFloat(cs.rowGap) || 0;
+  const pad = parseFloat(cs.paddingBottom) || 0;
+  const top = list.getBoundingClientRect().top;
+  const cut = nodes[TASKS_VISIBLE].getBoundingClientRect().top;
+  const height = cut - top - gap + pad;
+  // A zero here means the block was not laid out (hidden pane, display:none); leave
+  // the class's own fallback height in charge rather than writing a nonsense cap.
+  if (height > 0) list.style.maxHeight = `${Math.ceil(height)}px`;
+}
+
+/**
+ * Re-take the cap on every Tasks block on the page.
+ *
+ * The dragged height and the five-row cut are two answers to one question, so whichever
+ * is in force the other must not be left on the element — and the cut can only be
+ * *re-taken* from the rows, which is why this reads them back off the DOM rather than
+ * asking each pane to repaint. Split view can hold two lead asides and a reset in one of
+ * them is a reset in both, `--tasks-h` being one number for the browser.
+ */
+function recapTaskLists() {
+  for (const box of document.querySelectorAll('.team-tasks')) {
+    capTaskList(box, [...box.querySelectorAll(':scope > .team-task')]);
+  }
+}
 
 /* --------------------------------------------------------- rail footer --- */
 
@@ -2989,6 +3149,12 @@ function createPane(slot, host) {
       cols.append(left, buildRoomPanel());
       host.append(cols);
       mount = left;
+      // The aside's two dividers were built inside `buildRoomPanel`, before it was in the
+      // document — and both of their ceilings are read off rects, which are all zero until
+      // then. So the stored sizes are put on the page here, after the mount and before the
+      // two paints below, or the Tasks block would take its five-row cut against a height
+      // it is about to stop having. This also prunes the previous aside's pair.
+      applyResizers();
       // Paint the panel's lists NOW, after the aside is in the document — inside
       // buildRoomPanel the isConnected guards skip them, and a quiet room has no
       // incoming post to repaint it after a rebuild. Found on the harness lead: seven
@@ -3713,9 +3879,6 @@ function createPane(slot, host) {
   };
   const CLOSED_RANK = 4;
 
-  /** How many task rows the block shows before it stops growing and scrolls. */
-  const TASKS_VISIBLE = 5;
-
   function renderTasks() {
     const list = roomView.tasksEl;
     if (!list || !list.isConnected) return;
@@ -3863,36 +4026,6 @@ function createPane(slot, host) {
   }
 
   /**
-   * Stop the block growing at five rows. The maintainer ran seven tasks in one evening and
-   * the list pushed the room off the bottom of the panel; a long-lived team has dozens.
-   *
-   * Measured rather than declared, because a task row is one line or two — the branch
-   * line only exists once a worktree does — so "five rows" has no fixed height. The cut
-   * is taken from the sixth row's own top: five rows, four gaps, the list's padding,
-   * and nothing of the sixth. Reading a rect forces layout, which is the point — this
-   * runs synchronously inside the paint that appended the rows, never behind a
-   * `requestAnimationFrame`, which an automated Chrome window never fires because it
-   * reports `visibilityState: 'hidden'` (see CLAUDE.md).
-   *
-   * Under six rows nothing is set at all: an empty scroll gutter on a three-task team
-   * is worse than the problem this solves.
-   */
-  function capTaskList(list, nodes) {
-    list.style.maxHeight = '';
-    list.classList.toggle('is-capped', nodes.length > TASKS_VISIBLE);
-    if (nodes.length <= TASKS_VISIBLE) return;
-    const cs = getComputedStyle(list);
-    const gap = parseFloat(cs.rowGap) || 0;
-    const pad = parseFloat(cs.paddingBottom) || 0;
-    const top = list.getBoundingClientRect().top;
-    const cut = nodes[TASKS_VISIBLE].getBoundingClientRect().top;
-    const height = cut - top - gap + pad;
-    // A zero here means the block was not laid out (hidden pane, display:none); leave
-    // the class's own fallback height in charge rather than writing a nonsense cap.
-    if (height > 0) list.style.maxHeight = `${Math.ceil(height)}px`;
-  }
-
-  /**
    * Tasks refresh over HTTP on the roster beat (renderHead), not a new ws frame — the
    * endpoint exists, the join is roster-derived anyway, and the floor keeps a 2s roster
    * from turning into a 2s fetch loop.
@@ -4019,18 +4152,77 @@ function createPane(slot, host) {
     };
     roomView.hintEl = hint;
 
+    // The two dividers this aside owns (#13). Both are built here and dragged through the
+    // shared `resizer`; both re-pin the room while they move, because both change the
+    // shape of the box the reader is scrolled inside — the settings fold's own lesson,
+    // one and two elements over.
+    const asideGrip = paneGrip('x', 'Panel width', "Drag to set the panel's width · double-click to reset");
+    asideGrip.classList.add('aside-grip');
+    const roomHead = section('room', 'Workers and the lead coordinate here. View only — talk to the lead in the composer.');
+    const tasksGrip = paneGrip('y', 'Tasks and room split', 'Drag to split tasks and room · double-click to reset');
+    tasksGrip.classList.add('tasks-grip');
+
+    resizer({
+      handle: asideGrip,
+      axis: 'x',
+      storageKey: 'foreman.asideWidth',
+      min: ASIDE_MIN,
+      max: ASIDE_MAX,
+      // The ceiling is the *pane's*, not the window's: split view puts two of these side
+      // by side, and the one being dragged is the only one the pointer is inside. The
+      // stylesheet enforces the same floor and ceiling per aside — see `.room-panel` —
+      // because `--aside` is one number for the whole browser and the other pane may be
+      // narrower than this one.
+      ceiling: () => (asideGrip.closest('.lead-cols')?.clientWidth ?? window.innerWidth) / remPx() - LEAD_LEFT_MIN,
+      // The aside is flush with the pane's right edge, so what the pointer is asking for
+      // is the distance from that edge back to the cursor.
+      measure: (e) => (asideGrip.closest('.lead-cols')?.getBoundingClientRect().right ?? window.innerWidth) - e.clientX,
+      apply: (rem) => setRootVar('--aside', rem),
+      onMove: pinRoom,
+    });
+
+    resizer({
+      handle: tasksGrip,
+      axis: 'y',
+      storageKey: 'foreman.tasksHeight',
+      min: TASKS_MIN,
+      max: TASKS_MAX,
+      // What is left under the Tasks block once the room's own floor and the `room`
+      // heading are taken out of it. Measured off the panel rather than declared: the
+      // settings fold above can be open or shut, and the heading is one line of whatever
+      // the type scale says today.
+      ceiling: () => {
+        const bottom = panel.getBoundingClientRect().bottom;
+        const top = tasksList.getBoundingClientRect().top;
+        const head = roomHead.getBoundingClientRect().height;
+        // Before the aside is laid out every rect is zero; the preference's own `max`
+        // is a better answer than a negative one.
+        if (bottom <= top) return TASKS_MAX;
+        return (bottom - top - head) / remPx() - ROOM_MIN;
+      },
+      measure: (e) => e.clientY - tasksList.getBoundingClientRect().top,
+      apply: (rem) => {
+        setRootVar('--tasks-h', rem);
+        recapTaskLists();
+      },
+      onMove: pinRoom,
+    });
+
     // Settings on top (folded, so it is one line), then the two things actually read.
     // Both of the blocks above the room still call `pinRoom` when their own fetch lands
     // — reordering them does not change *which* boxes resize the room, only where they
     // sit, and the room still opens on its newest line rather than 454px short of it.
+    // The aside's own grip goes last so it paints over everything it overhangs.
     panel.append(
       settingsHead,
       settingsFold,
       section('tasks', 'Every task this team holds — stored state joined with what the pane shows now.'),
       tasksList,
-      section('room', 'Workers and the lead coordinate here. View only — talk to the lead in the composer.'),
+      tasksGrip,
+      roomHead,
       list,
       hint,
+      asideGrip,
     );
     return panel;
   }

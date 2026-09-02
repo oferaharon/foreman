@@ -44,43 +44,88 @@ button {
   min-height: 0;
 }
 
-/* The rail's right edge, dragged. Overhangs the border by a couple of pixels each way so
-   there is something to grab without the cursor having to land on a 1px rule — the whole
-   affordance is a hover, so it is drawn only then, and only as the existing rule going
-   accent. It sits over the list rather than in the column: a grip that took width would
-   move every row in the rail by its own thickness. */
-.rail-grip {
+/* ------------------------------------------------------------- grips --- */
+
+/* The three draggable dividers: the rail's right edge, the lead aside's left edge, and
+   the Tasks/Room split inside that aside. One class, because they are one behaviour —
+   see `resizer` in app.js.
+
+   Each overhangs its own 1px rule by three pixels each way, so there is something to grab
+   without the cursor having to land on a hairline, and each is positioned *over* the
+   layout rather than taking a column or a row of it: a grip with width would move every
+   row in the rail sideways by its own thickness.
+
+   Two marks, and the difference is the whole of issue #13. The hairline lights up only
+   under the cursor, exactly as the rail's did. The short bar in the middle is drawn at
+   rest, faintly — the rail was draggable from #4 and nothing on screen ever said so. */
+.pane-grip {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  right: -3px;
-  width: 7px;
   z-index: 3;
-  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   /* The pointer owns the drag from `pointerdown` to `pointerup`; without this a touch
      drag scrolls the page out from under it instead. */
   touch-action: none;
 }
 
-/* The hairline that lights up. Nothing is painted until the grip is pointed at, so an
-   undragged rail looks exactly as it did before this existed. */
-.rail-grip::after {
+/* The rule going accent. Offset three pixels into the strip, against the 1px border the
+   strip straddles: on the rule itself for the row divider, and one pixel inside the panel
+   for the two column ones — which is exactly where the rail's has been drawn since #4, and
+   is why this is an offset rather than a centre. The two column edges are mirror images,
+   so one absolutely positioned hairline cannot sit on the outer side of both. */
+.pane-grip::before {
   content: '';
   position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 3px;
-  width: 1px;
   background: transparent;
 }
 
-.rail-grip:hover::after,
-.app.rail-dragging .rail-grip::after { background: var(--accent); }
+/* The grip mark. `--ink-faint` is the panel's own "present but not asking for anything"
+   ink; the same rules that light the hairline take it to full `--ink`. */
+.pane-grip::after {
+  content: '';
+  border-radius: 999px;
+  background: var(--ink-faint);
+  transition: background 120ms ease;
+}
+.pane-grip:hover::before,
+.pane-grip.is-dragging::before { background: var(--accent); }
+.pane-grip:hover::after,
+.pane-grip.is-dragging::after { background: var(--ink); }
+@media (prefers-reduced-motion: reduce) {
+  .pane-grip::after { transition: none; }
+}
 
-/* While dragging, the pointer is captured by the grip and every other cursor in the app
+/* A column divider: a 7px strip down a full edge, with the bar upright in the middle of
+   it. Nothing here has a transition — a size that eased into place would lag the cursor,
+   which reads as the drag having been dropped. */
+.pane-grip.grip-col {
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+}
+.pane-grip.grip-col::before { top: 0; bottom: 0; left: 3px; width: 1px; }
+.pane-grip.grip-col::after { width: 2px; height: 1.6rem; }
+
+/* A row divider: the same thing turned ninety degrees. */
+.pane-grip.grip-row {
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: row-resize;
+}
+.pane-grip.grip-row::before { left: 0; right: 0; top: 3px; height: 1px; }
+.pane-grip.grip-row::after { height: 2px; width: 1.6rem; }
+
+/* The rail's own edge, overhanging its border. Measured: 315–322 against a 320px rail. */
+.rail-grip { right: -3px; }
+
+/* While dragging, the pointer is captured by the grip and every other cursor on the page
    would otherwise fight it — and a drag across a rail full of text selects all of it. */
-.app.rail-dragging { cursor: col-resize; user-select: none; }
-.app.rail-dragging * { cursor: col-resize !important; }
+body.col-dragging, body.row-dragging { user-select: none; }
+body.col-dragging * { cursor: col-resize !important; }
+body.row-dragging * { cursor: row-resize !important; }
 
 /* What this software is, and which version of it — the one piece of chrome that says so.
    Quiet by construction: faint ink, the head's own type scale, no accent until you point
@@ -1145,14 +1190,34 @@ button {
   flex: 1;
   min-width: 0;
 }
+/* Dragged from its left edge (#13). `--aside` is one number for the whole browser, so
+   the floor and the ceiling are *also* written here, per aside: split view can put two of
+   these in panes of different widths, and the percentage resolves against `.lead-cols`,
+   which is this pane's own. That is what keeps 20rem of transcript beside every one of
+   them. `min-width` beats `max-width` in CSS when they cross, which is the right way
+   round — an aside squeezed to nothing is not a panel. */
 .room-panel {
-  width: 340px;
+  width: var(--aside);
+  min-width: 15rem;
+  max-width: max(15rem, calc(100% - 20rem));
   flex: none;
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--rule);
   background: var(--shelf);
   min-height: 0;
+}
+/* The aside's own edge, mirroring `.rail-grip`: the strip's centre on the border. */
+.aside-grip { left: -3px; }
+/* The Tasks/Room divider. It is a flex item rather than an overlay — there is no edge to
+   hang it off, the two blocks simply meet — and the negative margins are what stop it
+   costing seven pixels of the panel: -4 above and -3 below nets zero, and lands its
+   hairline on the Tasks block's own bottom rule. `position: relative` because the shared
+   `.pane-grip` is absolute, and a row divider has to sit where the flow put it. */
+.tasks-grip {
+  position: relative;
+  flex: none;
+  margin: -4px 0 -3px;
 }
 .room-head {
   padding: 0.45rem 0.8rem;
@@ -1459,6 +1524,12 @@ button {
    two). The value here is only the fallback for a block that was not laid out. */
 .team-tasks {
   flex: none;
+  /* Dragged, or not. With no preference this is `auto` and the five-row cut above is what
+     bounds the block; with one, the height is exactly what was dragged and `capTaskList`
+     stands down. A height rather than a max-height on purpose: the divider has to follow
+     the pointer even on a team with three tasks, where there is no sixth row to reveal.
+     The rows do not stretch into it — they are ordinary blocks in a column that scrolls. */
+  height: var(--tasks-h, auto);
   overflow-y: auto;
   overscroll-behavior: contain; /* scrolling out of this box must not drag the room */
   padding: 0.5rem 0.7rem;
