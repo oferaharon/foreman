@@ -12,8 +12,8 @@ from a row's `⧉`, by restoring a snapshot, or when a team lead dispatches a wo
 panel too, through a port of that tool's own launcher (`server/launch.js`). It still starts
 nothing on its own: a dispatch happens because a lead asked you first. It *ends* a session
 in exactly two places — the bin on a rail row, and a task closed `done` once its PR is
-verified merged. Everything else it does is observe and inject. See `README.md` for how each
-feature works, the team included; this file is the things that will bite you.
+verified merged. Everything else it does is observe and inject. See `docs/panel.md` for how each
+feature works and `docs/team.md` for the team; this file is the things that will bite you.
 
 **Five screens, five parsers, and they must keep refusing each other's boxes.**
 `permission.js` (a permission prompt — every yes past the plain one is broader, and there
@@ -70,7 +70,7 @@ nothing.
 The panel also runs **team leads**: a Claude Code session you talk to, which dispatches
 **workers** — other sessions, each in its own git worktree — and brings you only the
 decisions that need you. Tick **Team lead** in `+ new` and the folder gets one.
-`README.md` describes what a team does and what it deliberately does not. What holds it
+`docs/team.md` describes what a team does and what it deliberately does not. What holds it
 together is here: the rules in this section, the Traps below, and the team modules' own
 tests, listed under *The substrate* above. Read them before changing any of it.
 
@@ -349,8 +349,8 @@ the refusal reported in the launch result and the room — and the brief is then
 the *demoted* forge, so it never promises a tool the file does not contain. `gh` is
 preferred for GitHub for that reason alone: its login is in the keychain. And `gh`'s login
 is **not git's** — without `gh auth setup-git` a worker's plain `git push` fails with
-*"could not read Username for 'https://github.com'"*, measured on a bench repo. The README
-states it as a prerequisite.
+*"could not read Username for 'https://github.com'"*, measured on a bench repo. `README.md`
+and `docs/running.md` state it as a prerequisite.
 
 **"Done" force-deletes a branch, so the endpoint checks before it sweeps.** `task_close`
 with outcome `done` runs `git branch -D`, and until this existed the only thing in front of
@@ -1662,7 +1662,7 @@ being optional" — that day came, and the ruling went the other way.
 all on `main`. The last of them — stuck detection, worktree GC, conflict flagging, the
 team panel in the lead's aside, `[room]` nudge rendering — merged 2026-08-26 on the
 strength of its own verification, and `team-lead-wave-e` is retired; there is no branch
-left holding any of it back. What the team deliberately does *not* do is in `README.md`'s
+left holding any of it back. What the team deliberately does *not* do is in `docs/team.md`'s
 Non-goals; how each rule here was learned is in the Traps above.
 
 Since then the team has grown a **`pending` task state**: a task recorded with its brief and
