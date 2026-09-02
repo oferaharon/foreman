@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parseModelDialog, parseModelConfirm, confirmNames, stepToward } from '../server/model.js';
+import {
+  parseModelDialog,
+  parseModelConfirm,
+  confirmNames,
+  stepToward,
+  footerModelName,
+} from '../server/model.js';
 import { parsePrompt } from '../server/permission.js';
 import { parseQuestion } from '../server/question.js';
 import { parsePlanPrompt } from '../server/plan.js';
@@ -190,4 +196,62 @@ test('the model parser refuses every other box', () => {
     assert.equal(parseModelDialog(fixture(name)), null, name);
     assert.equal(parseModelConfirm(fixture(name)), null, `confirm / ${name}`);
   }
+});
+
+/*
+ * The picker's rows and the composer footer do not spell a model the same way, and the
+ * panel has to know what the footer *will* say before the terminal redraws it — that is
+ * the whole of why the label used to sit one switch behind. These pin the bridge on the
+ * real fixture, and pin that it declines rather than guesses.
+ */
+test("a picker row says what the footer will call it", () => {
+  const d = parseModelDialog(fixture('dialog-model.txt'));
+  assert.deepEqual(
+    d.options.map(footerModelName),
+    ['Opus 5', 'Opus 5', 'Fable 5', 'Sonnet 5', 'Haiku 4.5'],
+  );
+});
+
+test('a row with no blurb to read yields nothing rather than a guess', () => {
+  // A row with no blurb is a layout nobody has met — at 70 columns the blurb wraps but
+  // survives, pinned below. If one ever arrives, the label alone names a *choice*, not a
+  // model: reading `Sonnet` as the footer's `Sonnet 5` would be inventing the version.
+  assert.equal(footerModelName({ label: 'Sonnet', description: null }), null);
+  assert.equal(footerModelName({ label: 'Default (recommended)', description: '' }), null);
+  assert.equal(footerModelName(undefined), null);
+  // ...and a blurb that names no model is the same case, not a partial match.
+  assert.equal(footerModelName({ label: 'Sonnet', description: 'Efficient for routine tasks' }), null);
+});
+
+test('the footer spelling is read with the footer\'s own pattern, parenthetical and all', () => {
+  // `parsePane` reads this exact shape off the footer line; the client's `shortModel`
+  // drops the trailing parenthetical, which is why `Opus 5` and `Opus 5 (1M context)`
+  // are the same label on screen and the seed never wobbles.
+  assert.equal(
+    footerModelName({ label: 'Opus', description: 'Opus 5 (1M context) · Best for everyday tasks' }),
+    'Opus 5 (1M context)',
+  );
+  assert.equal(footerModelName({ label: 'Haiku', description: 'Haiku 4.5 · Fastest' }), 'Haiku 4.5');
+});
+
+/*
+ * The same box at 70 columns, captured from a session in the sandbox's `alpha`. Pane width
+ * is an input to every parser here, and this one had no narrow capture at all.
+ *
+ * The thing it pins beyond the parse: the blurb *wraps* but is not lost, and the model name
+ * sits at its front — `Fable 5.1 · Most capable for your` — so what `footerModelName` reads
+ * is the half that survives. That is why the picker can predict the footer at any width
+ * rather than only on a wide terminal, and it is measured here rather than assumed.
+ */
+test('the picker parses at 70 columns, and the footer name survives the wrap', () => {
+  const d = parseModelDialog(fixture('dialog-model-narrow.txt'));
+  assert.deepEqual(
+    d.options.map((o) => o.label),
+    ['Default (recommended)', 'Opus (1M context)', 'Fable', 'Sonnet', 'Haiku'],
+  );
+  assert.equal(d.currentIndex, 4);
+  assert.deepEqual(
+    d.options.map(footerModelName),
+    ['Opus 5', 'Opus 5', 'Fable 5.1', 'Sonnet 5', 'Haiku 4.5'],
+  );
 });

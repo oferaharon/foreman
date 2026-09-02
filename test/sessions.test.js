@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { rememberFooter, openTaskFor } from '../server/sessions.js';
+import { rememberFooter, openTaskFor, SessionRegistry } from '../server/sessions.js';
 
 /*
  * Model and `ctx:` are scraped off the composer footer, which a question box, a permission
@@ -119,4 +119,51 @@ test('a session with no tmux name matches nothing', () => {
 test('no task store at all is not an error', () => {
   assert.equal(openTaskFor(null, 'voice-repo-x'), null);
   assert.equal(openTaskFor([], 'voice-repo-x'), null);
+});
+
+/*
+ * `noteModel` is the other end of the same store, and it exists because the panel can set a
+ * model faster than the terminal redraws the line the model is read off. Without it the
+ * poll right after a switch scrapes a footer that has not caught up — or no footer at all,
+ * because the picker is still coming down — and `rememberFooter` hands back the model the
+ * session was on before the click. The label then sits a switch behind, which is what was
+ * reported.
+ *
+ * It is a seed and not an assertion: the next poll that reads a real footer wins, so a
+ * switch that silently failed corrects itself instead of being believed forever.
+ */
+const bareRegistry = () => new SessionRegistry(null, null, null, null);
+
+test('a model the panel just set stands in until a footer is read', () => {
+  const r = bareRegistry();
+  rememberFooter(r.footers, '%16', { model: 'Fable 5.1', contextPct: 12 });
+
+  r.noteModel('%16', 'Sonnet 5');
+
+  // The picker is still on screen, so there is no footer to scrape.
+  assert.deepEqual(rememberFooter(r.footers, '%16', { model: null, contextPct: null }), {
+    model: 'Sonnet 5',
+    contextPct: 12,
+  });
+});
+
+test('the first real footer after a seed wins', () => {
+  const r = bareRegistry();
+  r.noteModel('%16', 'Sonnet 5');
+  assert.deepEqual(rememberFooter(r.footers, '%16', { model: 'Haiku 4.5', contextPct: 7 }), {
+    model: 'Haiku 4.5',
+    contextPct: 7,
+  });
+});
+
+test('a seed with nothing to seed changes nothing', () => {
+  const r = bareRegistry();
+  rememberFooter(r.footers, '%16', { model: 'Fable 5.1', contextPct: 12 });
+
+  // `footerModelName` answers null for a row with no blurb to read, and null must not
+  // erase a model that was actually on screen.
+  r.noteModel('%16', null);
+  r.noteModel(null, 'Sonnet 5');
+
+  assert.deepEqual(rememberFooter(r.footers, '%16', null), { model: 'Fable 5.1', contextPct: 12 });
 });

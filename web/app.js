@@ -1468,6 +1468,19 @@ function openMenu(anchor, items, { onDismiss } = {}) {
   closeMenu();
   if (sameAnchor) return;
 
+  // A menu is placed off its anchor's rect, and a node that has left the document measures
+  // as all zeros — so a detached anchor puts the menu in the top-left corner of the page
+  // instead of on the control that was clicked. That is not hypothetical: anything that
+  // awaits the server before opening can have its whole composer rebuilt underneath it
+  // (see `buildModelPicker`), and those callers now resolve the anchor after the await.
+  // This is the floor under them. `onDismiss` still runs, because it is the caller's "the
+  // menu is gone" hook and the model picker uses it to close the box it opened in the
+  // terminal — refusing must not leave one holding the session.
+  if (!anchor?.isConnected) {
+    onDismiss?.();
+    return;
+  }
+
   const el = document.createElement('div');
   el.className = 'menu';
 
@@ -6319,7 +6332,16 @@ function createPane(slot, host) {
       btn.textContent = 'opening…';
       try {
         const data = await postJSON(`/api/sessions/${encodeURIComponent(s.id)}/model/open`, {});
-        openModelMenu(btn, s, data.dialog);
+        // Resolved here rather than captured above, and the difference is a whole await.
+        // Opening the box types `/model` into the terminal and waits for it to come up,
+        // which is longer than a roster beat — and a session showing that box has no
+        // composer footer, so the frame that lands carries `mode: null`, `composerSig`
+        // changes, and `renderHead` replaces the entire composer. `btn` is then a detached
+        // node, it measures as all zeros, and the menu opens in the corner of the page
+        // rather than over the button. Same "resolve at click time" rule the header's pin
+        // follows, one await further along.
+        const live = composerEl?.model;
+        openModelMenu(live?.isConnected ? live : btn, s, data.dialog);
       } catch (err) {
         setComposerNote(err.message, 'err');
       } finally {
@@ -6328,6 +6350,29 @@ function createPane(slot, host) {
       }
     };
     return btn;
+  }
+
+  /**
+   * Show a model the panel has just set, without waiting to be told about it.
+   *
+   * `s.model` comes off the composer footer by way of the roster, and while the picker
+   * owned the terminal there was no footer to read — so the next frame names the model
+   * this session was on a moment ago, and the label looks one click behind. (The server
+   * seeds its own footer memory from the same answer, so the frame after that agrees
+   * rather than stomping this back; without that half this repaint would survive about a
+   * second.)
+   *
+   * Written onto the roster entry rather than onto the button, because the button, the
+   * header and the rail row all read that one field and painting three places by hand is
+   * how they drift apart. It is overwritten wholesale by the next `sessions` frame, which
+   * is the point: this is what the panel believes until the pane says otherwise.
+   */
+  function noteModelPicked(model) {
+    const s = current();
+    if (!model || !s) return;
+    s.model = model;
+    renderRail();
+    for (const p of panes) p.renderHead();
   }
 
   function openModelMenu(anchor, s, dialog) {
@@ -6346,6 +6391,14 @@ function createPane(slot, host) {
             index: o.index,
             expectLabel: o.label,
           });
+          // Paint the answer before saying anything about it. The roster's model is
+          // scraped off the composer footer, the terminal redraws that in its own time,
+          // and the response is the only thing on either side that already knows — throw
+          // it away and the button goes on naming the model you just left. The order
+          // matters: this repaints the head, which rewrites the hint, so the note below
+          // has to come after it.
+          noteModelPicked(done.footerModel);
+
           // Mid-conversation the terminal asks one more question — "the history gets
           // re-read on your next message" — which the server answers, because the click
           // already said switch. Saying so is the difference between answering for you and
@@ -6669,7 +6722,10 @@ function createPane(slot, host) {
     if (!s) return;
     btn.textContent = s.interactive && s.status !== 'idle' ? 'queue' : 'send';
 
-    if (!s.interactive) {
+    if (composerNote && Date.now() < composerNote.until) {
+      hint.className = `composer-hint${composerNote.kind ? ` ${composerNote.kind}` : ''}`;
+      hint.textContent = composerNote.text;
+    } else if (!s.interactive) {
       hint.textContent = 'no tmux pane — read-only';
     } else if (isTrustGate(s.prompt)) {
       // The card above this line says the panel will not answer that box. "Answer the
@@ -6957,13 +7013,36 @@ function createPane(slot, host) {
     }
   }
 
+  /**
+   * A note is what just happened; the hint underneath it is why a message would wait.
+   *
+   * It is held as state rather than written straight onto the node because the node is not
+   * safe to write on: any roster frame repaints the hint, and a composer rebuild replaces
+   * it outright. That was always a race — a frame landing in the wrong half-second wiped a
+   * note that had barely been drawn — and the model picker made it certain, because the
+   * answer it paints from is exactly the thing that makes the next frame differ. The note
+   * that says a model was set **for this session only** is not one to lose to a repaint:
+   * in this one dialog the alternative is the global default, which is most of what
+   * `server/model.js` is about.
+   *
+   * Four seconds, then the hint goes back to saying whatever is true. Nothing outranks a
+   * note inside that window, which is the behaviour that was already there — "switching
+   * to…" is drawn over a `dialog is open` warning today — and it is safe because a note
+   * only ever exists as the direct answer to something the reader just clicked.
+   */
+  const NOTE_MS = 4000;
   let noteTimer = null;
+  let composerNote = null; // { text, kind, until }
+
   function setComposerNote(text, kind = '') {
     if (!composerEl) return;
-    composerEl.hint.className = `composer-hint${kind ? ` ${kind}` : ''}`;
-    composerEl.hint.textContent = text;
+    composerNote = { text, kind, until: Date.now() + NOTE_MS };
     clearTimeout(noteTimer);
-    noteTimer = setTimeout(updateComposerHint, 4000);
+    noteTimer = setTimeout(() => {
+      composerNote = null;
+      updateComposerHint();
+    }, NOTE_MS);
+    updateComposerHint();
   }
 
   async function submit() {

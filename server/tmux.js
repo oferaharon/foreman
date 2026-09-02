@@ -5,6 +5,7 @@ import { SESSION_PREFIX } from './config.js';
 import { parsePrompt } from './permission.js';
 import { parseQuestion } from './question.js';
 import { parsePlanPrompt } from './plan.js';
+import { FOOTER_MODEL_RE } from './model.js';
 
 const run = promisify(execFile);
 
@@ -165,7 +166,7 @@ const DECISION_RE = /Do you want to|^\s*❯?\s*1\.\s+Yes\b|\(esc to (?:reject|ca
 function hasComposer(recent) {
   return recent
     .slice(-6)
-    .some((line) => /[⏵⏸]/.test(line) || (line.includes('|') && MODEL_RE.test(line)));
+    .some((line) => /[⏵⏸]/.test(line) || (line.includes('|') && FOOTER_MODEL_RE.test(line)));
 }
 
 /** `─────` above the dialog's heading. Solid rule only — the box-drawing kind is inner. */
@@ -228,8 +229,11 @@ function dialogTitle(nonEmpty) {
  * ...but the real line is padded to terminal width and can carry a right-aligned
  * hint ("new task? /clear to save 146.1k tokens"), so pull the fields out by name
  * rather than anchoring to the end of the line.
+ *
+ * The model half of it lives in `model.js` — the picker has to predict what this line
+ * will say before the terminal has redrawn it, and two spellings of one naming contract
+ * is the `isLeadName` mistake in another costume.
  */
-const MODEL_RE = /\b((?:Opus|Sonnet|Haiku|Fable)\s+[\d.]+(?:\s*\([^)]*\))?)/;
 const CTX_RE = /\bctx:\s*(\d+)%/;
 
 /**
@@ -349,7 +353,7 @@ export function parsePane(text) {
   let effort = null;
   for (const line of recent.slice(-6)) {
     if (!line.includes('|')) continue;
-    const m = MODEL_RE.exec(line);
+    const m = FOOTER_MODEL_RE.exec(line);
     if (!m) continue;
     model = m[1].trim();
     const ctx = CTX_RE.exec(line);
