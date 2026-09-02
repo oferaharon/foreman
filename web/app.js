@@ -1353,12 +1353,19 @@ async function openSettings() {
     // that click is what asks.
     noteBox.disabled = !notifySupported() || notifyPermission() === 'denied';
     noteTest.disabled = !notifyArmed();
+    // The line has to answer for the *checkbox*, not for the stored flag, and those two
+    // come apart in one real state: the opt-in is remembered here while the browser's own
+    // permission has gone back to `default` — a new profile, cleared site data, a
+    // permission reset. Reading the flag alone printed "On" over an empty box, which is
+    // the shape of every "is this broken?" report there has ever been.
     noteFlag.textContent =
       extra ||
       reason ||
-      (notifier.enabled
+      (notifyArmed()
         ? 'On, in this browser. Remembered here only — every browser and every device answers for itself.'
-        : 'Off. This is a browser preference, not a panel setting: it applies the moment you tick it and Save does not touch it.');
+        : notifier.enabled
+          ? 'You asked for these here, but this browser has not granted permission — tick the box to ask it again.'
+          : 'Off. This is a browser preference, not a panel setting: it applies the moment you tick it and Save does not touch it.');
     noteFlag.classList.toggle('is-restart', Boolean(extra));
   };
   paintNotify();

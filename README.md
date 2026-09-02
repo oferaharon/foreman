@@ -853,6 +853,54 @@ comes back stamped with the slot it belongs to. In the browser this meant liftin
 per-session state — selection, messages, the composer — out of module scope and into a
 `createPane` factory; two of everything, sharing one roster.
 
+### Installing it as an app
+
+The panel ships a web-app manifest, so it can leave the browser and become a window of its
+own: **Safari → File → Add to Dock**, or **Chrome → the address bar's install icon → Install
+app**. You get a Dock icon, no tabs and no address bar. The phone view at `/m/` installs the
+same way from iOS Safari — **Share → Add to Home Screen** — as a full-screen web app.
+
+They are deliberately **two apps, not one**. Each manifest carries its own `id` (`/` and
+`/m/`) and its own icon: the panel's mark is a rail of rows with the top one in the colour of
+a session that needs you, the phone's is a lead with two workers indented under it. Two
+manifests on one origin that share an `id` are one app as far as a browser is concerned, and
+installing the second would quietly replace the first.
+
+The mark is generated, not drawn by hand: `npm run icons` runs `scripts/make-icons.mjs`,
+which is the only description of it — the SVG and every PNG size come out of one set of
+coordinates, so the vector and the bitmaps cannot drift apart. It needs nothing but node.
+
+### Notifications
+
+Off by default, and opt in from the settings box: **Notifications on this Mac → Tell me when
+a session needs a human**. With it on, the panel raises a macOS notification the moment a
+session walks into something it cannot get past — a permission prompt, a question Claude is
+asking, a plan waiting for approval, the folder-trust gate — and when a worker's task reaches
+`review`. Clicking one focuses the window and opens that session.
+
+What it deliberately is not: a reminder, a digest, or a badge count. One notification when a
+thing happens, replaced rather than repeated if that session then needs something else, and
+nothing at all while it sits there waiting. Opening the panel announces no backlog — the
+first roster frame after a page load is a baseline, because half the sessions here are at a
+prompt at any given moment.
+
+Two quiet rules it inherits rather than invents. A **worker's** own prompts stay silent until
+its stuck timer fires, because a worker's prompt is its lead's to answer — the same rule that
+keeps it out of the inbox. And "it replied and you haven't read it" is not a notification; it
+is an unread badge, which is where it stays.
+
+**It only works where the browser will allow it, which means on this Mac.** Notifications need
+a secure context: `http://127.0.0.1` counts as one, a LAN address over plain `http://` does
+not. Opened from the phone or another machine the control is disabled with the reason printed
+under it rather than silently doing nothing. That follows from the exposure decision in
+[SECURITY.md](SECURITY.md) rather than being a gap in it, and the phone's half of this is the
+Home Screen icon.
+
+The preference is remembered in the browser that answered — it is not a panel setting, it
+applies the moment you tick it, and `save` does not touch it. Every browser and every device
+answers for itself. There is a `test` button beside it, because "did I actually grant this?"
+deserves an answer that is not "wait for a session to block".
+
 ## The team
 
 A **team lead** is a Claude Code session you talk to, which dispatches **workers** —
@@ -1426,6 +1474,12 @@ mcp/
 web/
   index.html  styles.css  app.js   (app.js: shared shell + rail, then a createPane factory)
   trust-gate.js   the one screen nothing may answer — the only web/ file server/ imports
+  notify.js       what is worth interrupting somebody for, and when it became true
+  manifest.webmanifest  m/manifest.webmanifest   two installable apps, two ids
+  icons/          the mark, generated — never hand-edited
+scripts/
+  make-icons.mjs  the only description of the mark: one geometry, the SVG and every PNG
+  backup-state.sh a copy of the state dir and the plist, before anything risky
 ```
 
 ## Configuration
