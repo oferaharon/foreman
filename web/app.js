@@ -6303,15 +6303,14 @@ function createPane(slot, host) {
     use.className = 'ghost-line-use';
     use.type = 'button';
     /*
-     * The button says what pressing it does, which is not quite what the issue's wording
-     * implies and is the better half of the trade: with auto-send on, "use" is a one-click
-     * send into a live session, and a control that sends should not be labelled as though
-     * it fills a box. The setting decides the behaviour; the label follows it rather than
+     * The button says what pressing it does. With the setting on this is a one-press send
+     * into a live session, and a control that sends should not be labelled as though it
+     * fills a box — the setting picks the behaviour and the label follows it rather than
      * hiding it.
      */
     use.textContent = ghostSend.on ? 'send' : 'use';
     use.title = ghostSend.on
-      ? 'Send this to the session now — ghost-text auto-send is on for this browser'
+      ? 'Send this to the session now — “send a suggestion straight away” is on for this browser'
       : 'Put this in the box below, to edit or send';
     use.onclick = () => useGhost(text);
 
