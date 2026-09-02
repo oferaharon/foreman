@@ -107,18 +107,47 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
 - **Destructive git stays denied** (`GIT_DENY` in `dispatch.js`) regardless of mode. A
   worktree isolates *files*, not history — a force-push from inside one reaches the real
   repository.
-- **Nothing merges on anything but the maintainer's explicit per-PR word.** The lead performs the
-  merge; the decision is never inferred from green checks, timers or silence. The
-  `mergePRs` toggle means auto-merge and is refused at every endpoint. The `leadMerges`
-  toggle (off by default) is *not* that: it only adds an allow rule for **that repo's own
-  forge's** merge tool (`mergeRule` in `team.js`) so a merge the maintainer ordered doesn't stop on a
-  harness prompt. What it costs differs by forge and the panel's copy says which — on Gitea
-  one tool both opens and merges PRs, so a rule cannot tell those apart and the per-PR rule
-  is then enforced by the lead's discipline rather than by a prompt; under `gh` the rule is
-  `Bash(gh pr merge:*)`, which genuinely cannot open one; through a GitHub MCP server it
-  adds **nothing**, because nobody here has run that server and an unverified tool name in
-  an allow rule is a rule that silently does nothing. The settings file is written at lead launch (`leadSettings`
-  in `team.js`), so a flip reaches the next lead, not a running one.
+- **Nothing merges on anything but the maintainer's explicit per-PR word — with one named
+  exception, which they turn on themselves.** The lead performs the merge; the decision is
+  never inferred from green checks, timers or silence. **Three adjacent things, and
+  confusing them is how this rule gets undone:**
+  - `mergePRs` means **auto-merge** — the panel merging on a trigger, a timer, or checks
+    going green with nobody looking. Still refused at every endpoint, still deleted from
+    every patch, and this feature deliberately gave it no way in.
+  - `leadMerges` (off by default) is about **the prompt**, not the decision: it only adds
+    an allow rule for **that repo's own forge's** merge tool (`mergeRule` in `team.js`) so a
+    merge the maintainer ordered doesn't stop on a harness prompt. What it costs differs by
+    forge and the panel's copy says which — on Gitea one tool both opens and merges PRs, so
+    a rule cannot tell those apart and the per-PR rule is then enforced by the lead's
+    discipline rather than by a prompt; under `gh` the rule is `Bash(gh pr merge:*)`, which
+    genuinely cannot open one; through a GitHub MCP server it adds **nothing**, because
+    nobody here has run that server and an unverified tool name in an allow rule is a rule
+    that silently does nothing.
+  - `leadDecidesMerges` (off by default, issue #7) is **the decision**: with it on, the
+    lead may merge a worker's PR per PR, on its own judgment, having asked
+    `POST /api/team/tasks/:id/merge-check` first (`mergeVerdict`, `merge-check.js`; the
+    lead tool is `task_merge_check`). It is not `mergePRs` in another costume — there is no
+    trigger, no timer, and no deferred merge anywhere in it, the verdict is bound to one
+    head sha, and every call is a room line (`event: 'self-merge'`), refusals included.
+    The two toggles are independent: deciding without `leadMerges` means the lead decides
+    and then stops at a prompt.
+
+  **The wall and the discipline, and the split is the whole design.** The panel holds no
+  forge credential and makes no network call (the maintainer's ruling, 2026-08-30), so
+  only half of a merge's conditions can be enforced. **Wall** — computed from this disk,
+  unarguable: the toggle, an unparseable `humanReviewPaths`, a `push only`/`no remote`
+  forge, the task's shape, a head that is not the branch tip here, an unreadable branch, and
+  a changed file under `humanReviewPaths`. **Discipline** — the lead's own word, written
+  into the room and checkable by nothing here: `mergeable` and `checks` are validated
+  against an enum (which only rules out a word nobody meant), and `evidence`, `reason` and
+  `suiteQuote` are required to be *said* rather than to be true. The brief
+  (`selfMergeSection`, `lead-brief.js`) is where that discipline is actually specified,
+  which is why its forbidden-flag sentences are pinned by name in `test/brief.test.js`.
+  The close line then says whether a decision was recorded for the head that merged — a
+  visible non-event, never a second refusal, because refusing there would catch merges the
+  maintainer ordered. The settings file **and the brief** are
+  written at lead launch (`leadSettings`, `leadBrief` in `index.js`), so a flip of either
+  toggle reaches the next lead, not a running one.
 - **Nothing kills a worker automatically.** Stuck, silent, looping — all of it surfaces;
   none of it `/exit`s. That is a human's call, and `assertNotBlocked` is the backstop.
 
@@ -287,6 +316,34 @@ while a no-forge merge is local and there may be no remote. It fails **closed** 
 that could not run refuses — and the refusal names `abandon`, which is the word for
 discarding work deliberately. A planner's branch and an already-deleted branch are the two
 exemptions, and both are exemptions because there is nothing there to protect.
+
+**A self-merge is decided on facts the panel cannot check, and every one of them has a
+trap in it — all measured by the planner against real PRs, none of them guessable.** The
+first is the load-bearing one and it is about *this* code, not about GitHub: **the panel
+cannot read a forge, and `merge-check.js` must never start.** Every instinct while
+building or extending it says "the endpoint should just call `gh pr view`"; it holds no
+credential, makes no network call, and the 2026-08-30 ruling says it never will. Whoever
+touches this next will be tempted exactly once, which is why the module's own header says
+so first.
+
+Then the four the brief has to teach a lead, because the lead is the only party that *can*
+look. **A merged GitHub PR reads `mergeable: UNKNOWN`** — full read on a merged PR:
+`state: MERGED`, `mergeable: UNKNOWN`, `mergeStateStatus: UNKNOWN`, `statusCheckRollup:
+[]`. So `state` is read **before** `mergeable`, or a PR that is already done reads as "not
+computed yet" and gets retried forever. **`UNKNOWN` is lazy and is never a pass**: the
+first query starts the computation and returns it, a second a moment later has the answer
+— so re-read a few times a couple of seconds apart, and if it is *still* unknown, refuse.
+Passing on it would be passing on nothing. **`statusCheckRollup: []` is two different
+facts** and `gh` cannot tell them apart on its own: either the repo configures no checks,
+or checks exist and none has reported on this head. `mergeStateStatus` disambiguates —
+`CLEAN` means no checks (which is `checks: 'none'`, and then the worker's own quoted suite
+result is what stands in for CI), `BLOCKED` means a required one has not reported, and
+`UNSTABLE` means one is red. And **Gitea's `merge_when_checks_succeed` is auto-merge by
+another name** — a real argument on `pull_request_write`, beside `force_merge`, that arms a
+merge to fire later on green with nobody looking. It is `mergePRs` in tool form, one
+argument away from a lead that means well, which is why the brief forbids it *by name*
+along with `--admin`, `--auto` and `force_merge`, and why `test/brief.test.js` pins each
+name rather than pinning "says something about flags".
 
 **`main` was hardcoded in four places, and that made the team feature unusable on `master`.**
 `worktree.js`, `deployed.js` and two sites in `index.js` all defaulted to `main`/`origin/main`,

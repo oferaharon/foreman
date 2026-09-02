@@ -25,7 +25,7 @@ import { FALLBACK, humanPhrase } from './human-name.js';
  * until something imports it. Anything that edits the prose here should `import()` the
  * file afterwards as its own check.
  */
-export function leadBrief({ repo, teamDir, decisionsFile, forge = null, base = 'main', human = FALLBACK }) {
+export function leadBrief({ repo, teamDir, decisionsFile, forge = null, base = 'main', human = FALLBACK, selfMerge = false }) {
   const name = path.basename(repo);
   return `# You are the team lead for ${name}
 
@@ -116,7 +116,7 @@ any other project's name — none of them are yours to publish. This does not to
 or ${decisionsFile}: both are local, and rulings there are recorded in ${human}'s own
 name, on purpose.
 
-${forgeSection({ forge, base, human })}
+${forgeSection({ forge, base, human, selfMerge })}
 
 ## The room
 
@@ -197,6 +197,115 @@ route around it. Deliberately discarding a branch is outcome "abandon", which is
 that word is for.`;
 
 /**
+ * The self-merge paragraphs — present only when the team's `leadDecidesMerges` toggle is
+ * on **and** this repo has a forge to merge on, and absent to the byte otherwise.
+ *
+ * It sits under the merging rule rather than replacing it, because it does not replace it:
+ * the maintainer's word still merges anything, and everything the rule above says about
+ * green checks and silence not being consent is still exactly true. What the toggle adds
+ * is one narrow door, and the door has a doorman — `task_merge_check`, whose verdict is
+ * computed server-side from this checkout (`server/merge-check.js`).
+ *
+ * The panel cannot read a forge and never will, so half of what a merge turns on arrives
+ * *from the lead* — is the PR mergeable, are the checks green — and is written into the
+ * room where the maintainer reads it back. That makes the "how to read the forge"
+ * paragraphs below load-bearing rather than helpful: they are the only thing standing
+ * between an honest verdict and a confident one. Every measurement in them was taken by
+ * the planner against real PRs, and the ones that cost the most are the two that read as
+ * pedantry: a merged GitHub PR reports `mergeable: UNKNOWN`, and an empty
+ * `statusCheckRollup` means two entirely different things.
+ *
+ * The forbidden flags are named one by one, per forge, for the same reason `--admin` is
+ * already named: a lead that means well reaches for the argument that makes the obstacle
+ * go away. `--auto` and Gitea's `merge_when_checks_succeed` are the dangerous ones,
+ * because they are not a merge — they are auto-merge, which is the one thing this toggle
+ * deliberately does not grant, one argument away from a tool the lead already holds.
+ */
+function selfMergeSection({ kind, via, human }) {
+  const readForge =
+    kind === 'gitea'
+      ? `**Read the forge with \`pull_request_read\` — it costs you no merge permission.** Its
+\`get\` carries Gitea's own mergeable answer, \`get_files\` the changed files, and
+\`get_status\` the combined status of the head commit. Report \`checks: "green"\` only
+when that status is actually green **on the head you are about to merge**. If the repo
+configures no checks at all, that is \`checks: "none"\` plus the worker's own words about
+its test suite, quoted in \`suiteQuote\` — never your summary of them. Anything you have
+not read is \`unknown\`, and \`unknown\` never passes.`
+      : via === 'gh'
+        ? `**Read the forge with \`gh pr view <N> --json state,mergeable,mergeStateStatus,statusCheckRollup\`.**
+Check \`state\` **before** \`mergeable\`: a PR that has already merged reads
+\`mergeable: UNKNOWN\`, so reading mergeability first turns a finished PR into one you
+retry forever. GitHub also computes mergeability **lazily** — the first read starts the
+computation and answers \`UNKNOWN\` — so re-read a few times a couple of seconds apart,
+and if it is still \`UNKNOWN\`, refuse and say so. \`UNKNOWN\` is never a pass. It passes
+when \`mergeStateStatus\` is \`CLEAN\` or \`HAS_HOOKS\` **and** every
+\`statusCheckRollup\` entry is a success, neutral or skipped conclusion; \`DIRTY\`
+(conflict), \`BEHIND\`, \`DRAFT\`, \`BLOCKED\` (a required check or review missing) and
+\`UNSTABLE\` (a red check) are not. An empty \`statusCheckRollup\` is **two different
+facts** and \`mergeStateStatus\` is what tells them apart: with \`CLEAN\` it means this
+repo configures no checks, which is \`checks: "none"\` plus the worker's own words about
+its test suite quoted in \`suiteQuote\`; with \`BLOCKED\` it means a required check has
+not reported on this head yet, which is \`checks: "pending"\` and not a merge.`
+        : `**Read the forge with your \`github\` MCP tools before you call it**, and report only
+what you actually read. Check whether the PR is already merged **before** you read its
+mergeability: a merged PR reports its mergeability as unknown, so reading that first
+turns a finished PR into one you retry forever. GitHub computes mergeability lazily, so
+an unknown answer means re-read a few times a couple of seconds apart — and if it is
+still unknown, refuse and say so. Unknown is never a pass. An empty list of checks is
+**two different facts**: a repo that configures none, which is \`checks: "none"\` plus the
+worker's own words about its test suite quoted in \`suiteQuote\`, and a repo whose
+required checks have not reported on this head yet, which is \`checks: "pending"\` and not
+a merge. If your tools cannot tell you which, that is \`unknown\`.`;
+
+  const forbidden =
+    kind === 'gitea'
+      ? `**Never \`force_merge\`, never \`merge_when_checks_succeed\`, and \`merge_style\` stays
+the plain \`merge\` you use today.** Both are real arguments on \`pull_request_write\` and
+both are outside what this toggle grants: \`force_merge\` merges even if the checks fail,
+which are the very thing you just vouched for, and \`merge_when_checks_succeed\` arms a
+merge that fires later, on
+green, with nobody looking. That second one is auto-merge by another name, and auto-merge
+is the one thing this toggle deliberately does not grant.`
+      : via === 'gh'
+        ? `**Never \`--admin\`, never \`--auto\`, never a force anything** — a plain
+\`gh pr merge <N> --merge\`, exactly as above. \`--admin\` merges past the very checks you
+just vouched for, and \`--auto\` arms a merge that fires later, on green, with nobody
+looking. That second one is auto-merge, and auto-merge is the one thing this toggle
+deliberately does not grant.`
+        : `**A plain merge, never a force, and never a deferred one.** If your \`github\` MCP tools
+offer an argument that merges past failing checks, or one that arms the merge to fire
+later when the checks go green, neither is yours to use — the second is auto-merge, and
+auto-merge is the one thing this toggle deliberately does not grant.`;
+
+  return `**This team lets you decide some merges yourself — and \`task_merge_check\` comes first,
+every time.** The team's \`leadDecidesMerges\` toggle is on, which means ${human} has
+allowed you to merge a worker's PR on your own judgment instead of waiting for their word.
+It loosens nothing above it: before any merge you were not explicitly told to do, call
+\`task_merge_check\` with the task id, **the head sha you read off the forge**, and what
+the forge told you — \`mergeable\`, \`checks\`, \`evidence\` (what you read, and where),
+\`reason\` (why this is a PR you may merge unasked), and \`suiteQuote\` when the repo runs
+no checks at all. Merge only when it answers \`allowed: true\`, and merge only the exact
+head it checked: the verdict is bound to that commit, and a branch that moved needs a new
+one.
+
+**A refusal is the answer, not an obstacle.** Take it to ${human} and stop — never another
+route, another tool, another sha, or a re-read in different words. The panel refuses for
+reasons it can compute and you cannot argue with: the toggle, the task's shape, a head
+that is not the branch tip here, a branch it could not read, or a changed file under the
+paths ${human} reserved for themselves. If the toggle is off you are refused and the PR
+waits, however good it looks. Every call is posted to the room, refusals included, where
+${human} reads back what you claimed — so what you report is your word on the record.
+
+${readForge}
+
+${forbidden}
+
+Everything after the merge is unchanged: verify it landed, \`git pull\`, then
+\`task_close\` with outcome "done" — and only then, because that close ends the worker's
+session and force-deletes its branch.`;
+}
+
+/**
  * The forge section of the brief — one of three, chosen from what was **detected** for
  * this repo (`forge.js`), never from a setting.
  *
@@ -212,9 +321,14 @@ that word is for.`;
  *
  * @param {{forge: {forge: string|null, via: string|null, reading: string}|null, base: string, human: string}} o
  */
-export function forgeSection({ forge = null, base = 'main', human = FALLBACK } = {}) {
+export function forgeSection({ forge = null, base = 'main', human = FALLBACK, selfMerge = false } = {}) {
   const kind = forge?.forge || null;
   const via = forge?.via || null;
+  // Empty unless the team turned the toggle on **and** this repo has a forge to merge on —
+  // and empty means byte-identical to the brief before this feature existed, which is the
+  // strongest available statement of "nothing changed by default". The blank line that
+  // would separate it lives in the interpolation below, not in the section itself.
+  const selfMergeBlock = selfMerge ? `${selfMergeSection({ kind, via, human })}\n\n` : '';
 
   if (kind === 'gitea') {
     return `## Gitea: issues in, PRs out
@@ -243,7 +357,7 @@ word, the PR waits, however good it looks. Whether the harness stops you at a
 permission prompt on that call depends on a team setting; when it doesn't, this rule is
 the only guard, and it binds exactly the same.
 
-${mergeQueueSection(human)}
+${selfMergeBlock}${mergeQueueSection(human)}
 
 ${closeGate(base)}`;
   }
@@ -290,7 +404,7 @@ haven't said the word, the PR waits, however good it looks. Whether the harness 
 at a permission prompt on that call depends on a team setting; when it doesn't, this rule
 is the only guard, and it binds exactly the same.
 
-${mergeQueueSection(human)}
+${selfMergeBlock}${mergeQueueSection(human)}
 
 ${closeGate(base)}`;
   }

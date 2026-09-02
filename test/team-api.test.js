@@ -1397,6 +1397,23 @@ test.before(async () => {
   git(['add', '-A'], wt);
   git(['commit', '-q', '-m', 'work'], wt);
 
+  // Two more, for the close **line** rather than the close gate: both are merged before
+  // they are closed, so the gate lets them through and the sentence is what is under test.
+  // `decided` gets an allowed `selfMerge` bound to its own tip; `undecided` gets none.
+  const worker = (label) => {
+    const dir = path.join(gateState, 'worktrees', `GateRepo-${label}`);
+    git(['worktree', 'add', '-q', dir, '-b', `agent/${label}`, 'master']);
+    fs.writeFileSync(path.join(dir, `${label}.txt`), `${label}\n`);
+    git(['add', '-A'], dir);
+    git(['commit', '-q', '-m', label], dir);
+    const head = execFileSync('git', ['-C', gateRepo, 'rev-parse', `agent/${label}`], { encoding: 'utf8' }).trim();
+    git(['merge', '-q', '--no-ff', `agent/${label}`, '-m', `merged ${label}`]);
+    return { dir, head };
+  };
+  const decided = worker('decided');
+  const undecided = worker('undecided');
+  const offTeam = worker('off-team');
+
   fs.mkdirSync(path.join(gateState, 'teams', teamKeyFor(gateRepo)), { recursive: true });
   fs.writeFileSync(
     path.join(gateState, 'teams', teamKeyFor(gateRepo), 'team.json'),
@@ -1410,6 +1427,27 @@ test.before(async () => {
         source: 'chat', state: 'review', branch: 'agent/unmerged', worktree: wt, base: 'master',
         staleBase: true, model: null, modelReason: null, startedBy: null, tmuxSession: null,
         pr: null, createdAt: '2026-08-31T08:00:00.000Z', updatedAt: '2026-08-31T09:00:00.000Z',
+      },
+      // Already merged above, so the gate passes and the close line is what is left to
+      // look at. The `selfMerge` on the first is the shape the endpoint writes.
+      decided: {
+        id: 'decided', repo: gateRepo, kind: 'build', body: 'the lead decided this one',
+        source: 'chat', state: 'review', branch: 'agent/decided', worktree: decided.dir, base: 'master',
+        staleBase: false, model: null, modelReason: null, startedBy: null, tmuxSession: null,
+        pr: 'http://box/pulls/70', createdAt: '2026-08-31T08:00:00.000Z', updatedAt: '2026-08-31T09:00:00.000Z',
+        selfMerge: { at: Date.parse('2026-08-31T09:30:00.000Z'), allowed: true, head: decided.head, reasons: ['the team\'s "leadDecidesMerges" toggle is on'] },
+      },
+      undecided: {
+        id: 'undecided', repo: gateRepo, kind: 'build', body: 'nobody asked the panel about this one',
+        source: 'chat', state: 'review', branch: 'agent/undecided', worktree: undecided.dir, base: 'master',
+        staleBase: false, model: null, modelReason: null, startedBy: null, tmuxSession: null,
+        pr: 'http://box/pulls/71', createdAt: '2026-08-31T08:00:00.000Z', updatedAt: '2026-08-31T09:00:00.000Z',
+      },
+      'off-team': {
+        id: 'off-team', repo: gateRepo, kind: 'build', body: 'closed while the toggle is off',
+        source: 'chat', state: 'review', branch: 'agent/off-team', worktree: offTeam.dir, base: 'master',
+        staleBase: false, model: null, modelReason: null, startedBy: null, tmuxSession: null,
+        pr: 'http://box/pulls/72', createdAt: '2026-08-31T08:00:00.000Z', updatedAt: '2026-08-31T09:00:00.000Z',
       },
     }, null, 2),
   );
@@ -1514,6 +1552,81 @@ test('…and once it is merged by hand, the close succeeds and sweeps', async ()
   const branches = git(['branch', '--list', 'agent/unmerged']).trim();
   assert.equal(branches, '', 'the branch is gone, now that it is safe for it to be');
   assert.ok(!fs.existsSync(path.join(gateState, 'worktrees', 'GateRepo-unmerged')), 'and the worktree with it');
+});
+
+/* ---------------------------------------- what the "done" line says about it --- */
+
+/*
+ * Item 5: on a team that lets its lead decide merges, the close line says whether one was
+ * decided — and on every other team it is the line it has always been.
+ *
+ * It is deliberately **not** a refusal. A second gate on close would catch merges the
+ * maintainer ordered on a self-merge team, which breaks the one promise this feature made:
+ * your word keeps working exactly as it did. A visible non-event is the better failure,
+ * the same trade the trigger endpoint makes.
+ *
+ * These run after the two above and share the gate panel's `team.json`, so the toggle is
+ * flipped deliberately and the first of them proves the untouched line before anything is
+ * turned on.
+ */
+
+const gateRoom = () => {
+  const file = path.join(gateState, 'teams', teamKeyFor(gateRepo), 'room.jsonl');
+  try {
+    return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+};
+
+test('on a team with the toggle off, the done line is exactly the line it has always been', async () => {
+  const config = await gateApi('GET', `/api/team/config?folder=${encodeURIComponent(gateRepo)}`);
+  assert.equal(config.body.toggles.leadDecidesMerges, false, 'off, and nothing has touched it');
+
+  const res = await gateApi('POST', '/api/team/tasks/off-team/close', { outcome: 'done' });
+  assert.equal(res.status, 200);
+  const text = gateRoom().at(-1).text;
+  assert.equal(text, 'Task off-team is done — merged and cleaned up. (http://box/pulls/72)');
+  assert.doesNotMatch(text, /judgment|merge decision/, 'no clause at all, not an empty one');
+});
+
+test('with the toggle on, a merge the lead decided says so, and names when it checked', async () => {
+  const on = await gateApi('PATCH', '/api/team/config', { folder: gateRepo, toggles: { leadDecidesMerges: true } });
+  assert.equal(on.body.toggles.leadDecidesMerges, true);
+
+  const res = await gateApi('POST', '/api/team/tasks/decided/close', { outcome: 'done' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.task.state, 'done');
+
+  const text = gateRoom().at(-1).text;
+  assert.match(text, /^Task decided is done — merged and cleaned up\. \(http:\/\/box\/pulls\/70\)/);
+  assert.match(text, / — merged on the lead's own judgment \(checked .+\)\.$/);
+
+  // The clause is bound to the head that actually merged, not merely to a decision
+  // existing: the verdict was taken on this commit. Read back through the API rather than
+  // off `tasks.json`, which is flushed a couple of seconds behind the Map.
+  const decided = (await gateApi('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'decided');
+  assert.equal(decided.selfMerge.head, decided.head, 'the checked head is the head that merged');
+  assert.equal(decided.state, 'done');
+});
+
+test('…and a merge nobody asked the panel about says that instead — a visible non-event', async () => {
+  const res = await gateApi('POST', '/api/team/tasks/undecided/close', { outcome: 'done' });
+  assert.equal(res.status, 200, 'it closes: this is a sentence, never a refusal');
+  assert.equal(res.body.task.state, 'done');
+
+  const text = gateRoom().at(-1).text;
+  assert.match(text, /^Task undecided is done — merged and cleaned up\. \(http:\/\/box\/pulls\/71\)/);
+  assert.match(text, / — no merge decision recorded for this task\.$/);
+
+  // The worktree and branch went the way they always do — the clause changes what the
+  // line says and nothing about what the close does.
+  const git = (args) => execFileSync('git', args, { cwd: gateRepo, encoding: 'utf8' });
+  assert.equal(git(['branch', '--list', 'agent/undecided']).trim(), '');
+  assert.ok(!fs.existsSync(path.join(gateState, 'worktrees', 'GateRepo-undecided')));
+
+  // Leave the bench as it was found.
+  await gateApi('PATCH', '/api/team/config', { folder: gateRepo, toggles: { leadDecidesMerges: false } });
 });
 
 /* ------------------------------------------- the stale planFile fallback --- */

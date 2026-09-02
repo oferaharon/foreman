@@ -1111,6 +1111,8 @@ Every autonomous power is a per-team toggle, and they start **off**:
 | Answer permission prompts | off | a machine pressing yes on permission boxes |
 | Approve plans | off | plan boxes, which can clear context and bypass permissions |
 | Flag worker conflicts | on | post to the room when two workers touch the same files |
+| Lead merges without a prompt | off | its merge call stops at no prompt; what that grants differs by forge |
+| Lead decides merges | off | the lead decides a merge per PR, within the conditions in [Merging](#merging) |
 
 Behind every one of them sits a rule that is not a toggle: **the lead may answer only
 when it can cite the grounds** — a line in the repo's own `CLAUDE.md`, a ruling you gave
@@ -1200,13 +1202,54 @@ be an ancestor of the base — looking at `origin/<base>` and at local `<base>`,
 first, and refusing if it cannot tell. The refusal names what to do. Discarding work
 deliberately is the *abandon* outcome, which is what that word is for.
 
-**The decision to merge is yours and is never inferred.** Not from green checks, not from
-a timer, not from silence, not from the lead's own confidence in the diff. On your
-explicit word, per PR, in conversation — "merge it", "merge #49" — the lead performs the
-merge, verifies it landed, then closes the task, which ends the worker's session and
-removes its worktree. The click is delegated; the decision is not. There is a `mergePRs`
-toggle and it exists so the answer to "can it merge by itself?" is visibly *no* rather
-than unspecified — it is refused everywhere, and cannot be turned on from the panel.
+**Unless you say otherwise, the decision to merge is yours, and it is never inferred.**
+Not from green checks, not from a timer, not from silence, not from the lead's own
+confidence in the diff. On your explicit word, per PR, in conversation — "merge it",
+"merge #49" — the lead performs the merge, verifies it landed, then closes the task, which
+ends the worker's session and removes its worktree. The click is delegated; the decision
+is not. There is a `mergePRs` toggle and it exists so the answer to "can it merge on a
+trigger?" is visibly *no* rather than unspecified — it is refused everywhere, and cannot
+be turned on from the panel.
+
+**You can hand the routine ones over — per team, per PR, and only if you say so.** Turn on
+**Lead decides merges** (`leadDecidesMerges`, off on every team until you turn it on) and
+the lead may merge a worker's PR on its own judgment instead of waiting for your word. It
+is not auto-merge and cannot become it: there is no trigger, no timer and no deferred
+merge, and the lead has to ask the panel first, one PR at a time, through a check that
+either allows that exact commit or refuses it.
+
+What the panel enforces itself, computed from your own checkout, where nothing the lead
+says can change the answer:
+
+- the toggle being off — that is the whole answer, and the PR waits;
+- the task's shape: this repo, in review, not a plan, with a PR recorded;
+- **the head sha**: the lead passes the commit it read on the forge, and the verdict is
+  bound to it. A branch that moved afterwards needs a new check;
+- a branch whose changed files could not be read — an unreadable branch refuses;
+- **the review paths**, below.
+
+**The folders you always want to look at yourself.** `humanReviewPaths` is a short list of
+paths — a file, or a folder and everything under it — that the lead may never merge on its
+own. A PR touching any of them is refused, with the file named, and comes to you like
+every other PR. `server` reserves `server/index.js` and does not reserve `serverless.js`;
+these are path prefixes, not patterns, so the question stays "which folders do I want to
+see?" rather than "which glob do I mean?". An entry it cannot read refuses the whole list
+rather than dropping the bad line, because a shorter safety list fails in the direction of
+merging something you wanted to see.
+
+And what it cannot enforce, said plainly because it matters more than the rest: **the
+panel never talks to your forge.** It holds no credential and makes no network call, so
+"is this PR mergeable, are its checks green" arrives *from the lead*, in its own words,
+and is recorded in the room where you read it back. That half is discipline, not a wall —
+the lead's brief tells it exactly how to read a forge honestly, and every check it runs is
+posted to the room, refusals included. A merge decided this way is named in the task's
+close line; a task closed with no decision recorded says that instead, so a lead that
+merged without asking leaves a visible gap rather than a silence.
+
+The two toggles are independent on purpose. With **Lead decides merges** on and **Lead
+merges without a prompt** off, the lead may decide and then still stop at a permission
+prompt you answer — safe, and quietly back where you started, which is worth knowing
+before you wonder why it stopped.
 
 ### The merge queue
 
@@ -1298,9 +1341,13 @@ already running.
 
 Things the team was designed *not* to do, listed so nobody has to re-argue them:
 
-- **No auto-merge**, on any trigger — see [Merging](#merging). The `mergePRs` toggle means
-  auto-merge and is refused at every endpoint, so the answer is visibly *no* rather than
-  unspecified.
+- **No auto-merge**, on any trigger — see [Merging](#merging). Nothing merges on a timer,
+  on a webhook, or because checks went green with nobody looking. The `mergePRs` toggle
+  means exactly that and is refused at every endpoint, so the answer is visibly *no*
+  rather than unspecified. What *can* be turned on is a different thing: behind an
+  off-by-default per-team toggle, the **lead** may decide a merge per PR, having read the
+  diff and the forge, within conditions the panel enforces. A decision taken by something
+  that looked, one PR at a time, is not a trigger firing.
 - **Nothing kills a worker automatically.** Stuck, silent, looping — all of it surfaces and
   none of it ends a session. That is your call, every time.
 - **No worker-to-worker messaging.** The room is the only coordination surface: one place

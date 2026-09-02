@@ -78,8 +78,32 @@ were built to fail closed rather than to be configured safely:
   isolates files, not the repository's history; a force-push from inside one
   still reaches the real repository, which is exactly what this denial list
   exists to stop.
-- **Nothing merges a pull request, and nothing closes a session, on its own.**
-  Both are actions a human takes, explicitly, every time.
+- **Nothing closes a session on its own.** Ending a session is an action a
+  human takes, explicitly, every time — stuck, silent and looping workers are
+  surfaced, never killed.
+- **Nothing merges a pull request on a trigger, ever.** No timer, no webhook,
+  no "checks went green" — the toggle that would mean that is refused at every
+  endpoint. By default nothing merges without your explicit word on that
+  specific pull request, either.
+
+**One of those has an exception, and you are the one who turns it on.** A team
+can opt into letting its lead decide merges: with the per-team toggle
+`leadDecidesMerges` — off on every team until you set it — the lead may merge a
+pull request on its own judgment, one pull request at a time. It is still not a
+trigger: nothing fires on a timer, on a webhook or on checks going green, and
+there is no deferred merge anywhere in it.
+
+What the panel enforces there, it computes from your own checkout, and a check
+it cannot run refuses: the toggle, the task's shape, that the commit being
+merged is the exact one that was checked, that the branch's changed files could
+be read at all, and that none of them is under a path you reserved for yourself
+(`humanReviewPaths`). What it cannot enforce is the state of your forge — the
+panel holds no credential for one and makes no network call — so "mergeable,
+checks green" is the lead's own report, validated only for being a word the
+panel recognizes. Every check is written to the team's room, refusals included,
+and the task's close line says whether a decision was recorded for the commit
+that merged. That is an audit trail, not a guarantee: it does not stop a lead
+from being wrong, it stops it from being wrong quietly.
 
 ## Where a secret can leak
 
