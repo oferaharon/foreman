@@ -7,6 +7,14 @@ window. Tick one box when you start a session and it comes up as a **team lead**
 session you talk to that dispatches other sessions as workers, each in its own git
 worktree, and brings you only the decisions that need you.
 
+![The panel in dark theme, open on a team lead. On the left, a rail: the lead pinned at the
+top, reading "1 task · 1 in review", with its worker nested underneath on branch
+agent/readme-screenshots. In the middle, the lead's transcript, tool calls folded into
+one-line chips, and above the composer a merge-queue row naming the one branch waiting on
+a decision with a MERGE button beside it. On the right, the team panel: a task list with
+one task blocked, two pending and two done — one of them marked deployed — and under it the
+room, the team's log of dispatches, reports and PRs.](docs/images/panel.png)
+
 The panel is the whole product on its own; the team is the second chapter and every part of
 it is optional. Sessions can be started anywhere — a terminal, another tool — and, on
 request, from here: `+ new`, a row's `⧉`, a restored snapshot, or a lead dispatching a
@@ -85,6 +93,11 @@ The transcripts are the important part: Claude Code writes typed JSON, so the pa
 renders real messages with tool calls folded into one-line chips — no terminal
 scraping, no PTY emulation.
 
+![The same panel on an ordinary session: a rail with a Needs you group holding one session
+stopped on a permission prompt, then two project headings — one session working, one idle —
+and the idle one's conversation open beside it, three questions and their answers with Bash
+calls folded into one-line chips.](docs/images/sessions.png)
+
 ### Status
 
 Four states. Three come from hook events: **working** (`UserPromptSubmit`,
@@ -129,6 +142,11 @@ looking. Sessions move *into*
 the group rather than appearing twice, so it empties as you deal with it. A session
 that's still `working` is held back — it hasn't finished talking yet. `⇧⇥` cycles the
 queue.
+
+![The top of the rail: a pinned team lead with its worker nested under it, then a Needs
+you group holding one session stopped on a permission prompt and one carrying two unread
+replies, then a project heading with the open session under
+it.](docs/images/rail-inbox.png)
 
 The badge clears only when the newest message is genuinely on screen; scrolling back
 through history is reading the past, not catching up.
@@ -499,6 +517,12 @@ Permission boxes never reach the transcript, so the pane is the only source. The
 parses the real box — tool, subject, any diff, and the actual numbered options — and
 renders each option as its own button.
 
+![A permission prompt as the panel draws it: the tool and the file at the top, the diff it
+wants to apply, the question, and the box's three real options as separate buttons. The
+second — a yes that also switches the session into accepting edits — is outlined rather
+than plain, and the composer below reads "answer the prompt above" with its send button
+showing queue.](docs/images/permission-card.png)
+
 Answers are sent as the option's **digit**, which Claude Code accepts directly. That
 needs no assumption about where the cursor sits, and the server refuses to send at all
 if the named option isn't on screen or its label has changed since you saw it.
@@ -842,6 +866,12 @@ worker is a session in the rail, and you can select either one, read its transcr
 attach a Terminal, and type into it directly if you want to go over the lead's head.
 Nothing here is headless or hidden.
 
+![A phone-sized screen: the project name with a chat and tasks tab pair under it, then a
+lead's conversation — a message sent to it, two tool calls folded into one-line chips, and
+its answer — with a reply box at the bottom.](docs/images/phone.png)
+
+`/m/` is a phone-sized view of your leads and nothing else.
+
 ### Starting a lead
 
 Tick **team lead** in `+ new`. That turns the launch into something different: it seeds
@@ -981,6 +1011,12 @@ grey card. The colour comes from what the poster said the line *is* (`event: 'di
 on the entry), never from reading its sentence, so rewording the message cannot silently
 turn the colour off.
 
+![The room, read top to bottom: a worker's report as a bubble, folded to five lines behind a
+quiet view more and tagged ready for review with its branch; four grey system cards — a PR
+opened, a task recorded pending, a merge, a task closed; the green line where the next
+worker was dispatched; that worker's own two bubbles, each named and timestamped and each
+folded; and a last grey card for the PR it opened.](docs/images/team-room.png)
+
 **A long entry folds to five lines.** A worker's DONE report runs to several paragraphs
 and this panel is 340px read beside the conversation with the lead — one report used to be
 the whole room. Bubbles and system cards clamp, with a quiet `view more` inside the entry;
@@ -1014,6 +1050,10 @@ been blocked or silent past the team's timer reads `stuck` and pulses. Rows carr
 branch, a link to the PR once there is one, and a `✕` that abandons the task behind a
 two-click confirmation — which refuses, with the reason on screen, while that worker has
 anything open in its terminal.
+
+![The task list: one task blocked with a link to its PR, two pending, one done and carrying
+a deployed pill, one done plan task — each with its state as a chip and its branch
+underneath.](docs/images/team-tasks.png)
 
 **Settings** — the autonomy toggles plus the team's knobs: how many workers may run at
 once and how long a worker may sit stuck before the room is told, both editable while
