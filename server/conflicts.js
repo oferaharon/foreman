@@ -48,6 +48,14 @@ const git = (dir, args) => run('git', ['-C', dir, ...args]);
  * exactly the entries a rename produces. `parsePorcelainZ` is where that is handled, and
  * it is the only reason this parse is a named function rather than four lines inline.
  *
+ * **And rename detection is the *other* half of the same asymmetry, found after the `-z`
+ * fix and not covered by it.** `git diff` detects renames by default, so once a rename is
+ * committed the diff names only where the file went; `status --porcelain` names both ends
+ * of an uncommitted one. Two workers, one having committed `web/x.js` -> `web/y.js` and
+ * one editing `web/x.js`, therefore shared no path at all and were never flagged — the
+ * same shape of silence as the encoding bug, in the case where the work is further along.
+ * `--no-renames` on the branch side is the fix and `branchPaths` carries the measurement.
+ *
  * **No shared parse with `merge-queue.js`, deliberately.** That module's diff side is
  * `split('\0').filter(Boolean)` and so is this one's, and so is `deployed.js`'s
  * `branchFacts` — but that is the definition of "a NUL-separated list", not a contract
@@ -104,7 +112,19 @@ export function parsePorcelainZ(stdout) {
 
 async function branchPaths(repo, base, branch) {
   if (!base || !branch) return new Set();
-  const { stdout } = await git(repo, ['diff', '--name-only', '-z', `${base}...${branch}`]);
+  // `--no-renames`, and it is load-bearing: rename detection is **on by default** in
+  // `git diff`, so a committed `web/x.js` -> `web/y.js` reports only `web/y.js` and the
+  // old name leaves this worker's set entirely — a sibling editing `web/x.js` then
+  // overlaps nothing and is never flagged. The porcelain side has always kept both names
+  // (`parsePorcelainZ` above, and the arrow form before it), so without this flag the two
+  // sides disagree about what a rename touches and the blind spot is exactly the
+  // *committed* case. Measured in a throwaway repo: default gives `web/y.js`,
+  // `--no-renames` gives `web/x.js` and `web/y.js`. It also overrides a `diff.renames`
+  // config set to `true` or `copies` ("even when the configuration file gives the default
+  // to do so"), which is why it is a flag here rather than a repo setting somebody could
+  // switch back. Do not "tidy" it away: a rename touches the path it came from as much as
+  // the one it went to, and that is this module's whole question.
+  const { stdout } = await git(repo, ['diff', '--name-only', '--no-renames', '-z', `${base}...${branch}`]);
   return new Set(stdout.split('\0').filter(Boolean));
 }
 

@@ -98,7 +98,18 @@ export async function mergePaths(repo, { branch, base } = {}, deps = {}) {
   try {
     // By sha, not by ref: the shas are what the key promises, and resolving twice leaves
     // a window where the diff is of something the cache is not named after.
-    const { stdout } = await git(repo, ['diff', '--name-only', '-z', `${baseSha}...${branchSha}`]);
+    // `--no-renames` for the same reason `conflicts.js` carries it, asked of a different
+    // question and answered the same way. Rename detection is on by default, so a PR that
+    // committed `web/x.js` -> `web/y.js` would report only `web/y.js` — and a *second* PR
+    // editing `web/x.js` would share no path with it, so `sharesNote` would stay silent
+    // and the batch would compose as though the two were unrelated. They are not: git will
+    // either carry the edit onto the new name or conflict, and either way that is the pair
+    // the maintainer must be told about before pressing one button for both. The flag can
+    // only ever *add* the old name, so it widens what a row warns about and never narrows
+    // it — the direction this file already prefers ("unknown beats optimistic"). It serves
+    // `landedPaths` too, where the question is the same one shifted in time: a `rebase
+    // first` against work that landed a rename needs the name the branch still knows.
+    const { stdout } = await git(repo, ['diff', '--name-only', '--no-renames', '-z', `${baseSha}...${branchSha}`]);
     const paths = [...new Set(stdout.split('\0').filter(Boolean))].sort();
     remember(cache, key, paths);
     return paths;

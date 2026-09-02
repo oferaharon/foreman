@@ -212,3 +212,56 @@ test('parsePorcelainZ reads a rename as two fields, not two entries', async () =
 test('parsePorcelainZ on an empty tree is empty, not a phantom path', () => {
   assert.equal(parsePorcelainZ('').size, 0);
 });
+
+/*
+ * Rename detection — the *other* half of the asymmetry the `-z` work above uncovered.
+ *
+ * `git diff` detects renames by default, so once a worker has **committed** a move the
+ * branch side names only where the file went. The porcelain side names both ends. So the
+ * one case the union could not see was a committed rename colliding with a sibling still
+ * editing the old name — recorded as its own task on 2026-09-01 rather than folded into
+ * that fix, and this is it. Real git, real worktrees, same rule as the rest of the file.
+ */
+
+test('a committed rename collides with a sibling editing the old name', async () => {
+  // The file has to exist at the base, or there is no rename for git to detect: a file
+  // added and moved entirely on one branch is just an add of the new name.
+  fs.mkdirSync(path.join(repo, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'web', 'moving.js'), 'one\ntwo\nthree\nfour\nfive\n');
+  git(['add', '-A']);
+  git(['commit', '-m', 'a file for one worker to move and another to edit']);
+
+  const a = await createWorktree({ repo, label: 'rn-a' });
+  const b = await createWorktree({ repo, label: 'rn-b' });
+
+  // a commits the rename; b edits the old name and has not committed — the ordinary
+  // mid-task shape, and the pair that used to overlap on nothing at all.
+  git(['mv', 'web/moving.js', 'web/moved.js'], a.dir);
+  git(['commit', '-m', 'move it'], a.dir);
+  fs.writeFileSync(path.join(b.dir, 'web', 'moving.js'), 'b is editing this\n');
+
+  // What the branch side would say without the flag, so the assertions below are not
+  // merely asserting what git happens to do today.
+  const detected = git(['diff', '--name-only', `${a.base}...${a.branch}`]).trim().split('\n');
+  assert.deepEqual(detected, ['web/moved.js'], 'detection on: the old name is simply gone');
+
+  const committed = await taskPaths({ repo, base: a.base, branch: a.branch, worktree: a.dir });
+  assert.ok(committed.has('web/moved.js'), 'where it went');
+  assert.ok(committed.has('web/moving.js'), 'and where it came from — a rename touches both');
+
+  const tasks = new TaskStore(path.join(process.env.FOREMAN_STATE_DIR, `tasks-rn-${Math.random().toString(36).slice(2)}.json`));
+  for (const [id, wt] of [['rn-a', a], ['rn-b', b]]) {
+    tasks.create({ id, repo, branch: wt.branch, worktree: wt.dir, base: wt.base });
+    tasks.update(id, { state: 'working' });
+  }
+  const calls = [];
+  const scanner = createConflictScanner({
+    tasks,
+    readTeam: () => ({ toggles: { flagConflicts: true } }),
+    postConflict: (_r, info) => calls.push(info),
+  });
+  await scanner.scan({ now: 1 });
+  assert.equal(calls.length, 1, 'the committed rename and the edit of the old name are one conflict');
+  assert.deepEqual(calls[0].tasks, ['rn-a', 'rn-b']);
+  assert.deepEqual(calls[0].paths, ['web/moving.js'], 'named by the path they actually share');
+});

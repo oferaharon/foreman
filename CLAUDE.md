@@ -1406,11 +1406,24 @@ at all — it arrives as two ordinary entries, ` D old` and `?? new`. `test/conf
 pins the non-ASCII match, the space case as a regression guard, and the rename; all three
 against real throwaway repos, and all three verified to fail against the old parse.
 
-**A gap this deliberately did not close:** `diff --name-only` has rename detection on by
-default, so a *committed* rename reports only the new name, while the porcelain side
-reports both. A worker that committed `web/x.js` → `web/y.js` therefore does not collide
-with one editing `web/x.js`. Different defect, different fix (`--no-renames` on the diff
-side), recorded rather than folded in.
+**…and rename detection is the same asymmetry from the other end, closed after it as its
+own task.** `diff --name-only` detects renames **by default**, so a *committed* rename
+reports only the new name while the porcelain side reports both — a worker that committed
+`web/x.js` → `web/y.js` shared no path at all with one editing `web/x.js`, and was never
+flagged. `--no-renames` is the fix and it is one flag on three diffs, because all three
+sites ask a question a vanished old name answers wrongly: `conflicts.js` (two workers on
+one file *right now*), `merge-queue.js` (would these two PRs compose — git will either
+carry the edit onto the new name or conflict, and either way the maintainer must be told
+before one press stands for both), and `deployed.js`, where it is the **restart** answer
+it protects: a branch that moved `server/x.js` out to `web/x.js` reported `changed:
+['web']` and `needsRestart` said no for a branch that plainly took a file out of `server/`.
+Measured — default gives `web/y.js`, `--no-renames` gives `web/x.js` and `web/y.js`, and it
+overrides a `diff.renames` config of `true` or `copies`, so it is a flag rather than a
+setting somebody could switch back. No `-M0` and no `--diff-filter`: `--no-renames` alone
+makes a rename read as a delete of the old path plus an add of the new. The flag can only
+ever *add* the old name, so every one of the three widens what it warns about and never
+narrows it — the direction all three files already prefer. Each has a test built on real
+throwaway repos, and each was run against the old code first to see it fail.
 
 **`composerSig` does not know about tasks, and a merge block built inside `buildComposer`
 would freeze on stale data.** The composer is only rebuilt when that signature changes,
