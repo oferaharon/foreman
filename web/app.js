@@ -19,7 +19,7 @@ const state = {
   // this browser rather than on the server, unlike a group's collapse state — that is a
   // fact about your filing and should follow you between windows, while this is a fact
   // about the window you're looking at. A phone and a desktop want different answers.
-  flatRail: localStorage.getItem('foreman.flatRail') === '1',
+  flatRail: loadFlag('foreman.flatRail'),
   showThinking: false,
   // Half-written messages, per session. Switching sessions to go check something is
   // normal; losing what you'd typed because of it is not.
@@ -38,6 +38,32 @@ function loadStore(key) {
     return raw && typeof raw === 'object' ? raw : {};
   } catch {
     return {};
+  }
+}
+
+/**
+ * A stored on/off flag, and the reason it is a function rather than the one-liner it
+ * replaced.
+ *
+ * `localStorage` is a *getter* that throws where a browser blocks site data — not a store
+ * that answers `null` — so the bare `localStorage.getItem(...)` this used to be threw at
+ * module scope, before a single line of the panel had run. Measured with storage denied:
+ * one exception at `app.js:22`, the module dead, the rail drawing zero rows, and the whole
+ * page a header over nothing. It is the only read here that was ever outside a guard;
+ * `loadStore` above and the resizers' `readPref` below both already had one.
+ *
+ * Not `readPref`, deliberately: that one parses a size in rem and caches it in the map the
+ * dividers persist from, and a boolean has no business in either.
+ *
+ * Off is the correct answer with nothing stored — the rail's groups and folder headings
+ * are what a browser that has never been told otherwise should draw.
+ */
+function loadFlag(key) {
+  try {
+    return localStorage.getItem(key) === '1';
+  } catch {
+    /* private mode, or storage denied — off is a perfectly good answer */
+    return false;
   }
 }
 
