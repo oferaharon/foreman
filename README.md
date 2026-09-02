@@ -7,11 +7,13 @@ window. Tick one box when you start a session and it comes up as a **team lead**
 session you talk to that dispatches other sessions as workers, each in its own git
 worktree, and brings you only the decisions that need you.
 
-![The panel in dark theme. On the left, a rail: a pinned team lead with its worker nested
-underneath, a Needs you group holding one session stopped on a permission prompt, and two
-project headings — one session working, one idle. On the right, the idle session's
-transcript, with tool calls folded into one-line chips, above the message
-composer.](docs/images/panel.png)
+![The panel in dark theme, open on a team lead. On the left, a rail: the lead pinned at the
+top, reading "1 task · 1 in review", with its worker nested underneath on branch
+agent/readme-screenshots. In the middle, the lead's transcript, tool calls folded into
+one-line chips, and above the composer a merge-queue row naming the one branch waiting on
+a decision with a MERGE button beside it. On the right, the team panel: a task list with
+one task blocked, two pending and two done — one of them marked deployed — and under it the
+room, the team's log of dispatches, reports and PRs.](docs/images/panel.png)
 
 The panel is the whole product on its own; the team is the second chapter and every part of
 it is optional. Sessions can be started anywhere — a terminal, another tool — and, on
@@ -90,6 +92,11 @@ Three sources, each doing what it's good at:
 The transcripts are the important part: Claude Code writes typed JSON, so the panel
 renders real messages with tool calls folded into one-line chips — no terminal
 scraping, no PTY emulation.
+
+![The same panel on an ordinary session: a rail with a Needs you group holding one session
+stopped on a permission prompt, then two project headings — one session working, one idle —
+and the idle one's conversation open beside it, three questions and their answers with Bash
+calls folded into one-line chips.](docs/images/sessions.png)
 
 ### Status
 
@@ -1004,6 +1011,12 @@ grey card. The colour comes from what the poster said the line *is* (`event: 'di
 on the entry), never from reading its sentence, so rewording the message cannot silently
 turn the colour off.
 
+![The room, read top to bottom: a worker's report as a bubble, folded to five lines behind a
+quiet view more and tagged ready for review with its branch; four grey system cards — a PR
+opened, a task recorded pending, a merge, a task closed; the green line where the next
+worker was dispatched; that worker's own two bubbles, each named and timestamped and each
+folded; and a last grey card for the PR it opened.](docs/images/team-room.png)
+
 **A long entry folds to five lines.** A worker's DONE report runs to several paragraphs
 and this panel is 340px read beside the conversation with the lead — one report used to be
 the whole room. Bubbles and system cards clamp, with a quiet `view more` inside the entry;
@@ -1038,8 +1051,8 @@ branch, a link to the PR once there is one, and a `✕` that abandons the task b
 two-click confirmation — which refuses, with the reason on screen, while that worker has
 anything open in its terminal.
 
-![The task list: one task dispatched, two pending, one done and carrying a deployed pill
-and a link to its PR, one done plan task — each with its state as a chip and its branch
+![The task list: one task blocked with a link to its PR, two pending, one done and carrying
+a deployed pill, one done plan task — each with its state as a chip and its branch
 underneath.](docs/images/team-tasks.png)
 
 **Settings** — the autonomy toggles plus the team's knobs: how many workers may run at
