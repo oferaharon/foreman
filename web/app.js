@@ -3056,6 +3056,13 @@ function createPane(slot, host) {
     // at all, and saying so is the whole point: a toggle that reads as on and does nothing
     // is worse than one that is honestly inert.
     ['leadMerges', 'Lead merges without a prompt', leadMergesHint, leadMergesNote],
+    // The fifth element is new here: whether the row is answerable on this repo at all.
+    // `leadMerges` stays pressable on a repo with no forge and says so in its copy, which
+    // is right for it — pressing it there is harmless, it just grants nothing. This row is
+    // not the same shape: it hands over the per-PR word, and on a repo with no PR there is
+    // nothing to hand over, so the switch is disabled and the note says why rather than
+    // storing a `true` that would read as a decision the maintainer took.
+    ['leadDecidesMerges', 'Lead merges without your word', leadDecidesHint, leadDecidesNote, forgeHasPRs],
   ];
 
   /** What `leadMerges` grants on this repo's forge, in the hover. */
@@ -3085,6 +3092,62 @@ function createPane(slot, host) {
     return 'No forge on this repo, so this grants nothing.';
   }
 
+  /**
+   * Is there a PR on this repo to decide about at all? `push only` and `no remote` both
+   * mean no — a branch is pushed (or not) and merging is something that happens elsewhere,
+   * by hand. Same test `mergeVerdict`'s refusal 3 uses server-side, so a row the panel
+   * lets you press is a row the endpoint would not refuse out of hand.
+   */
+  function forgeHasPRs(forge) {
+    return Boolean(forge?.forge);
+  }
+
+  /**
+   * `leadDecidesMerges` — the decision, not the prompt. Its copy is a function of the
+   * forge for the same reason `leadMerges`'s is, and for one more: under GitHub through an
+   * MCP server the panel adds no permission rule at all, so the lead may decide and then
+   * still stop at a prompt (§6 Q4 of the plan). That is confusing but safe, and the honest
+   * fix is a sentence here rather than refusing the feature to a working setup.
+   */
+  function leadDecidesHint(forge) {
+    // What the panel itself still refuses, whatever this switch says — the half of the
+    // conditions that is a wall rather than the lead's discipline. Worth the hover's
+    // length: this is the toggle where "what does it actually let it do" is the question.
+    const bounded =
+      'Bounded by checks the panel makes on its own: the task has to be in review with a PR, the commit it names has to be the tip of that branch here, and nothing it changes may be under “always review myself” below. Every check is posted to the room, refusals included, and a task’s close line says whether a decision was recorded for the commit that merged.';
+    const perPR =
+      'Lets the lead decide, per PR, that a worker’s work is ready and merge it without waiting for your word. Nothing fires on a timer, a webhook, or on checks going green with nobody looking — the lead asks the panel each time, and the forge facts it reports are its own word, in the room, where you read them back.';
+    if (forge?.forge === 'gitea' || (forge?.forge === 'github' && forge?.via === 'gh')) {
+      return `${perPR} ${bounded}`;
+    }
+    if (forge?.forge === 'github') {
+      return `${perPR} ${bounded} This repo reaches GitHub through an MCP server, and the panel adds no permission rule for its merge tool — so the lead may decide, and will then still stop at a prompt you answer.`;
+    }
+    return 'Nothing to decide about on this repo: no forge tools are installed, so a worker’s work stops at a branch and there is no PR to merge.';
+  }
+
+  /** The always-visible note — what it hands over, and the two gotchas that must not hide. */
+  function leadDecidesNote(forge) {
+    const later = 'Applies from the next lead launch; a running lead keeps what it started with.';
+    /*
+     * §6 Q5, verbatim and unconditional. The two toggles are deliberately independent — a
+     * switch that silently turns another one on is worse than a combination that needs a
+     * sentence — and this is the sentence. It is phrased as a standing conditional rather
+     * than reacting to `leadMerges`' current value on purpose: `buildSettings` runs once
+     * per team and is not rebuilt when a toggle flips, so a note that read the other
+     * switch would go stale the moment you used it.
+     */
+    const q5 = 'With “Lead merges without a prompt” off, you will still be asked at the prompt.';
+    if (!forgeHasPRs(forge)) return 'No PR to merge on this repo, so there is nothing here to hand over.';
+    if (forge.forge === 'github' && forge.via === 'mcp') {
+      // Q5's sentence would be actively misleading here — it implies the other switch
+      // could remove the prompt, and under an MCP server nothing does. The stronger
+      // wording carries the same fact and is true.
+      return `Hands over the per-PR word, bounded by the list below. You will still be asked at the prompt whatever “Lead merges without a prompt” says, because the panel adds no rule for this repo’s merge tool. ${later}`;
+    }
+    return `Hands over the per-PR word, bounded by the list below and by the panel’s own refusals. ${q5} ${later}`;
+  }
+
   function errLine(el, message) {
     const line = document.createElement('div');
     line.className = 'team-err';
@@ -3104,6 +3167,79 @@ function createPane(slot, host) {
     const next = await postJSONMethod('PATCH', '/api/team/config', { folder: roomView.repo, ...body });
     roomView.config = next;
     return next;
+  }
+
+  /**
+   * `humanReviewPaths` — the folders the maintainer always wants to look at themselves,
+   * and the bound on the toggle above this box. A PR touching anything under one of them
+   * is refused a self-merge, with the offending files named in the room.
+   *
+   * **This one is a control, and the setup row four blocks down is the reason to say so.**
+   * The maintainer's ruling (2026-08-26) is that a control they cannot answer correctly
+   * should not be a control — which is exactly why `setup` is detected and shown read-only,
+   * with a wrong value a bug in detection rather than a box to correct. "Which folders do I
+   * always want to look at myself?" is the opposite kind of question: nobody but them can
+   * answer it, and no amount of reading the repo would produce it. So it gets a box.
+   *
+   * Committed on blur the way the number knobs are, plus ⌘/Ctrl+Enter, because a
+   * textarea's plain Enter is a newline and one-per-line is the whole point of the shape.
+   *
+   * Two things it borrows from the knobs and one it does not. Borrowed: the refusal shows
+   * the **server's own message** — `normalizeReviewPaths` names the entry that was wrong,
+   * and a panel-written "invalid" would send the reader back to guess which line — and the
+   * box reverts to the last list the server accepted, because a textarea still holding
+   * refused text reads as saved. Not borrowed: what is drawn back is the *normalised* list
+   * the server answered with (`./server/` → `server`, de-duplicated, sorted), not what was
+   * typed, so what you see is what `mergeVerdict` matches against.
+   *
+   * The list is data compared against git's own output, never a permission rule — it must
+   * never go near `pathRule`, whose double-slash is a fact about a different system.
+   */
+  function reviewPathsEditor(team, elm) {
+    const block = document.createElement('label');
+    block.className = 'team-paths';
+    const cap = document.createElement('span');
+    cap.className = 'team-paths-cap';
+    cap.textContent = 'always review myself';
+    cap.title =
+      'Folders whose changes you always want to look at yourself. A PR touching one of them is refused a self-merge and waits for your word, however good it looks. One folder per line, no wildcards — name the folder itself. Empty means nothing is reserved.';
+    const box = document.createElement('textarea');
+    box.className = 'team-paths-input';
+    box.rows = 3;
+    box.spellcheck = false;
+    box.placeholder = 'folders you always want to look at yourself,\none per line — e.g. server';
+    // The last list the server accepted. Every revert goes back to this, and it is
+    // replaced only by an answer that came back 200.
+    let accepted = Array.isArray(team.humanReviewPaths) ? [...team.humanReviewPaths] : [];
+    box.value = accepted.join('\n');
+
+    const commit = async () => {
+      const lines = box.value.split('\n').map((s) => s.trim()).filter(Boolean);
+      // A blur is a cheap and frequent event; this is a disk write with a room-visible
+      // consequence. Unchanged text tidies its own whitespace and goes no further.
+      if (lines.length === accepted.length && lines.every((v, i) => v === accepted[i])) {
+        box.value = accepted.join('\n');
+        return;
+      }
+      box.disabled = true;
+      try {
+        const next = await patchTeam({ humanReviewPaths: lines });
+        accepted = Array.isArray(next.humanReviewPaths) ? [...next.humanReviewPaths] : [];
+      } catch (err) {
+        errLine(elm, err.message);
+      }
+      box.value = accepted.join('\n');
+      box.disabled = false;
+    };
+    box.onchange = commit;
+    box.onkeydown = (ev) => {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+        ev.preventDefault();
+        commit();
+      }
+    };
+    block.append(cap, box);
+    return block;
   }
 
   /**
@@ -3320,17 +3456,23 @@ function createPane(slot, host) {
     // painting it while detached is the normal case — a torn-down elm just gets GC'd.
     const team = roomView.config;
     elm.replaceChildren();
-    for (const [key, label, hintFor, noteFor] of TOGGLE_ROWS) {
+    for (const [key, label, hintFor, noteFor, availableFor] of TOGGLE_ROWS) {
       // Copy that depends on the detected forge arrives as a function; everything else is
       // a plain string and stays one.
       const forge = team.forgeResolved || null;
       const hint = typeof hintFor === 'function' ? hintFor(forge) : hintFor;
       const note = typeof noteFor === 'function' ? noteFor(forge) : noteFor;
+      // A row with no fifth element is always answerable, which is every row but one.
+      const available = typeof availableFor === 'function' ? availableFor(forge) : true;
       const row = document.createElement('label');
-      row.className = 'team-toggle-row';
+      row.className = available ? 'team-toggle-row' : 'team-toggle-row is-unavailable';
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.checked = Boolean(team.toggles?.[key]);
+      // A stored `true` on a repo that has since lost its forge still shows as on — the
+      // switch reports what is in `team.json`, and drawing it off would be the panel
+      // telling you something the file does not say. It just cannot be changed here.
+      box.disabled = !available;
       box.onchange = async () => {
         box.disabled = true;
         try {
@@ -3352,6 +3494,11 @@ function createPane(slot, host) {
         line.textContent = note;
         elm.append(line);
       }
+      // The path list is the bound on the row above it, so it is drawn from inside the
+      // loop rather than after it: appended after the loop it would merely *happen* to
+      // land under `leadDecidesMerges` because that row is last today, and would drift
+      // away from it the day another toggle is added.
+      if (key === 'leadDecidesMerges') elm.append(reviewPathsEditor(team, elm));
     }
     // The knobs. Committed on change, reverted on refusal, same shape as the toggles.
     const knob = (label, value, hint, apply) => {
@@ -4153,6 +4300,11 @@ function createPane(slot, host) {
       // a dashed edge, the same muted ink, no colour of its own. Spending a third colour
       // on "nothing happened" would cost the two that mean something.
       else if (e.event === 'pending') card.classList.add('is-pending');
+      // A lead that merged on its own authority — the one machinery line where something
+      // that used to need the maintainer happened without them. Matched on the event
+      // **and** on `allowed`, both exactly: the same endpoint posts a line for every
+      // refusal, and a refused check is the panel doing its job, not a thing to mark.
+      else if (e.event === 'self-merge' && e.allowed) card.classList.add('is-self-merge');
       // The stamp sits on the first line's baseline to the right, so the text and its
       // "view more" share a column of their own rather than joining that row.
       const body = document.createElement('div');
@@ -4162,6 +4314,24 @@ function createPane(slot, host) {
       text.textContent = e.text || '';
       body.append(text);
       roomClampable(text, e, pending);
+      // What was actually checked, under the sentence. On a self-merge line this is the
+      // substance — the sentence says a decision was taken, the list says on what — and
+      // the maintainer reads it back a week later, so it is not a hover and not a clamp.
+      //
+      // It is drawn from `reasons` rather than from `event`, so any machinery line that
+      // grows a reasons list gets it. Deliberately *outside* the clamp: `applyRoomClamp`
+      // puts "view more" directly after the text it cut off, so the list lands below the
+      // control, and its own height is settled before the clamp pass measures anything.
+      if (Array.isArray(e.reasons) && e.reasons.length) {
+        const list = document.createElement('ul');
+        list.className = 'room-reasons';
+        for (const r of e.reasons) {
+          const li = document.createElement('li');
+          li.textContent = String(r);
+          list.append(li);
+        }
+        body.append(list);
+      }
       card.append(body);
       if (e.ts) card.append(roomStamp(e.ts));
       return card;
