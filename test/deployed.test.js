@@ -107,6 +107,48 @@ test('a merged branch is not pulled until the checkout has it', async () => {
   );
 });
 
+/*
+ * The rename blind spot, in the form it takes here. `git diff` detects renames by default,
+ * so a branch that moved a file out of `server/` reports only where it landed — `changed`
+ * comes back without `server`, and `needsRestart` says no for a branch that plainly took a
+ * file out of the directory this panel runs from. Same flag, same reason, as `conflicts.js`
+ * and `merge-queue.js`; here it is the restart answer it protects.
+ */
+test('a file moved out of server/ still names server/ — detection would report only where it went', async () => {
+  // `server/thing.js` is on main from the test above, so this is a real cross-directory
+  // move of a file that exists at the base.
+  git(['checkout', '-b', 'agent/moved-out', 'origin/main']);
+  fs.mkdirSync(path.join(repo, 'web'), { recursive: true }); // git mv will not create it
+  git(['mv', 'server/thing.js', 'web/thing.js']);
+  git(['commit', '-m', 'move it out of server/']);
+  const facts = await branchFacts(repo, { branch: 'agent/moved-out', base: 'origin/main' });
+  git(['checkout', 'main']);
+
+  assert.deepEqual(
+    git(['diff', '--name-only', 'origin/main...agent/moved-out']).split('\n'),
+    ['web/thing.js'],
+    'detection on: server/ vanishes from the answer entirely',
+  );
+  assert.deepEqual(facts.changed, ['server', 'web'], 'both ends — the branch did take a file out of server/');
+
+  // The consequence, in this file's own words: `needsRestart` is `changed.some(RESTART_DIRS)`,
+  // pinned by the decision table below. With detection on, `changed` was `['web']` and this
+  // branch read as live on the pull alone.
+  const merged = git(['merge', '--no-ff', '-m', 'merge moved-out', 'agent/moved-out']) && git(['rev-parse', 'HEAD']);
+  const stale = createDeployTracker({ panelRepo: repo, sha: async () => git(['rev-parse', 'HEAD~1']) });
+  const task = { id: 't', repo, state: 'done', head: facts.head, changed: facts.changed };
+  assert.equal(merged, git(['rev-parse', 'HEAD']));
+  assert.equal((await stale.status(task)).state, 'restart', 'pulled, booted before it, and server/ lost a file');
+  // A second tracker, because answers are cached by `${repo}:${head}` and this is the
+  // same commit asked a different way: the old `changed`, and the pill it used to draw.
+  const asDetected = createDeployTracker({ panelRepo: repo, sha: async () => git(['rev-parse', 'HEAD~1']) });
+  assert.equal(
+    (await asDetected.status({ ...task, changed: ['web'] })).state,
+    'deployed',
+    'and the answer detection used to give — the whole of what the flag changes',
+  );
+});
+
 /* ---------------------------------------------------------- the decision table --- */
 
 const done = (over = {}) => ({ id: 't', repo: '/repo', state: 'done', head: 'abc', changed: ['server'], ...over });

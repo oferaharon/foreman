@@ -172,6 +172,52 @@ test('…and the same two with disjoint paths report nothing and compose', async
   assert.deepEqual(batch.tasks, ['only-server', 'only-web']);
 });
 
+/*
+ * The same rename blind spot `conflicts.js` was fixed for, asked of this file's question.
+ * Rename detection is on by default, so a PR that moved a file reports only where it went
+ * — and a second PR editing the old name would share nothing with it, so `sharesNote`
+ * would stay silent and the batch would compose two PRs that cannot land side by side.
+ */
+test('a committed rename keeps both names, so a PR editing the old one still shares a file', async () => {
+  resetCaches();
+  // The file has to exist at the base, or the move is just an add of the new name.
+  fs.mkdirSync(path.join(repo, 'web'), { recursive: true });
+  fs.writeFileSync(path.join(repo, 'web/moving.js'), 'one\ntwo\nthree\nfour\nfive\n');
+  git(['add', '-A']);
+  git(['commit', '-q', '-m', 'a file for one PR to move and another to edit']);
+
+  git(['checkout', '-q', '-B', 'agent/renamer', 'main']);
+  git(['mv', 'web/moving.js', 'web/moved.js']);
+  git(['commit', '-q', '-m', 'move it']);
+  git(['checkout', '-q', 'main']);
+  commitOn('agent/old-name-editor', { 'web/moving.js': 'edited under the old name\n' });
+
+  assert.deepEqual(
+    await mergePaths(repo, { branch: 'agent/renamer', base: 'main' }),
+    ['web/moved.js', 'web/moving.js'],
+    'both ends of the rename',
+  );
+  // …and what it would have said without the flag, so the line above is not just
+  // asserting what git happens to do today.
+  assert.deepEqual(
+    git(['diff', '--name-only', 'main...agent/renamer']).trim().split('\n'),
+    ['web/moved.js'],
+    'detection on: the old name is simply gone',
+  );
+
+  const tasks = [
+    review('renamer', { pr: 'http://box/pulls/70', updatedAt: '2026-08-30T09:00:00.000Z' }),
+    review('old-name-editor', { pr: 'http://box/pulls/71', updatedAt: '2026-08-30T10:00:00.000Z' }),
+  ];
+  const { rows, batch } = await collectQueue({ tasks, repo, forge: FORGE });
+  assert.deepEqual(rows.find((r) => r.id === 'renamer').shares, [
+    { id: 'old-name-editor', paths: ['web/moving.js'] },
+  ]);
+  assert.equal(rows.find((r) => r.id === 'old-name-editor').sharesNote, 'also changed by renamer: web/moving.js');
+  assert.equal(batch.allowed, false, 'one press standing for both is the thing withheld');
+  assert.match(batch.why, /both change web\/moving\.js/);
+});
+
 /* ------------------------------------------------------------ the states --- */
 
 const rowsFor = (tasks, extra = {}) => buildQueue({ tasks, repo, ...extra });

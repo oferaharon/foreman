@@ -99,7 +99,16 @@ export async function branchFacts(repo, { branch, base }) {
   for (const ref of [base, `origin/${bare}`, bare]) {
     if (!ref) continue;
     try {
-      const { stdout } = await git(repo, ['diff', '--name-only', '-z', `${ref}...${branch}`]);
+      // `--no-renames`, and here it is the *restart* answer it protects. Rename detection
+      // is on by default, so a branch that moved `server/x.js` out to `web/x.js` reports
+      // only `web/x.js`, `changed` comes back `['web']`, and `needsRestart` says no — for
+      // a branch that plainly removed a file from `server/`. The flag makes a rename read
+      // as a delete of the old path plus an add of the new, so both directories are named.
+      // It can only ever add a directory that genuinely had a file leave it, so it moves
+      // this answer toward "restart" and never away from it, which is the bias the
+      // `needsRestart` comment below already states. Same flag, same reason, as
+      // `conflicts.js` and `merge-queue.js`.
+      const { stdout } = await git(repo, ['diff', '--name-only', '--no-renames', '-z', `${ref}...${branch}`]);
       changed = [...new Set(stdout.split('\0').filter(Boolean).map((p) => p.split('/')[0]))].sort();
       break;
     } catch {
