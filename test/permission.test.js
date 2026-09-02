@@ -243,3 +243,79 @@ test('a tail that does not line up is not joined onto the option above it', () =
   assert.equal(joined.options.length, 3);
   assert.equal(joined.options[1].label, 'Yes, and do something long really long');
 });
+
+test('the tip Claude Code draws inside the box does not become the subject', () => {
+  // Real captures, v2.1.257, from a sandbox session in manual mode. Claude Code prints
+  //
+  //     Bash command
+  //     Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+  //
+  //       cat /private/tmp/permtip-probe.txt
+  //
+  // and the body walk took the first line under the title, so the tip won the subject slot
+  // and the command was demoted into `detail` — on exactly the prompts that offer the
+  // auto-mode row, which are exactly the prompts that grant something broad.
+  for (const name of ['prompt-bash-tip.txt', 'prompt-bash-tip-narrow.txt']) {
+    const p = parsePrompt(fixture(name));
+    assert.ok(p, `${name}: should parse`);
+    assert.equal(p.title, 'Bash command', name);
+    assert.equal(p.subject, 'cat /private/tmp/permtip-probe.txt', `${name}: the command`);
+    assert.deepEqual(p.detail, ['Print permtip-probe.txt contents'], name);
+    // Not merely demoted — gone. The same sentence is already on the card, carried by
+    // option 3, which is the button it is advice about.
+    const flat = [p.title, p.subject, ...p.detail].join('\n');
+    assert.ok(!/^Tip:/m.test(flat), `${name}: no tip anywhere in the body`);
+    assert.match(p.options[2].label, /auto mode handles these prompts for you$/, name);
+  }
+});
+
+test('…and the tip is dropped identically at 220 and 70 columns, where it wraps', () => {
+  // At 70 the tip is two lines, flush at the title's own column, so a walk that dropped
+  // only the line matching `Tip:` would leave `auto mode" below` as the subject — the
+  // same defect one line down. Same lesson as the option-run join above, one field over.
+  const wide = parsePrompt(fixture('prompt-bash-tip.txt'));
+  const narrow = parsePrompt(fixture('prompt-bash-tip-narrow.txt'));
+  assert.deepEqual(
+    [narrow.title, narrow.subject, narrow.detail],
+    [wide.title, wide.subject, wide.detail],
+    'both widths spell one body',
+  );
+});
+
+test('the capture the defect was reported from, fixed on that capture', () => {
+  // `prompt-bash-broad{,-narrow}.txt` are the v2.1.247 captures the classifier work
+  // committed; the tip was in them all along and read as the subject. Pinned here so the
+  // fix is held against the screen it was found on, not only against a fresh one.
+  for (const name of ['prompt-bash-broad.txt', 'prompt-bash-broad-narrow.txt']) {
+    const p = parsePrompt(fixture(name));
+    assert.equal(p.subject, 'cat /private/tmp/adu-perm-probe.txt', name);
+    assert.deepEqual(p.detail, ['Read probe file'], name);
+  }
+});
+
+test('a body line that is not a tip is never eaten as one', () => {
+  // The rule has two independent stops, and the cost of getting either wrong is losing the
+  // command from the card — so each is pinned on its own, with a control.
+  const box = (...body) =>
+    parsePrompt(
+      [
+        ' Bash command',
+        ...body,
+        ' Do you want to proceed?',
+        ' ❯ 1. Yes',
+        '   2. No',
+        ' Esc to cancel',
+      ].join('\n'),
+    );
+
+  // A blank line ends the block, however flush the subject sits.
+  assert.equal(box(' Tip: auto mode handles these prompts', '', ' the command').subject, 'the command');
+  // A deeper indent ends it, with no blank to help.
+  assert.equal(box(' Tip: auto mode handles these prompts', '   the command').subject, 'the command');
+  // The control for both: flush *and* unseparated is a wrap, and is dropped.
+  assert.equal(box(' Tip: auto mode handles these', ' prompts for you', '', ' the command').subject, 'the command');
+  // A line that merely mentions a tip mid-sentence is body text and stays.
+  assert.equal(box(' Read the Tip: file').subject, 'Read the Tip: file');
+  // And a box with no tip at all is untouched.
+  assert.equal(box(' the command', ' what it does').subject, 'the command');
+});

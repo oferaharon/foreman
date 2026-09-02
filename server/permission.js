@@ -14,6 +14,7 @@
  *
  *   ────────────────────────────────
  *    Bash command                     <- title
+ *    Tip: auto mode handles these…    <- Claude Code's own advice; dropped, see `dropTip`
  *      chmod 755 sample.txt           <- subject / detail
  *      Set permissions on sample.txt
  *    This command requires approval
@@ -120,6 +121,73 @@ function classify(label) {
 }
 
 /**
+ * Claude Code's own advice, printed *inside* the box between the title and the subject:
+ *
+ *     Bash command
+ *     Tip: auto mode handles these prompts for you — choose "switch to auto mode" below
+ *
+ *       cat /private/tmp/probe.txt
+ *       Read the probe file
+ *
+ * The body walk took the first line under the title as `subject`, so the tip won the slot
+ * and the command was demoted into `detail`. The card's header then read `Bash command ·
+ * Tip: auto mode handles these prompts for you — choose "switch to` — truncated mid-word,
+ * with the command pushed below — and it happened **only** on the prompts that offer the
+ * auto-mode row, which are exactly the prompts that grant something broad. The loudest slot
+ * on the card showed advice instead of the command where reading it matters most.
+ *
+ * Anchored and narrow on purpose. `classify` above argues at length that a phrase list is
+ * the wrong shape for deciding *how broad a yes is*, and it is — but the asymmetry here
+ * runs the other way. A tip we fail to recognise costs one wrong header line, the bug we
+ * already have; a body line wrongly taken for a tip loses the command from the card
+ * entirely. So this matches the literal label Claude Code prints, at the start of the
+ * line, and nothing else.
+ */
+const TIP_RE = /^Tip:\s/;
+
+/**
+ * The tip, and the lines it wrapped onto, removed from the body.
+ *
+ * **Dropped rather than kept as a field**, which is the one design call in this change.
+ * Nothing is lost by it: the tip's whole sentence is already on the card, carried by the
+ * option it is advice about — `3. Yes, and switch to auto mode · auto mode handles these
+ * prompts for you` — where it sits against the button that acts on it. And the panel
+ * classes that option `approve-mode`, the broadest thing on the box, and arms it behind a
+ * second click; repeating Claude Code's nudge toward it in the card's own voice would be
+ * the panel arguing for the thing it guards against. A `tip` field nobody renders is dead
+ * weight that invites a later reader to render it.
+ *
+ * Two independent stops for the block, either of which ends it — measured on v2.1.257 at
+ * 220, 70 and 40 columns, where the tip is one, two and three lines:
+ *
+ *   - **a blank line.** The box puts one between the tip and the subject at every width.
+ *   - **a deeper indent.** The tip and its wrap sit flush at the title's own column (1);
+ *     the subject and detail are indented past it (3). A wrap never indents itself.
+ *
+ * Plus a cap, so a body that somehow satisfies both cannot be eaten wholesale — the same
+ * belt the option walk's `carry` wears one loop up.
+ *
+ * The honest limit: a tip immediately followed, with no blank, by a subject at the tip's
+ * own column would be indistinguishable from a wrap, and both guards would miss it. No
+ * prompt shape produces that today. Bash prompts — the only ones that carry a tip at all;
+ * Edit and Create prompts offer `switch to accept edits` and get no tip — have the blank.
+ */
+function dropTip(body) {
+  const at = body.findIndex((e) => TIP_RE.test(e.text));
+  if (at < 0) return body;
+  let end = at + 1;
+  while (
+    end < body.length &&
+    end - at <= 4 &&
+    !body[end].gapAbove &&
+    body[end].indent <= body[at].indent
+  ) {
+    end += 1;
+  }
+  return [...body.slice(0, at), ...body.slice(end)];
+}
+
+/**
  * @param {string} text  raw `capture-pane` output
  * @returns {null | {title, subject, detail, question, options, cursor, raw}}
  */
@@ -212,15 +280,24 @@ export function parsePrompt(text) {
     break;
   }
 
-  // Everything from the box's top edge down to the question is the body.
-  const body = [];
+  // Everything from the box's top edge down to the question is the body — collected with
+  // the two facts `dropTip` needs about each line: its own indent, and whether a blank
+  // line sits above it. Walking upward, a blank marks the entry unshifted most recently,
+  // which is the one directly below it.
+  const bodyLines = [];
   for (let j = bodyEnd; j >= 0 && bodyEnd - j < 24; j -= 1) {
     const line = lines[j];
     if (INNER_RULE_RE.test(line)) continue; // a section divider, keep walking
     if (BOX_EDGE_RE.test(line)) break;
     if (TRANSCRIPT_RE.test(line)) break;
-    if (line.trim()) body.unshift(line.trim());
+    if (line.trim()) {
+      bodyLines.unshift({ text: line.trim(), indent: indentOf(line), gapAbove: false });
+    } else if (bodyLines.length) {
+      bodyLines[0].gapAbove = true;
+    }
   }
+
+  const body = dropTip(bodyLines).map((e) => e.text);
 
   const title = body[0] || null;
   const subject = body[1] || null;
