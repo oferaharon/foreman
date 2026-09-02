@@ -1577,6 +1577,21 @@ button {
 .icon-btn.is-busy { color: var(--working); cursor: default; }
 .icon-btn.is-error { color: var(--decision); }
 
+/* The forge's mark on a lead's header, between the session name and the model/ctx text.
+   No border and no accent — the controls to its right are things you *do* to the session
+   and this only points at where the code lives, so it stays a mark rather than becoming a
+   fifth button. `flex: none` because the `h1` beside it ellipsises: a long session name
+   must eat its own width, never the icon's. */
+.head-forge {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink-faint);
+  text-decoration: none; /* it is a mark, and the UA would underline the empty box */
+  flex: none;
+}
+
+.head-forge:hover { color: var(--ink); }
+
 /* ========================================================== transcript === */
 
 .stream {
