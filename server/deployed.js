@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { bareBase } from './base-branch.js';
+import { browsableRepoUrl, REPO_URL } from './config.js';
 
 const run = promisify(execFile);
 
@@ -31,6 +32,22 @@ const run = promisify(execFile);
  * The restart half only applies to *this* repo. A merge in some other team's project has
  * no process here to be stale: pulled is as deployed as it gets. And it only applies when
  * the change touched `server/` — `web/` is served from disk on every load.
+ *
+ * And "*this* repo" is not always a directory comparison, which is the case a packaged
+ * install adds. Installed rather than cloned, the panel runs out of a package directory
+ * that is not a git repository and is not any team's checkout — so the directory test says
+ * "some other team's project", and a task in this project's own checkout would be called
+ * `deployed` on the pull alone. It is the one answer here that is a lie rather than a
+ * shrug: the merge is in the checkout, the panel is the released build, and the released
+ * build does not have it. So the panel's *project* is the second way to match — the task
+ * repo's own `origin` against `REPO_URL` from `package.json`, which ships inside the
+ * package. Both are local reads; nothing here has ever made a network call and nothing
+ * here ever will.
+ *
+ * Matched that way there is no boot sha to compare against, so the verdict is `unknown`
+ * and the row draws no chip at all. That is the whole intended outcome — a wrong green
+ * badge is the worst thing this file could produce, and showing nothing beats showing
+ * something wrong.
  *
  * Nothing in here is allowed to be expensive: the tasks endpoint is polled on the roster
  * beat, so answers are cached per (repo, sha) and a `deployed` is cached forever — a
@@ -165,7 +182,31 @@ function needsRestart(changed) {
   return changed.some((d) => RESTART_DIRS.has(d));
 }
 
+/**
+ * `git remote get-url origin`, normalised to the browsable spelling, or null.
+ *
+ * No network — it reads `.git/config`, the same read `forge.js` makes for the same reason.
+ * `browsableRepoUrl` is what makes the comparison hold: the three spellings npm and git
+ * both accept (`git+https://…`, a bare `https://…`, and the scp-like `git@host:owner/repo`)
+ * all name one repository, and a string compare against `package.json` would match exactly
+ * one of them. Reusing `config.js`'s function rather than writing a second normaliser is
+ * the `isLeadName` rule: two spellings of one fact is how they come to disagree.
+ */
+async function readOrigin(repo) {
+  try {
+    const { stdout } = await git(repo, ['remote', 'get-url', 'origin']);
+    return browsableRepoUrl(stdout.trim());
+  } catch {
+    return null; // no origin, or not a git repo at all
+  }
+}
+
 const UNKNOWN = { state: 'unknown', deployed: false, label: null, why: 'No branch tip recorded for this task.' };
+
+/** The sentence for a panel that was installed rather than cloned. */
+const INSTALLED_WHY =
+  'This panel was installed rather than cloned, so there is no checkout of its own to compare against — ' +
+  'restart or upgrade the service to pick this change up.';
 
 /**
  * @param {object} [deps] all injected so the decision table can be tested without a repo;
@@ -175,11 +216,13 @@ export function createDeployTracker({
   panelRepo = PANEL_REPO,
   ancestor = isAncestor,
   sha = shaOf,
+  origin = readOrigin,
+  repoUrl = REPO_URL,
   ttlMs = 20_000,
   now = Date.now,
 } = {}) {
   const cache = new Map(); // `${repo}:${sha}` -> { at, value }
-  const sameRepo = new Map(); // repo -> boolean
+  const sameRepo = new Map(); // repo -> Promise<'path' | 'project' | null>
 
   /*
    * The sha the process was started on, read *now* — at construction, which is boot.
@@ -194,19 +237,54 @@ export function createDeployTracker({
   const bootHead = () => bootPromise;
 
   /** Symlinks and cloud-sync folders make string equality unsafe; realpath both ends once. */
-  function isPanelRepo(repo) {
+  function samePath(repo) {
+    const real = (p) => {
+      try {
+        return fs.realpathSync(p);
+      } catch {
+        return path.resolve(p);
+      }
+    };
+    return real(repo) === real(panelRepo);
+  }
+
+  /**
+   * Is this repository the one the running panel came out of, and *how* do we know?
+   *
+   *   'path'     it is the directory the panel is running from — a checkout install
+   *   'project'  the panel is not running from a checkout at all, and this repository's
+   *              `origin` is the panel's own project — an installed build looked at from
+   *              a contributor's clone
+   *   null       some other team's repository; there is no process here to be stale
+   *
+   * The order is what keeps this free on a checkout panel. `samePath` is a `realpath` and
+   * no more; `bootHead()` is already resolved by the time anybody opens the team panel; and
+   * a panel that *is* a checkout stops there, so `git remote` is never shelled out to at
+   * all and the answers a checkout panel gives are the ones it gave before this existed.
+   *
+   * A promise is cached rather than a value so the roster beat's concurrent paints share
+   * one read, and because the answer cannot change under a running process: `panelRepo` is
+   * fixed at construction and `bootHead` with it.
+   */
+  function panelRepoMatch(repo) {
     if (!sameRepo.has(repo)) {
-      const real = (p) => {
-        try {
-          return fs.realpathSync(p);
-        } catch {
-          return path.resolve(p);
-        }
-      };
-      sameRepo.set(repo, real(repo) === real(panelRepo));
+      sameRepo.set(
+        repo,
+        (async () => {
+          if (samePath(repo)) return 'path';
+          // A panel with a boot sha has a checkout of its own, and this is not it.
+          if (await bootHead()) return null;
+          if (!repoUrl) return null; // no `package.json` to compare against — nothing to say
+          const url = await origin(repo);
+          return url && url.toLowerCase() === repoUrl.toLowerCase() ? 'project' : null;
+        })(),
+      );
     }
     return sameRepo.get(repo);
   }
+
+  /** Kept for the shape it always had; `panelRepoMatch` is what the verdict reads. */
+  const isPanelRepo = async (repo) => (await panelRepoMatch(repo)) !== null;
 
   async function evaluate(task) {
     const pulled = await ancestor(task.repo, task.head, 'HEAD');
@@ -219,7 +297,8 @@ export function createDeployTracker({
         why: 'Merged upstream, but this Mac\'s checkout does not have it yet — pull.',
       };
     }
-    if (!isPanelRepo(task.repo) || !needsRestart(task.changed)) {
+    const match = await panelRepoMatch(task.repo);
+    if (!match || !needsRestart(task.changed)) {
       return {
         state: 'deployed',
         deployed: true,
@@ -228,7 +307,13 @@ export function createDeployTracker({
       };
     }
     const boot = await bootHead();
-    if (!boot) return { ...UNKNOWN, why: 'Could not read the sha this panel booted on.' };
+    // Two ways to arrive with no boot sha, and they are not the same sentence. Matched by
+    // project, there is no checkout behind this panel and never was — that is the packaged
+    // install, and it is expected rather than broken. Matched by path, the panel is running
+    // out of a directory whose HEAD we could not read, which is a fault.
+    if (!boot) {
+      return { ...UNKNOWN, why: match === 'project' ? INSTALLED_WHY : 'Could not read the sha this panel booted on.' };
+    }
     const live = await ancestor(task.repo, task.head, boot);
     if (live === null) return { ...UNKNOWN, why: 'Could not compare against the sha this panel booted on.' };
     return live

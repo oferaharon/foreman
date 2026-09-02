@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { REPO_URL } from '../server/config.js';
 import { branchFacts, createDeployTracker, isAncestor, shaOf } from '../server/deployed.js';
 
 /*
@@ -147,6 +148,97 @@ test('a file moved out of server/ still names server/ — detection would report
     'deployed',
     'and the answer detection used to give — the whole of what the flag changes',
   );
+});
+
+/*
+ * The packaged install, against real repositories.
+ *
+ * Installed rather than cloned, the panel runs out of a package directory that is not a git
+ * repository — so there is no boot sha, and the directory test never names any team's
+ * checkout. Left there, a task in *this project's own* checkout read `deployed` on the pull
+ * alone: the merge is in the checkout and the running panel is the released build, which
+ * does not have it. A wrong green badge is the worst answer this file can give.
+ *
+ * `origin` and `sha` are both the real ones here — the point of the test is that a genuine
+ * `git remote get-url` on a genuine repository, put through `browsableRepoUrl`, matches what
+ * `package.json` says this project is.
+ */
+test('an installed panel draws no chip for this project, and is unchanged for anyone else', async () => {
+  const notARepo = path.join(scratch, 'libexec-package'); // where a packaged install lives
+  fs.mkdirSync(notARepo, { recursive: true });
+  assert.equal(await shaOf(notARepo, 'HEAD'), null, 'the premise: a package directory is not a checkout');
+  assert.ok(REPO_URL, 'package.json names this project, which is what the match is against');
+
+  // A clone of this project on a contributor's Mac. The scp-like spelling on purpose: it is
+  // one of the three git accepts, and `browsableRepoUrl` is what makes it compare equal.
+  const mine = path.join(scratch, 'mine');
+  const ssh = `git@${REPO_URL.replace(/^https?:\/\//, '').replace('/', ':')}.git`;
+  fs.mkdirSync(mine);
+  execFileSync('git', ['init', '-b', 'main'], { cwd: mine });
+  execFileSync('git', ['config', 'user.email', 'test@test'], { cwd: mine });
+  execFileSync('git', ['config', 'user.name', 'test'], { cwd: mine });
+  execFileSync('git', ['remote', 'add', 'origin', ssh], { cwd: mine });
+  fs.writeFileSync(path.join(mine, 'server-change.js'), 'x\n');
+  execFileSync('git', ['add', '.'], { cwd: mine });
+  execFileSync('git', ['commit', '-m', 'work'], { cwd: mine });
+  const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: mine, encoding: 'utf8' }).trim();
+
+  const brewed = createDeployTracker({ panelRepo: notARepo });
+  const verdict = await brewed.status({ id: 't', repo: mine, state: 'done', head, changed: ['server'] });
+  assert.equal(verdict.state, 'unknown');
+  assert.equal(verdict.label, null, 'no label is how `web/app.js` draws no chip at all');
+  assert.match(verdict.why, /installed rather than cloned/);
+  assert.equal(await brewed.isPanelRepo(mine), true, 'matched by project, not by path');
+
+  // Somebody else's project, from the same installed panel: exactly as it answered before.
+  const theirs = path.join(scratch, 'theirs');
+  fs.mkdirSync(theirs);
+  execFileSync('git', ['init', '-b', 'main'], { cwd: theirs });
+  execFileSync('git', ['config', 'user.email', 'test@test'], { cwd: theirs });
+  execFileSync('git', ['config', 'user.name', 'test'], { cwd: theirs });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://example.invalid/someone/else.git'], { cwd: theirs });
+  fs.writeFileSync(path.join(theirs, 'thing.js'), 'x\n');
+  execFileSync('git', ['add', '.'], { cwd: theirs });
+  execFileSync('git', ['commit', '-m', 'work'], { cwd: theirs });
+  const theirHead = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: theirs, encoding: 'utf8' }).trim();
+
+  const other = await brewed.status({ id: 'u', repo: theirs, state: 'done', head: theirHead, changed: ['server'] });
+  assert.equal(other.state, 'deployed', 'another team\'s project has no process here to be stale');
+  assert.equal(await brewed.isPanelRepo(theirs), false);
+});
+
+test('an installed panel with no project to compare against says nothing new', async () => {
+  // `REPO_URL` is null when `package.json` could not be read — the same non-fatal shrug
+  // `config.js` takes for the footer's link. With no project name in hand there is no
+  // second way to match, so every repo answers exactly as it did before this existed.
+  const tracker = createDeployTracker({
+    panelRepo: '/not/a/repo',
+    sha: async () => null, // the packaged install: no checkout, no boot sha
+    ancestor: async () => true,
+    repoUrl: null,
+    origin: async () => 'https://example.invalid/owner/repo',
+  });
+  const s = await tracker.status({ id: 't', repo: '/repo', state: 'done', head: 'abc', changed: ['server'] });
+  assert.equal(s.state, 'deployed');
+  assert.equal(await tracker.isPanelRepo('/repo'), false);
+});
+
+test('a panel running from a checkout never asks a repo for its origin', async () => {
+  // The byte-identical half: with a boot sha in hand the project rung is unreachable, so
+  // this is the same answer, by the same route, as before the packaged case existed.
+  let asked = 0;
+  const tracker = createDeployTracker({
+    panelRepo: repo,
+    sha: async () => 'boot',
+    ancestor: async () => true,
+    origin: async () => {
+      asked += 1;
+      return REPO_URL;
+    },
+  });
+  const s = await tracker.status({ id: 't', repo: '/somewhere/else', state: 'done', head: 'abc', changed: ['server'] });
+  assert.equal(s.state, 'deployed');
+  assert.equal(asked, 0, 'a checkout panel shells out to `git remote` exactly never');
 });
 
 /* ---------------------------------------------------------- the decision table --- */
