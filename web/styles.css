@@ -1601,7 +1601,16 @@ body.row-dragging * { cursor: row-resize !important; }
 @media (prefers-reduced-motion: reduce) {
   .team-chip.is-stuck { animation: none; }
 }
-.team-task-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The id gives way first, and by a long way. Nothing else on this line can shrink — the
+   chips, the PR link and the ✕ are all `flex: none` — so raising the factor changes
+   nothing at rest and everything while the row is asking a question: `drop <id>?` names
+   the same id, and two ellipses side by side would be the row saying half of it twice. */
+.team-task-id {
+  flex-shrink: 100;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .team-task-pr { font-family: var(--mono); font-size: 0.68rem; color: var(--accent); flex: none; }
 .team-task-close {
   font-family: var(--mono);
@@ -1614,7 +1623,7 @@ body.row-dragging * { cursor: row-resize !important; }
   flex: none;
   padding: 0 0.15rem;
 }
-.team-task-close:hover, .team-task-close.armed { color: var(--decision); }
+.team-task-close:hover { color: var(--decision); }
 .team-task-branch {
   font-family: var(--mono);
   font-size: 0.66rem;
@@ -2953,9 +2962,9 @@ body.row-dragging * { cursor: row-resize !important; }
 .merge-note.is-done { color: var(--idle); }
 .merge-note.is-quiet { color: var(--ink-faint); }
 
-/* Quiet until you reach for it, then loud — the same shape as `.team-task-close`, which
-   is the panel's idiom for "this one asks twice". Armed goes red because the second press
-   is the one that speaks for the maintainer. */
+/* Quiet until you reach for it. It never turns into anything: pressing it swaps the whole
+   control for the question (`.confirm`), which is the panel's idiom for "this one asks" —
+   see the confirmation section at the end of this file. */
 .merge-btn {
   flex: none;
   font-family: var(--mono);
@@ -2969,13 +2978,6 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 .merge-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
-/* Both selectors, and the hover one deliberately as specific as the rule above it: the
-   second press happens with the cursor still on the button, so an armed control styled
-   only by `.armed` loses to `:hover` and goes on looking unarmed. Measured on the bench —
-   `sure?` came up in the accent, not the red the word is for. */
-.merge-btn.armed,
-.merge-btn.armed:hover:not(:disabled) { color: var(--decision); border-color: currentColor; }
-.merge-btn.armed:hover:not(:disabled) { background: color-mix(in srgb, var(--decision) 12%, transparent); }
 .merge-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* The last line: `merge all` at the right, over the interrupt button — or, when the batch
@@ -3515,6 +3517,65 @@ body.row-dragging * { cursor: row-resize !important; }
   max-width: 60rem;
   overflow-wrap: anywhere;
 }
+
+/* ======================================================= confirmation === */
+
+/*
+ * `merge #12?  yes  no`, standing where the control stood.
+ *
+ * Inline and baseline-aligned so it lands in the row's own line rather than becoming one.
+ * That is not tidiness: the merge block is the only thing this panel has ever put above the
+ * interrupt row, and a question that wrapped would move the row that never moves.
+ *
+ * The question shrinks and ellipsises; the two answers never do, because a question you
+ * cannot answer is worse than one you cannot finish reading. The whole text is on the
+ * `title`, and the row it sits in already names the same task.
+ */
+.confirm {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+}
+
+/* Pushed to the right edge, the way the glyph it replaces is (`margin-left: auto` on
+   `.team-task-close`). The merge row needs none — the title beside it is `flex: 1` and
+   takes the slack already — and the foot right-aligns its own children. */
+.team-task-line > .confirm { margin-left: auto; }
+
+.confirm-q {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+
+.confirm-yes,
+.confirm-no {
+  flex: none;
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 0.1rem 0.45rem;
+}
+
+/* The decision colour, and the border with it — this is the press that speaks for the
+   maintainer, and it is the same red the rail's bin and the permission card's broader
+   yeses already use for exactly that. */
+.confirm-yes { color: var(--decision); border-color: currentColor; }
+.confirm-yes:hover { background: color-mix(in srgb, var(--decision) 12%, transparent); }
+
+/* Ghost. No is the ordinary answer and the safe one; it should look like nothing much,
+   and it must not compete with the word beside it for the eye. */
+.confirm-no { color: var(--ink-faint); }
+.confirm-no:hover { color: var(--ink); border-color: var(--ink-faint); }
 
 /* ============================================================= narrow === */
 

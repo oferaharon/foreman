@@ -826,11 +826,13 @@ function errorLine() {
  * option list is rebuilt at every render, so position means nothing and the digit is what
  * the terminal will still agree with.
  *
- * **The label is never replaced by the armed state.** The desktop's bin swaps its glyph for
- * `sure?`, which is fine for a glyph; here the label is the whole point of reading the row —
- * `Yes, clear context (34% used) and bypass permissions` is a sentence you must be able to
- * re-read *while* deciding whether to tap it again. So `sure?` arrives as a line underneath
- * and the label stays put. Four seconds, then it disarms itself.
+ * **The label is never replaced by the armed state.** Everywhere else a destructive control
+ * is swapped whole for a question naming the action — the merge block one file over, the
+ * desktop's `armConfirm` — because what it replaced named nothing. Here the label is the
+ * whole point of reading the row: `Yes, clear context (34% used) and bypass permissions` is
+ * a sentence you must be able to re-read *while* deciding whether to tap it again. So the
+ * confirmation arrives as a line underneath and the label stays put. Four seconds, then it
+ * disarms itself.
  */
 function optionButton({ digit, label, description, tone, primary, arm, armNote, card, err, send }) {
   const btn = document.createElement('button');
