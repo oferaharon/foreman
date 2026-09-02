@@ -518,6 +518,30 @@ test('GET /api/teams reads repo out of team.json, never reconstructs it from the
   assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), 'sorted by name');
 });
 
+/*
+ * `GET /api/config` carries what this software *is*, and the rail's footer draws it.
+ *
+ * Against the running panel rather than against `config.js`'s exports, because the fact
+ * worth pinning is that the *response* carries it — the footer reads nothing else, and
+ * `web/` is forbidden a second copy of either value. `package.json` is read here the same
+ * way the server reads it, so a version bump can never leave the endpoint behind: this
+ * asserts they agree, not that either is a particular string.
+ */
+test('GET /api/config carries the version and the browsable repository from package.json', async () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+  const res = await api('GET', '/api/config');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.version, pkg.version);
+  assert.match(res.body.version, /^\d+\.\d+\.\d+/, 'a real version, not an empty string dressed as one');
+
+  // Browsable, not a clone URL: the `.git` suffix `repository.url` carries is what the
+  // server strips, and a footer link ending in `.git` is a download prompt.
+  assert.equal(res.body.repoUrl, pkg.repository.url.replace(/\.git$/, ''));
+  assert.equal(res.body.repoUrl, pkg.homepage, 'homepage and repository name the same place');
+  assert.match(res.body.repoUrl, /^https:\/\//, 'something a browser can open');
+});
+
 test('GET /api/team/tasks: ?folder= is an exact match, ?brief=0 omits body, absent params are unchanged', async () => {
   const repoA = path.join(stateDir, 'MobileTeamA');
   const repoB = path.join(stateDir, 'MobileTeamB');

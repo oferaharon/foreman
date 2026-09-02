@@ -85,8 +85,173 @@ const el = {
   snapshot: document.getElementById('snapshot'),
   flatRail: document.getElementById('flatRail'),
   railList: document.getElementById('railList'),
+  railFoot: document.querySelector('.rail-foot'),
+  railRepo: document.getElementById('railRepo'),
+  railVersion: document.getElementById('railVersion'),
+  railGrip: document.getElementById('railGrip'),
   main: document.getElementById('main'),
 };
+
+/* ---------------------------------------------------------- rail width --- */
+
+/*
+ * The rail's width, dragged from its right edge and remembered in this browser.
+ *
+ * One value drives everything: `--rail` is the first column of the `.app` grid, so the
+ * main area — and both panes of a split, which share `1fr 1fr` of whatever is left — follow
+ * from it with nothing else to keep in step. The default lives in `tokens.css` and is the
+ * value used when nothing is stored, so clearing the preference is *removing* the custom
+ * property rather than writing 20rem back: two spellings of one default is how they drift.
+ *
+ * Kept in `localStorage` beside `foreman.flatRail`, and for the same reason — this is a
+ * fact about the window you are looking at, not about your filing, and a phone and a
+ * 34-inch monitor want different answers. A group's collapse state is on the server
+ * because it is the other kind.
+ *
+ * The preference and the applied width are deliberately two numbers. The ceiling is
+ * `min(RAIL_MAX, half the viewport)`, so narrowing the window has to narrow the rail —
+ * but it must not *overwrite* what you chose, or resizing a window for five seconds
+ * costs you the width you set on the big monitor. `applyRail` clamps; only a drag or a
+ * reset writes.
+ */
+
+/** rem, and the floor/ceiling the drag is clamped to. `RAIL_DEFAULT` is `--rail` in
+ *  `tokens.css` — it is here only to recognise "the same as the default" on a reset, and
+ *  is never written into the property. */
+const RAIL_MIN = 14;
+const RAIL_MAX = 40;
+
+/** The root font size in px, read rather than assumed: the preference is stored in rem so
+ *  it survives a browser text-size change, and this is what converts it. */
+const remPx = () => parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+
+/** What this browser last chose, in rem. `null` means "never dragged" — the CSS default. */
+let railPref = readRailPref();
+
+function readRailPref() {
+  try {
+    const raw = Number(localStorage.getItem('foreman.railWidth'));
+    // Anything unparseable, zero, negative or absurd falls back to the CSS default rather
+    // than to a clamp of nonsense — a stored value nobody wrote is not a preference.
+    return Number.isFinite(raw) && raw >= RAIL_MIN && raw <= RAIL_MAX ? raw : null;
+  } catch {
+    /* private mode, or storage denied — the default is a perfectly good answer */
+    return null;
+  }
+}
+
+/** The ceiling, in rem: never more than half the viewport, so the rail can't swallow the
+ *  conversation on a laptop even when the stored width came from a wider screen. */
+const railCeiling = () => Math.max(RAIL_MIN, Math.min(RAIL_MAX, window.innerWidth / remPx() / 2));
+
+/** Put `railPref` on the page, clamped to what this viewport can afford. No preference
+ *  means removing the property, so `tokens.css` answers. */
+function applyRail() {
+  if (railPref == null) {
+    document.documentElement.style.removeProperty('--rail');
+    return;
+  }
+  const rem = Math.min(Math.max(railPref, RAIL_MIN), railCeiling());
+  document.documentElement.style.setProperty('--rail', `${rem}rem`);
+}
+
+function setRailWidth(px, { persist = false } = {}) {
+  railPref = Math.min(Math.max(px / remPx(), RAIL_MIN), railCeiling());
+  applyRail();
+  if (persist) persistRail();
+}
+
+function persistRail() {
+  try {
+    if (railPref == null) localStorage.removeItem('foreman.railWidth');
+    else localStorage.setItem('foreman.railWidth', String(Math.round(railPref * 100) / 100));
+  } catch {
+    /* quota or private mode — this window still behaves, it just won't survive a reload */
+  }
+}
+
+if (el.railGrip) {
+  let dragging = false;
+
+  el.railGrip.addEventListener('pointerdown', (e) => {
+    // Left button only. A right-click here is the context menu, and a middle-click is a
+    // paste on some setups — neither should start a drag that only ends on pointerup.
+    if (e.button !== 0) return;
+    e.preventDefault();
+    dragging = true;
+    // Capture, so the drag survives the pointer leaving the 7px strip — which it does
+    // immediately, and which is the whole reason this is pointer events and not mousemove
+    // on the document.
+    el.railGrip.setPointerCapture(e.pointerId);
+    el.app.classList.add('rail-dragging');
+  });
+
+  el.railGrip.addEventListener('pointermove', (e) => {
+    // The rail starts at the viewport's left edge, so the pointer's x *is* the width it
+    // is asking for. Live, with no transition anywhere on `--rail` — a width that eased
+    // into place would lag the cursor, which reads as the drag having been dropped.
+    if (dragging) setRailWidth(e.clientX);
+  });
+
+  const end = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      el.railGrip.releasePointerCapture(e.pointerId);
+    } catch {
+      /* already released — the capture is gone either way */
+    }
+    el.app.classList.remove('rail-dragging');
+    persistRail();
+  };
+  el.railGrip.addEventListener('pointerup', end);
+  el.railGrip.addEventListener('pointercancel', end);
+
+  // Back to the width in `tokens.css`, and forget the preference entirely — the way every
+  // other reset-to-default in a browser behaves.
+  el.railGrip.addEventListener('dblclick', () => {
+    railPref = null;
+    applyRail();
+    persistRail();
+  });
+}
+
+// A stored width from a wider screen has to shrink to fit this one; the preference itself
+// is left alone, so it comes back when the window does.
+window.addEventListener('resize', applyRail);
+applyRail();
+
+/* --------------------------------------------------------- rail footer --- */
+
+/**
+ * Fill the rail's footer from the server's own answer.
+ *
+ * `GET /api/config` is where the version and the repository live, derived from
+ * `package.json` by `server/config.js` — nothing under `web/` spells either, so a fork or
+ * a version bump reaches the footer without anybody remembering this file exists.
+ *
+ * It fails silently and on purpose. The footer is chrome; a panel whose boot fetch failed
+ * still has a rail full of sessions, and an error banner over a missing version number
+ * would be the loudest thing on the screen for the least reason. What is left is the mark
+ * with no link, which `styles.css` already draws as a wordmark rather than as a dead one.
+ */
+async function fillRailFooter() {
+  try {
+    const res = await fetch('/api/config');
+    if (!res.ok) return;
+    const cfg = await res.json();
+    if (cfg.repoUrl) {
+      el.railRepo.href = cfg.repoUrl;
+      el.railRepo.title = `Foreman on ${new URL(cfg.repoUrl).host}`;
+    }
+    if (cfg.version) {
+      el.railVersion.textContent = `v${cfg.version}`;
+      el.railVersion.title = `This panel is running Foreman ${cfg.version}`;
+    }
+  } catch {
+    /* offline, or the panel went away mid-boot — the rail is the part that matters */
+  }
+}
 
 /* ---------------------------------------------------------- websocket --- */
 
@@ -6849,6 +7014,8 @@ paintFlatToggle();
 
 // Keep relative timestamps honest without a full re-render storm.
 setInterval(renderRail, 30_000);
+
+fillRailFooter();
 
 addPane('a');
 // A split is part of "where I was" too — reopening one pane when you left two is the same

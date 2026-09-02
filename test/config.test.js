@@ -4,7 +4,8 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { readTokenFile, TRIGGER_TOKEN_FILE, STATE_DIR } from '../server/config.js';
+import { fileURLToPath } from 'node:url';
+import { readTokenFile, TRIGGER_TOKEN_FILE, STATE_DIR, VERSION, REPO_URL, browsableRepoUrl } from '../server/config.js';
 
 /*
  * The trigger token file, against real files on a real disk.
@@ -104,4 +105,45 @@ test('the file lives under STATE_DIR, which is what gives a scratch panel its ow
   // a real lead is the thing this placement exists to make impossible.
   assert.equal(path.basename(TRIGGER_TOKEN_FILE), 'trigger-token');
   assert.equal(TRIGGER_TOKEN_FILE, path.join(STATE_DIR, 'trigger-token'));
+});
+
+/* ──────────────────────────────────────── what this software is, for the footer ─── */
+
+/*
+ * `VERSION` and `REPO_URL` exist so `web/` never spells either. The end-to-end half —
+ * that `GET /api/config` actually carries them — is in `test/team-api.test.js`, against
+ * the running panel; here is the derivation, which is where the wrong answers live.
+ */
+
+test('VERSION is package.json\'s version, read from beside the code and not from the cwd', () => {
+  const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(VERSION, pkg.version);
+  assert.equal(REPO_URL, pkg.homepage);
+});
+
+test('every remote spelling npm accepts comes back as something a browser can open', () => {
+  const want = 'https://github.com/alpha/beta';
+  assert.equal(browsableRepoUrl('https://github.com/alpha/beta.git'), want);
+  assert.equal(browsableRepoUrl('git+https://github.com/alpha/beta.git'), want);
+  assert.equal(browsableRepoUrl('https://github.com/alpha/beta'), want);
+  assert.equal(browsableRepoUrl('https://github.com/alpha/beta/'), want, 'a trailing slash is not part of the name');
+  // The scp-like form: no scheme, and the colon is a path separator rather than a port —
+  // the same knot `remoteHost` in forge.js has to untie.
+  assert.equal(browsableRepoUrl('git@github.com:alpha/beta.git'), want);
+  assert.equal(browsableRepoUrl('ssh://git@github.com/alpha/beta.git'), want);
+  assert.equal(browsableRepoUrl('git://github.com/alpha/beta.git'), want);
+  // Self-hosted, port and all — nothing here is GitHub-specific.
+  assert.equal(browsableRepoUrl('http://gamma.test:3002/alpha/beta.git'), 'http://gamma.test:3002/alpha/beta');
+});
+
+test('anything that is not a link comes back null, so the footer draws no link at all', () => {
+  // Showing nothing beats showing something wrong — a dead href in the one piece of
+  // chrome that says what this software is would be worse than a bare wordmark.
+  assert.equal(browsableRepoUrl(undefined), null);
+  assert.equal(browsableRepoUrl(''), null);
+  assert.equal(browsableRepoUrl('   '), null);
+  assert.equal(browsableRepoUrl('alpha/beta'), null, 'a GitHub shorthand is not a URL');
+  assert.equal(browsableRepoUrl('file:///Users/somebody/alpha'), null);
+  assert.equal(browsableRepoUrl({ url: 'https://github.com/alpha/beta' }), null, 'a string, or nothing');
 });
