@@ -10,7 +10,8 @@ import test from 'node:test';
 process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'foreman-team-'));
 const {
   decisionsPreamble, ensureTeam, readTeam, teamKey, teamDir, leadSettings, mergeRule,
-  pathRule, plannerStance, plansDir, planPath,
+  normalizeReviewPaths, pathRule, plannerStance, plansDir, planPath,
+  MAX_REVIEW_PATHS, MAX_REVIEW_PATH_LENGTH,
 } = await import('../server/team.js');
 const { FALLBACK, humanName } = await import('../server/human-name.js');
 
@@ -52,6 +53,12 @@ test('stored config wins, new defaults fill gaps', () => {
   assert.equal(team.maxWorkers, 5, 'tuned value kept');
   assert.equal(team.toggles.openPRs, false, 'tuned toggle kept');
   assert.equal(team.toggles.flagConflicts, true, 'missing toggle takes its default');
+
+  // The self-merge pair, in the same shape: a `team.json` written before this shipped
+  // carries neither key, and reads them at their defaults rather than at `undefined`.
+  // This is what "a maintainer on an older team.json sees nothing change" means in code.
+  assert.equal(team.toggles.leadDecidesMerges, false, 'off, and off is what nothing means');
+  assert.deepEqual(team.humanReviewPaths, [], 'and no paths are reserved, because the toggle is off');
 });
 
 test('the panel fold is remembered per team, and stays out of the dials', () => {
@@ -79,6 +86,77 @@ test('the dispatch defaults: Opus workers, leadMerges off', () => {
   const { config } = ensureTeam('/Users/x/Code/Defaults');
   assert.equal(config.defaultModel, 'claude-opus-5', 'the ruled default is Opus');
   assert.equal(config.toggles.leadMerges, false, 'trust is handed over explicitly, never seeded');
+});
+
+test('a fresh team decides no merges of its own, and reserves nothing', () => {
+  const { config, configFile } = ensureTeam('/Users/x/Code/SelfMerge');
+  assert.equal(config.toggles.leadDecidesMerges, false, 'the maintainer turns this on, nothing seeds it');
+  assert.deepEqual(config.humanReviewPaths, []);
+
+  // Top level, not in `toggles` — `toggles` is the autonomy dials, booleans and one
+  // number, and a path list in there reads as a permission. Same reason `triggers` is
+  // top-level.
+  assert.equal(config.toggles.humanReviewPaths, undefined);
+  const onDisk = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  assert.deepEqual(onDisk.humanReviewPaths, [], 'written, so it is visibly empty rather than absent');
+  assert.equal(onDisk.toggles.leadDecidesMerges, false);
+});
+
+/* --------------------------------------------- humanReviewPaths, the shape --- */
+
+/*
+ * One function decides what an entry is, so the PATCH validator and the matcher cannot
+ * disagree — and it refuses the whole list rather than dropping the bad entry. That is
+ * `trigger.js`'s `compile()` rule with a sharper reason: a dropped entry makes the safety
+ * list *shorter*, which fails towards merging something the maintainer wanted to see.
+ */
+
+test('a review path is tidied to one spelling, de-duplicated and sorted', () => {
+  assert.deepEqual(normalizeReviewPaths([]), []);
+  assert.deepEqual(normalizeReviewPaths(undefined), [], 'an absent key is the empty list');
+
+  // Four spellings of one folder, and a file beside it.
+  assert.deepEqual(
+    normalizeReviewPaths(['./server/', '/server', 'server//', 'server', 'SECURITY.md']),
+    ['SECURITY.md', 'server'],
+  );
+  assert.deepEqual(normalizeReviewPaths(['  web/m  ']), ['web/m'], 'trimmed — a trailing space matches nothing');
+  assert.deepEqual(normalizeReviewPaths(['a//b///c']), ['a/b/c'], 'repeated slashes collapse');
+  assert.deepEqual(normalizeReviewPaths(['b', 'a']), ['a', 'b'], 'sorted, so the panel shows it back stably');
+});
+
+test('a bad entry refuses the whole list, and the message names it', () => {
+  const refused = (list) => {
+    let message = null;
+    assert.throws(() => normalizeReviewPaths(list), (err) => ((message = err.message), true));
+    return message;
+  };
+
+  // Globs: the repo carries no glob matcher, and a `*` matched literally against git's
+  // output would match nothing — a hole in a safety list, silently.
+  assert.match(refused(['server', 'web/**']), /"web\/\*\*"/);
+  assert.match(refused(['web/**']), /prefixes, not globs/);
+  // Out of the repo, and inert-in-the-match, both by name.
+  assert.match(refused(['../etc']), /"\.\.\/etc"/);
+  assert.match(refused(['.']), /"\."/);
+  assert.match(refused(['a\0b']), /null byte/);
+  assert.match(refused(['']), /empty/);
+  assert.match(refused([42]), /"?42"?/);
+  assert.match(refused([null]), /not a path/);
+
+  // A list is a list. `null` and a bare string are somebody's typo, and reading either as
+  // "nothing is reserved" is the fail-open this function exists to prevent.
+  assert.match(refused(null), /must be a list/);
+  assert.match(refused('server'), /must be a list/);
+
+  // Caps, both of them, and the count is in the message.
+  assert.match(refused([`${'a'.repeat(MAX_REVIEW_PATH_LENGTH + 1)}`]), new RegExp(`${MAX_REVIEW_PATH_LENGTH}`));
+  const many = Array.from({ length: MAX_REVIEW_PATHS + 1 }, (_, i) => `d${i}`);
+  assert.match(refused(many), new RegExp(`${MAX_REVIEW_PATHS + 1} entries`));
+  assert.equal(normalizeReviewPaths(many.slice(0, MAX_REVIEW_PATHS)).length, MAX_REVIEW_PATHS, 'the cap itself is fine');
+
+  // And the whole list goes: the good entry beside the bad one is not quietly kept.
+  assert.throws(() => normalizeReviewPaths(['server', 'web/**']));
 });
 
 test('the merge rule is the forge\'s own, and there is no general one', () => {

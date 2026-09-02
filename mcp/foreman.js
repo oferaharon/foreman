@@ -172,6 +172,11 @@ function summarizeTask(t) {
     startedBy: t.startedBy,
     staleBase: t.staleBase,
     brief: briefOf(t.body),
+    // The last self-merge verdict, when there is one. Kept because it is the one thing on
+    // a task that says whether the lead already asked and what it was told — a `done` task
+    // with no `selfMerge` on a team that decides its own merges is exactly the shape the
+    // maintainer wants to be able to see.
+    selfMerge: t.selfMerge,
     live: t.live,
     deploy: t.deploy && { state: t.deploy.state, deployed: t.deploy.deployed },
   };
@@ -409,6 +414,53 @@ const LEAD_TOOLS = [
     },
     handler: async (args) =>
       api('PATCH', `/api/team/tasks/${encodeURIComponent(args.id)}`, { pr: args.url }),
+  },
+  {
+    name: 'task_merge_check',
+    /*
+     * The gate is the endpoint's, not this description's. Everything that decides is
+     * server-side in `mergeVerdict` — deliberately not behind `requireToggle` here, so
+     * there is exactly one decision point and this tool cannot be the thing that decides.
+     * What the description does is tell the truth about what it is for and what a refusal
+     * means, because a lead that treats "no" as an obstacle to route around is the whole
+     * failure this feature has to avoid.
+     */
+    description:
+      `Ask the panel whether you may merge this task's PR on your OWN judgment, without ${HUMAN}'s per-PR word. This is gated on the team's leadDecidesMerges toggle, which is OFF by default: with it off you will be refused, and that refusal is the answer — the PR waits for ${HUMAN}, however good it looks. Call this BEFORE any merge you were not explicitly told to do, and merge only when it answers allowed:true, and only the exact head it checked. A refusal ALWAYS means bring it to ${HUMAN} — never try another route, another tool, another sha, or a re-read with different words. The panel cannot see your forge, so the forge's own facts come from you and are recorded in the room where ${HUMAN} reads them back: report \`mergeable\` and \`checks\` honestly (never guess, and GitHub's UNKNOWN is not a pass — re-read a few seconds later, and if it is still unknown, say unknown), quote what you actually read in \`evidence\`, and say in \`reason\` why this PR is one you may merge unasked. If the repo runs no checks at all, pass checks:"none" and quote the worker's own words about its test suite in \`suiteQuote\`. Every call is posted to the room, refusals included. This tool does not merge and there is no tool here that does — the merge stays your forge's own, after an allowed verdict.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The task id. It must be in review, in this repo, with a PR recorded.' },
+        head: { type: 'string', description: 'The head sha you read off the forge. The verdict is bound to it — merge that commit or check again.' },
+        mergeable: {
+          type: 'string',
+          enum: ['clean', 'dirty', 'behind', 'draft', 'blocked', 'unstable', 'unknown'],
+          description: 'What the forge says about mergeability. GitHub mergeStateStatus CLEAN or HAS_HOOKS is "clean"; everything else keeps its own word. Only "clean" passes.',
+        },
+        checks: {
+          type: 'string',
+          enum: ['green', 'none', 'red', 'pending', 'unknown'],
+          description: 'The state of the checks on THIS head. "none" only when the repo genuinely configures no checks — pending checks are "pending".',
+        },
+        evidence: { type: 'string', description: 'What you actually read, and where. Required; recorded in the room.' },
+        reason: { type: 'string', description: 'Why this is a PR you may merge without asking. Required; recorded in the room.' },
+        suiteQuote: { type: 'string', description: 'Required when checks is "none": the worker\'s own words about its test suite.' },
+      },
+      required: ['id', 'head', 'mergeable', 'checks', 'evidence', 'reason'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      if (!REPO) throw new Error('This lead has no FOREMAN_REPO — refusing to check a merge anywhere.');
+      return api('POST', `/api/team/tasks/${encodeURIComponent(args.id)}/merge-check`, {
+        folder: REPO,
+        head: args.head,
+        mergeable: args.mergeable,
+        checks: args.checks,
+        evidence: args.evidence,
+        reason: args.reason,
+        suiteQuote: args.suiteQuote,
+      });
+    },
   },
   {
     name: 'worker_read',

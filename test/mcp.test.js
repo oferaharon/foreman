@@ -165,8 +165,9 @@ test('the lead surface: dispatch, status, read, send, close, the room, and the g
     res.result.tools.map((t) => t.name).sort(),
     [
       'plan_read', 'room_post', 'room_read', 'task_add', 'task_close', 'task_dispatch',
-      'task_set_pr', 'task_start', 'team_status', 'worker_answer_permission',
-      'worker_answer_question', 'worker_approve_plan', 'worker_read', 'worker_send',
+      'task_merge_check', 'task_set_pr', 'task_start', 'team_status',
+      'worker_answer_permission', 'worker_answer_question', 'worker_approve_plan',
+      'worker_read', 'worker_send',
     ],
   );
 });

@@ -55,9 +55,10 @@ import {
 import { TaskStore, TASK_KINDS } from './tasks.js';
 import { createWorktree, removeWorktree, pruneWorktrees, runSetup, tidyLabel, WORKTREES_DIR } from './worktree.js';
 import { writeWorkerSettings, answerTrustGate, resolveWorkerModel, WORKER_MODELS } from './dispatch.js';
-import { ensureTeam, readTeam, teamDir, teamKey, leadSettings, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
+import { ensureTeam, readTeam, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
 import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
-import { collectQueue, composition, mergeLine, prName } from './merge-queue.js';
+import { collectQueue, composition, mergeLine, prName, prNumber } from './merge-queue.js';
+import { mergeVerdict } from './merge-check.js';
 import { resolveSetup } from './setup-detect.js';
 import { resolveForge, credentialKeys, READINGS } from './forge.js';
 import { resolveBaseBranch, bareBase } from './base-branch.js';
@@ -1649,6 +1650,13 @@ app.patch('/api/team/config', async (req, res) => {
     }
     patch.stuckAfterMinutes = mins;
   }
+  // The one toggle that is type-checked rather than stored as sent. Every other boolean
+  // here is read for truthiness by something that merely reports; this one gates a merge,
+  // and `"false"` — the string a form control hands you — is truthy. Refusing a non-boolean
+  // costs a caller one fixed request; accepting one turns the toggle on by accident.
+  if (patch.leadDecidesMerges !== undefined && typeof patch.leadDecidesMerges !== 'boolean') {
+    return res.status(400).json({ error: 'leadDecidesMerges is true or false.' });
+  }
   const next = { ...team, toggles: { ...team.toggles, ...patch } };
   if (typeof req.body?.maxWorkers === 'number') next.maxWorkers = req.body.maxWorkers;
   // Panel chrome — whether the aside's SETTINGS block is folded away. Kept out of
@@ -1664,6 +1672,19 @@ app.patch('/api/team/config', async (req, res) => {
     // "unknown model" with the list, not as a complaint about a file nobody edited.
     try {
       next.defaultModel = resolveWorkerModel(req.body.defaultModel, null).model;
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
+  // The bound on `leadDecidesMerges`, and the one new top-level key this endpoint writes.
+  // Whitelisted by name like every other, and validated through the one function that
+  // decides the list's shape (`normalizeReviewPaths`) — so what the panel stores and what
+  // `mergeVerdict` matches against cannot be two different ideas of an entry. The refusal
+  // carries the thrown message verbatim, because it names the entry that was wrong and a
+  // 400 saying "invalid" would send the maintainer back to guess which line.
+  if (req.body?.humanReviewPaths !== undefined) {
+    try {
+      next.humanReviewPaths = normalizeReviewPaths(req.body.humanReviewPaths);
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -2366,6 +2387,96 @@ app.post('/api/team/merge', async (req, res) => {
     });
     res.status(err.status === 409 ? 503 : err.status || 500).json({ error: err.message });
   }
+});
+
+/*
+ * `POST /api/team/tasks/:id/merge-check` — may the lead merge this one on its own?
+ *
+ * The other half of the merge story, and it points the other way: the endpoint above is
+ * the maintainer's press travelling *to* the lead, and this is the lead asking the panel
+ * whether it may act without one. Behind the team's `leadDecidesMerges` toggle, which is
+ * off by default and is the maintainer's own answer to "may it at all".
+ *
+ * Four things about it that are decisions rather than shape:
+ *
+ *   - **It never merges, and never will.** It returns a verdict. The merge stays the
+ *     forge tool the lead already holds, so the panel gains no forge capability and the
+ *     2026-08-30 ruling ("the panel holds no Gitea credentials") is untouched. There is
+ *     deliberately no tool in `mcp/foreman.js` that performs one.
+ *   - **The room line goes on every call, allowed or refused.** A refusal that left no
+ *     trace would make "the lead never tried" indistinguishable from "the lead tried, was
+ *     told no, and went round". `event: 'self-merge'`, never a matched sentence — the text
+ *     is a message to a human and will be reworded, and a string-matched colour turns off
+ *     silently the day it is.
+ *   - **A refusal is a 200, not an error.** The verdict *is* the answer; a 4xx would make
+ *     the tool report a failure where the panel did exactly its job. The 4xx cases below
+ *     are the ones where there is no verdict to give: a malformed folder, an unknown task,
+ *     a folder with no team.
+ *   - **It records `selfMerge` on the task and adds no task state.** `TaskStore#load`
+ *     spreads unknown fields through, so this survives; `TASK_STATES` is strict and a state
+ *     added here would be the rollback hazard CLAUDE.md spends a paragraph on, for a
+ *     feature that does not need one.
+ */
+app.post('/api/team/tasks/:id/merge-check', async (req, res) => {
+  const folder = String(req.body?.folder || '').trim();
+  if (!folder || !path.isAbsolute(folder)) {
+    return res.status(400).json({ error: "A merge check needs `folder`, the repo's absolute path." });
+  }
+  const repo = path.resolve(folder);
+  const team = readTeam(repo);
+  // No team, no toggle and no room to post the refusal into — and `room.post` would create
+  // the team directory as a side effect of saying no, which is worse than saying nothing.
+  if (!team) return res.status(404).json({ error: 'No team for this folder.' });
+
+  const task = tasks.get(req.params.id);
+  if (!task) return res.status(404).json({ error: 'Unknown task.' });
+
+  let verdict;
+  try {
+    const [forge, baseInfo] = await Promise.all([resolveForge(repo), resolveBaseBranch(repo)]);
+    verdict = await mergeVerdict({
+      team,
+      task,
+      repo,
+      forge,
+      base: baseInfo.branch,
+      head: req.body?.head,
+      mergeable: req.body?.mergeable,
+      checks: req.body?.checks,
+      evidence: req.body?.evidence,
+      reason: req.body?.reason,
+      suiteQuote: req.body?.suiteQuote,
+    });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+
+  const at = Date.now();
+  // Only on the task the caller actually named in its own folder — a verdict about
+  // somebody else's task is a refusal, and writing to their record would be the endpoint
+  // doing the very cross-team thing it just refused.
+  if (String(task.repo || '') === repo) {
+    tasks.update(task.id, { selfMerge: { at, allowed: verdict.allowed, head: verdict.head, reasons: verdict.reasons } });
+  }
+
+  const said = [
+    req.body?.reason ? `Reason: ${String(req.body.reason).trim()}` : null,
+    req.body?.evidence ? `Evidence: ${String(req.body.evidence).trim()}` : null,
+  ].filter(Boolean).join(' — ');
+  const named = task.pr ? `${prName({ pr: task.pr, prNumber: prNumber(task.pr) })} (${task.id})` : task.id;
+  try {
+    room.post(repo, {
+      from: 'lead', to: 'all', kind: 'system', event: 'self-merge', about: task.id,
+      allowed: verdict.allowed, pr: task.pr || null, head: verdict.head, reasons: verdict.reasons,
+      text: verdict.allowed
+        ? `Self-merge allowed for ${named}. ${said}`.trim()
+        : `Self-merge refused for ${named} — ${verdict.reasons[0]}.${said ? ` ${said}` : ''}`,
+    });
+  } catch {
+    /* a room post must never turn a verdict into an error */
+  }
+  broadcastRoster();
+  res.json(verdict);
 });
 
 /* -------------------------------------------------------------- model --- */

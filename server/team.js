@@ -83,9 +83,44 @@ const DEFAULTS = {
     // them apart, and on means trusting the lead's discipline (merge only on the
     // maintainer's explicit per-PR word) instead of a prompt.
     leadMerges: false,
+    // leadDecidesMerges is NOT mergePRs and NOT leadMerges, and the three are adjacent
+    // enough that saying so here is cheaper than the hunt.
+    //   mergePRs          the *panel* merges on a trigger — a timer, a webhook, checks
+    //                     going green with nobody looking. Still refused at every
+    //                     endpoint, still stripped out of every PATCH, and it stays that
+    //                     way: this is the opposite of that.
+    //   leadMerges        the harness *prompt* on the forge's merge tool, nothing more.
+    //   leadDecidesMerges the **decision**: with it on, the lead may decide per PR that a
+    //                     worker's PR is ready and merge it without waiting on the
+    //                     maintainer's word — bounded by `humanReviewPaths` below and by
+    //                     `mergeVerdict` (server/merge-check.js), which refuses on the
+    //                     panel's own facts. Off by default; off is the ruled default and
+    //                     nothing seeds it on. Nothing implies the other two, either way:
+    //                     with this on and leadMerges off the lead decides and then still
+    //                     stops on a permission prompt the maintainer answers.
+    leadDecidesMerges: false,
     flagConflicts: true,
     stuckAfterMinutes: 20,
   },
+  /**
+   * Paths whose changes the maintainer always wants to look at themselves — the bound on
+   * `leadDecidesMerges`. A PR touching anything under one of these is refused a self-merge,
+   * with the offending files named. Empty is the default and empty means *nothing is
+   * reserved*, which is only safe because the toggle above is off.
+   *
+   * **These are repo-relative path prefixes, not globs and not permission rules.** They are
+   * compared as data against git's own output (`mergePaths`, `-z`, exact repo-relative
+   * paths), never handed to Claude Code — so they must never go near `pathRule` below,
+   * which builds `Edit(//abs/path/**)` rules and whose double-slash is a different fact
+   * about a different system. A `*` in an entry is refused rather than quietly matched
+   * literally: the repo carries no glob matcher, and an entry that silently matches nothing
+   * is a hole in a safety list.
+   *
+   * Top-level rather than inside `toggles` for the same reason `triggers` is: `toggles` is
+   * the autonomy dials — booleans and one number — and a path list in there reads as a
+   * permission.
+   */
+  humanReviewPaths: [],
   // Panel chrome, not policy. Nothing that dispatches, watches or scans reads this — it
   // lives here for the same reason a group's collapse lives in groups.json rather than
   // localStorage: two windows should agree, and a reload shouldn't reopen what you
@@ -179,9 +214,92 @@ decided so far, not that anything is missing. Entries go below, newest last.
 `;
 }
 
+/** The most entries the list may hold, and the longest one entry may be. Both are here to
+ *  stop a paste turning a safety list into something nobody reads back. */
+export const MAX_REVIEW_PATHS = 50;
+export const MAX_REVIEW_PATH_LENGTH = 200;
+
+/**
+ * The one place `humanReviewPaths`' shape is decided — so the PATCH validator and the
+ * matcher (`reviewPathHits`, server/merge-check.js) cannot disagree about what an entry is.
+ *
+ * Returns the cleaned array, or **throws naming the offending entry**. It refuses the whole
+ * list rather than dropping the bad entry, following `trigger.js`'s `compile()` — and here
+ * the reasoning is sharper than trigger's: dropping an entry makes the safety list
+ * *shorter*, which fails towards merging something the maintainer wanted to see. A list
+ * that stops working gets looked at; one that silently narrowed does not.
+ *
+ * Per entry, in this order:
+ *   - it must be a non-empty string once trimmed. (Trimming is the fail-closed direction:
+ *     `server ` matches nothing, and an entry that matches nothing is a hole.)
+ *   - `*` and NUL are refused. Prefixes, not globs — the repo has no glob matcher, and a
+ *     `*` matched literally against git output would match nothing.
+ *   - repeated slashes collapse, a leading `./` is stripped (repeatedly), one leading `/`
+ *     is stripped, trailing slashes go. So `./server/`, `/server`, `server//` and `server`
+ *     are all one entry.
+ *   - what is left may not still be absolute, and no segment may be `.` or `..`. `..`
+ *     leaves the repo; a `.` segment is inert in the match, which is the same hole an
+ *     unmatched `*` would be.
+ *
+ * Then the list: at most `MAX_REVIEW_PATHS`, de-duplicated and sorted, so two spellings of
+ * one folder are one entry and the panel shows it back in a stable order.
+ *
+ * `undefined` means the key is absent and reads as the empty list. Anything else that is
+ * not an array throws — a `humanReviewPaths` that is a string or `null` in `team.json` is
+ * somebody's typo, and reading it as "nothing is reserved" is exactly the fail-open this
+ * function exists to prevent.
+ */
+export function normalizeReviewPaths(list) {
+  if (list === undefined) return [];
+  if (!Array.isArray(list)) {
+    throw new Error(`humanReviewPaths must be a list of paths, not ${list === null ? 'null' : typeof list}.`);
+  }
+  if (list.length > MAX_REVIEW_PATHS) {
+    throw new Error(`humanReviewPaths holds ${list.length} entries — at most ${MAX_REVIEW_PATHS}.`);
+  }
+
+  const clean = [];
+  for (const raw of list) {
+    const name = () => JSON.stringify(raw);
+    if (typeof raw !== 'string') throw new Error(`humanReviewPaths: ${name()} is not a path — every entry is a string.`);
+    let p = raw.trim();
+    if (!p) throw new Error('humanReviewPaths: an entry is empty — remove the blank line or name a path.');
+    if (p.includes('*')) {
+      throw new Error(`humanReviewPaths: ${name()} contains "*" — these are path prefixes, not globs. Name the folder itself, e.g. "server".`);
+    }
+    if (p.includes('\0')) throw new Error(`humanReviewPaths: ${name()} contains a null byte.`);
+
+    p = p.replace(/\/{2,}/g, '/');
+    while (p.startsWith('./')) p = p.slice(2);
+    if (p.startsWith('/')) p = p.slice(1);
+    p = p.replace(/\/+$/, '');
+
+    if (!p) throw new Error(`humanReviewPaths: ${name()} names no path once it is tidied.`);
+    if (p.startsWith('/')) throw new Error(`humanReviewPaths: ${name()} is an absolute path — entries are relative to the repo.`);
+    const segments = p.split('/');
+    if (segments.includes('..')) {
+      throw new Error(`humanReviewPaths: ${name()} contains a ".." segment — entries stay inside the repo.`);
+    }
+    if (segments.includes('.')) {
+      throw new Error(`humanReviewPaths: ${name()} contains a "." segment — name the path itself, e.g. "server".`);
+    }
+    if (p.length > MAX_REVIEW_PATH_LENGTH) {
+      throw new Error(`humanReviewPaths: ${name()} is ${p.length} characters — at most ${MAX_REVIEW_PATH_LENGTH}.`);
+    }
+    clean.push(p);
+  }
+
+  return [...new Set(clean)].sort();
+}
+
 /** `/abs/path` → the `//`-anchored glob permission rules need. A plain absolute path in
  *  an Edit rule silently matches nothing — measured, Wave B.0. And the tool is Edit,
- *  never Write: Claude Code stopped matching Write(path) rules (Wave E). */
+ *  never Write: Claude Code stopped matching Write(path) rules (Wave E).
+ *
+ *  Not to be confused with `normalizeReviewPaths` above: that one cleans a *data* list
+ *  compared against git output, this one builds a permission rule Claude Code reads. They
+ *  are different systems with different escaping, and the day they are spelled alike is the
+ *  day one of them silently stops working. */
 export const pathRule = (tool, abs) => `${tool}(//${String(abs).replace(/^\/+/, '')}/**)`;
 
 /**
