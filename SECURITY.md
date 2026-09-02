@@ -34,6 +34,9 @@ yourself. It requires only that a request reach the panel's port.
 The panel binds `127.0.0.1` unless you say otherwise, under launchd as well as
 by hand: you widen it by setting `bindHost` in `<FOREMAN_STATE_DIR>/config.json`
 (or `$FOREMAN_HOST`) and restarting, and the boot line then says which host it used.
+That's still true under a Homebrew install — `brew services` starts the same process,
+and it's the state dir's `config.json` that decides the bind, not anything in the
+formula or the service definition.
 
 If you choose to bind the panel to `0.0.0.0` — to reach it from a phone or
 another device on your network — you are handing everything in the list above
