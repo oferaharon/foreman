@@ -292,3 +292,203 @@ test('the briefs introduce the human without stuttering when nobody is named', (
   assert.match(plainWorker, /reports to the human;/);
   assert.match(plainPlanner, /bring your plan to the human for approval/);
 });
+
+/* ------------------------------------------------ the self-merge section --- */
+
+/*
+ * `leadDecidesMerges` — the toggle that lets a lead merge on its own judgment — reaches
+ * the brief as one parameter, and the whole of what these pin is that it is **inert until
+ * it is on**.
+ *
+ * Byte-identity is claimed here in the only form a test can keep. A golden copy of every
+ * variant would say it most literally and hold for about a week: the next reword of any
+ * unrelated paragraph breaks five files, somebody regenerates them, and the golden then
+ * proves nothing about this feature at all. What is actually invariant is that turning the
+ * toggle on **inserts one contiguous block and changes nothing else** — computed below
+ * from the common prefix and suffix of the two renderings — and that the parameter's
+ * default is off. Together those say what "nothing changed by default" means and go on
+ * saying it after the prose moves. (The literal diff against the pre-change module was
+ * taken on the bench for all four shapes and was empty; that is a measurement, and this is
+ * the test that survives it.)
+ */
+
+const FORGE_SHAPES = [
+  ['gitea', { forge: 'gitea', via: 'mcp', reading: 'Gitea' }],
+  ['github via gh', { forge: 'github', via: 'gh', reading: 'GitHub' }],
+  ['github via mcp', { forge: 'github', via: 'mcp', reading: 'GitHub' }],
+  ['no forge', null],
+];
+
+const briefWith = (forge, selfMerge) =>
+  leadBrief({
+    repo: REPO,
+    teamDir: '/Users/x/State/teams/Users-x-Code-Fake',
+    decisionsFile: DECISIONS,
+    forge,
+    base: 'main',
+    human: NAME,
+    selfMerge,
+  });
+
+/** Every phrase the section owns — nothing here may appear while the toggle is off. */
+const SELF_MERGE_PHRASES = [
+  'task_merge_check',
+  'leadDecidesMerges',
+  'decide some merges yourself',
+  'A refusal is the answer',
+];
+
+test('the self-merge parameter defaults to off, and off renders exactly the brief without it', () => {
+  for (const [which, forge] of FORGE_SHAPES) {
+    const omitted = leadBrief({
+      repo: REPO,
+      teamDir: '/Users/x/State/teams/Users-x-Code-Fake',
+      decisionsFile: DECISIONS,
+      forge,
+      base: 'main',
+      human: NAME,
+    });
+    assert.equal(briefWith(forge, false), omitted, `${which}: passing false is the same as not passing it`);
+    for (const phrase of SELF_MERGE_PHRASES) {
+      assert.ok(!omitted.includes(phrase), `${which}: "${phrase}" must not appear with the toggle off`);
+    }
+  }
+});
+
+test('turning it on inserts one contiguous block and changes nothing else', () => {
+  for (const [which, forge] of FORGE_SHAPES) {
+    const off = briefWith(forge, false);
+    const on = briefWith(forge, true);
+    if (!forge?.forge) {
+      assert.equal(on, off, `${which}: no forge means no PR to merge, so there is nothing to say`);
+      continue;
+    }
+    assert.notEqual(on, off, `${which}: the section is there`);
+
+    // The common head and tail of the two renderings. If everything between them is an
+    // insertion — `on` is `off` with one block spliced in — then removing that block
+    // reproduces `off` exactly, which is byte-identity stated as a property.
+    let head = 0;
+    while (head < off.length && off[head] === on[head]) head += 1;
+    let tail = 0;
+    while (tail < off.length - head && off[off.length - 1 - tail] === on[on.length - 1 - tail]) tail += 1;
+    const inserted = on.slice(head, on.length - tail);
+    assert.equal(on.slice(0, head) + on.slice(on.length - tail), off, `${which}: one insertion, nothing else moved`);
+    assert.ok(inserted.length > 500, `${which}: and the insertion is the section, not a stray character`);
+  }
+});
+
+test('the section names the tool, the sha binding, and what a refusal means', () => {
+  for (const [which, forge] of FORGE_SHAPES.filter(([, f]) => f?.forge)) {
+    const brief = briefWith(forge, true);
+    assert.match(brief, /call\s+`task_merge_check`/, `${which}: the tool is named`);
+    assert.match(brief, /the head sha you read off the forge/, `${which}: with the head it read`);
+    assert.match(brief, /`mergeable`, `checks`, `evidence`/, `${which}: and the facts it must hand over`);
+    assert.match(brief, /`suiteQuote` when the repo runs\s+no checks/, `${which}: including the no-checks case`);
+    assert.match(brief, /Merge only when it answers `allowed: true`/, `${which}`);
+    assert.match(brief, /only the exact\s+head it checked/, `${which}: a verdict is bound to a commit`);
+    assert.match(brief, /A refusal is the answer, not an obstacle/, `${which}`);
+    assert.match(brief, new RegExp(`Take it to ${NAME} and stop`), `${which}: a refusal goes to the maintainer`);
+    assert.match(brief, /never another\s+route, another tool, another sha/, `${which}`);
+    // The sentence that survives from the paragraph above it, word for word: the toggle
+    // is a door, not a change of rule, and this is the rule.
+    assert.match(brief, /the PR\s+waits, however good it looks/, `${which}: the surviving sentence`);
+    assert.match(brief, /`task_close` with outcome "done"/, `${which}: and the close is still last`);
+  }
+});
+
+/*
+ * Every flag named one by one, because a lead that means well reaches for the argument
+ * that makes the obstacle go away — and two of these are not a merge at all but
+ * auto-merge, which is the one thing the toggle deliberately does not grant. A phrase list
+ * is the right shape here for once: these are literal arguments on real tools, and a test
+ * that only checked "says something about flags" would pass while the dangerous one had
+ * been dropped.
+ */
+test('under gh the forbidden flags are --admin and --auto, both by name', () => {
+  const brief = briefWith({ forge: 'github', via: 'gh', reading: 'GitHub' }, true);
+  assert.match(brief, /Never `--admin`, never `--auto`, never a force anything/);
+  assert.match(brief, /`--auto` arms a merge that fires later, on\s+green, with nobody\s+looking/);
+  assert.match(brief, /auto-merge is the one thing this toggle\s+deliberately does not grant/);
+  assert.match(brief, /gh pr view <N> --json state,mergeable,mergeStateStatus,statusCheckRollup/);
+  assert.doesNotMatch(brief, /force_merge/, 'and the other forge\'s arguments are not mentioned at all');
+  assert.doesNotMatch(brief, /merge_when_checks_succeed/);
+});
+
+test('under Gitea the forbidden arguments are force_merge and merge_when_checks_succeed, both by name', () => {
+  const brief = briefWith({ forge: 'gitea', via: 'mcp', reading: 'Gitea' }, true);
+  assert.match(brief, /Never `force_merge`, never `merge_when_checks_succeed`/);
+  assert.match(brief, /`merge_style` stays\s+the plain `merge`/);
+  assert.match(brief, /auto-merge by another name/);
+  assert.match(brief, /`pull_request_read` — it costs you no merge permission/);
+  assert.match(brief, /`get_status`/, 'the read that answers the checks question');
+  assert.doesNotMatch(brief, /--auto/, 'and the other forge\'s flags are not mentioned at all');
+  assert.doesNotMatch(brief, /--admin/);
+});
+
+test('under a GitHub MCP server it forbids the same two things without inventing tool names', () => {
+  const brief = briefWith({ forge: 'github', via: 'mcp', reading: 'GitHub' }, true);
+  assert.match(brief, /A plain merge, never a force, and never a deferred one/);
+  assert.match(brief, /the second is auto-merge/);
+  // Nobody here has run that server, so naming its arguments would be inventing them —
+  // the same reason `mergeRule` adds no permission rule for it.
+  assert.doesNotMatch(brief, /--auto/);
+  assert.doesNotMatch(brief, /force_merge/);
+  assert.doesNotMatch(brief, /gh pr view/, 'and no shell commands for a lead that has no gh');
+});
+
+test('the GitHub read rules carry the two measurements that cost the most', () => {
+  const brief = briefWith({ forge: 'github', via: 'gh', reading: 'GitHub' }, true);
+  // A merged PR reads `mergeable: UNKNOWN`, so `state` is read first or a finished PR is
+  // retried forever.
+  assert.match(brief, /Check `state` \*\*before\*\* `mergeable`/);
+  assert.match(brief, /already merged reads\s+`mergeable: UNKNOWN`/);
+  // UNKNOWN is lazy, and never a pass.
+  assert.match(brief, /computes mergeability \*\*lazily\*\*/);
+  assert.match(brief, /`UNKNOWN` is never a pass/);
+  assert.match(brief, /re-read a few times a couple of seconds apart/);
+  // The pass rule, and the empty rollup that means two different things.
+  assert.match(brief, /`mergeStateStatus` is `CLEAN` or `HAS_HOOKS`/);
+  assert.match(brief, /success, neutral or skipped conclusion/);
+  assert.match(brief, /empty `statusCheckRollup` is \*\*two different\s+facts\*\*/);
+  assert.match(brief, /with `CLEAN` it means this\s+repo configures no checks/);
+  assert.match(brief, /with `BLOCKED` it means a required check has\s+not reported/);
+});
+
+test('with the toggle on and no forge, the section is absent — there is no PR to merge', () => {
+  for (const forge of [null, { forge: null, via: null, reading: 'push only' }]) {
+    const brief = briefWith(forge, true);
+    for (const phrase of SELF_MERGE_PHRASES) {
+      assert.ok(!brief.includes(phrase), `"${phrase}" has nothing to act on without a forge`);
+    }
+  }
+});
+
+test('the self-merge section substitutes the detected name like everything else', () => {
+  for (const [which, forge] of FORGE_SHAPES.filter(([, f]) => f?.forge)) {
+    const named = forgeSection({ forge, base: 'main', human: NAME, selfMerge: true });
+    assert.ok(named.includes(NAME), `${which}: the name reaches the new section`);
+    assert.equal(
+      named.split(NAME).join('§'),
+      forgeSection({ forge, base: 'main', human: OTHER, selfMerge: true }).split(OTHER).join('§'),
+      `${which}: and every site it reaches is an interpolation`,
+    );
+    assert.ok(
+      forgeSection({ forge, base: 'main', selfMerge: true }).includes(FALLBACK),
+      `${which}: and it falls back when nobody is named`,
+    );
+  }
+});
+
+test('the backtick check covers the self-merge variants too — a bare one would break the module', async () => {
+  // The same T19 check as above, extended: the section is more prose in the same template
+  // literal, and a bare backtick in it ends the literal for the whole file.
+  const mod = await import('../server/lead-brief.js');
+  for (const selfMerge of [false, true]) {
+    for (const [, forge] of FORGE_SHAPES) {
+      const text = mod.forgeSection({ forge, base: 'main', selfMerge });
+      assert.ok(text.length > 200, 'every variant renders');
+      assert.doesNotMatch(text, /undefined/, 'and nothing interpolated as undefined');
+    }
+  }
+});

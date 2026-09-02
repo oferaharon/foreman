@@ -885,7 +885,20 @@ async function launchLead(folder, { terminal, resume = null }) {
   // can carry its own `user.name`, and a brief is generated per repo.
   await fsp.writeFile(
     briefFile,
-    leadBrief({ repo: folder, teamDir: tDir, decisionsFile, forge: effective, base, human: humanName(folder) }),
+    leadBrief({
+      repo: folder,
+      teamDir: tDir,
+      decisionsFile,
+      forge: effective,
+      base,
+      human: humanName(folder),
+      // The self-merge paragraphs, and `effective` above is why they are honest: a
+      // credential-carrying MCP entry has already demoted the forge to `push only` by
+      // here, so a brief never promises a tool the `mcp.json` beside it does not contain.
+      // Written at launch like everything else in this block, so a flip reaches the
+      // *next* lead — the panel's copy says so beside the toggle.
+      selfMerge: Boolean(config.toggles?.leadDecidesMerges),
+    }),
   );
 
   // The lead never writes code — enforced, not requested. Deny the checkout, allow
@@ -1819,6 +1832,42 @@ async function mergedIntoBase(task) {
   };
 }
 
+/*
+ * What the "done" line says about who decided this merge — one clause, on a self-merge
+ * team only, and never a refusal.
+ *
+ * A second refusal on close would be the obvious move and is the wrong one: it would catch
+ * merges the *maintainer* ordered on a team that also lets the lead decide, which breaks
+ * the one thing this feature promised not to touch. So this is a visible non-event
+ * instead, the same trade the trigger endpoint makes — a `done` task with no decision
+ * recorded says so, in the line the maintainer already reads, and they can go and look.
+ *
+ * The comparison is against **the head that merged** (re-read a few lines above, because
+ * review fixes commit after the review), not merely against "there is a selfMerge". A
+ * verdict is bound to the commit it was taken on, so a check on commit A followed by a
+ * push and a merge of commit B is exactly the case worth surfacing — and it surfaces as
+ * "no merge decision recorded", which understates it slightly and errs towards being
+ * looked at, which is the safe direction for this particular sentence.
+ *
+ * On a team with the toggle off this returns `''`, so the line is the one it has always
+ * been — the same "byte-identical by default" rule the brief follows.
+ */
+function selfMergeClause(repo, task) {
+  let team = null;
+  try {
+    team = readTeam(repo);
+  } catch {
+    /* no team, no toggle, no clause — a close must never fail over a sentence */
+  }
+  if (!team?.toggles?.leadDecidesMerges) return '';
+  const decision = task?.selfMerge;
+  const head = task?.head || null;
+  if (decision?.allowed && head && decision.head === head) {
+    return ` — merged on the lead's own judgment (checked ${new Date(decision.at).toLocaleString()}).`;
+  }
+  return ' — no merge decision recorded for this task.';
+}
+
 /**
  * Abandon a task: end its session (same guards as the bin — never type into a box),
  * remove its worktree and branch, mark it. A `failed` task keeps its worktree as
@@ -1941,7 +1990,7 @@ app.post('/api/team/tasks/:id/close', async (req, res) => {
         // Worth saying out loud: closing a plan task removes its worktree and branch and
         // leaves the plan itself alone — it lives in the team folder, not the checkout.
         ? `Plan task ${task.id} is done; the plan stays at ${task.planFile || planPath(task.repo, task.id)}.`
-        : `Task ${task.id} is done — merged and cleaned up.${task.pr ? ` (${task.pr})` : ''}`
+        : `Task ${task.id} is done — merged and cleaned up.${task.pr ? ` (${task.pr})` : ''}${selfMergeClause(task.repo, tasks.get(task.id))}`
       : `Task ${task.id} closed (${tasks.get(task.id).state}); worktree ${keepWorktree ? 'kept' : 'removed'}.`,
   });
   await registry.refresh().catch(() => {});
