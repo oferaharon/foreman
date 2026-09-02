@@ -65,6 +65,25 @@ dir_size() {
   echo $(( ${kb:-0} * 1024 ))
 }
 
+# Read one named export off a JS module beside this script.
+#
+# Bash cannot import, so this is the only way a value owned by `server/` reaches here
+# without being spelled a second time in another language. Answers the empty string on
+# every failure — no node, no module, a module that throws — because each caller has its
+# own fallback and a backup must not abort over a label it could not look up.
+read_export() {
+  local module="$1" name="$2"
+  [[ -f "$module" ]] || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  node -e "
+    const { pathToFileURL } = require('url');
+    import(pathToFileURL(process.argv[1]).href)
+      .then((m) => process.stdout.write(m[process.argv[2]] || ''))
+      .catch(() => {});
+  " "$module" "$name" 2>/dev/null || true
+  return 0
+}
+
 # `12.4 MB` — decimal, because that's what Finder and `ls -lh` say.
 human_size() {
   local bytes="$1"
@@ -127,7 +146,8 @@ fi
 #
 # Resolved from where this script sits, because the install location is the fact — there
 # is no marker file and no flag to go looking for. It decides two things below: which
-# restart instructions the refusal prints, and (further down) where server/logs.js is.
+# restart instructions the refusal prints, and (further down) which launchd label names
+# the plist — `brew services` generates its own, under a name of its own choosing.
 #
 # `pwd -P` for the physical path: a symlinked checkout under a Homebrew prefix would
 # otherwise read as an ordinary one, and vice versa.
@@ -226,25 +246,40 @@ CLAUDE_JSON="$HOME/.claude.json"
 # a git checkout" is the right answer when there is no checkout.
 REPO_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || REPO_DIR=""
 
-# server/logs.js is the source of truth for the LaunchAgent label (DEFAULT_AGENT_LABEL,
-# overridable by $FOREMAN_AGENT_LABEL). Found **beside this script**, never via git:
-# `$SCRIPT_DIR/../server/logs.js` is true in a checkout and equally true under a package
-# manager's libexec, where `git rev-parse` answers nothing at all — and an empty answer
-# there used to fall silently through to the hardcoded default, which is the wrong label
-# for any install that set one, and so the wrong plist (or none) in the archive.
-# The fallback stays for a copy of this script carried off on its own.
+# The launchd label, which is the plist's basename — and there are **two of them**, one per
+# install, because two different things generate the plist.
+#
+# A checkout's plist is written by `install-agent.js` from `server/logs.js`'s AGENT_LABEL
+# (`dev.foreman.panel`, overridable by $FOREMAN_AGENT_LABEL). A Homebrew install's plist is
+# written by `brew services` from the formula's `service do` block, and launchd names it
+# after the formula: `homebrew.mxcl.<formula>`. Under Homebrew, `dev.foreman.panel.plist`
+# names no file at all — so a backup asking for it captured nothing and said MISSING, with
+# nothing else on the run looking wrong. UNDER_HOMEBREW above is what chooses.
+#
+# Note this is the *label*, and only the label. The panel's log basenames stay derived from
+# AGENT_LABEL in both installs, because the formula's own `service do` block spells
+# `foreman.log` / `foreman-error.log` — see the long note on BREW_LAUNCHD_LABEL in
+# server/homebrew.js for what making AGENT_LABEL itself brew-aware would have cost.
+#
+# Both are read **beside this script**, never via git: `$SCRIPT_DIR/../server/*.js` is true
+# in a checkout and equally true under a package manager's libexec, where `git rev-parse`
+# answers nothing at all — and an empty answer there used to fall silently through to the
+# hardcoded default, which is the wrong label for any install that set one, and so the
+# wrong plist (or none) in the archive. The fallbacks stay for a copy of this script
+# carried off on its own; neither spells `foreman-panel` twice.
 LOGS_JS="$SCRIPT_DIR/../server/logs.js"
+HOMEBREW_JS="$SCRIPT_DIR/../server/homebrew.js"
 DEFAULT_AGENT_LABEL="dev.foreman.panel"
-AGENT_LABEL=""
-if [[ -f "$LOGS_JS" ]] && command -v node >/dev/null 2>&1; then
-  AGENT_LABEL=$(node -e "
-    const { pathToFileURL } = require('url');
-    import(pathToFileURL(process.argv[1]).href)
-      .then((m) => process.stdout.write(m.AGENT_LABEL || ''))
-      .catch(() => {});
-  " "$LOGS_JS" 2>/dev/null) || AGENT_LABEL=""
+
+if [[ "$UNDER_HOMEBREW" -eq 1 ]]; then
+  AGENT_LABEL="$(read_export "$HOMEBREW_JS" BREW_LAUNCHD_LABEL)"
+  # $FOREMAN_AGENT_LABEL is deliberately not consulted here: it renames the plist the
+  # *checkout* installer writes, and renames nothing that `brew services` generated.
+  AGENT_LABEL="${AGENT_LABEL:-homebrew.mxcl.$BREW_FORMULA}"
+else
+  AGENT_LABEL="$(read_export "$LOGS_JS" AGENT_LABEL)"
+  AGENT_LABEL="${AGENT_LABEL:-${FOREMAN_AGENT_LABEL:-$DEFAULT_AGENT_LABEL}}"
 fi
-AGENT_LABEL="${AGENT_LABEL:-${FOREMAN_AGENT_LABEL:-$DEFAULT_AGENT_LABEL}}"
 PLIST_PATH="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 
 # ---------------------------------------------------------------------------

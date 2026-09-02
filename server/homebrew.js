@@ -49,6 +49,31 @@ import { fileURLToPath } from 'node:url';
  */
 export const FORMULA = 'foreman-panel';
 
+/**
+ * The launchd label a `brew services` job runs under: `homebrew.mxcl.` + the formula name.
+ *
+ * **This is not the panel's own label and must not be confused with it.** `logs.js` owns
+ * `AGENT_LABEL` (`dev.foreman.panel` by default), which the checkout's `install-agent.js`
+ * writes into the plist it generates *and* which the log basenames are derived from. Under
+ * Homebrew nobody generates that plist: `brew services` writes
+ * `~/Library/LaunchAgents/homebrew.mxcl.<formula>.plist` from the formula's `service do`
+ * block, so `dev.foreman.panel.plist` names no file on disk — which is how
+ * `scripts/backup-state.sh` came to look for a plist that was never there and report it
+ * MISSING with nothing else wrong.
+ *
+ * So there are two labels, and exactly one thing may read this one: whatever needs to
+ * *find the plist launchd is really using*. The log basenames stay derived from
+ * `AGENT_LABEL`, because the formula's `service do` block spells `foreman.log` /
+ * `foreman-error.log` and a panel deriving them from this label instead would trim two
+ * files nobody writes while the ones launchd appends to grow without bound — the exact
+ * cascade `logs.js` already warns about, arriving from the other end.
+ *
+ * `homebrew.mxcl.` is Homebrew's own prefix, not ours; the half that is ours is `FORMULA`,
+ * and it is spelled once. `scripts/backup-state.sh` reads this export rather than carrying
+ * the composed string, the same way it reads `AGENT_LABEL` off `logs.js`.
+ */
+export const BREW_LAUNCHD_LABEL = `homebrew.mxcl.${FORMULA}`;
+
 /** Tried in order when `$HOMEBREW_PREFIX` says nothing: Apple silicon, then Intel. */
 export const FALLBACK_PREFIXES = ['/opt/homebrew', '/usr/local'];
 
