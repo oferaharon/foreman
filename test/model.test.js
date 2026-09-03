@@ -292,6 +292,9 @@ const SCROLLED = {
   'dialog-model-scroll-end.txt': { window: [3, 4, 5], cursor: 5 },
   // 220 columns, 23 rows — same window, no wrapped blurbs. Height, not width.
   'dialog-model-scroll-wide.txt': { window: [1, 2, 3], cursor: 2 },
+  // both markers at once, with the cursor between them — the state the panel leaves the
+  // box in after `/model/open` has walked the list and put the cursor back on the ✔ row.
+  'dialog-model-scroll-mid.txt': { window: [2, 3, 4], cursor: 3 },
 };
 
 const NAMES = {

@@ -1,0 +1,22 @@
+❯ /model
+───────────────────────────────────────────────────────────────── alpha-scroll ─
+
+────────────────────────────────────────────────────────────────────────────────
+  Select model
+  Switch between Claude models. Your pick becomes the default for new
+  sessions. For other/previous model names, specify with --model.
+
+  ↑ 2. Opus (1M context)      Opus 5 with 1M context · Best for everyday,
+                              complex tasks
+  ❯ 3. Fable ✔                Fable 5.1 · Most capable for your hardest and
+                              longest-running tasks
+  ↓ 4. Sonnet                 Sonnet 5 · Efficient for routine tasks
+     … +2 models
+
+  ● High effort (default) ←/→ to adjust
+
+  Use /fast to turn on Fast mode (Opus 5).
+
+  Enter to set as default · s to use this session only · Esc to cancel
+
+

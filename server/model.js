@@ -92,8 +92,12 @@ const GAP_RE = /\s{2,}/;
  *   when there is more list beyond it. They are not the cursor and they never share a row
  *   with it: with the cursor on the bottom visible row the `↓` is simply not drawn.
  * - `… +N models` counts what is **hidden in total**, not what is below. It reads `+2` at
- *   the top of the list and `+2` at the bottom of it, so `visible + N` is the length of
- *   the whole list — the only thing on screen that says how many models there are.
+ *   the top of the list and `+2` at the bottom of it, so `visible + N` is the length of the
+ *   whole list. Measured true at every size the panel produces — three rows at 80×23 and at
+ *   220×23, two at 60×12, five in each case — and measured **one short at 60×10**, where the
+ *   window degenerates to a single row and the count still reads `+3`. So it is reported as
+ *   `total` and nothing is decided by it: the endpoint that walks the list stops on a
+ *   completed lap, not on this number.
  * - The list **wraps**: `Down` from the last row lands on the first. That is why
  *   `stepToward` stays monotonic (below) and why the window can be enumerated by walking
  *   one direction.

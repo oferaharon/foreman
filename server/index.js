@@ -2598,37 +2598,53 @@ async function closeModelDialog(paneId) {
  *
  * Two things make that affordable rather than reckless. `Down` is one of the two keys in
  * this dialog that cannot commit anything — a digit writes the global default and `Enter`
- * writes it outright, and neither is ever sent from here — and the list **wraps**, so a
- * single direction reaches every row. It stops on `total` (`… +N models` says how long the
- * list is), on a read it cannot parse, or on the step bound, and never on a count.
+ * writes it outright, and neither is ever sent from here — and the list **wraps**, so one
+ * direction reaches every row and comes back to where it started.
  *
- * The cursor is then walked back to the row it started on. Nothing in the panel depends on
- * where it sits, but somebody may be looking at that terminal, and a menu that silently
- * moved their selection is the panel editing a screen it was only asked to read.
+ * **The lap is the stop condition, not `… +N models`,** and that is deliberate. The count
+ * is right at every size the panel actually produces (three rows at 80×23 and at 220×23,
+ * two at 60×12 — `visible + N` is five in all of them), and it is one short at 60×10, where
+ * the window degenerates to a single row. Nothing here is worth resting on a number that
+ * has already been seen to be off by one: the walk stops when the cursor returns home, or
+ * when two presses in a row teach it nothing, or on a read it cannot parse, or on the step
+ * bound — never on a count. `total` stays in the parse result as what the box says, and is
+ * not what this trusts.
+ *
+ * A completed lap leaves the cursor where it was found. A walk that stopped early does not,
+ * so it is walked back. Nothing in the panel depends on where it sits, but somebody may be
+ * looking at that terminal, and a menu that silently moved their selection is the panel
+ * editing a screen it was only asked to read.
  */
 async function readWholeModelList(paneId, first) {
   if (!first.partial) return first;
 
   const seen = new Map(first.options.map((o) => [o.index, o]));
   const home = first.cursorIndex;
-  let last = first;
+  let at = home;
 
   for (let i = 0; i < MODEL_STEPS; i += 1) {
-    if (last.total != null && seen.size >= last.total) break;
     await sendKeys(paneId, 'Down');
     await new Promise((r) => setTimeout(r, MODEL_STEP_MS));
     const next = parseModelDialog(await capturePane(paneId, 40));
     if (!next) break; // stop rather than press on into a screen we stopped understanding
-    const before = seen.size;
     for (const o of next.options) if (!seen.has(o.index)) seen.set(o.index, o);
-    last = next;
-    // A full lap with nothing new: the list is shorter than `… +N` claimed, or it does not
-    // wrap after all. Either way there is nothing further to learn by pressing.
-    if (seen.size === before && next.cursorIndex === home) break;
+    const moved = next.cursorIndex;
+    // A press that does not move the cursor is the end of a list that does not wrap.
+    //
+    // This is the stall test, and it is deliberately about the *cursor* rather than about
+    // whether the press revealed a new row. "Two presses that taught us nothing, so stop"
+    // was the first version and it was wrong for an ordinary reason: the window only
+    // scrolls once the cursor reaches its edge, so walking from row 1 of a three-row window
+    // spends two presses inside the rows already on screen. It stopped there — three models
+    // of five, from exactly the state a freshly opened picker is in when the current model
+    // is the first row. Caught by driving the real menu from a browser rather than by
+    // driving the endpoint from a row the walk happened to start below.
+    if (moved == null || moved === at) break;
+    at = moved;
+    if (at === home) break; // all the way round
   }
 
   // Back to where it was found. Bounded and re-read, like every other step here.
-  let at = last.cursorIndex;
   for (let i = 0; i < MODEL_STEPS && at !== home; i += 1) {
     const key = stepToward(at, home);
     if (!key) break;
@@ -2648,6 +2664,8 @@ async function readWholeModelList(paneId, first) {
     cursorIndex: at,
     currentIndex: options.find((o) => o.current)?.index ?? null,
     total: options.length,
+    // Honest rather than optimistic: if the box claimed more rows than the walk ever saw,
+    // this is still a partial menu and the client should know it is drawing one.
     partial: options.length < (first.total ?? options.length),
   };
 }
