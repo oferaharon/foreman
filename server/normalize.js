@@ -7,6 +7,7 @@
  */
 
 import { NUDGE_MARK } from './watch.js';
+import { LINK_MARK } from './links.js';
 
 const DROP_TYPES = new Set([
   'attachment',
@@ -384,6 +385,13 @@ export function normalizeRecord(rec) {
     // not something a human typed. Prefix-anchored with the space so a message merely
     // *mentioning* [room] stays the user's words (the parseCommandOutput lesson).
     if (text.startsWith(`${NUDGE_MARK} `)) return [{ ...base, kind: 'nudge', text }];
+
+    // Another project's lead, delivered through a link — same family as the nudge above,
+    // and typed by the panel rather than by anyone. Prefix-anchored with the space so a
+    // message merely *mentioning* [link] stays the user's words (the parseCommandOutput
+    // lesson, learned a third time here). The merge sentence carries no such prefix and
+    // must keep drawing as a user bubble — it is the maintainer's own word.
+    if (text.startsWith(`${LINK_MARK} `)) return [{ ...base, kind: 'link_message', text }];
 
     // Claude Code's own tap on the shoulder when a subagent, a background command or a
     // monitor finishes — same family as the nudge above, and the same reason it must not
