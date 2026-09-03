@@ -34,7 +34,7 @@ const run = promisify(execFile);
  *      a registered `gitea` MCP server for the self-hosted case.
  *
  * A pair of yes/no gives four readings, and these four words are the maintainer's ruled
- * vocabulary (2026-08-31, Q9) — they are what the panel shows and what the README says:
+ * vocabulary (2026-08-31, Q9) — they are what the panel shows and what `docs/team.md` says:
  *
  *   `GitHub`      origin is github.com and there are tools for it
  *   `Gitea`       origin is elsewhere and the gitea MCP server is registered

@@ -553,7 +553,7 @@ function printTriggerState() {
   const missing = notes.length ? 'no usable token' : 'no token file';
   console.log(on
     ? `Triggers: on — token file at ${TRIGGER_TOKEN_FILE}`
-    : `Triggers: off — ${missing}, see README (${TRIGGER_TOKEN_FILE})`);
+    : `Triggers: off — ${missing}, see docs/running.md (${TRIGGER_TOKEN_FILE})`);
 }
 
 // --------------------------------------------------------------------------- install ---
