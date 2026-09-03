@@ -640,6 +640,30 @@ are empty. Only the first was ever visible, so only the first was changed. And n
 `<command-name>` already carries the slash — the chip adds its own, which is why every
 command in the panel read `//model` until it was stripped in `parseCommand`.
 
+**A `type: 'user'` record is not proof a human typed anything.** When a subagent, a
+background command or a monitor finishes, Claude Code injects the result back as a
+**synthetic user turn** — a whole `<task-notification>` envelope — and the terminal draws
+one line for it. `normalize.js` drops only by `DROP_TYPES` and `isMeta`, so the panel drew
+every one as a full user bubble: a subagent's entire report, in the maintainer's own voice,
+saying something they never typed, two screens tall. Measured across this Mac: 472 of them,
+median 425 bytes, p90 8.5 KB, largest 48 KB. `parseTaskNotice` reads them as a `notice`
+chip.
+
+Three measurements decided its shape and none of them is guessable. **`<summary>` is on all
+472 and is self-describing**, so it *is* the chip's line — and it is why the label says
+`notice` rather than the obvious `agent finished`: only 92 are agents, 263 are background
+commands and 94 are monitors, so that wording would be wrong on four rows in five.
+**`<result>` is on only 92 and `<event>` on 94**; the other ~290 are a status and a pointer
+to an output file, and their chip is deliberately unopenable rather than opening on nothing.
+And **detection is two witnesses that must both hold** — a record field (`origin.kind`, or
+`promptSource` for a record carrying no `origin`) *and* an anchored `^<task-notification>`
+envelope — never the sentence inside, which is Claude Code's wording and will be reworded.
+The conjunction is also the scope: a typed message quoting an envelope stays a bubble
+(there is exactly one of those on this Mac), and whatever else `promptSource: 'system'`
+grows to carry falls through unchanged, which is the right default for a shape nobody has
+read. Unread never counted these — it counts `assistant` records with text — so nothing
+about the inbox moved.
+
 **A subscription dies with the socket, and nothing on screen says so.** The tailer holding
 a file offset is server state, so a dropped connection or a server restart ends it — while
 the roster keeps arriving, because that is broadcast to every client. The result is a rail

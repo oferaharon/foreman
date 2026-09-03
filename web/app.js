@@ -5762,6 +5762,18 @@ function createPane(slot, host) {
         div.textContent = m.text;
         return div;
       }
+      // A subagent, background command or monitor reporting back. Claude Code injects it
+      // as a user turn and the terminal never shows it, so a chip is the honest register:
+      // the summary is self-describing (`Agent "…" finished`, `Background command "…"
+      // completed`), which is why the label says only what kind of line this is. The
+      // report itself is prose, so it opens as markdown rather than as `chip-out`'s mono.
+      case 'task_notification':
+        return renderChip({
+          name: 'notice',
+          summary: m.summary,
+          body: m.text,
+          markdown: true,
+        });
       // What the command printed back. Sits under its `/model` or `/exit` chip and is
       // styled off it, because that is what it is — the reply, not a turn of its own.
       case 'command_output': {
@@ -5966,7 +5978,7 @@ function createPane(slot, host) {
     return el;
   }
 
-  function renderChip({ name, summary, body, isError, muted, hasResult, result, images }) {
+  function renderChip({ name, summary, body, isError, muted, hasResult, result, images, markdown }) {
     const wrap = document.createElement('div');
     if (muted) wrap.className = 'msg-thinking';
 
@@ -6029,7 +6041,14 @@ function createPane(slot, host) {
     out.hidden = true;
     if (diff) out.append(renderDiff(diff));
     else if (agent) out.append(renderAgentRun(agent, body));
-    else out.textContent = body || '';
+    // A report written for a human to read, not command output: the same treatment the
+    // subagent's `returned` block already gets, one nesting level up.
+    else if (markdown && body) {
+      const prose = document.createElement('div');
+      prose.className = 'msg-assistant';
+      prose.innerHTML = marked.parse(body);
+      out.append(prose);
+    } else out.textContent = body || '';
     wrap.append(out);
 
     // A failure is the one thing you shouldn't have to click to discover.
