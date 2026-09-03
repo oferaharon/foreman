@@ -2224,6 +2224,18 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .chip-out.err { border-left: 2px solid var(--decision); }
 
+/* A notice's report, opened inside the chip's own body. `.chip-out` is mono and `pre-wrap`
+   because it exists for command output; a subagent's report is prose, and reads in the
+   same register as the `returned` block below — one nesting level deeper — which is why
+   the direct-child selector leaves that one alone. */
+.chip-out > .msg-assistant {
+  font-family: var(--serif);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: normal;
+}
+
 /* ---- subagent runs ---- */
 
 .agent-run { display: flex; flex-direction: column; gap: 0.7rem; }

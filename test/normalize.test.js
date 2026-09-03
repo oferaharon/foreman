@@ -162,3 +162,134 @@ test('an image on a sidechain record is kept and flagged, not dropped', () => {
   assert.equal(msg.sidechain, true);
   assert.equal(msg.images.length, 1, 'a subagent’s screenshots are part of what the session produced');
 });
+
+/*
+ * Task notifications — a finished subagent, background command or monitor, handed back to
+ * the session as a synthetic user turn that the terminal never draws.
+ *
+ * All three envelopes below are copied from one scratch session in the sandbox's `alpha`
+ * repo on Claude Code v2.1.257 — one agent whose report is markdown, one whose result is a
+ * bare number, one background command with no result at all. Only the home directory in
+ * the paths is rewritten; every tag, and the order of them, is as Claude Code wrote it.
+ *
+ * Measured across this Mac's transcripts: 472 of these, `<summary>` on all 472,
+ * `<result>` on 92, `<event>` on 94, and one lone `human`/`typed` message whose text
+ * mentions the words — which is the last test here.
+ */
+
+const notice = (uuid, content) => ({
+  type: 'user',
+  uuid,
+  timestamp: '2026-09-03T00:59:00.988Z',
+  message: { role: 'user', content },
+  origin: { kind: 'task-notification' },
+  promptSource: 'system',
+  queueSkipAttachments: true,
+  userType: 'external',
+});
+
+const AGENT_MARKDOWN = `<task-notification>
+<task-id>ab25f30c58bf94f03</task-id>
+<tool-use-id>toolu_01DRNbBLkyf3iPd8k3nmGW7d</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-dev-Foreman-foreman-sandbox-alpha/433f353b/tasks/ab25f30c58bf94f03.output</output-file>
+<status>completed</status>
+<summary>Agent "Describe repo in markdown" finished</summary>
+<note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+<result># alpha
+
+- A ~75-line ES-module string library with \`node --test\` coverage.
+- It's a **sandbox**: nothing here is real.</result>
+<usage><subagent_tokens>29054</subagent_tokens><tool_uses>2</tool_uses><duration_ms>10433</duration_ms></usage>
+</task-notification>`;
+
+const BACKGROUND_NO_RESULT = `<task-notification>
+<task-id>b1hehjy97</task-id>
+<tool-use-id>toolu_01RcDwUmmWibzt1fmzwhciQL</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-dev-Foreman-foreman-sandbox-alpha/433f353b/tasks/b1hehjy97.output</output-file>
+<status>completed</status>
+<summary>Background command "Sleep 2 seconds then echo done" completed (exit code 0)</summary>
+</task-notification>`;
+
+test('a finished agent is a chip, not a user bubble', () => {
+  const [msg] = normalizeRecord(notice('n1', AGENT_MARKDOWN));
+  assert.equal(msg.kind, 'task_notification', 'never `user` — nobody typed this');
+  assert.equal(msg.summary, 'Agent "Describe repo in markdown" finished');
+  assert.match(msg.text, /^# alpha/, 'the body is the report, with the envelope gone');
+  assert.match(msg.text, /nothing here is real\.$/, 'and it ends where `</result>` did');
+  assert.ok(!/task-id|output-file|<usage>/.test(msg.text), 'no bookkeeping leaks into it');
+});
+
+test('a notification with no result opens onto nothing', () => {
+  const [msg] = normalizeRecord(notice('n2', BACKGROUND_NO_RESULT));
+  assert.equal(msg.kind, 'task_notification');
+  assert.equal(msg.summary, 'Background command "Sleep 2 seconds then echo done" completed (exit code 0)');
+  // ~290 of the 472 are a status and a pointer to an output file. An empty body is what
+  // makes the chip refuse to open, rather than opening on a blank panel.
+  assert.equal(msg.text, '');
+});
+
+test('a monitor event is a notification too, and `<event>` is its body', () => {
+  const [msg] = normalizeRecord(
+    notice(
+      'n3',
+      '<task-notification>\n<task-id>bh2tndyto</task-id>\n<summary>Monitor event: "alpha test run"</summary>\n<event>the suite went green on the third try</event>\n</task-notification>',
+    ),
+  );
+  assert.equal(msg.kind, 'task_notification');
+  assert.equal(msg.text, 'the suite went green on the third try');
+});
+
+test('the task id stands in when there is no summary', () => {
+  const [msg] = normalizeRecord(
+    notice('n4', '<task-notification>\n<task-id>b1hehjy97</task-id>\n</task-notification>'),
+  );
+  assert.equal(msg.summary, 'b1hehjy97');
+  assert.equal(msg.text, '');
+});
+
+test('a record with no `origin` is still read off `promptSource`', () => {
+  const rec = notice('n5', BACKGROUND_NO_RESULT);
+  delete rec.origin;
+  assert.equal(normalizeRecord(rec)[0].kind, 'task_notification');
+});
+
+test('a message merely mentioning a task-notification stays the user\'s words', () => {
+  // There is exactly one of these on this Mac — `origin.kind: 'human'`,
+  // `promptSource: 'typed'` — and it is why detection is on the record's own fields and
+  // never on the sentence inside. Same reasoning as `parseCommandOutput`'s anchoring.
+  const rec = {
+    type: 'user',
+    uuid: 'h1',
+    timestamp: '2026-09-03T00:59:00.988Z',
+    origin: { kind: 'human' },
+    promptSource: 'typed',
+    message: { role: 'user', content: `look at this: ${AGENT_MARKDOWN}` },
+  };
+  const [msg] = normalizeRecord(rec);
+  assert.equal(msg.kind, 'user');
+  assert.match(msg.text, /^look at this: <task-notification>/);
+});
+
+test('a typed message that is nothing but the envelope is still the user\'s words', () => {
+  const rec = {
+    type: 'user',
+    uuid: 'h2',
+    origin: { kind: 'human' },
+    promptSource: 'typed',
+    message: { role: 'user', content: AGENT_MARKDOWN },
+  };
+  // The envelope alone is not the witness — pasting one must not turn it into machinery.
+  assert.equal(normalizeRecord(rec)[0].kind, 'user');
+});
+
+test('a system-sourced record of some other shape falls straight through', () => {
+  const rec = {
+    type: 'user',
+    uuid: 'h3',
+    promptSource: 'system',
+    message: { role: 'user', content: '<some-future-thing>hello</some-future-thing>' },
+  };
+  // `promptSource: 'system'` may grow to carry things nobody here has read. A bubble is
+  // the right default for a shape we do not recognise.
+  assert.equal(normalizeRecord(rec)[0].kind, 'user');
+});

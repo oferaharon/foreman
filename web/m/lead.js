@@ -1252,6 +1252,25 @@ function renderMessage(m) {
       div.textContent = `/${m.name}${m.args ? ` ${m.args}` : ''}`;
       return div;
     }
+    // A subagent or background command reporting back. Claude Code injects it as a user
+    // turn, so without this it wore the user's bubble here too — and the report inside runs
+    // to pages. One line, the same shape a tool call gets: this screen draws no bodies at
+    // all, which is what keeps a 95 KB frame readable with a thumb.
+    case 'task_notification': {
+      const div = document.createElement('div');
+      div.className = 'm-msg-tool';
+      const name = document.createElement('span');
+      name.className = 'm-tool-name';
+      name.textContent = 'notice';
+      div.append(name);
+      if (m.summary) {
+        const sum = document.createElement('span');
+        sum.className = 'm-tool-summary';
+        sum.textContent = m.summary;
+        div.append(sum);
+      }
+      return div;
+    }
     case 'command_output': {
       const div = document.createElement('div');
       div.className = 'm-msg-command is-output';
@@ -1290,7 +1309,15 @@ function drawable(messages) {
   return messages.filter((m) => !m.sidechain && DRAWN.has(m.kind));
 }
 
-const DRAWN = new Set(['user', 'assistant', 'nudge', 'command', 'command_output', 'tool_use']);
+const DRAWN = new Set([
+  'user',
+  'assistant',
+  'nudge',
+  'command',
+  'command_output',
+  'tool_use',
+  'task_notification',
+]);
 
 function renderStream({ pin = false } = {}) {
   const el = view.el;

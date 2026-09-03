@@ -293,6 +293,23 @@ browser. Subagent transcripts are served only for file paths the panel has actua
 referenced by a transcript, so `/api/agent-run` can't be turned into a read-any-file
 endpoint.
 
+### Notices
+
+Not everything in a transcript was said by somebody. When a subagent, a background command
+or a monitor finishes, Claude Code hands the result back to the session as a **synthetic
+user turn** — a `<task-notification>` envelope wrapping the whole report — and the terminal
+shows only a single line for it. The panel drew it as a user bubble, so a subagent's report
+could run two screens tall in the middle of a conversation, in your voice, saying something
+you never typed.
+
+It is a chip now: `notice · Agent "…" finished`, opening onto the report rendered as
+markdown. The summary line is Claude Code's own and says which kind of thing finished, so
+the chip's label only says what kind of *line* this is. Roughly two in three carry no
+report at all — a status and a pointer to an output file — and those chips simply don't
+open. What makes this safe is that the panel decides on the record's own fields rather than
+on the text: a message of yours that quotes one of these envelopes is still a message of
+yours.
+
 ### Slash commands and `@` mentions
 
 Typing `/` at the start of a message offers the session's real commands with their

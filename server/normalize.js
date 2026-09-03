@@ -182,6 +182,60 @@ function parseCommandOutput(text) {
   return m ? m[1].replace(ANSI_RE, '').trim() : null;
 }
 
+/**
+ * A finished subagent, background command or monitor, handed back to the session as a
+ * **synthetic user turn** — text nobody typed and the terminal never draws.
+ *
+ * Claude Code writes it as a `type: 'user'` record carrying an entire `<task-notification>`
+ * envelope, and the report inside runs to pages: measured across this Mac's transcripts,
+ * 472 of them, median 425 bytes, p90 8.5 KB, the largest 48 KB. `normalize.js` drops only
+ * by `DROP_TYPES` and `isMeta`, so every one of them was drawn as a full user bubble — a
+ * subagent's whole report, in the maintainer's voice, two screens tall, absent from the
+ * terminal beside it.
+ *
+ * **Detection is on the record's own fields, never on the sentence inside**, the
+ * `parseCommandOutput` lesson one function up: the wording of that envelope is Claude
+ * Code's and will change, while a message *quoting* one has to stay the user's words.
+ * Two witnesses, and both must hold — `origin.kind` (or `promptSource`, which is what a
+ * record with no `origin` at all would still carry) says the harness wrote it, and the
+ * anchored envelope says this is the shape we know. That conjunction is also what keeps
+ * the scope narrow: whatever else `promptSource: 'system'` grows to carry falls straight
+ * through to a bubble, unchanged, which is the right default for a shape nobody has read.
+ *
+ * What comes out is a summary line and, when there is one, a body:
+ *
+ * - `<summary>` is on all 472 and is self-describing — `Agent "…" finished`,
+ *   `Background command "…" completed (exit code 0)`, `Monitor event: "…"` — so it is the
+ *   whole of the chip's line and the chip's own label says only what kind of line it is.
+ *   The task id stands in on the one record in 472 that carries no summary.
+ * - The body is `<result>` (92) or `<event>` (94); the remaining ~290 are a status and a
+ *   pointer to an output file and have nothing worth expanding, so their chip simply
+ *   doesn't open. Both tags are matched **non-greedily**: a stray `</result>` inside a
+ *   report truncates what we show rather than swallowing the envelope's own tail, which is
+ *   this panel's usual trade of showing less over showing something wrong.
+ */
+const TASK_NOTICE_RE = /^<task-notification>[\s\S]*<\/task-notification>$/;
+const NOTICE_TAGS = {
+  taskId: /<task-id>([\s\S]*?)<\/task-id>/,
+  summary: /<summary>([\s\S]*?)<\/summary>/,
+  result: /<result>([\s\S]*?)<\/result>/,
+  event: /<event>([\s\S]*?)<\/event>/,
+};
+
+function noticeTag(text, name) {
+  const m = NOTICE_TAGS[name].exec(text);
+  return m ? m[1].trim() : '';
+}
+
+function parseTaskNotice(rec, text) {
+  const fromHarness = rec.origin?.kind === 'task-notification' || rec.promptSource === 'system';
+  if (!fromHarness || !TASK_NOTICE_RE.test(text)) return null;
+  return {
+    summary: noticeTag(text, 'summary') || noticeTag(text, 'taskId'),
+    text: noticeTag(text, 'result') || noticeTag(text, 'event'),
+  };
+}
+
 function stringifyResult(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -330,6 +384,12 @@ export function normalizeRecord(rec) {
     // not something a human typed. Prefix-anchored with the space so a message merely
     // *mentioning* [room] stays the user's words (the parseCommandOutput lesson).
     if (text.startsWith(`${NUDGE_MARK} `)) return [{ ...base, kind: 'nudge', text }];
+
+    // Claude Code's own tap on the shoulder when a subagent, a background command or a
+    // monitor finishes — same family as the nudge above, and the same reason it must not
+    // wear a user bubble.
+    const notice = parseTaskNotice(rec, text);
+    if (notice) return [{ ...base, kind: 'task_notification', ...notice }];
 
     return [withImages({ ...base, kind: 'user', text }, pasted)];
   }
