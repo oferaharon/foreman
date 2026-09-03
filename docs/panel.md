@@ -316,31 +316,43 @@ created — with a bounded walk as the fallback. Matching is subsequence-based, 
 finds `server/tmux.js`, and scoring favours the basename over deep paths that merely
 contain the letters.
 
-### Images
+### Images and text files
 
-Paste or drop an image onto the composer. The panel saves it to
-`~/.foreman/images/` and drops the **path** into your message — which is exactly
+Paste or drop an image — or a `.txt` or `.md` file — onto the composer. The panel saves it
+to `~/.foreman/images/` and drops the **path** into your message — which is exactly
 what happens when you drop a file onto the terminal today: the path arrives as text,
-Claude Code calls `Read`, and the tool result carries the image.
+Claude Code calls `Read`, and the tool result carries the image or the file's text.
 
-The composer shows a chip — thumbnail, your original filename, and an `x` to remove —
-rather than a long path, so the box keeps holding your words. The path is substituted in
-at send time, ahead of your text, the way a dropped file leads in the terminal. Pending
-images are per session and survive switching away and reloading; a failed send puts them
-back.
+The composer shows a chip — a thumbnail for an image, a document glyph and the size for a
+text file, then your original filename and an `x` to remove — rather than a long path, so
+the box keeps holding your words. The path is substituted in at send time, ahead of your
+text, the way a dropped file leads in the terminal. Pending attachments are per session and
+survive switching away and reloading; a failed send puts them back.
+
+Pasting *text* is untouched: a paste carries no file, so it lands in the textarea as it
+always has. Only a real dropped or pasted file is uploaded.
 
 The copy is unavoidable, not a preference: a browser hands JavaScript the *bytes* and
 the *filename* of a dropped file, never its location. Measured on this machine — a
 Finder drag into Chrome offers only the `Files` flavour, with no `text/uri-list`, no
 `file://` URL, and `File.path === null`. Terminal.app can type your real path because
 it is a native app; a web page cannot see it. Your original filename is preserved in
-the saved copy, behind a timestamp prefix. Uploads are validated by magic bytes (PNG/JPEG/GIF/WebP, not
-the client's content-type), filenames are reduced to a safe basename, 25MB cap, and
-anything older than a week is pruned on startup.
+the saved copy, behind a timestamp prefix, and so is its extension — `Read` needs it.
+Filenames are reduced to a safe basename, and anything older than a week is pruned on
+startup.
 
-> Sessions in **manual** permission mode will ask before reading from that folder, since
-> it sits outside the project. The panel's permission card handles it — option 2 is
-> usually "allow reading from images/ for this session". Sessions in auto mode don't ask.
+**What gets in.** Images are validated by magic bytes (PNG/JPEG/GIF/WebP, never the
+client's content-type), 25MB cap. Text is validated by extension — `.txt` or `.md` — plus
+a strict UTF-8 read and a refusal of any NUL byte, capped at **1MB**, because a text file
+is read straight into a context window and a giant one spends it. Where the two disagree,
+the **bytes win**: a real PNG named `notes.txt` is saved as a `.png`. Anything else is
+refused with a message saying what is accepted.
+
+> Text files land in the *same* folder as images on purpose. Sessions in **manual**
+> permission mode will ask before reading from that folder, since it sits outside the
+> project. The panel's permission card handles it — option 2 is usually "allow reading
+> from images/ for this session". A second folder would mean a second prompt for the same
+> gesture. Sessions in auto mode don't ask.
 
 ### Images a session captured
 

@@ -78,7 +78,7 @@ server/
   status.js       hook events -> state + pane bindings
   commands.js     the session's real slash commands, for completion
   files.js        file listing under a session's cwd, for `@` mentions
-  uploads.js      pasted and dropped images, saved and pruned
+  uploads.js      pasted and dropped images and text files, saved and pruned
   images.js       every image in a transcript, for the per-session gallery
   git.js          what the shell wrapper would have named a session by default
   wrapper.js      when ~/.zshrc last changed, which dates the naming scheme

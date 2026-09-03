@@ -2197,6 +2197,67 @@ const BINDING_MARK = {
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
+ * Whether an attachment is a text file, asked of the name the server saved it under.
+ *
+ * **Derived, never stored.** The saved name carries the extension because `Read` needs it
+ * to, so the fact is already on disk and on every attachment record — including the ones
+ * `localStorage` was holding before text uploads existed, which is why nothing had to be
+ * migrated. A `kind` field beside the name would be a second spelling of one fact, and the
+ * day the two disagreed the chip would draw a thumbnail of a text file.
+ */
+const TEXT_UPLOAD_RE = /\.(txt|md)$/i;
+const isTextName = (name) => TEXT_UPLOAD_RE.test(String(name || ''));
+
+/** Sizes for a chip: short enough to sit beside a filename in 15rem. */
+function shortBytes(n) {
+  if (!Number.isFinite(n) || n < 0) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * A page with a folded corner, in `--ink-faint`, where an image chip has its thumbnail.
+ *
+ * Drawn rather than fetched: asking `/api/image/<name>` for a `.md` as an `<img>` would
+ * get the bytes, fail to decode them, and leave a broken-image mark — a wrong picture in
+ * the one slot on the chip that is supposed to say what kind of thing this is.
+ */
+function docGlyph() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('class', 'attach-doc');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const page = document.createElementNS(SVG_NS, 'path');
+  page.setAttribute('d', 'M3.5 1.5h6L13 5v9.5H3.5z');
+  page.setAttribute('fill', 'none');
+  page.setAttribute('stroke', 'currentColor');
+  page.setAttribute('stroke-width', '1.2');
+  page.setAttribute('stroke-linejoin', 'round');
+  svg.append(page);
+
+  const fold = document.createElementNS(SVG_NS, 'path');
+  fold.setAttribute('d', 'M9.5 1.5V5H13');
+  fold.setAttribute('fill', 'none');
+  fold.setAttribute('stroke', 'currentColor');
+  fold.setAttribute('stroke-width', '1.2');
+  fold.setAttribute('stroke-linejoin', 'round');
+  svg.append(fold);
+
+  for (const y of [8, 10.5]) {
+    const line = document.createElementNS(SVG_NS, 'path');
+    line.setAttribute('d', `M5.5 ${y}h5`);
+    line.setAttribute('stroke', 'currentColor');
+    line.setAttribute('stroke-width', '1.2');
+    line.setAttribute('stroke-linecap', 'round');
+    svg.append(line);
+  }
+
+  return svg;
+}
+
+/**
  * Drawn rather than typed.
  *
  * The first version used the padlock emoji and failed for a reason worth keeping: at
@@ -6108,13 +6169,14 @@ function createPane(slot, host) {
     });
     ta.addEventListener('blur', () => setTimeout(closeCompletion, 120));
 
-    // Paste or drop an image and the path lands in the message — the same thing that
-    // happens when you drop a file onto the terminal.
+    // Paste or drop an image, a `.txt` or a `.md` and the path lands in the message — the
+    // same thing that happens when you drop a file onto the terminal. Pasted *text* never
+    // comes through here: it carries no files, so this returns and the textarea keeps it.
     ta.addEventListener('paste', (e) => {
-      const files = imageFiles(e.clipboardData);
+      const files = attachableFiles(e.clipboardData);
       if (!files.length) return;
       e.preventDefault();
-      attachImages(files, s.id);
+      attachFiles(files, s.id);
     });
 
     for (const type of ['dragenter', 'dragover']) {
@@ -6131,10 +6193,10 @@ function createPane(slot, host) {
     }
     wrap.addEventListener('drop', (e) => {
       wrap.classList.remove('dropping');
-      const files = imageFiles(e.dataTransfer);
+      const files = attachableFiles(e.dataTransfer);
       if (!files.length) return;
       e.preventDefault();
-      attachImages(files, s.id);
+      attachFiles(files, s.id);
     });
 
     // Waiting messages sit above the box, in the order they'll go. Kept out of the
@@ -7876,23 +7938,34 @@ function createPane(slot, host) {
     return false;
   }
 
-  function imageFiles(dt) {
+  /**
+   * Images by their reported type, text files by their name — and the asymmetry is the
+   * server's, not a shortcut here: a browser reports an empty `File.type` for a `.md` often
+   * enough that a type test would refuse the ordinary case. The server re-decides both,
+   * on magic bytes and on a strict UTF-8 read, so this is a filter and not a gate.
+   *
+   * **Only real files, which is what keeps pasted *text* out of it.** `dt.files` is empty
+   * when you paste a paragraph — that arrives as a string item — so the textarea gets it,
+   * as it always has. Both callers also return early on an empty list, and that is the
+   * same guarantee said twice rather than one of them being redundant.
+   */
+  function attachableFiles(dt) {
     if (!dt) return [];
-    return [...(dt.files || [])].filter((f) => f.type.startsWith('image/'));
+    return [...(dt.files || [])].filter((f) => f.type?.startsWith('image/') || isTextName(f.name));
   }
 
   /**
-   * Upload each image, then drop its path into the message.
+   * Upload each file, then drop its path into the message.
    *
    * The path is plain visible text, not a hidden attachment: Claude Code reads it with
    * the Read tool exactly as it does when you drop a file into the terminal, and you can
    * see and edit what you're about to send.
    */
-  async function attachImages(files, sessionId) {
+  async function attachFiles(files, sessionId) {
     if (!composerEl) return;
 
     for (const file of files) {
-      setComposerNote(`uploading ${file.name || 'image'}…`);
+      setComposerNote(`uploading ${file.name || 'file'}…`);
       try {
         const res = await fetch('/api/upload', {
           method: 'POST',
@@ -7910,8 +7983,9 @@ function createPane(slot, host) {
 
         state.attachments[sessionId] = [
           ...attachmentsFor(sessionId),
-          // The original name is what you recognise; the path is plumbing.
-          { path: body.path, name: body.name, label: file.name || body.name },
+          // The original name is what you recognise; the path is plumbing. `bytes` is only
+          // drawn on a text chip, which has no thumbnail to say how much file this is.
+          { path: body.path, name: body.name, label: file.name || body.name, bytes: body.bytes },
         ];
         persistDrafts();
         renderAttachments();
@@ -7936,17 +8010,31 @@ function createPane(slot, host) {
       const chip = document.createElement('div');
       chip.className = 'attach';
 
-      const thumb = document.createElement('img');
-      thumb.className = 'attach-thumb';
-      thumb.src = `/api/image/${encodeURIComponent(a.name)}`;
-      thumb.alt = '';
-      chip.append(thumb);
+      if (isTextName(a.name)) {
+        chip.append(docGlyph());
+      } else {
+        const thumb = document.createElement('img');
+        thumb.className = 'attach-thumb';
+        thumb.src = `/api/image/${encodeURIComponent(a.name)}`;
+        thumb.alt = '';
+        chip.append(thumb);
+      }
 
       const name = document.createElement('span');
       name.className = 'attach-name';
       name.textContent = a.label || a.name;
       name.title = a.path;
       chip.append(name);
+
+      // Only on a text chip: a thumbnail already says roughly how much file there is, and
+      // a size beside every image would be new furniture on a strip that reads fine now.
+      const size = isTextName(a.name) ? shortBytes(a.bytes) : '';
+      if (size) {
+        const bytes = document.createElement('span');
+        bytes.className = 'attach-bytes';
+        bytes.textContent = size;
+        chip.append(bytes);
+      }
 
       const rm = document.createElement('button');
       rm.className = 'attach-remove';
@@ -8007,12 +8095,12 @@ function createPane(slot, host) {
     if (!s?.interactive || !composerEl) return;
 
     const typed = composerEl.ta.value.trim();
-    const images = attachmentsFor(s.id);
-    if (!typed && !images.length) return;
+    const attached = attachmentsFor(s.id);
+    if (!typed && !attached.length) return;
 
     // Paths lead, the way a dropped file does in the terminal — Claude reads them first,
     // then the question about them.
-    const text = [...images.map((a) => a.path), typed].filter(Boolean).join(' ');
+    const text = [...attached.map((a) => a.path), typed].filter(Boolean).join(' ');
 
     composerEl.ta.value = '';
     composerEl.ta.style.height = 'auto';
@@ -8027,7 +8115,7 @@ function createPane(slot, host) {
     // If it didn't go, put it back rather than swallowing what you wrote.
     if (!ok) {
       if (typed) state.drafts[s.id] = typed;
-      if (images.length) state.attachments[s.id] = images;
+      if (attached.length) state.attachments[s.id] = attached;
       persistDrafts();
       if (view.selected === s.id && composerEl) {
         composerEl.ta.value = typed;
