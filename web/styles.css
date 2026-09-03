@@ -2768,6 +2768,17 @@ body.row-dragging * { cursor: row-resize !important; }
   background: var(--surface-sunk);
 }
 
+/*
+ * A text file's chip where an image's has its thumbnail. Same 1.5rem box, so a strip
+ * holding one of each keeps a single row height and nothing steps sideways.
+ */
+.attach-doc {
+  width: 1.5rem;
+  height: 1.5rem;
+  flex: none;
+  color: var(--ink-faint);
+}
+
 .attach-name {
   font-family: var(--mono);
   font-size: 0.7rem;
@@ -2775,6 +2786,14 @@ body.row-dragging * { cursor: row-resize !important; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Only a text chip carries one — a thumbnail already says how much file there is. */
+.attach-bytes {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--ink-faint);
+  flex: none;
 }
 
 .attach-remove {

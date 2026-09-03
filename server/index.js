@@ -95,7 +95,7 @@ import {
   slugFor,
   uniqueSessionName,
 } from './launch.js';
-import { saveImage, resolveImage, pruneImages } from './uploads.js';
+import { saveUpload, resolveImage, pruneImages } from './uploads.js';
 import { rotateLogs, rotationLines, LOG_OUT, LOG_ERR } from './logs.js';
 import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
@@ -222,12 +222,19 @@ app.post('/hook', (req, res) => {
 /* -------------------------------------------------------------- uploads --- */
 
 /**
- * Take a pasted or dropped image and hand back a path. The panel puts that path in the
- * message, which is exactly what dropping a file into the terminal does today.
+ * Take a pasted or dropped image or text file and hand back a path. The panel puts that
+ * path in the message, which is exactly what dropping a file into the terminal does today.
+ *
+ * **The content-type list here is a body-parser filter, never the gate.** Browsers report
+ * an *empty* `File.type` for a `.md` often enough that gating on it would refuse the most
+ * ordinary case, and an empty type is what the client sends as `application/octet-stream`
+ * — so this list is deliberately wide and `saveUpload` decides, on magic bytes for an
+ * image and on extension plus a strict UTF-8 read for text. Anything this parser lets
+ * through and that refuses is a 400 with the reason.
  */
 app.post(
   '/api/upload',
-  express.raw({ type: ['image/*', 'application/octet-stream'], limit: '25mb' }),
+  express.raw({ type: ['image/*', 'text/*', 'application/octet-stream'], limit: '25mb' }),
   async (req, res) => {
     try {
       // The header is percent-encoded so spaces and unicode survive the transport.
@@ -235,9 +242,9 @@ app.post(
       try {
         name = decodeURIComponent(name);
       } catch {
-        /* malformed encoding — fall back to the raw value, saveImage sanitises it */
+        /* malformed encoding — fall back to the raw value, saveUpload sanitises it */
       }
-      const saved = await saveImage(req.body, name, Date.now());
+      const saved = await saveUpload(req.body, name, Date.now());
       res.json({ path: saved.path, name: path.basename(saved.path), bytes: saved.bytes });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -245,7 +252,11 @@ app.post(
   },
 );
 
-/** Thumbnails for the composer's attachment strip. */
+/**
+ * Thumbnails for the composer's attachment strip. It serves anything in the upload folder,
+ * text files included, but only images are ever *asked* for — a text chip draws a glyph
+ * rather than fetching the file, so nothing here needs to know which kind it is holding.
+ */
 app.get('/api/image/:name', (req, res) => {
   const file = resolveImage(req.params.name);
   if (!file) return res.status(404).end();
