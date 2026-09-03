@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { imageBlocks, normalizeRecord, servableImage, stitch } from '../server/normalize.js';
+import { linkLine } from '../server/links.js';
+import { mergeLine } from '../server/merge-queue.js';
 
 /*
  * Images in a transcript, and the two paths that used to throw them away.
@@ -292,4 +294,64 @@ test('a system-sourced record of some other shape falls straight through', () =>
   // `promptSource: 'system'` may grow to carry things nobody here has read. A bubble is
   // the right default for a shape we do not recognise.
   assert.equal(normalizeRecord(rec)[0].kind, 'user');
+});
+
+/*
+ * The `[link]` register — another project's lead, delivered by the panel into a lead's
+ * composer. Same family as the nudge and the task-notification above: without the
+ * prefix, a delivered message draws as a two-screen user bubble in the maintainer's own
+ * voice, which is the exact failure the feature exists to prevent (see the plan's Traps).
+ *
+ * The envelope is composed by `linkLine` (`server/links.js`), never hand-typed here, so
+ * these tests cannot drift from what the panel actually sends.
+ */
+
+const typed = (uuid, content) => ({
+  type: 'user',
+  uuid,
+  timestamp: '2026-09-03T00:59:00.988Z',
+  message: { role: 'user', content },
+});
+
+test('a link message from another lead is a chip, not a user bubble', () => {
+  const text = linkLine({ speaker: 'lead', body: 'the schema moved.', id: 'lnk-1', peer: '/repos/beta' });
+  const [msg] = normalizeRecord(typed('l1', text));
+  assert.equal(msg.kind, 'link_message', 'never `user` — nobody typed this');
+  assert.equal(msg.text, text);
+});
+
+test('a link message from the maintainer is the same kind as one from a lead', () => {
+  const text = linkLine({
+    speaker: 'human',
+    body: 'go ahead and merge that.',
+    id: 'lnk-1',
+    peer: '/repos/beta',
+    human: 'the maintainer',
+  });
+  const [msg] = normalizeRecord(typed('l2', text));
+  // Detection is by the shared `[link] ` prefix, never by which envelope shape follows —
+  // the whole point is that a lead cannot tell the two apart by reading the transcript.
+  assert.equal(msg.kind, 'link_message');
+});
+
+test('a message merely mentioning [link] stays the user\'s words', () => {
+  const [msg] = normalizeRecord(typed('l3', 'did you see the [link] feature land yet?'));
+  assert.equal(msg.kind, 'user');
+});
+
+test('a message starting with [link] but no trailing space stays the user\'s words', () => {
+  // `[link]` with no space is not the mark — see the parseCommandOutput lesson, learned a
+  // third time here. Anchoring loosely would eat ordinary prose shaped like the prefix.
+  const [msg] = normalizeRecord(typed('l4', '[link]: see the docs section on this'));
+  assert.equal(msg.kind, 'user');
+});
+
+test('the merge sentence still normalizes as a user message', () => {
+  // The contrast that makes the [link] prefix load-bearing: the merge line carries no
+  // prefix and must keep drawing as a user bubble, because it is the maintainer's own
+  // word — getting this backwards is the failure the whole feature is built around.
+  const text = mergeLine([{ id: 'task-1', prNumber: 40 }], 'the maintainer');
+  const [msg] = normalizeRecord(typed('l5', text));
+  assert.equal(msg.kind, 'user');
+  assert.equal(msg.text, text);
 });
