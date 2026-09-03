@@ -757,6 +757,24 @@ panel answers it, because the click already said switch, and it says so afterwar
 under the composer reads *history re-read on the next message*. It checks first that the box
 names the model you clicked; anything else and it Escapes back out and changes nothing.
 
+**On a short pane the dialog is not five rows.** Below about 25 lines Claude Code draws it
+as a three-row scrolling window instead — `↑`/`↓` markers where the highlight goes and a
+`… +2 models` row counting what is off screen. That is not an exotic size: the pane header's
+*attach a Terminal* button opens a default macOS Terminal window, which is 80×23, so the
+picker collapses the moment you attach one. It is **height, not width** — the same box at
+220 columns and 23 rows collapses identically, and at 220×50 it does not.
+
+The menu still offers every model. Opening it walks the highlight round the list with arrow
+keys, reading the pane after each press, and puts it back where it found it — arrows are the
+two keys in that dialog that cannot commit anything, and the list wraps, so one direction
+reaches every row. Picking a row that is off screen steps toward it the same way.
+
+And the panel can always close the box, even one it cannot read. Whether it may *drive* the
+picker and whether there is a picker to get **out of** are different questions: the second is
+answered by the heading and the footer alone, so a layout the parser has never met is
+Escaped rather than abandoned. It used to be abandoned, and the session then sat behind its
+own picker with the composer refusing to send until somebody pressed Esc in the terminal.
+
 ### Choosing an effort level
 
 The effort level sits beside the model, and looks almost the same — but it is the opposite
