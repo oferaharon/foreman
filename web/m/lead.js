@@ -1271,6 +1271,30 @@ function renderMessage(m) {
       }
       return div;
     }
+    // Another project's lead, delivered down a link and typed into this session by the
+    // panel. Nobody here typed it, so it must not wear the user's bubble — drawn as one it
+    // would be another project's lead speaking in the maintainer's voice, which is the
+    // failure the whole connections feature is designed around.
+    //
+    // A chip rather than the nudge's centred full text, and that is this screen's own rule
+    // rather than a preference: a link message is an envelope plus a quoted body and runs
+    // to a dozen lines, which is exactly why `task_notification` beside it draws one line
+    // too. The first line of the envelope is self-describing — it names the project and the
+    // link — so it is the summary, verbatim and unparsed. The body is read on the desktop,
+    // or in the terminal.
+    case 'link_message': {
+      const div = document.createElement('div');
+      div.className = 'm-msg-tool';
+      const name = document.createElement('span');
+      name.className = 'm-tool-name';
+      name.textContent = 'link';
+      div.append(name);
+      const sum = document.createElement('span');
+      sum.className = 'm-tool-summary';
+      sum.textContent = String(m.text || '').split('\n')[0];
+      div.append(sum);
+      return div;
+    }
     case 'command_output': {
       const div = document.createElement('div');
       div.className = 'm-msg-command is-output';
@@ -1313,6 +1337,7 @@ const DRAWN = new Set([
   'user',
   'assistant',
   'nudge',
+  'link_message',
   'command',
   'command_output',
   'tool_use',
