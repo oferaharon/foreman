@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import {
   parseModelDialog,
   parseModelConfirm,
+  modelDialogOpen,
+  modelConfirmOpen,
   confirmNames,
   stepToward,
   footerModelName,
@@ -254,4 +256,208 @@ test('the picker parses at 70 columns, and the footer name survives the wrap', (
     d.options.map(footerModelName),
     ['Opus 5', 'Opus 5', 'Fable 5.1', 'Sonnet 5', 'Haiku 4.5'],
   );
+});
+
+/* ------------------------------------------------- the scrolling window --- */
+
+/*
+ * What the picker becomes on a short pane, and the reason this whole section exists: the
+ * panel's own attach-terminal button opens a default macOS Terminal window, which shrinks
+ * the pane to **80×23**, and at that height Claude Code stops drawing five rows and draws
+ * a three-row scrolling window instead — `↑`/`↓` markers in the cursor column and a
+ * `… +2 models` row counting what is hidden.
+ *
+ * Every fixture below is a real `capture-pane` from a scratch session in the sandbox's
+ * `alpha` on v2.1.257, one per cursor position, plus the same box at 220 columns and 23
+ * rows. That last one is the measurement that decided the fix: **the collapse is height,
+ * not width.** 220×23 windows exactly like 80×23 while 220×50 shows all five rows, so
+ * this is not a narrow-terminal case and a wide capture proves nothing on its own.
+ *
+ * What it cost before: `↓ 3.` does not match `OPTION_RE`, so the run came back as 1..2 or
+ * as 3..4 — not a 1..N run at all — and the parser answered null over a box the panel had
+ * opened itself, which it then could not read, could not close, and which blocked the
+ * composer until somebody pressed Esc in the terminal.
+ */
+
+const SCROLLED = {
+  // fresh open: the cursor sits on the ✔ row, which is the last visible one, so the `↓`
+  // that would mark it is not drawn — this is the state that used to parse and quietly
+  // return three models out of five.
+  'dialog-model-scroll-top.txt': { window: [1, 2, 3], cursor: 3 },
+  // one `Up`: `↓ 3.` on the bottom row.
+  'dialog-model-scroll-down.txt': { window: [1, 2, 3], cursor: 2 },
+  // `↑ 2.` on the top row, and the run no longer starts at 1.
+  'dialog-model-scroll-up.txt': { window: [2, 3, 4], cursor: 4 },
+  // the end of the list: `↑ 3.` above, and the effort line changes to "not supported".
+  'dialog-model-scroll-end.txt': { window: [3, 4, 5], cursor: 5 },
+  // 220 columns, 23 rows — same window, no wrapped blurbs. Height, not width.
+  'dialog-model-scroll-wide.txt': { window: [1, 2, 3], cursor: 2 },
+};
+
+const NAMES = {
+  1: 'Default (recommended)',
+  2: 'Opus (1M context)',
+  3: 'Fable',
+  4: 'Sonnet',
+  5: 'Haiku',
+};
+
+test('a scrolled window parses, at every cursor position, keeping the list\'s own numbers', () => {
+  for (const [name, want] of Object.entries(SCROLLED)) {
+    const d = parseModelDialog(fixture(name));
+    assert.ok(d, `${name} — the whole point: this used to be null`);
+    assert.deepEqual(d.options.map((o) => o.index), want.window, name);
+    assert.deepEqual(
+      d.options.map((o) => o.label),
+      want.window.map((i) => NAMES[i]),
+      `${name} — the marker column is not part of the label`,
+    );
+    assert.equal(d.cursorIndex, want.cursor, `${name} — a marker is never the cursor`);
+  }
+});
+
+/*
+ * `… +N models` counts everything hidden, not what is below the fold: it reads `+2` at the
+ * top of the list and `+2` at the bottom. So `visible + N` is the length of the whole list
+ * — the only thing on screen that says how many models there are, and what tells the
+ * enumeration when to stop pressing.
+ */
+test('the window says how much of the list it is not showing', () => {
+  for (const name of Object.keys(SCROLLED)) {
+    const d = parseModelDialog(fixture(name));
+    assert.equal(d.windowed, true, name);
+    assert.equal(d.hidden, 2, `${name} — +2 at either end of the list`);
+    assert.equal(d.total, 5, name);
+    assert.equal(d.partial, true, `${name} — three of five is not a menu`);
+  }
+});
+
+/* The wide, tall box is untouched by any of it: no markers, no `… +N`, nothing to rebase. */
+test('a box showing the whole list says so, and reads exactly as before', () => {
+  for (const name of ['dialog-model.txt', 'dialog-model-open.txt', 'dialog-model-narrow.txt']) {
+    const d = parseModelDialog(fixture(name));
+    assert.equal(d.windowed, false, name);
+    assert.equal(d.partial, false, name);
+    assert.equal(d.hidden, 0, name);
+    assert.equal(d.total, 5, name);
+    assert.equal(d.options.length, 5, name);
+  }
+});
+
+/*
+ * The ✔ can be off-window, and then there is no current row to report. Null rather than a
+ * guess, for the reason the rest of this file keeps choosing: a wrong tick on a menu says
+ * "you are already on this one" about a model the session is not running.
+ */
+test('a tick outside the window is reported as absent, not moved', () => {
+  const d = parseModelDialog(fixture('dialog-model-scroll-end.txt'));
+  assert.equal(d.currentIndex, 3, 'Fable is still visible at the top of this window');
+  const off = parseModelDialog(
+    fixture('dialog-model-scroll-end.txt').replace('3. Fable ✔  ', '3. Fable    '),
+  );
+  assert.deepEqual(off.options.map((o) => o.index), [3, 4, 5]);
+  assert.equal(off.currentIndex, null);
+});
+
+/*
+ * The window is flattened *inside* this module — marker column blanked, `… +N` lifted out,
+ * run rebased to 1 — so the shared block reader and the four other parsers see nothing new.
+ * These are the cross-refusals for the new shape, and they are the reason `OPTION_RE` in
+ * `question.js` was left exactly as it was.
+ */
+test('the other parsers all refuse the scrolling picker too', () => {
+  for (const name of [...Object.keys(SCROLLED), 'dialog-model-confirm-short.txt']) {
+    assert.equal(parsePrompt(fixture(name)), null, `permission / ${name}`);
+    assert.equal(parseQuestion(fixture(name)), null, `question / ${name}`);
+    assert.equal(parsePlanPrompt(fixture(name)), null, `plan / ${name}`);
+  }
+});
+
+test('the picker and the confirmation still refuse each other on a short pane', () => {
+  assert.equal(parseModelDialog(fixture('dialog-model-confirm-short.txt')), null);
+  for (const name of Object.keys(SCROLLED)) {
+    assert.equal(parseModelConfirm(fixture(name)), null, name);
+  }
+});
+
+/* The second screen is unchanged by the height — captured at 80×23, the yes label unwrapped. */
+test('the confirmation still parses at 80x23', () => {
+  const c = parseModelConfirm(fixture('dialog-model-confirm-short.txt'));
+  assert.equal(c.kind, 'model-confirm');
+  assert.equal(c.target, 'Haiku 4.5');
+  assert.equal(c.yesIndex, 1);
+  assert.equal(c.noIndex, 2);
+  assert.equal(confirmNames(c.target, { label: 'Haiku', description: 'Haiku 4.5 · Fastest' }), true);
+});
+
+/* A window's rows still say what the footer will call them — the blurb survives the fold. */
+test('the footer name is readable from a windowed row', () => {
+  const d = parseModelDialog(fixture('dialog-model-scroll-end.txt'));
+  assert.deepEqual(d.options.map(footerModelName), ['Fable 5.1', 'Sonnet 5', 'Haiku 4.5']);
+});
+
+/* ---------------------------------------------------- getting back out --- */
+
+/*
+ * The second half of the bug, and the half that made the first half unrecoverable.
+ *
+ * `closeModelDialog` used to ask `parseModelDialog` whether there was anything to close, so
+ * a box it could not read was a box it decided was not there: it pressed nothing, reported
+ * success, and left the session blocked. Whether the panel may *drive* the picker and
+ * whether there is a picker to get **out of** are different questions, and only the second
+ * one is allowed to be answered by the title and the footer alone.
+ */
+test('the picker is recognised as open even when its rows cannot be read', () => {
+  for (const name of [...Object.keys(SCROLLED), 'dialog-model.txt', 'dialog-model-narrow.txt']) {
+    assert.equal(modelDialogOpen(fixture(name)), true, name);
+  }
+  // The shape that started all this, stood up synthetically because the real one is fixed:
+  // a run this module cannot make sense of. Broken in the middle rather than at an edge, so
+  // it fails the way a future layout would — rows that are there and do not line up.
+  const broken = fixture('dialog-model-scroll-up.txt').replace(/^(\s*)3\. Fable/m, '$19. Fable');
+  assert.equal(parseModelDialog(broken), null, 'unreadable, by construction');
+  assert.equal(modelDialogOpen(broken), true, 'and still plainly on screen');
+});
+
+test('the confirmation is recognised as open by its title alone', () => {
+  assert.equal(modelConfirmOpen(fixture('dialog-model-confirm-short.txt')), true);
+  assert.equal(modelConfirmOpen(fixture('dialog-model-confirm.txt')), true);
+  // Narrow on purpose, so a third row makes `parseModelConfirm` refuse — and the box the
+  // panel then cannot answer is exactly the one it must still be able to Escape.
+  const grown = fixture('dialog-model-confirm.txt').replace(
+    /2\. No, go back/,
+    '2. Yes, and stop asking\n    3. No, go back',
+  );
+  assert.equal(parseModelConfirm(grown), null);
+  assert.equal(modelConfirmOpen(grown), true);
+});
+
+test('neither witness fires on a screen that is not the picker', () => {
+  for (const name of [
+    'prompt-bash.txt',
+    'dialog-choice-single.txt',
+    'dialog-plan-approve.txt',
+    'dialog-effort.txt',
+    'dialog-config.txt',
+    'dialog-resume.txt',
+    'pane-idle.txt',
+    'pane-working.txt',
+    'pane-trust-gate.txt',
+  ]) {
+    assert.equal(modelDialogOpen(fixture(name)), false, name);
+    assert.equal(modelConfirmOpen(fixture(name)), false, `confirm / ${name}`);
+  }
+});
+
+/*
+ * The footer has to sit *below* the heading. A `Select model` line left in the scrollback
+ * by an earlier `/model` must not stand in for a live box — the witness ends in Escape
+ * keystrokes, and pressing those into a composer is not free.
+ */
+test('a heading in the scrollback is not a box', () => {
+  const stale = `${fixture('dialog-model.txt')
+    .split('\n')
+    .filter((l) => !/to set as default/.test(l))
+    .join('\n')}\n❯ \n`;
+  assert.equal(modelDialogOpen(stale), false);
 });

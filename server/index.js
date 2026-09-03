@@ -36,6 +36,8 @@ import { parsePlanPrompt, approvalKeys } from './plan.js';
 import {
   parseModelDialog,
   parseModelConfirm,
+  modelDialogOpen,
+  modelConfirmOpen,
   confirmNames,
   stepToward,
   footerModelName,
@@ -2552,7 +2554,15 @@ app.post('/api/team/tasks/:id/merge-check', async (req, res) => {
  * open in the browser is correct — the panel is a remote control for it, not a copy.
  */
 
-const MODEL_STEPS = 12; // five rows today; a bound, not a count
+/*
+ * A bound on stepping, never a count. Five rows today, fourteen at most, and on a short
+ * pane the list is a three-row scrolling window — so reaching the last row from the first
+ * can be thirteen presses rather than four. Every one of them is re-read before the next.
+ */
+const MODEL_STEPS = 24;
+
+/** Between one arrow key and the read that says where it landed. */
+const MODEL_STEP_MS = 180;
 
 /**
  * Escape out of whatever half of `/model` is on screen, and check it worked.
@@ -2560,15 +2570,86 @@ const MODEL_STEPS = 12; // five rows today; a bound, not a count
  * One press is not an exit: from the `Switch model?` confirmation `Esc` goes back to the
  * picker, and only the next one reaches the composer. Verified in a scratch session — it
  * ends on `Kept model as Fable 5`, nothing committed.
+ *
+ * **What it asks is the witness, not the parser**, and that distinction is the whole of
+ * this feature's second half. Written against `parseModelDialog` — as it was — a box the
+ * panel could not *read* was a box it decided was not there: this returned `true` having
+ * pressed nothing, `/model/cancel` reported success, and the session stayed blocked behind
+ * a picker only the terminal could dismiss. Getting out must not depend on understanding
+ * what you are getting out of. See `modelDialogOpen` in `model.js`.
  */
 async function closeModelDialog(paneId) {
-  for (let i = 0; i < 3; i += 1) {
-    const text = await capturePane(paneId, 40);
-    if (!parseModelDialog(text) && !parseModelConfirm(text)) return true;
+  const stillUp = (text) => modelDialogOpen(text) || modelConfirmOpen(text);
+  for (let i = 0; i < 4; i += 1) {
+    if (!stillUp(await capturePane(paneId, 40))) return true;
     await sendKeys(paneId, 'Escape').catch(() => {});
     await new Promise((r) => setTimeout(r, 300));
   }
-  return !parseModelDialog(await capturePane(paneId, 40));
+  return !stillUp(await capturePane(paneId, 40));
+}
+
+/**
+ * Walk the cursor round the window until every row of the list has been seen.
+ *
+ * On a short pane the picker shows three rows of five, so the menu the browser draws from
+ * one read is missing two models — and the two it is missing are the two at the bottom,
+ * which is where Sonnet and Haiku live. The box scrolls with the cursor and nothing else
+ * moves it, so the only way to learn the rest is to step and re-read.
+ *
+ * Two things make that affordable rather than reckless. `Down` is one of the two keys in
+ * this dialog that cannot commit anything — a digit writes the global default and `Enter`
+ * writes it outright, and neither is ever sent from here — and the list **wraps**, so a
+ * single direction reaches every row. It stops on `total` (`… +N models` says how long the
+ * list is), on a read it cannot parse, or on the step bound, and never on a count.
+ *
+ * The cursor is then walked back to the row it started on. Nothing in the panel depends on
+ * where it sits, but somebody may be looking at that terminal, and a menu that silently
+ * moved their selection is the panel editing a screen it was only asked to read.
+ */
+async function readWholeModelList(paneId, first) {
+  if (!first.partial) return first;
+
+  const seen = new Map(first.options.map((o) => [o.index, o]));
+  const home = first.cursorIndex;
+  let last = first;
+
+  for (let i = 0; i < MODEL_STEPS; i += 1) {
+    if (last.total != null && seen.size >= last.total) break;
+    await sendKeys(paneId, 'Down');
+    await new Promise((r) => setTimeout(r, MODEL_STEP_MS));
+    const next = parseModelDialog(await capturePane(paneId, 40));
+    if (!next) break; // stop rather than press on into a screen we stopped understanding
+    const before = seen.size;
+    for (const o of next.options) if (!seen.has(o.index)) seen.set(o.index, o);
+    last = next;
+    // A full lap with nothing new: the list is shorter than `… +N` claimed, or it does not
+    // wrap after all. Either way there is nothing further to learn by pressing.
+    if (seen.size === before && next.cursorIndex === home) break;
+  }
+
+  // Back to where it was found. Bounded and re-read, like every other step here.
+  let at = last.cursorIndex;
+  for (let i = 0; i < MODEL_STEPS && at !== home; i += 1) {
+    const key = stepToward(at, home);
+    if (!key) break;
+    await sendKeys(paneId, key);
+    await new Promise((r) => setTimeout(r, MODEL_STEP_MS));
+    const now = parseModelDialog(await capturePane(paneId, 40));
+    if (!now) break;
+    at = now.cursorIndex;
+  }
+
+  const options = [...seen.values()]
+    .sort((a, b) => a.index - b.index)
+    .map((o) => ({ ...o, cursor: o.index === at }));
+  return {
+    ...first,
+    options,
+    cursorIndex: at,
+    currentIndex: options.find((o) => o.current)?.index ?? null,
+    total: options.length,
+    partial: options.length < (first.total ?? options.length),
+  };
 }
 
 /** Open `/model` in this session and read what it offers. */
@@ -2581,8 +2662,23 @@ app.post('/api/sessions/:id/model/open', async (req, res) => {
     return res.status(409).json({ error: 'Answer what is open in the terminal first.' });
   }
   // Already up — from a previous open, or opened by hand. Just read it.
-  const showing = parseModelDialog(await capturePane(session.paneId, 40));
-  if (showing) return res.json({ ok: true, dialog: showing });
+  const already = await capturePane(session.paneId, 40);
+  const showing = parseModelDialog(already);
+  if (showing) {
+    return res.json({ ok: true, dialog: await readWholeModelList(session.paneId, showing) });
+  }
+  // Up, and unreadable. Say which box, and get out of it rather than leaving the session
+  // holding one the panel put there — the failure this feature exists to end was a 409
+  // repeated forever over a picker nothing would close.
+  if (modelDialogOpen(already) || modelConfirmOpen(already)) {
+    const closed = await closeModelDialog(session.paneId).catch(() => false);
+    registry.refresh().catch(() => {});
+    return res.status(502).json({
+      error: closed
+        ? 'The model picker came up in a shape the panel could not read — it has been closed. Try again, or use /model in the terminal.'
+        : 'The model picker is open in the terminal and the panel cannot read or close it. Press Esc there.',
+    });
+  }
 
   if (before.state === 'dialog') {
     return res.status(409).json({ error: `${before.dialog} is open in the terminal.` });
@@ -2593,11 +2689,13 @@ app.post('/api/sessions/:id/model/open', async (req, res) => {
     await new Promise((r) => setTimeout(r, 450));
     const dialog = parseModelDialog(await capturePane(session.paneId, 40));
     if (!dialog) {
-      // Never leave a half-opened modal behind holding the session.
-      await sendKeys(session.paneId, 'Escape').catch(() => {});
+      // Never leave a half-opened modal behind holding the session. `closeModelDialog`
+      // rather than one blind Escape: the box may be up and merely unreadable, which is
+      // precisely the case a single press used to be asked to cover and did not.
+      await closeModelDialog(session.paneId).catch(() => {});
       return res.status(502).json({ error: 'The model picker did not come up.' });
     }
-    res.json({ ok: true, dialog });
+    res.json({ ok: true, dialog: await readWholeModelList(session.paneId, dialog) });
   } catch (err) {
     res.status(err instanceof PaneBlockedError ? 409 : 500).json({ error: err.message });
   }
@@ -2646,11 +2744,45 @@ app.post('/api/sessions/:id/model', async (req, res) => {
 
   try {
     for (let step = 0; step <= MODEL_STEPS; step += 1) {
-      const dialog = parseModelDialog(await capturePane(session.paneId, 40));
-      if (!dialog) return res.status(409).json({ error: 'The model picker is not open.' });
+      const text = await capturePane(session.paneId, 40);
+      const dialog = parseModelDialog(text);
+      if (!dialog) {
+        // Not open is one answer; open and unreadable is a different one, and leaving that
+        // second case alone is what used to strand a session behind its own picker.
+        if (modelDialogOpen(text) || modelConfirmOpen(text)) {
+          const closed = await closeModelDialog(session.paneId).catch(() => false);
+          registry.refresh().catch(() => {});
+          return res.status(409).json({
+            error: closed
+              ? 'The picker changed into something the panel could not read — nothing was set, and it has been closed.'
+              : 'The picker changed into something the panel can neither read nor close. Press Esc in the terminal.',
+          });
+        }
+        return res.status(409).json({ error: 'The model picker is not open.' });
+      }
 
       const target = dialog.options.find((o) => o.index === wanted);
-      if (!target) return res.status(400).json({ error: `Option ${wanted} is not on screen.` });
+      if (!target) {
+        // On a short pane the box is a three-row window onto the list, so the row that was
+        // clicked can be off screen entirely — which is not "no such option", it is "not
+        // yet". Step toward it off the window's own bounds and re-read, the same discipline
+        // as every other press here; `expectLabel` is checked the moment it comes into view,
+        // which is still before anything is committed.
+        const first = dialog.options[0]?.index;
+        const last = dialog.options[dialog.options.length - 1]?.index;
+        const key =
+          dialog.windowed && wanted >= 1 && wanted <= (dialog.total ?? Infinity)
+            ? wanted < first
+              ? 'Up'
+              : wanted > last
+                ? 'Down'
+                : null
+            : null;
+        if (!key) return res.status(400).json({ error: `Option ${wanted} is not on screen.` });
+        await sendKeys(session.paneId, key);
+        await new Promise((r) => setTimeout(r, MODEL_STEP_MS));
+        continue;
+      }
       // The row that was clicked must still be the row at that number.
       if (expectLabel && expectLabel !== target.label) {
         return res.status(409).json({
@@ -2704,7 +2836,7 @@ app.post('/api/sessions/:id/model', async (req, res) => {
         return res.json({ ok: true, model: target.label, footerModel });
       }
       await sendKeys(session.paneId, key);
-      await new Promise((r) => setTimeout(r, 180));
+      await new Promise((r) => setTimeout(r, MODEL_STEP_MS));
     }
     res.status(500).json({
       error: 'The cursor would not settle on that row — nothing was set. Finish it in the terminal.',
