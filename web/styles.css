@@ -2368,6 +2368,31 @@ body.row-dragging * { cursor: row-resize !important; }
   text-overflow: ellipsis;
 }
 
+/* A message from another project's lead, delivered down a link.
+
+   The nudge above is one line and ellipsises; this is an envelope over a quoted body and
+   must not, because the quoting *is* the message — every body line carries a `> ` written
+   by the panel, and that is the whole of what makes a lead unable to forge a line that
+   reads as the maintainer's. So it wraps, in mono, with the whitespace kept.
+
+   Framed and set in from the left, rather than centred like the phone's event line: it is
+   long enough that a centred block would be unreadable, and the frame is what says this is
+   an event in the conversation rather than a turn of it. Muted ink and no accent — the
+   register is "the panel typed this", not "look at this". */
+.msg-link {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-left: 2px solid var(--rule-strong);
+  background: var(--surface);
+  border-radius: 0 3px 3px 0;
+  padding: 0.5rem 0.7rem;
+  margin: 0.2rem 0;
+}
+
 .divider {
   display: flex;
   align-items: center;
@@ -3679,6 +3704,172 @@ body.row-dragging * { cursor: row-resize !important; }
    and it must not compete with the word beside it for the eye. */
 .confirm-no { color: var(--ink-faint); }
 .confirm-no:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+/* ====================================================== joint thread === */
+
+/* A pane holding something that is not a session: the joint thread over one link's two
+   rooms. It reuses split view rather than taking a column of its own — the locked ruling,
+   on the grounds that four columns (rail, connections, conversation, lead aside) do not fit
+   a laptop.
+
+   It borrows the pane's own furniture — `.main-head` above, a scrolling middle, a quiet
+   foot — so a slot holding a thread reads as the same kind of object as a slot holding a
+   conversation. What it does not borrow is the room's bubbles: those lane by worker/lead,
+   and here both speakers are leads. */
+
+.main-head.is-link .link-mark {
+  font-family: var(--mono);
+  color: var(--ink-muted);
+  flex: none;
+}
+
+.main-head.is-link h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* The label the link was opened with, in the maintainer's own words. Quiet: it is why the
+   link exists, not what is happening on it. */
+.link-head-label {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+/* A link closed while its thread was open. The pane stays and goes on rendering its
+   history — never blank a pane — so this is the only thing that says the channel is shut. */
+.link-head-closed {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  color: var(--decision);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 0.3rem;
+  margin-left: 0.4rem;
+}
+
+.link-thread {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1.4rem 0 1.6rem;
+}
+
+.link-thread-inner {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.app.split .link-thread-inner { padding-left: 1rem; padding-right: 1rem; }
+
+.link-quiet {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  max-width: 34rem;
+}
+
+.link-quiet.is-error { color: var(--decision); }
+
+/* Laned by *which end of the link* said it — `a` left, `b` right — because a joint thread
+   belongs to neither project and so has no "own repo" to lane against, the way the room's
+   bubbles do. `a` and `b` are stored sorted, so a side never moves between paints. */
+.link-msg { max-width: 82%; line-height: 1.45; }
+.link-msg.from-a { align-self: flex-start; }
+.link-msg.from-b { align-self: flex-end; }
+.link-msg.from-b .link-meta { justify-content: flex-end; }
+
+/* The maintainer's own line. Full width and centred rather than laned, because it is not
+   one of the two ends — it is the one speaker on this channel whose word can authorize,
+   and it must be **structurally** distinguishable from a lead's line rather than merely a
+   different colour of the same shape. Item 7 is what puts one here; the lane exists now so
+   that entry has somewhere to land the day it does. */
+.link-msg.from-human {
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.link-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0 0.1rem 0.15rem;
+}
+
+.link-pill {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: var(--ink-muted);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-pill.is-human { color: var(--accent); border-color: currentColor; }
+
+.link-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
+
+.link-bubble {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  background: var(--surface);
+}
+
+.link-msg.from-a .link-bubble { border-top-left-radius: 3px; }
+.link-msg.from-b .link-bubble { border-top-right-radius: 3px; }
+
+/* The maintainer's line gets the accent edge the room already uses for an audit trail, and
+   for the same reason: this is the shape that carries authority. */
+.link-msg.from-human .link-bubble {
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+/* Two leads writing prose: keep their paragraphs. */
+.link-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* A message that did not land exists only in the sender's room, which is right — and it
+   has to say so, or the thread reads as though it arrived. */
+.link-msg.is-undelivered .link-bubble {
+  border-color: color-mix(in srgb, var(--decision) 45%, transparent);
+  background: color-mix(in srgb, var(--decision) 6%, var(--surface));
+}
+
+.link-undelivered {
+  margin-top: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+/* Handed off, not read: the queue may hold it for hours. The vaguer verb is deliberate. */
+.link-queued {
+  margin-top: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--working);
+}
+
+/* Read-only, and it says which — a reader hunting for a box that is not there is the same
+   failure as a card that refuses to draw a button without explaining itself. */
+.link-foot {
+  flex: none;
+  border-top: 1px solid var(--rule);
+  padding: 0.6rem 1.6rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+.app.split .link-foot { padding-left: 1rem; padding-right: 1rem; }
 
 /* ============================================================= narrow === */
 
