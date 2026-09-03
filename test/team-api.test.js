@@ -1734,3 +1734,512 @@ test('neither the recorded path nor the computed one exists — 404 naming both'
   assert.deepEqual(res.body.triedPaths, [stale, computed]);
   assert.equal(res.body.path, computed, 'the last one tried — where it would land, same as before this fix');
 });
+
+/*
+ * Cross-project links — `GET/POST /api/team/links`, `.../close`, `.../message`,
+ * `.../thread`, `.../seen`, and the un-pin refusal.
+ *
+ * Its own panel, its own state dir, its own three team folders: these need `links.json`
+ * to be the suite's own file, and one of them seeds it before boot so the store's load
+ * path is exercised through the real server rather than around it.
+ *
+ * **What is here and what is benched.** No lead is running (there is no tmux in this
+ * suite at all), so every send lands on the sending-side 409 — which is the case worth
+ * pinning anyway, because it is the one that must write *nothing*. The four answers that
+ * need a live pane are benched by hand against real leads in the sandbox, exactly as the
+ * trigger's `delivered`/`queued` are: the far-side refusal and its two room lines, the
+ * copies both rooms take on a successful send, `delivered`/`queued`, and the un-pin
+ * refusal (which needs a lead in the roster, and the roster is built from tmux). The
+ * thread is pinned here against rooms written by hand, in the shape the endpoint writes.
+ *
+ * Two structural pins stand in where HTTP cannot reach: the third roster-frame site
+ * (`registry.on('update')`, which fires on tmux churn) and the pin refusal. Reading the
+ * source is the only mechanism available for those, the way `test/logs.test.js` reads
+ * `package.json` and a shell script it cannot import.
+ *
+ * **Every control character below is written as a numeric escape**, deliberately — the
+ * `normalize.js` habit. An invisible byte in source lasts until the next careless edit,
+ * and these particular bytes are the thing under test.
+ */
+
+let linkState;
+let linkPort;
+let linkPanel;
+let alphaRepo;
+let betaRepo;
+let gammaRepo;
+let loneRepo; // a folder with no team — the 404
+
+/** A folder with a team, and a `decisions.md` that already has something in it. */
+function prepareLinkTeam(state, dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const teamPath = path.join(state, 'teams', teamKeyFor(dir));
+  fs.mkdirSync(teamPath, { recursive: true });
+  fs.writeFileSync(path.join(teamPath, 'team.json'), JSON.stringify({ repo: dir }, null, 2));
+  fs.writeFileSync(
+    path.join(teamPath, 'decisions.md'),
+    `# Decisions — ${path.basename(dir)}\n\n## 2026-01-01 — Something already decided\n\nKeep this.\n`,
+  );
+}
+
+async function linkApi(method, route, body) {
+  const res = await fetch(`http://127.0.0.1:${linkPort}${route}`, {
+    method,
+    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+const linkRoom = (dir) => {
+  const file = path.join(linkState, 'teams', teamKeyFor(dir), 'room.jsonl');
+  try {
+    return fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  } catch {
+    return [];
+  }
+};
+
+const decisionsOf = (dir) =>
+  fs.readFileSync(path.join(linkState, 'teams', teamKeyFor(dir), 'decisions.md'), 'utf8');
+
+/** Append one entry straight into a room, the way the message endpoint would. */
+function writeRoomEntry(dir, entry) {
+  const file = path.join(linkState, 'teams', teamKeyFor(dir), 'room.jsonl');
+  fs.appendFileSync(file, `${JSON.stringify(entry)}\n`);
+}
+
+/** A regex that matches a path literally. */
+const literal = (s) => new RegExp(s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+test.before(async () => {
+  linkState = await fsp.mkdtemp(path.join(os.tmpdir(), 'foreman-links-'));
+  // Sandbox names only — `alpha`, `beta` and `gamma` are the three throwaway repos, and
+  // the only project names allowed anywhere that gets written down.
+  alphaRepo = path.join(linkState, 'Alpha');
+  betaRepo = path.join(linkState, 'Beta');
+  gammaRepo = path.join(linkState, 'Gamma');
+  loneRepo = path.join(linkState, 'NoTeamHere');
+  for (const dir of [alphaRepo, betaRepo, gammaRepo]) prepareLinkTeam(linkState, dir);
+  fs.mkdirSync(loneRepo, { recursive: true });
+
+  /*
+   * Seeded before boot: a link with something unseen on it, and a `seq` of 4. Nothing
+   * reachable over HTTP can put a message on a card (that needs two live leads), so this
+   * is the only way to test `seen` against a card that had something on it — and it
+   * exercises the store's load and its id recovery through the real server.
+   */
+  fs.writeFileSync(
+    path.join(linkState, 'links.json'),
+    JSON.stringify({
+      seq: 4,
+      links: [{
+        id: 'lnk-4',
+        a: alphaRepo, b: gammaRepo, // already sorted: Alpha < Gamma
+        label: 'seeded', createdAt: 1_780_000_000_000, closedAt: null,
+        lastAt: 1_780_000_100_000, lastText: 'something', lastFrom: gammaRepo,
+        unseen: 3, seenAt: null,
+      }],
+    }, null, 2),
+  );
+
+  linkPort = await freePort();
+  linkPanel = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      FOREMAN_PORT: String(linkPort),
+      FOREMAN_HOST: '127.0.0.1',
+      FOREMAN_STATE_DIR: linkState,
+    },
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  process.on('exit', () => linkPanel?.kill());
+
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    try {
+      await fetch(`http://127.0.0.1:${linkPort}/api/team/tasks`);
+      return;
+    } catch {
+      if (Date.now() > deadline) throw new Error('the links scratch panel never came up');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+});
+
+test.after(async () => {
+  await stop(linkPanel);
+  if (linkState) await fsp.rm(linkState, { recursive: true, force: true });
+});
+
+test('a link is opened between two projects, and its id continues the seq on disk', async () => {
+  const res = await linkApi('POST', '/api/team/links', {
+    a: betaRepo, b: alphaRepo, label: 'shared auth schema',
+  });
+  assert.equal(res.status, 200);
+  // `lnk-5`, not `lnk-1`: the seeded file said 4, and a re-load that minted an id already
+  // in use would give one card two links.
+  assert.equal(res.body.link.id, 'lnk-5');
+  // Sorted, so `{a,b}` and `{b,a}` are one pair rather than two records that can disagree
+  // — asked for here in the reverse order on purpose.
+  assert.deepEqual([res.body.link.a, res.body.link.b], [alphaRepo, betaRepo]);
+  assert.equal(res.body.link.label, 'shared auth schema');
+  assert.equal(res.body.link.closedAt, null);
+  assert.equal(res.body.link.unseen, 0);
+  assert.deepEqual(res.body.decisions.map((d) => d.ok), [true, true], 'both files took it');
+});
+
+test('the list is every link; ?open=1 narrows it and ?folder= names the other end', async () => {
+  const all = await linkApi('GET', '/api/team/links');
+  assert.equal(all.status, 200);
+  assert.deepEqual(all.body.links.map((l) => l.id).sort(), ['lnk-4', 'lnk-5']);
+
+  const mine = await linkApi('GET', `/api/team/links?folder=${encodeURIComponent(betaRepo)}`);
+  assert.deepEqual(mine.body.links.map((l) => l.id), ['lnk-5']);
+  // Named once, here, rather than derived independently by the column, the lead's
+  // `link_list` and the thread.
+  assert.equal(mine.body.links[0].peer, alphaRepo);
+  assert.equal(mine.body.links[0].peerName, 'Alpha');
+
+  const relative = await linkApi('GET', '/api/team/links?folder=Beta');
+  assert.equal(relative.status, 400);
+  assert.match(relative.body.error, /absolute path/);
+});
+
+test('opening refuses a self-link, a relative path, a project with no team, and a duplicate pair', async () => {
+  const self = await linkApi('POST', '/api/team/links', { a: alphaRepo, b: alphaRepo });
+  assert.equal(self.status, 400);
+  assert.match(self.body.error, /cannot be linked to itself/);
+
+  const relative = await linkApi('POST', '/api/team/links', { a: 'Alpha', b: betaRepo });
+  assert.equal(relative.status, 400);
+  assert.match(relative.body.error, /absolute project paths/);
+
+  const missing = await linkApi('POST', '/api/team/links', { a: alphaRepo });
+  assert.equal(missing.status, 400);
+
+  // The store deliberately does not ask whether a project has a team — this endpoint
+  // does, because a link between projects with no lead to speak on it is a card that can
+  // never do anything.
+  const noTeam = await linkApi('POST', '/api/team/links', { a: alphaRepo, b: loneRepo });
+  assert.equal(noTeam.status, 404);
+  assert.match(noTeam.body.error, /No team for /);
+  assert.match(noTeam.body.error, /NoTeamHere/, 'names which of the two');
+
+  const dup = await linkApi('POST', '/api/team/links', { a: alphaRepo, b: betaRepo });
+  assert.equal(dup.status, 409);
+  assert.equal(dup.body.link, 'lnk-5', 'names the link that is in the way');
+
+  // …and the reverse order is the same pair, because a pair has one spelling.
+  const reversed = await linkApi('POST', '/api/team/links', { b: alphaRepo, a: betaRepo });
+  assert.equal(reversed.status, 409);
+
+  assert.deepEqual(
+    (await linkApi('GET', '/api/team/links')).body.links.map((l) => l.id).sort(),
+    ['lnk-4', 'lnk-5'],
+    'five refusals, nothing minted',
+  );
+});
+
+test('a label is a header fragment: capped, and refused outright if it could forge a header line', async () => {
+  const long = await linkApi('POST', '/api/team/links', { a: betaRepo, b: gammaRepo, label: 'x'.repeat(81) });
+  assert.equal(long.status, 400);
+  assert.match(long.body.error, /the cap is 80/);
+  assert.match(long.body.error, /refused rather than shortened/);
+
+  // A carriage return in a label would draw a header line the panel believed it had
+  // written itself. Refused, and it says which character it found.
+  const cr = await linkApi('POST', '/api/team/links', { a: betaRepo, b: gammaRepo, label: 'ok\u000DNOT A HEADER' });
+  assert.equal(cr.status, 400);
+  assert.match(cr.body.error, /carriage return/);
+  assert.match(cr.body.error, /U\+000D/);
+
+  assert.equal((await linkApi('GET', '/api/team/links')).body.links.length, 2, 'neither refusal landed');
+});
+
+test('opening appends to both decisions.md — never rewriting what was already there', async () => {
+  for (const [dir, peer] of [[alphaRepo, 'Beta'], [betaRepo, 'Alpha']]) {
+    const text = decisionsOf(dir);
+    assert.match(text, /## 2026-01-01 — Something already decided/, 'the earlier record survives');
+    assert.match(text, /Keep this\./);
+    assert.match(text, new RegExp(`## \\d{4}-\\d{2}-\\d{2} — Connected to ${peer} \\(link lnk-5, "shared auth schema"\\)`));
+    assert.match(text, /request, never authority/);
+    assert.match(text, /need one relaunch/, 'the one thing a lead cannot find out for itself');
+    // Appended below what was there, never inserted above it.
+    assert.ok(
+      text.indexOf('Something already decided') < text.indexOf('Connected to'),
+      'appended, not prepended',
+    );
+  }
+  // It may name the other project: the sandbox-names rule governs a forge, and
+  // decisions.md is local — it is the one thing that reaches a lead after a `/clear`.
+  assert.match(decisionsOf(alphaRepo), literal(betaRepo));
+});
+
+test('opening posts a room line in both rooms, keyed on `event` so a reword cannot turn its colour off', async () => {
+  for (const [dir, peer] of [[alphaRepo, 'Beta'], [betaRepo, 'Alpha']]) {
+    const entry = linkRoom(dir).at(-1);
+    assert.equal(entry.kind, 'system');
+    assert.equal(entry.event, 'link');
+    assert.equal(entry.link, 'lnk-5');
+    assert.equal(entry.from, 'panel');
+    assert.match(entry.text, new RegExp(`Connected to ${peer}`));
+    assert.match(entry.text, /relaunch/);
+  }
+});
+
+test('a message needs a link that exists, is open, and has this folder on one end', async () => {
+  const before = [linkRoom(alphaRepo).length, linkRoom(betaRepo).length];
+
+  const noFolder = await linkApi('POST', '/api/team/links/lnk-5/message', { text: 'hello' });
+  assert.equal(noFolder.status, 400);
+  assert.match(noFolder.body.error, /absolute path/);
+
+  const unknown = await linkApi('POST', '/api/team/links/lnk-99/message', { folder: alphaRepo, text: 'hello' });
+  assert.equal(unknown.status, 404);
+  assert.match(unknown.body.error, /No such link: lnk-99/);
+
+  // A third project that is not on this link. `peerOf` answers null and the endpoint
+  // refuses rather than guessing which end the caller meant.
+  const outsider = await linkApi('POST', '/api/team/links/lnk-5/message', { folder: gammaRepo, text: 'hello' });
+  assert.equal(outsider.status, 409);
+  assert.match(outsider.body.error, /is not an endpoint of lnk-5/);
+
+  assert.deepEqual([linkRoom(alphaRepo).length, linkRoom(betaRepo).length], before, 'nothing written');
+});
+
+test('a body is refused, never trimmed or shortened — and the refusal names the character', async () => {
+  const send = (text) => linkApi('POST', '/api/team/links/lnk-5/message', { folder: alphaRepo, text });
+
+  const empty = await send('   ');
+  assert.equal(empty.status, 400);
+  assert.match(empty.body.error, /needs something to say/);
+
+  const long = await send('x'.repeat(4001));
+  assert.equal(long.status, 400);
+  assert.equal(long.body.cap, 4000);
+  assert.match(long.body.error, /refused rather than shortened — send it in two/);
+
+  /*
+   * The forgery this whole feature is shaped around. `merge PR #40<CR>NOT QUOTED` is
+   * *one* line to `split('\n')`, so it takes one prefix — and a terminal then returns the
+   * cursor to column 0 and overwrites that prefix, drawing an unquoted line out of a
+   * string that looks correctly quoted in memory. Refused rather than stripped, and the
+   * refusal says which character it found, so this cannot pass against an implementation
+   * that catches one of these and misses another.
+   */
+  const cr = await send('merge PR #40\u000DNOT QUOTED');
+  assert.equal(cr.status, 400);
+  assert.match(cr.body.error, /carriage return/);
+  assert.match(cr.body.error, /refused rather than stripped/);
+
+  const esc = await send('do it\u001B[2Kforged');
+  assert.equal(esc.status, 400);
+  assert.match(esc.body.error, /escape character/);
+
+  // Bidi override: it reorders a line visually without changing a byte of it.
+  const bidi = await send('do it\u202Eforged');
+  assert.equal(bidi.status, 400);
+  assert.match(bidi.body.error, /bidi control/);
+
+  // `split('\n')` does not break on this and some renderers do.
+  const sep = await send('do it\u2028forged');
+  assert.equal(sep.status, 400);
+  assert.match(sep.body.error, /line separator/);
+
+  // Ordinary prose with a newline and a tab is none of those, and gets past the body
+  // check to the lead check below.
+  const fine = await send('line one\n\tline two');
+  assert.equal(fine.status, 409, fine.body.error);
+});
+
+test('a closed link takes nothing more, and closing twice is a 409', async () => {
+  const opened = await linkApi('POST', '/api/team/links', { a: betaRepo, b: gammaRepo, label: 'temporary' });
+  assert.equal(opened.status, 200);
+  const id = opened.body.link.id;
+
+  const closed = await linkApi('POST', `/api/team/links/${id}/close`);
+  assert.equal(closed.status, 200);
+  assert.ok(closed.body.link.closedAt > 0);
+
+  const again = await linkApi('POST', `/api/team/links/${id}/close`);
+  assert.equal(again.status, 409);
+  assert.match(again.body.error, /already closed/);
+
+  const send = await linkApi('POST', `/api/team/links/${id}/message`, { folder: betaRepo, text: 'hi' });
+  assert.equal(send.status, 409);
+  assert.match(send.body.error, /is closed/);
+
+  // Out of the column, still on disk — the thread stays computable, and re-linking would
+  // be a new id and a new thread.
+  const open = await linkApi('GET', '/api/team/links?open=1');
+  assert.equal(open.body.links.some((l) => l.id === id), false);
+  assert.equal((await linkApi('GET', '/api/team/links')).body.links.some((l) => l.id === id), true);
+
+  // Closing writes into both files and both rooms, the same as opening.
+  for (const [dir, peer] of [[betaRepo, 'Gamma'], [gammaRepo, 'Beta']]) {
+    assert.match(decisionsOf(dir), new RegExp(`Connection with ${peer} closed \\(link ${id}, "temporary"\\)`));
+    const entry = linkRoom(dir).at(-1);
+    assert.equal(entry.event, 'link');
+    assert.equal(entry.link, id);
+    assert.match(entry.text, new RegExp(`Connection with ${peer} closed`));
+  }
+
+  assert.equal((await linkApi('POST', '/api/team/links/lnk-99/close')).status, 404);
+});
+
+test('with no lead on the sending side the message is refused and nothing at all is written', async () => {
+  /*
+   * The sending side needs a live lead too, and that refusal is what makes the far-side
+   * alert line affordable: the room is append-only and is the maintainer's scan surface,
+   * and this endpoint is reachable from the LAN with no authentication like every other.
+   * A caller who guessed a link id must not be able to append to it.
+   */
+  const before = [linkRoom(alphaRepo).length, linkRoom(betaRepo).length];
+  const res = await linkApi('POST', '/api/team/links/lnk-5/message', {
+    folder: alphaRepo, text: 'the schema moved',
+  });
+  assert.equal(res.status, 409);
+  assert.match(res.body.error, /No lead is running in /);
+  assert.match(res.body.error, /nothing was launched/i, 'the 2026-08-27 ruling, said out loud');
+  assert.deepEqual([linkRoom(alphaRepo).length, linkRoom(betaRepo).length], before);
+});
+
+test('seen zeroes the card, and 404s for a link nobody has heard of', async () => {
+  const before = (await linkApi('GET', '/api/team/links')).body.links.find((l) => l.id === 'lnk-4');
+  assert.equal(before.unseen, 3, 'the seeded file was read');
+
+  const res = await linkApi('POST', '/api/team/links/lnk-4/seen');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.link.unseen, 0);
+  assert.ok(res.body.link.seenAt > 0);
+  // The summary itself survives — `seen` is about what is *new*, not about the card.
+  assert.equal(res.body.link.lastText, 'something');
+
+  assert.equal((await linkApi('POST', '/api/team/links/lnk-99/seen')).status, 404);
+});
+
+test('the thread is one conversation out of two rooms, ordered by ts across both', async () => {
+  /*
+   * Written by hand into both rooms, in the shape the message endpoint writes: each side
+   * carries a copy of every message, and **each room is authoritative for what its own
+   * lead said** — so the filter is by `sender` and there is nothing to dedupe. Sending
+   * one for real needs two live leads and is benched.
+   */
+  const base = 1_790_000_000_000;
+  const msg = (sender, peer, text, ts, over = {}) => ({
+    seq: 99, ts, from: 'lead', to: 'lead', kind: 'link',
+    link: 'lnk-5', speaker: 'lead', sender, peer, text, delivered: true, queued: false, ...over,
+  });
+
+  // Alpha spoke first, Beta answered, Alpha again — each written into both rooms.
+  for (const dir of [alphaRepo, betaRepo]) {
+    writeRoomEntry(dir, msg(alphaRepo, betaRepo, 'the schema moved', base + 1000));
+    writeRoomEntry(dir, msg(betaRepo, alphaRepo, 'noted, we read it at boot', base + 2000));
+    writeRoomEntry(dir, msg(alphaRepo, betaRepo, 'thanks', base + 3000));
+  }
+  // A refusal exists in the sender's room only, and shows in the thread as a message
+  // that did not land.
+  writeRoomEntry(alphaRepo, msg(alphaRepo, betaRepo, 'are you there', base + 4000, {
+    delivered: false, reason: 'no lead is running', alert: true,
+  }));
+  // Another link's traffic in the same rooms, and an ordinary room line. Neither belongs
+  // to this thread.
+  writeRoomEntry(alphaRepo, msg(alphaRepo, gammaRepo, 'different link', base + 1500, { link: 'lnk-4' }));
+  writeRoomEntry(betaRepo, { seq: 99, ts: base + 1600, from: 'panel', to: 'lead', kind: 'system', text: 'not a link entry' });
+
+  const res = await linkApi('GET', '/api/team/links/lnk-5/thread');
+  assert.equal(res.status, 200);
+  assert.deepEqual(
+    res.body.entries.map((e) => e.text),
+    ['the schema moved', 'noted, we read it at boot', 'thanks', 'are you there'],
+  );
+  // Each entry carries the room it came out of, and every one is the room of whoever
+  // spoke — which is what makes seven written lines read back as four messages.
+  assert.deepEqual(res.body.entries.map((e) => e.repo), [alphaRepo, betaRepo, alphaRepo, alphaRepo]);
+  assert.equal(res.body.entries.at(-1).delivered, false);
+  assert.equal(res.body.entries.at(-1).reason, 'no lead is running');
+  assert.equal(res.body.link.id, 'lnk-5');
+  assert.equal(res.body.cursor, base + 4000);
+
+  // `since` is a **timestamp**, not a seq: seq is per repo, so two entries out of two
+  // rooms can share any value and could never order this.
+  const since = await linkApi('GET', `/api/team/links/lnk-5/thread?since=${base + 2000}`);
+  assert.deepEqual(since.body.entries.map((e) => e.text), ['thanks', 'are you there']);
+
+  const capped = await linkApi('GET', '/api/team/links/lnk-5/thread?limit=2');
+  assert.deepEqual(capped.body.entries.map((e) => e.text), ['thanks', 'are you there'], 'the tail, not the head');
+  assert.equal(capped.body.truncated, true);
+
+  assert.equal((await linkApi('GET', '/api/team/links/lnk-99/thread')).status, 404);
+});
+
+test('a closed link still reads its thread — a pane holding one must never blank', async () => {
+  const closed = (await linkApi('GET', '/api/team/links')).body.links.find((l) => l.closedAt);
+  assert.ok(closed, 'there is a closed link to ask about');
+  const res = await linkApi('GET', `/api/team/links/${closed.id}/thread`);
+  assert.equal(res.status, 200);
+  assert.ok(res.body.link.closedAt > 0, 'the record says so, which is what draws the closed line');
+});
+
+test('the roster frame carries the open links — on connect, and again when one closes', async () => {
+  const { WebSocket } = await import('ws');
+  const ws = new WebSocket(`ws://127.0.0.1:${linkPort}/ws`);
+  const frames = [];
+  ws.on('message', (raw) => {
+    const msg = JSON.parse(raw);
+    if (msg.type === 'sessions') frames.push(msg.data ?? msg);
+  });
+  await new Promise((resolve, reject) => {
+    ws.once('open', resolve);
+    ws.once('error', reject);
+  });
+
+  const waitFor = async (matches) => {
+    const deadline = Date.now() + 5000;
+    for (;;) {
+      const hit = frames.find(matches);
+      if (hit) return hit;
+      if (Date.now() > deadline) throw new Error('no roster frame matched');
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+
+  try {
+    // The connect frame. A column that is correct here and stale afterwards is exactly
+    // what adding the field to two of the three sites produces.
+    const first = await waitFor((f) => Array.isArray(f.links));
+    assert.equal(first.links.some((l) => l.id === 'lnk-5'), true);
+    assert.equal(first.links.every((l) => !l.closedAt), true, 'open links only — the column shows the live ones');
+
+    // …and the broadcast frame, on a change. `POST .../close` calls `broadcastRoster`.
+    frames.length = 0;
+    assert.equal((await linkApi('POST', '/api/team/links/lnk-5/close')).status, 200);
+    await waitFor((f) => Array.isArray(f.links) && !f.links.some((l) => l.id === 'lnk-5'));
+  } finally {
+    ws.close();
+  }
+});
+
+test('all three roster-frame sites carry `links`, and the un-pin refusal is still in the pin handler', () => {
+  /*
+   * Structural pins, because HTTP cannot reach either.
+   *
+   * The third roster site is `registry.on('update')`, which fires on tmux churn; the pin
+   * refusal needs a lead in the roster, and the roster is built from tmux. Both are
+   * benched by hand against real leads in the sandbox — this is the guard that stops one
+   * of them being quietly dropped in between, the way `test/logs.test.js` reads two files
+   * it cannot import.
+   */
+  const source = fs.readFileSync(path.join(ROOT, 'server', 'index.js'), 'utf8');
+  const frames = source.match(/send\(ws, 'sessions', \{[^}]*\}/g) || [];
+  assert.equal(frames.length, 3, 'the roster frame is built in exactly three places');
+  for (const frame of frames) assert.match(frame, /links/, `every roster frame carries links: ${frame}`);
+
+  const pin = source.slice(source.indexOf("app.post('/api/sessions/:id/pin'"));
+  const handler = pin.slice(0, pin.indexOf('\n});'));
+  assert.match(handler, /linkHolding\(session\)/, 'the un-pin refusal asks whether a link holds this lead');
+  assert.match(handler, /status\(409\)/, 'and refuses rather than quietly not working');
+  assert.ok(handler.indexOf('linkHolding') < handler.indexOf('pins.set'), 'it refuses before it writes');
+});
