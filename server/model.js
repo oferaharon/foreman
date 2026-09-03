@@ -70,8 +70,143 @@ const NO_RE = /^No,\s*go back\b/i;
 const GAP_RE = /\s{2,}/;
 
 /**
+ * The scrolling window — what the picker becomes when the pane is short.
+ *
+ * Measured on v2.1.257 in the sandbox's `alpha`, and the finding that matters first is
+ * that **it is height, not width**: at 220 columns and 23 rows the box collapses exactly
+ * as it does at 80×23, while 220×50 draws all five rows. 80×23 is not an exotic size —
+ * it is what the panel's own attach-terminal button shrinks a pane to, because a default
+ * macOS Terminal window is 80×23 (CLAUDE.md's "Attaching a Terminal resizes the pane").
+ *
+ *       1. Default (recommended)  Opus 5 with 1M context · Best for everyday,
+ *                                 complex tasks
+ *     ❯ 2. Opus (1M context)      Opus 5 with 1M context · Best for everyday,
+ *                                 complex tasks
+ *     ↓ 3. Fable ✔                Fable 5.1 · Most capable for your hardest and
+ *                                 longest-running tasks
+ *        … +2 models
+ *
+ * Three rows of a five-row list, and three things about the chrome, all captured:
+ *
+ * - `↑` / `↓` sit **in the cursor column**, where `❯` goes, on the first/last visible row
+ *   when there is more list beyond it. They are not the cursor and they never share a row
+ *   with it: with the cursor on the bottom visible row the `↓` is simply not drawn.
+ * - `… +N models` counts what is **hidden in total**, not what is below. It reads `+2` at
+ *   the top of the list and `+2` at the bottom of it, so `visible + N` is the length of the
+ *   whole list. Measured true at every size the panel produces — three rows at 80×23 and at
+ *   220×23, two at 60×12, five in each case — and measured **one short at 60×10**, where the
+ *   window degenerates to a single row and the count still reads `+3`. So it is reported as
+ *   `total` and nothing is decided by it: the endpoint that walks the list stops on a
+ *   completed lap, not on this number.
+ * - The list **wraps**: `Down` from the last row lands on the first. That is why
+ *   `stepToward` stays monotonic (below) and why the window can be enumerated by walking
+ *   one direction.
+ *
+ * What it cost before this was read: `↓ 3.` does not match `OPTION_RE`, so the run came
+ * back as 1..2 (or 3..4, which is not a 1..N run at all) and `parseModelDialog` answered
+ * **null** — over a box the panel had opened itself, which then could not be read, could
+ * not be closed, and blocked the composer until somebody pressed Esc in the terminal.
+ *
+ * So the window is flattened before `readOptionBlock` ever sees it: the marker column is
+ * blanked, the `… +N models` row is lifted out, and the run is rebased to start at 1. The
+ * offset is added back afterwards. Nothing here changes what the shared block reader —
+ * or `permission.js`, `question.js`, `plan.js`, `effort.js` — sees on any other screen.
+ */
+const SCROLL_MARKERS = '↑↓';
+/** `  ↓ 3. Fable ✔` / `  ❯ 2. Opus` / `    1. Default` — enough of a row to find its number. */
+const ROW_HEAD_RE = new RegExp(`^(\\s*)([❯${SCROLL_MARKERS}])?(\\s*)(\\d{1,2})\\.(?=\\s)`);
+/** `     … +2 models` — how many rows the window is not showing. */
+const MORE_RE = /^\s*…\s*\+(\d+)\s+models?\s*$/;
+
+/**
+ * Cut the picker's option run down to a plain 1..N run `readOptionBlock` can read.
+ *
+ * @param {string[]} nonEmpty the capture with blank lines dropped
+ * @param {number} from index of the box's own title — nothing above it is touched, because
+ *   a numbered line in the scrollback above is somebody's transcript, not an option
+ * @returns {{lines: string[], offset: number, hidden: number, windowed: boolean}}
+ */
+function flattenWindow(nonEmpty, from) {
+  const out = [];
+  const rows = [];
+  let hidden = 0;
+  let windowed = false;
+
+  for (let i = 0; i < nonEmpty.length; i += 1) {
+    if (i < from) {
+      out.push(nonEmpty[i]);
+      continue;
+    }
+    const more = MORE_RE.exec(nonEmpty[i]);
+    if (more) {
+      // Lifted out rather than left in: below the last visible row it is harmless, but
+      // above one it would be filed as that row's description and end up on a card.
+      hidden = Number(more[1]);
+      windowed = true;
+      continue;
+    }
+    const m = ROW_HEAD_RE.exec(nonEmpty[i]);
+    if (m) rows.push({ at: out.length, m });
+    out.push(nonEmpty[i]);
+  }
+
+  if (!rows.length) return { lines: out, offset: 0, hidden, windowed };
+
+  const offset = Number(rows[0].m[4]) - 1;
+  if (offset > 0) windowed = true;
+
+  for (const { at, m } of rows) {
+    const marker = m[2];
+    if (marker && SCROLL_MARKERS.includes(marker)) windowed = true;
+    if (!offset && (!marker || marker === '❯')) continue; // nothing to rewrite
+    const num = String(Number(m[4]) - offset);
+    // Keep the column the label starts at: the rebased number can only be shorter, so the
+    // difference goes back into the indent. `❯` survives; a scroll marker becomes a space.
+    const pad = ' '.repeat(m[1].length + (m[4].length - num.length));
+    const cursor = marker === '❯' ? '❯' : marker ? ' ' : '';
+    out[at] = `${pad}${cursor}${m[3]}${num}.${out[at].slice(m[0].length)}`;
+  }
+
+  return { lines: out, offset, hidden, windowed };
+}
+
+/**
+ * Is `/model` on screen at all, whether or not its rows can be read?
+ *
+ * The title and the footer, and nothing about the options — which is the whole point.
+ * `parseModelDialog` decides whether the panel may *drive* the box; this decides whether
+ * there is a box to get **out of**, and those are different questions with different costs
+ * for being wrong. A picker the panel opened and then failed to parse used to be
+ * abandoned: `closeModelDialog` asked the same failing parser, concluded nothing was open,
+ * returned `true` without ever pressing Escape, and left the session blocked behind a box
+ * only the terminal could dismiss.
+ *
+ * The footer is required *below* the title so an old `Select model` line in the scrollback
+ * cannot stand in for a live one.
+ */
+export function modelDialogOpen(text) {
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    if (!TITLE_RE.test(lines[i])) continue;
+    return lines.slice(i + 1).some((l) => FOOTER_RE.test(l));
+  }
+  return false;
+}
+
+/**
+ * …and the same question for the second screen.
+ *
+ * By title alone, deliberately: `parseModelConfirm` is narrow on purpose (it answers with a
+ * digit), so the day Claude Code grows a third row there it returns null — and that is
+ * exactly the state the panel must still be able to Escape out of.
+ */
+export function modelConfirmOpen(text) {
+  return text.split('\n').some((l) => CONFIRM_TITLE_RE.test(l));
+}
+
+/**
  * @param {string} text raw `capture-pane` output
- * @returns {null | {kind, options, cursorIndex, currentIndex}}
+ * @returns {null | {kind, options, cursorIndex, currentIndex, windowed, hidden, total, partial}}
  */
 export function parseModelDialog(text) {
   const nonEmpty = text
@@ -84,13 +219,27 @@ export function parseModelDialog(text) {
   // other heading must never be driven by the code below, which ends in a keystroke.
   if (!nonEmpty.some((l) => FOOTER_RE.test(l))) return null;
 
-  const block = readOptionBlock(nonEmpty);
+  // The title is found before anything is rewritten, because it is what bounds the
+  // rewriting: only lines below the box's own heading are the box's own rows.
+  let titleAt = -1;
+  for (let i = nonEmpty.length - 1; i >= 0; i -= 1) {
+    if (TITLE_RE.test(nonEmpty[i])) {
+      titleAt = i;
+      break;
+    }
+  }
+  if (titleAt < 0) return null;
+
+  const { lines, offset, hidden, windowed } = flattenWindow(nonEmpty, titleAt);
+  const block = readOptionBlock(lines);
   if (!block) return null;
   const { top, rows } = block;
 
+  // Still checked against the block itself, and not merely "there is a title somewhere":
+  // an option run six lines below the heading is this box's, one further down is not.
   let titled = false;
   for (let i = top - 1; i >= 0 && top - i <= 6; i -= 1) {
-    if (TITLE_RE.test(nonEmpty[i])) {
+    if (TITLE_RE.test(lines[i])) {
       titled = true;
       break;
     }
@@ -103,7 +252,10 @@ export function parseModelDialog(text) {
     const [head, ...tail] = r.label.split(GAP_RE);
     const name = head.replace(/\s*✔\s*$/, '').trim();
     return {
-      index: r.index,
+      // Back to the number the terminal itself drew, so `expectLabel`, the client's menu
+      // and the cursor arithmetic all speak the list's own numbering rather than the
+      // window's.
+      index: r.index + offset,
       label: name,
       description: tail.join(' ').trim() || null,
       current: /✔/.test(head),
@@ -111,11 +263,23 @@ export function parseModelDialog(text) {
     };
   });
 
+  // `visible + N` is the length of the list — `… +N models` counts everything hidden, not
+  // just what is below the fold. With no such row the window is the list.
+  const total = windowed ? (hidden ? options.length + hidden : null) : options.length;
+
   return {
     kind: 'model',
     options,
     cursorIndex: options.find((o) => o.cursor)?.index ?? null,
     currentIndex: options.find((o) => o.current)?.index ?? null,
+    // The box is showing a slice of the list...
+    windowed,
+    hidden,
+    total,
+    // ...and these rows are therefore not the whole menu. Said out loud so a caller that
+    // draws them knows it is drawing part of a list, rather than inferring it from a
+    // count that happens to be short.
+    partial: windowed && (total == null || options.length < total),
   };
 }
 
@@ -156,6 +320,13 @@ export function footerModelName(option) {
  *
  * Returned as a plan rather than executed, so the caller can press one key, re-read, and
  * ask again — a count computed once and fired blind is the thing this avoids.
+ *
+ * **Monotonic on purpose, though the list wraps.** `Down` from the last row lands on the
+ * first — measured — so from row 5 to row 1 a single `Down` would beat four `Up`s. It is
+ * still four `Up`s here, because a direction chosen by comparison converges whether or not
+ * the list wraps, while a direction chosen *because* it wraps stalls against the end of the
+ * list the day it stops. The caller is bounded and re-reads after every press, so the extra
+ * presses cost a fraction of a second and buy a rule that cannot walk the wrong way.
  *
  * @returns {'Down' | 'Up' | null} null when it is already there
  */

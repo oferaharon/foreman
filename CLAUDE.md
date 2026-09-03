@@ -1811,6 +1811,48 @@ opens that session — and it did. It cannot press "Add to Dock".
   the composer: `closeModelDialog` presses and re-reads rather than pressing once. Whether
   the box appears at all depends on the cache, so both paths are live — a fresh session
   switches on `s` alone.
+- **…and on a short pane it is not a list at all but a window onto one, which is how the
+  panel came to strand a session behind a box it had opened itself.** At **80×23** — the
+  size the panel's own attach-terminal button shrinks a pane to, because a default macOS
+  Terminal window is 80×23 — Claude Code v2.1.257 draws the picker as a **three-row
+  scrolling window**: `↑`/`↓` in the *cursor column* where `❯` goes, and a `… +2 models`
+  row. `↓ 3.` does not match `OPTION_RE`, so the run came back as 1..2 or as 3..4 — not a
+  1..N run — and `parseModelDialog` answered **null**. `POST /model` then stepped once,
+  re-read null, answered 409 "the model picker is not open" and **left the box up**; every
+  later `/model/open` answered 409, `closeModelDialog` returned `true` without pressing
+  Escape *because it asked the same failing parser*, and the composer stayed blocked until
+  somebody pressed Esc in the terminal. the maintainer hit it live on a lead.
+
+  Four measurements, taken in the sandbox's `alpha`, and the first is the one that decides
+  where to look. **It is height, not width**: 220×23 windows exactly as 80×23 does, while
+  220×50 draws all five rows — so a wide capture proves nothing here and the fixtures are a
+  matched set at both sizes. **A marker is never the cursor**: with the cursor on the edge
+  row the marker is simply not drawn, so `↑`/`↓` can be blanked without ever losing a `❯`.
+  **`… +N models` counts everything hidden, not what is below** — `+2` at the top of the
+  list and `+2` at the bottom — so `visible + N` is the length of the list; true at every
+  size the panel produces and **one short at 60×10**, where the window degenerates to a
+  single row, which is why nothing is decided by it. And **the list wraps**: `Down` from the
+  last row lands on the first.
+
+  Two rules come out of it. The window is flattened **inside `model.js`** — marker column
+  blanked, `… +N` lifted out, the run rebased to start at 1 and the offset added back — so
+  `OPTION_RE` and `readOptionBlock` are untouched and the other four parsers see nothing
+  new; loosening the shared regex to admit `↓ 3.` would have taught every screen in the
+  panel to read a scroll marker as part of an option. And **getting out must not depend on
+  reading**: `modelDialogOpen` / `modelConfirmOpen` are witnesses by title and footer alone,
+  and every path that used to abandon an unreadable picker now Escapes it and says so. A box
+  the panel opened and cannot read is a box it must close.
+
+  What the endpoint does with all that: `/model/open` walks the cursor round the list with
+  arrow keys — the only keys in this dialog that commit nothing — merging what each window
+  shows, then walks it back to where it found it, so the browser's menu offers all five
+  models. **The stall test is the cursor, not the yield**, and that is the one trap inside
+  the fix: written as "two presses that revealed no new row, so stop", it fired after two
+  presses *inside* a three-row window and returned three models of five — from exactly the
+  state a freshly opened picker is in when the current model is row 1. A press that does not
+  move the cursor is the end of a list that does not wrap; nothing inside a window imitates
+  that. It was found by driving the real menu from a browser, because every run driven from
+  the CLI had happened to start on a row where the first press scrolled the window.
 - **The panel is probably already running.** Check `lsof -iTCP:48770` before starting
   one, use `FOREMAN_PORT` for a second, and never `pkill -f "node server/index.js"` — that
   pattern matches the one the user is using; kill by port (`lsof -tiTCP:<port>`). Give the
