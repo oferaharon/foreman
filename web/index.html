@@ -87,6 +87,22 @@
         ></div>
       </aside>
 
+      <!--
+        The connections column. A **sibling** of `.rail`, never a block inside
+        `.rail-list`: an open group's tint in that list is tiled from three full-width
+        rows, and anything joining that flow would have to answer to it.
+
+        It is in the markup always and on screen only while at least one open link exists
+        — `.app.has-links` is what gives the grid its middle column, the same show/hide
+        trade `.app.split .main` already makes. With no links the panel is what it was
+        before this feature. The narrow query hides it too, or a phone-width window gets a
+        column and no rail.
+      -->
+      <aside class="conn-col" id="connCol" aria-label="Connections">
+        <div class="conn-head">connections</div>
+        <div class="conn-list" id="connList"></div>
+      </aside>
+
       <main class="main" id="main"></main>
     </div>
 

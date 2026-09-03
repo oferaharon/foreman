@@ -41,6 +41,32 @@
      by a wide margin and still tracks both themes from one line, since `--accent` and
      `--surface` are the pair that flip. */
   --row-open: color-mix(in srgb, var(--accent) 22%, var(--surface));
+
+  /* Both ends of a link, marked when either one is open. It has to clear the same three
+     backgrounds `--row-open` does — plain surface, `--shelf` inside an open group, and
+     `--surface-sunk` under the cursor — and one more besides: it must not be mistakable
+     for the selection. So it is a different *hue* rather than a weaker accent. A second
+     indigo tint at some lower percentage is exactly the ambiguity `--row-open` exists to
+     fix, one step further on.
+
+     The teal is borrowed from `--mode-edits`, the palette's one hue that is neither a
+     status (green/amber/red) nor the accent — so the mark cannot be read as a session
+     state either. Mixed rather than hard-coded, so it tracks both themes from one line the
+     way `--shelf` and `--row-open` do.
+
+     **The band is the quiet half and the edge is the load-bearing one**, which is what
+     makes 16% enough where the selection needed 22%. Measured in the dark theme, contrast
+     against surface / shelf / surface-sunk: this band 1.36 / 1.24 / 1.43, against
+     `--row-open`'s 1.46 / 1.33 / 1.53 — deliberately the quieter of the two, because the
+     row you selected should stay the loudest thing in the rail. The 3px left edge is
+     `--mode-edits` at full strength and is *opaque*, so it cannot be washed out by any of
+     the three: 8.28 / 7.54 / 8.70, where `.is-open`'s own accent edge measures 6.36
+     against surface. Same "three signals rather than one" argument the selected row makes.
+
+     The connections column's own width sits here for the reason `--rail` and `--aside` do:
+     it is the one place the default is spelled. */
+  --row-linked: color-mix(in srgb, var(--mode-edits) 16%, var(--surface));
+  --conn: 15rem;
 }
 
 @media (prefers-color-scheme: dark) {

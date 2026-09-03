@@ -33,6 +33,11 @@ button {
   height: 100vh;
 }
 
+/* The connections column takes a middle column only while there is a link to put in it —
+   the same show/hide trade `.app.split .main` makes for the second pane. With no links the
+   grid is what it always was and the column is not laid out at all. */
+.app.has-links { grid-template-columns: var(--rail) var(--conn) 1fr; }
+
 /* =============================================================== rail === */
 
 .rail {
@@ -923,6 +928,23 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 .session-row:hover { background: var(--surface-sunk); }
+
+/* Both ends of a link, whenever either end is open — "selecting a connected lead highlights
+   both linked rows", and there is no line drawn between them because nothing here may
+   measure where a row is.
+
+   It sits **above** `.is-open` deliberately, so the selected row keeps its own band: on the
+   row you are in, "selected" is the more useful of the two things to say, and the link is
+   already named by the chip on that row's third line. What this marks is the *other* end —
+   the row you were not looking at.
+
+   `--row-linked` is a different hue rather than a weaker accent, for the reason spelled out
+   beside it in `tokens.css`. The left edge is the same 3px every row already reserves, so
+   nothing steps sideways when it appears. */
+.session-row.is-linked {
+  background: var(--row-linked);
+  border-left-color: var(--mode-edits);
+}
 
 /* Three signals rather than one, because the rail is long and the row you are reading has
    to be findable without hunting: a filled band, a left edge thick enough to read as a
@@ -3858,6 +3880,21 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--working);
 }
 
+/* The end of a closed link's thread. Quiet and not alarming: closing was a decision the
+   maintainer took, so this is a full stop rather than a warning. */
+.link-closed-line {
+  align-self: center;
+  max-width: 34rem;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  border-top: 1px solid var(--rule);
+  padding-top: 0.7rem;
+  margin-top: 0.3rem;
+}
+
 /* Read-only, and it says which — a reader hunting for a box that is not there is the same
    failure as a card that refuses to draw a button without explaining itself. */
 .link-foot {
@@ -3871,10 +3908,213 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .app.split .link-foot { padding-left: 1rem; padding-right: 1rem; }
 
+/* ======================================================= connections === */
+
+/* Links as **cards**, never lines drawn between two rows. The maintainer's own call, after
+   it was flagged that a line needs both endpoints on screen and that measuring row
+   positions on every rail repaint is the class of bug that already bit this project. A card
+   is the object: it survives scrolling, sorting and a collapsed group, and nothing about it
+   knows where either row is.
+
+   A sibling of `.rail`, not a block inside `.rail-list` — an open group's tint in that list
+   is tiled from three full-width rows, and anything joining that flow has to answer to it. */
+.conn-col {
+  display: none;
+  border-right: 1px solid var(--rule);
+  background: var(--surface);
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.app.has-links .conn-col { display: flex; }
+
+.conn-head {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 0.9rem 0.8rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.conn-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.conn-card {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--ground);
+  overflow: hidden;
+}
+
+/* The card whose thread is in a pane right now. The same accent edge the rail's open row
+   wears, for the same reason and with the same meaning: this is the one you are in. */
+.conn-card.is-open {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule));
+  background: color-mix(in srgb, var(--accent) 10%, var(--ground));
+}
+
+.conn-open {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.5rem 0.55rem 0.4rem;
+  min-width: 0;
+}
+
+.conn-open:hover { background: var(--surface-sunk); }
+
+.conn-pair {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  min-width: 0;
+}
+
+/* Both names shrink together rather than one eating the other — a link is symmetrical and
+   a card that showed one project whole and the other as an ellipsis would read as being
+   about the first. The full paths are on the card's own hover. */
+.conn-proj {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.conn-tie { flex: none; color: var(--ink-faint); }
+
+.conn-unseen {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  background: var(--accent);
+  color: var(--surface);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+}
+
+.conn-label {
+  font-size: 0.74rem;
+  color: var(--ink-muted);
+  margin-top: 0.15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One line, cut by CSS and never by a measurement. The room's five-line clamp has to
+   measure because it decides whether to draw a control; this decides nothing, so it does
+   not — and this repaints on the roster beat, where a forced layout is what slides a list
+   under whoever is reading it. */
+.conn-last {
+  margin-top: 0.25rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-last.is-quiet { color: var(--ink-faint); font-style: italic; }
+.conn-last-from { color: var(--ink-faint); margin-right: 0.3rem; }
+
+.conn-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  padding: 0.1rem 0.55rem 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+}
+
+/* Quiet until you go for it. Closing writes into two projects' standing records and cannot
+   be undone from here, so it asks first (`armConfirm`) — but a control that shouted about
+   itself on a card you read every day would be the wrong kind of warning. */
+.conn-close {
+  flex: none;
+  color: var(--ink-faint);
+  border: 1px solid transparent;
+  border-radius: 2px;
+  padding: 0 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+}
+
+.conn-close:hover { color: var(--decision); border-color: currentColor; }
+.conn-close:disabled { opacity: 0.5; cursor: default; }
+
+/* The chip on a lead's row: which other project this lead is connected to, and the way into
+   that thread. On the third line team rows already have — never a fourth. */
+.link-chip {
+  flex: none;
+  border-radius: 2px;
+  padding: 0 0.28rem;
+  font-size: 0.9em;
+  letter-spacing: 0.04em;
+  color: var(--mode-edits);
+  border: 1px solid currentColor;
+  cursor: pointer;
+}
+
+.link-chip:hover { background: color-mix(in srgb, var(--mode-edits) 18%, transparent); }
+
+/* -------------------------------------------------------- the toast --- */
+
+/* A sentence with nowhere else to go — see `toast` in app.js. Over the panel rather than in
+   it, so nothing reflows under a reader, and low on the left where the rail's controls are
+   without covering the row that just refused. */
+.panel-toast {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 40;
+  max-width: 28rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-left: 3px solid var(--decision);
+  border-radius: 4px;
+  padding: 0.6rem 0.7rem;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.25);
+}
+
+.panel-toast-text { font-size: 0.82rem; line-height: 1.4; color: var(--ink); }
+
+.panel-toast-close {
+  flex: none;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  line-height: 1;
+}
+
+.panel-toast-close:hover { color: var(--ink); }
+
 /* ============================================================= narrow === */
 
 @media (max-width: 52rem) {
   .app { grid-template-columns: 1fr; }
+  /* …including when there are links: the query collapses the grid to one column, and a
+     connections column here would be a column with no rail beside it. */
+  .app.has-links { grid-template-columns: 1fr; }
+  .app.has-links .conn-col { display: none; }
   .rail { display: none; }
   .app[data-view="rail"] .rail { display: flex; }
   .app[data-view="rail"] .main { display: none; }
