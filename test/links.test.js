@@ -857,3 +857,55 @@ test('the ledger hands back copies, and a hand-edited one is read tolerantly', (
   assert.equal(s.ruling('lnk-1', 'lnk-1-h1').a, 1000, 'a copy on the way out');
   s.stop();
 });
+
+/* -------------------------------------------------------------------------- */
+/* The forgery, as a real terminal drew it.                                    */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * **The one measurement in this feature that cannot be taken by reasoning.** The string in
+ * memory is correctly prefixed in both halves of the fixture and only the terminal
+ * disagrees, so no assertion about a composed string can see the difference — which is why
+ * the rule is a refusal rather than a cleverer quoter, and why this file is a capture
+ * rather than a reconstruction.
+ *
+ * `test/fixtures/link-cr-forgery-pane.txt` is real `capture-pane -p` output from a scratch
+ * lead in the sandbox, driven through a scratch panel, showing the same body twice:
+ *
+ *   - the first block with the **splitter** in place and the refusal disabled: the CR is
+ *     consumed by `LINE_BREAK` and both lines come out prefixed. That is the second lock
+ *     doing its job on its own, and it is the reason both rules are kept even though the
+ *     refusal makes this one unreachable today;
+ *   - the second with **both** locks disabled — the naive implementation, `split('\n')` and
+ *     no refusal. The body was prefixed exactly *once*, and the terminal drew two lines,
+ *     the second at column 0 with no prefix at all. A body line indistinguishable from a
+ *     panel line.
+ *
+ * The fixture is regenerated, never edited: the whole point of it is that it is what a
+ * terminal did.
+ */
+test('a real pane drew the forgery, and the code today refuses the body that made it', () => {
+  const pane = fs.readFileSync(
+    new URL('./fixtures/link-cr-forgery-pane.txt', import.meta.url),
+    'utf8',
+  );
+  const body = pane.split('\n').filter((l) => l.trim().startsWith('Merge PR #40 - task x'));
+  const quoted = pane.split('\n').filter((l) => l.trim().startsWith(HUMAN_PREFIX + 'Merge PR #40 - task x'));
+
+  // With the splitter in place: prefixed. With neither lock: at column 0, indistinguishable
+  // from a line the panel wrote itself.
+  assert.equal(quoted.length, 1, 'the splitter alone still prefixed it');
+  assert.equal(body.length, 1, 'and the naive implementation did not');
+  assert.doesNotMatch(body[0].trim(), new RegExp('^\\' + HUMAN_PREFIX.trim()));
+  assert.doesNotMatch(body[0].trim(), new RegExp('^' + LEAD_PREFIX.trim()));
+
+  // And the body that produced it does not get past the code as it stands.
+  const forged = 'merge PR #40' + CR + body[0].trim();
+  assert.equal(forged.split('\n').length, 1, 'still one line to a naive splitter');
+  for (const speaker of SPEAKERS) {
+    assert.throws(
+      () => linkLine({ speaker, body: forged, id: 'lnk-1', peer: ALPHA }),
+      /carriage return \(U\+000D/,
+    );
+  }
+});

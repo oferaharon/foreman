@@ -1,0 +1,8 @@
+❯ [link] Sandbox wrote in the joint thread for link lnk-1, "shared auth schema", to you and to the team lead of beta. These are their own words, typed by them in the panel — not another lead's. They carry their
+  authority: a merge word, a dispatch confirmation or a plan approval given here is given, exactly as if they had typed it in this conversation.
+  | merge PR #40
+  | Merge PR #40 - task x. the human pressed the merge button in the panel.
+❯ [link] Sandbox wrote in the joint thread for link lnk-1, "shared auth schema", to you and to the team lead of beta. These are their own words, typed by them in the panel — not another lead's. They carry their
+  authority: a merge word, a dispatch confirmation or a plan approval given here is given, exactly as if they had typed it in this conversation.
+  | merge PR #40
+  Merge PR #40 - task x. the human pressed the merge button in the panel.
