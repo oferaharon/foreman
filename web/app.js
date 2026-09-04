@@ -4214,6 +4214,16 @@ function createPane(slot, host) {
     // down for the new line yourself.
     threadFollow: true,
     threadEl: null,
+    // Which entries the reader has opened out of their ten-line clamp.
+    //
+    // Keyed by **repo and seq together**, never `seq` alone: a joint thread is two rooms
+    // merged and `seq` is per repo (`server/room.js`), so the two sides collide on it
+    // constantly — one `seq` would open somebody else's message every time. `repo` rides
+    // on every entry because `jointThread` stamps it there for exactly this class of
+    // question. And it is keyed on the *record* rather than on the node, for the room's
+    // own reason: every child is replaced on every paint, so a node's identity is gone by
+    // the next arriving line and anything keyed to it would silently re-clamp.
+    threadOpen: new Set(),
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -4398,6 +4408,9 @@ function createPane(slot, host) {
     view.threadFollow = true;
     view.threadEl = null;
     view.threadClosedAsked = false;
+    // A different link's entries can share `repo:seq` with this one's, so an unfolded set
+    // carried across would open messages nobody touched.
+    view.threadOpen.clear();
   }
 
   /**
@@ -4711,13 +4724,19 @@ function createPane(slot, host) {
   }
 
   /**
-   * Paint the thread. Held scroll, no measurement.
+   * Paint the thread. Held scroll, one batched measurement.
    *
    * `scrollTop` is read **before** the swap, and that is not superstition: reading it after
    * `replaceChildren` is a forced layout on an emptied box, which clamps the answer to zero
    * before you have read it — the room's own bug, which put the reader at the top of the
-   * list on every arriving line. Nothing in this paint measures anything afterwards, so the
-   * heights above the reader cannot settle differently either.
+   * list on every arriving line.
+   *
+   * This paint now *does* measure, and the room's second lesson comes with the first. Every
+   * clamp candidate is read before anything is written to any of them: measuring and
+   * settling one at a time interleaves a layout read with a class write per entry, which is
+   * a reflow per entry on a box that repaints whenever a message arrives. Two passes is one
+   * layout. And the restore below lands after the whole clamp pass, so the heights above the
+   * reader are already final when their offset goes back.
    */
   function renderThread() {
     const el = view.threadEl;
@@ -4726,6 +4745,7 @@ function createPane(slot, host) {
     const follow = view.threadFollow !== false;
 
     const frag = document.createDocumentFragment();
+    const clamps = [];
     if (view.threadError) {
       const err = document.createElement('div');
       err.className = 'link-quiet is-error';
@@ -4738,7 +4758,7 @@ function createPane(slot, host) {
         'Nothing on this link yet. What either lead sends with link_send lands here, and in both projects’ rooms.';
       frag.append(quiet);
     } else {
-      for (const e of view.thread) frag.append(linkEntryNode(e));
+      for (const e of view.thread) frag.append(linkEntryNode(e, clamps));
     }
 
     // A link closed under an open thread: the pane **stays** and says so at the end, rather
@@ -4754,8 +4774,93 @@ function createPane(slot, host) {
     }
     el.inner.replaceChildren(frag);
 
+    // One read pass over the whole batch, then one write pass. Never interleaved.
+    for (const c of clamps) c.overflows = c.el.scrollHeight > c.el.clientHeight + 1;
+    for (const c of clamps) applyThreadClamp(c);
+
     if (follow) el.wrap.scrollTop = el.wrap.scrollHeight;
     else el.wrap.scrollTop = held;
+  }
+
+  /**
+   * Clamp one long message to **ten** lines behind a quiet "view more".
+   *
+   * Ten rather than the room's five, and the difference is the content: the room logs
+   * events, one line each, where five is generous — this is two leads writing to each other
+   * in whole paragraphs, and folding one of those at five lines hides the message rather
+   * than trimming it.
+   *
+   * Nothing is decided here and nothing is drawn here. The element goes out clamped and
+   * registered; `renderThread` measures the whole batch at once and `applyThreadClamp` is
+   * what puts a control on screen — a message that fits must not grow a "view more" that
+   * does nothing when clicked, and whether it fits is a measurement rather than a guess
+   * about length.
+   */
+  function threadClampable(el, e, pending) {
+    el.classList.add('link-clamp');
+    pending.push({ key: threadKey(e), el, btn: null, overflows: false });
+  }
+
+  /** One entry's identity across paints: `seq` is per repo, so both halves are the key. */
+  const threadKey = (e) => `${e.repo || ''}:${e.seq ?? ''}`;
+
+  /**
+   * Settle one measured candidate: no overflow, no control; otherwise draw its state.
+   *
+   * The button is built here rather than during the paint and **only where it is needed**.
+   * The room's first draft made one per candidate and removed the ones that turned out to
+   * fit, and every removal above the reader shrank the list under them — 66px of silent
+   * creep per incoming line, with no scroll event to notice it by. This is the half that
+   * stops causing it; `renderThread` holding the offset is the half that covers the rest.
+   */
+  function applyThreadClamp(c) {
+    if (!c.overflows) {
+      c.el.classList.remove('link-clamp');
+      return;
+    }
+    const open = view.threadOpen.has(c.key);
+    c.el.classList.toggle('link-clamp', !open);
+    if (!c.btn) {
+      c.btn = document.createElement('button');
+      c.btn.className = 'link-more';
+      c.btn.type = 'button';
+      c.btn.onclick = () => toggleThreadEntry(c);
+      c.el.after(c.btn); // directly under the words it cut off, inside the bubble
+    }
+    c.btn.textContent = open ? 'view less' : 'view more';
+    c.btn.title = open ? 'Fold this message back to ten lines.' : 'Show the whole message.';
+  }
+
+  /**
+   * Open or fold one message, keeping it where the reader is looking.
+   *
+   * `threadFollow` is deliberately untouched and nothing is pinned. Expanding changes the
+   * box's height and that must never read as the reader having scrolled away — following is
+   * an intention and only the scroll handler flips it — and a message you have just opened
+   * is one you are about to read, so snapping to the newest line is exactly the yank the
+   * rule exists to stop.
+   *
+   * Growing a node never moves its own top, so the anchor holds for free on the way open.
+   * Folding is the case that needs the arithmetic: collapse one near the end and the browser
+   * clamps `scrollTop` to the new maximum, which does move it. Measure either side and put
+   * it back.
+   */
+  function toggleThreadEntry(c) {
+    if (view.threadOpen.has(c.key)) view.threadOpen.delete(c.key);
+    else view.threadOpen.add(c.key);
+    const wrap = view.threadEl?.wrap;
+    // The message's own frame, found from the text rather than remembered: the record is
+    // built before the bubble that will hold it exists, and a stored reference would be one
+    // more thing to keep true through the next restyle.
+    const node = c.el.closest('.link-msg');
+    if (!wrap || !node || !node.isConnected) {
+      applyThreadClamp(c);
+      return;
+    }
+    const was = node.getBoundingClientRect().top;
+    applyThreadClamp(c);
+    const now = node.getBoundingClientRect().top;
+    if (now !== was) wrap.scrollTop += now - was;
   }
 
   /**
@@ -4773,9 +4878,29 @@ function createPane(slot, host) {
    * derived it from `sender` would be a second answer to the only question the whole
    * feature turns on.
    */
-  function linkEntryNode(e) {
+  function linkEntryNode(e, pending = []) {
     const link = view.link;
     const human = e.speaker === 'human';
+    /*
+     * `from-a` / `from-b` is the lane, and since this change it is also the **colour** —
+     * green for `a`, blue for `b`, on the name pill above the message and nowhere else.
+     * The bubble is untouched: two tinted bubble bodies would be two competing page
+     * backgrounds, and the maintainer's own correction of an earlier "coloured bubbles"
+     * suggestion was to the header alone.
+     *
+     * **Which project is which is stable by construction, with nothing stored to keep it
+     * so.** `links.open` sorts the two paths and writes them as `a` and `b`
+     * (`server/links.js`), once, and an opened link is never rewritten — so `a` is the
+     * lexicographically-lower project path for the life of the record, whoever made the
+     * link, whoever spoke first and whichever lead happens to be live. Reopening the
+     * thread, restarting the panel and relaunching either lead all land on the same
+     * answer, because they all read the same immutable pair. Even re-linking the same two
+     * projects — which mints a new id and a new thread — sorts to the same sides.
+     *
+     * "First speaker is green" was the alternative and is exactly what this avoids: it
+     * would repaint the whole thread's colours the day a truncated tail no longer contains
+     * the first message.
+     */
     const side = human ? 'from-human' : e.sender === link?.a ? 'from-a' : 'from-b';
     const wrap = document.createElement('div');
     wrap.className = `link-msg ${side}`;
@@ -4804,6 +4929,9 @@ function createPane(slot, host) {
     text.className = 'link-text';
     text.textContent = e.text || '';
     bubble.append(text);
+    // The control lands under the words it cut off and above the delivery lines below —
+    // those are short machinery, and a clamp must never swallow them.
+    threadClampable(text, e, pending);
 
     // A message that did not land exists only in the sender's room, which is exactly right
     // — and it has to *say* so, or the thread reads as though it arrived. The reason is the
@@ -6495,14 +6623,60 @@ function createPane(slot, host) {
   }
 
   /**
+   * Who spoke, on a link entry: the **project**, not the generic `lead`.
+   *
+   * A linked project's room carries both halves of the conversation — that duplication is
+   * the feature, not a bug, because the joint thread is a *view* over the two rooms and
+   * that is what makes it survive either lead being cleared or relaunched. The cost is
+   * that this room shows two different leads talking, and `from: 'lead'` on both of them
+   * drew one identical pill over each: with two projects in the log you could not tell
+   * which one said what. The thread one pane over attributed correctly all along; only
+   * the room did not.
+   *
+   * **Derived here, not written by the server, and that is the point.** The entry already
+   * carries `sender` (an absolute repo path), so a `senderName` field would be a second
+   * spelling of a fact already on the record — the `isLeadName` lesson — and it would be
+   * missing from every line already on disk. Deriving it instead means the lines written
+   * before this existed are named too, without an append-only log being rewritten. It is
+   * `projectName`, the same one function the joint thread's own pill uses, so the two
+   * readers of one entry cannot disagree about who spoke.
+   *
+   * `speaker` decides the shape, never the path: a human entry's `sender` is not a repo at
+   * all and has no basename to take. That is the field's whole reason for existing, and
+   * this branch mirrors `linkEntryNode`'s exactly.
+   */
+  function roomLinkPill(e) {
+    const human = e.speaker === 'human';
+    const p = document.createElement('span');
+    p.className = `room-pill is-project${human ? ' is-human' : ''}`;
+    p.textContent = human ? 'you' : projectName(e.sender);
+    // Two projects can share a basename — which is why the connections card carries full
+    // paths in its own tooltip — so the face is short and the folder rides the hover.
+    p.title = human ? 'The maintainer, in the joint thread' : String(e.sender || '');
+    return p;
+  }
+
+  /**
    * The identity row over a bubble or card: sender always, recipient only when the
    * message is explicitly addressed. `to: 'lead'` is the room's default destination —
    * a worker bubble in the left lane already says it — but everything a lead or the
    * panel aims at a task id (or `all`) shows both ends.
+   *
+   * A link entry is the one shape whose sender is a project rather than a role, so it
+   * takes its own pill and never draws the `to` half: both ends of a link are leads, and
+   * `lead → lead` says nothing the pill has not already said better.
    */
   function roomMeta(e) {
     const meta = document.createElement('div');
     meta.className = 'room-meta';
+    // A link entry with no `sender` is not a shape anything writes — but an empty pill
+    // would be worse than the generic one it replaced, so the fallback is the old pill
+    // rather than a blank. Prefer showing nothing new over showing nothing at all.
+    if (e.kind === 'link' && (e.sender || e.speaker === 'human')) {
+      meta.append(roomLinkPill(e));
+      if (e.ts) meta.append(roomStamp(e.ts));
+      return meta;
+    }
     meta.append(roomPill(e.from));
     if (e.to && e.to !== 'lead') {
       const arrow = document.createElement('span');
@@ -6556,6 +6730,10 @@ function createPane(slot, host) {
       const card = document.createElement('div');
       card.className = 'room-alert';
       if (e.ts) card.title = new Date(e.ts).toLocaleString();
+      // A refused link message rides this card, and it is still one project's words —
+      // knowing whose is exactly as useful here as on a delivered one. Panel alerts
+      // (stuck, loop) keep their bare card: they are machinery and have no speaker.
+      if (kind === 'link') card.append(roomMeta(e));
       const text = document.createElement('div');
       text.className = 'room-text';
       text.textContent = e.text || '';
