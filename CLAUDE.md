@@ -128,8 +128,8 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
     a rule cannot tell those apart and the per-PR rule is then enforced by the lead's
     discipline rather than by a prompt; under `gh` the rule is `Bash(gh pr merge:*)`, which
     genuinely cannot open one; through a GitHub MCP server it adds **nothing**, because
-    nobody here has run that server and an unverified tool name in an allow rule is a rule
-    that silently does nothing.
+    that server's tool name has never been verified here, and an unverified tool name in an
+    allow rule is a rule that silently does nothing.
   - `leadDecidesMerges` (off by default, issue #7) is **the decision**: with it on, the
     lead may merge a worker's PR per PR, on its own judgment, having asked
     `POST /api/team/tasks/:id/merge-check` first (`mergeVerdict`, `merge-check.js`; the
@@ -151,8 +151,8 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
   (`selfMergeSection`, `lead-brief.js`) is where that discipline is actually specified,
   which is why its forbidden-flag sentences are pinned by name in `test/brief.test.js`.
   The close line then says whether a decision was recorded for the head that merged — a
-  visible non-event, never a second refusal, because refusing there would catch merges the
-  a human ordered. The settings file **and the brief** are
+  visible non-event, never a second refusal, because refusing there would catch merges a
+  human ordered. The settings file **and the brief** are
   written at lead launch (`leadSettings`, `leadBrief` in `index.js`), so a flip of either
   toggle reaches the next lead, not a running one.
 - **Nothing kills a worker automatically.** Stuck, silent, looping — all of it surfaces;
@@ -247,8 +247,7 @@ Both widths now yield identical labels, which is also what keeps `expectLabel` h
 terminal is resized between the render and the click. Same lesson as "A question wraps, and
 so do its options", one box over — `test/fixtures/prompt-bash-broad{,-narrow}.txt` pin it,
 and `test/permission.test.js` pins the refusals: misaligned by two columns, and not indented
-at all. It shipped inside the classifier PR rather than on its own, because the brief's
-"committed at both widths" could not be met while the narrow capture parsed as nothing.
+at all.
 
 **…and the box's own advice used to win the subject slot, on exactly the prompts where the
 command matters most.** Claude Code prints a tip *inside* the box, between the title and
@@ -286,8 +285,7 @@ The match is anchored and narrow (`^Tip:\s`) on purpose, and note it runs the *o
 to `classify` one function up. There, a phrase list is the wrong shape because a yes wrongly
 called narrow is a standing grant. Here the asymmetry inverts: a tip we fail to recognise
 costs one wrong header line — today's bug — while a body line wrongly taken for a tip loses
-the command from the card entirely. Same reasoning, opposite answer, because the cost of
-each mistake is opposite.
+the command from the card entirely: same reasoning, opposite answer.
 
 **Exposure is the one thing a LAN peer may not change, and the check is the socket, not
 the header.** `PATCH /api/config` — the settings modal — writes `bindHost` and
@@ -328,17 +326,17 @@ never see half a file is a boot deciding what to bind.
 found on the bench.** The forge is derived per repo from `git remote get-url origin`
 (`forge.js`), and detection is deliberately **two independent questions**: what the origin
 points at, and whether tooling for it is installed. Matching the remote's host against the
-registered MCP server's URL is *not* a detector — the Gitea remote and the Gitea MCP server
-on this Mac share an IP by coincidence and differ in port, and a forge's MCP server need
-not live on its git host at all. Four readings come out of the pair, and the words are
+registered MCP server's URL is *not* a detector — on the machine this was found on, a Gitea
+remote and a registered Gitea MCP server shared an IP by coincidence and differed in port,
+and a forge's MCP server need not live on its git host at all. Four readings come out of the pair, and the words are
 deliberately chosen and are not to be paraphrased: `GitHub`, `Gitea`, `push only`, `no remote`.
 
 The trap is in the second question's *else*. Written as "any non-GitHub host is a
 self-hosted forge, and a registered `gitea` server means we have tools for it", a
-`gitlab.com` repo reads **Gitea** on any machine with that server registered — which is
-this one — and its lead is handed gitea tools for a forge that has never heard of them. So
-`push only`, the reading ruled for exactly that case ("this Mac for any GitLab or Bitbucket
-repo"), could never fire here at all. `NOT_GITEA_HOSTS` names the public forges that are
+`gitlab.com` repo reads **Gitea** on any machine that has a `gitea` server registered at
+all — and its lead is then handed gitea tools for a forge that has never heard of them. So
+`push only`, the reading that exists for exactly that case — a GitLab or Bitbucket repo on
+a machine with no tooling for it — could never fire on such a machine. `NOT_GITEA_HOSTS` names the public forges that are
 neither, `codeberg.org` among them because it runs **Forgejo** — whose API is close enough
 to Gitea's that it may well work, which is precisely why it must not be *implied* to.
 The limit the list cannot fix is written beside it: a **self-hosted** GitLab is
@@ -382,7 +380,7 @@ look. **A merged GitHub PR reads `mergeable: UNKNOWN`** — full read on a merge
 computed yet" and gets retried forever. **`UNKNOWN` is lazy and is never a pass**: the
 first query starts the computation and returns it, a second a moment later has the answer
 — so re-read a few times a couple of seconds apart, and if it is *still* unknown, refuse.
-Passing on it would be passing on nothing. **`statusCheckRollup: []` is two different
+**`statusCheckRollup: []` is two different
 facts** and `gh` cannot tell them apart on its own: either the repo configures no checks,
 or checks exist and none has reported on this head. `mergeStateStatus` disambiguates —
 `CLEAN` means no checks (which is `checks: 'none'`, and then the worker's own quoted suite
@@ -661,8 +659,8 @@ to an output file, and their chip is deliberately unopenable rather than opening
 And **detection is two witnesses that must both hold** — a record field (`origin.kind`, or
 `promptSource` for a record carrying no `origin`) *and* an anchored `^<task-notification>`
 envelope — never the sentence inside, which is Claude Code's wording and will be reworded.
-The conjunction is also the scope: a typed message quoting an envelope stays a bubble
-(there is exactly one of those on this Mac), and whatever else `promptSource: 'system'`
+The conjunction is also the scope: a typed message quoting an envelope stays a bubble, and
+whatever else `promptSource: 'system'`
 grows to carry falls through unchanged, which is the right default for a shape nobody has
 read. Unread never counted these — it counts `assistant` records with text — so nothing
 about the inbox moved.
@@ -670,8 +668,8 @@ about the inbox moved.
 **A subscription dies with the socket, and nothing on screen says so.** The tailer holding
 a file offset is server state, so a dropped connection or a server restart ends it — while
 the roster keeps arriving, because that is broadcast to every client. The result is a rail
-that looks perfectly alive above a transcript that silently stopped minutes ago, which is
-how it was found: the terminal had twenty minutes the panel didn't. `ws.onopen` re-subscribes
+that looks perfectly alive above a transcript that silently stopped minutes ago — found
+because the terminal had twenty minutes the panel didn't. `ws.onopen` re-subscribes
 **every open pane**; the version before split view re-subscribed `state.selected`, a variable
 the `createPane` refactor had already deleted, so it re-subscribed nothing at all.
 
@@ -991,9 +989,8 @@ row's content sideways as the selection moves; and `.is-open` deliberately beats
 between two strong states every time the mouse crossed the rail.
 
 **A team row is three lines tall, and every other row must stay two.** `worker · agent/<id>`
-under a worker, `lead · N tasks` under a lead — chosen over a coloured
-stripe and over a fifth badge, and the *only* thing that makes it affordable is that it
-lands on nothing else. Generalising it to ordinary rows undoes the trade. Three things it
+under a worker, `lead · N tasks` under a lead — chosen over a coloured stripe and over a
+fifth badge, and the *only* thing that makes it affordable is that it lands on nothing else. Generalising it to ordinary rows undoes the trade. Three things it
 has to respect: the extra line rides in the meta line's grid columns (`grid-column: 2 / -1`,
 auto row) so nothing above it moves; it carries no margin that escapes the row, because an
 open group's tint is tiled from full-width siblings and a gap anywhere would cut through it;
@@ -1075,8 +1072,8 @@ The hoisting rule then changed, for workers alone. A worker's permission prompt 
 lead's to answer and its finished report is its lead's to read, so a worker row no longer
 hoists until `stuck` fires (`stuckAfterMinutes`, default 20) — a deliberate call, taken
 knowing that a blocked-but-not-yet-stuck worker inside a *collapsed* team group is therefore
-not visible. The trade was bought with the lead row's `N waiting` count, which
-names the same fact the inbox stopped showing, and backstopped by the stuck timer, which
+not visible. The trade was bought with the lead row's `N waiting` count, which names the
+same fact the inbox stopped showing, and backstopped by the stuck timer, which
 puts the row in the inbox for real once it has actually been abandoned there.
 
 And the compensating signal is hidden for exactly that window, which is the part nothing
@@ -1181,8 +1178,8 @@ muted ink, no accent, no motion. The counter is floored at zero on purpose: a fu
 frame can *shrink* the list, and a negative count would hide a hint that was due.
 
 **A room line's colour is keyed on what the poster said it is, never on how it reads.**
-A dispatch line was asked for in green, the way a conflict is amber — and there
-was nothing on the entry to tell one system line from another. `about` looks like the key
+A dispatch line was asked for in green, the way a conflict is amber — and there was nothing
+on the entry to tell one system line from another. `about` looks like the key
 and is not: it is the *task id*, carried by every task-scoped system line, so a dispatch and
 the `→ working` transition a minute later are identical by it. Every `kind: 'system'` post
 in the repo (gc.js, watch.js's `postSystem`, and index.js's dispatch, model, PR and close
@@ -1479,9 +1476,9 @@ at all — it arrives as two ordinary entries, ` D old` and `?? new`. `test/conf
 pins the non-ASCII match, the space case as a regression guard, and the rename; all three
 against real throwaway repos, and all three verified to fail against the old parse.
 
-**…and rename detection is the same asymmetry from the other end, closed after it as its
-own task.** `diff --name-only` detects renames **by default**, so a *committed* rename
-reports only the new name while the porcelain side reports both — a worker that committed
+**…and rename detection is the same asymmetry from the other end.** `diff --name-only`
+detects renames **by default**, so a *committed* rename reports only the new name while the
+porcelain side reports both — a worker that committed
 `web/x.js` → `web/y.js` shared no path at all with one editing `web/x.js`, and was never
 flagged. `--no-renames` is the fix and it is one flag on three diffs, because all three
 sites ask a question a vanished old name answers wrongly: `conflicts.js` (two workers on
@@ -1827,8 +1824,8 @@ human saying so: see the five rules under *The team*.
 - **The panel is probably already running.** Check `lsof -iTCP:48770` before starting
   one, use `FOREMAN_PORT` for a second, and never `pkill -f "node server/index.js"` — that
   pattern matches the one the user is using; kill by port (`lsof -tiTCP:<port>`). Give the
-  second one `FOREMAN_STATE_DIR` too — and since the team shipped, that is no longer just
-  tidiness. Two servers must not run the queue at once (they share
+  second one `FOREMAN_STATE_DIR` too, and that is not just tidiness. Two servers must not
+  run the queue at once (they share
   `~/.foreman/queue.json` and would both flush the same message), a test run would
   otherwise be saving snapshots over the bench you actually rely on, and **a second
   server boots its own worktree GC**: pointed at the real state dir it will sweep real
