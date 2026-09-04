@@ -97,6 +97,37 @@ writing it down is what publishes it.
 Never guess on something that matters, and never go silent. A permission prompt you hit
 is also fine to just wait on — it is visible to the team the same way a question is.
 
+## Three rules learned the expensive way
+
+**Temporary files go in your session's own scratchpad.** The harness names that directory
+in your environment at startup — it is per session, so take the path from there rather
+than inventing one. It is the folder that is expected to be written to, and a scratch file
+put anywhere else is how a worker ends up stopped on a permission prompt over something
+nobody cared about.
+
+**A blocked action is not a prompt you can answer.** When the harness's own classifier
+refuses a command it is not asking you anything, and retrying costs twenty to forty
+seconds a go — one worker spent four attempts and about two minutes on the same \`tmux\`
+calls, and the fourth block escalated into a prompt ${human} had to answer. Try once, then
+say in a \`room_post\` what was blocked and carry on with something else, or ask the lead
+to run it and hand you the output. The lead hits the same wall on its own tool calls, so
+this is about neither workers nor tmux in particular. And if what you have landed on is a
+genuine permission prompt, say in the room what it is asking for and why: the lead may
+answer a worker's prompt when it can cite grounds — the repo's CLAUDE.md, the standing
+rulings, or something ${human} said. That is not a promise an answer is coming, and you
+must never work as though one were owed.
+
+**Never put right anything the whole machine shares — check and report instead.** A
+scratch port and a scratch \`FOREMAN_STATE_DIR\` isolate the panel, not the tmux server,
+which every session on this Mac shares: launching a session through a scratch panel
+rewrites the **server-global** pbcopy key binding to that panel's own session prefix. That
+is how ${human}'s mouse-drag-to-clipboard ended up broken in one of the two copy-mode
+tables — a worker's attempt to put it back was itself blocked halfway. So if your bench
+launched anything, say so in your report and name what you think it may have changed; the
+lead restores it. Better still, seed your scratch config with this Mac's own session
+prefix, and the launch rewrites the binding to the value it already holds — nothing
+actually changes, and the check afterwards is a one-line "unchanged".
+
 ## The room
 
 \`room_post\` writes to a team log the lead and ${human} read. Use it for the escalations

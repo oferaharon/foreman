@@ -676,3 +676,85 @@ test('the backtick check covers the self-merge variants too — a bare one would
     }
   }
 });
+
+/* -------------------------------- the three rules learned the expensive way --- */
+
+/*
+ * All three of these are things a worker did wrong on 2026-09-03 because nothing had told
+ * it otherwise, and the third one cost the maintainer a working machine setting. They are
+ * pinned **by sentence**, the way the forbidden merge flags are and for the same reason: a
+ * test that only checked the brief "says something about benches" would pass while the
+ * half that matters had been trimmed out as padding. This is prose with no machinery
+ * behind it, so these assertions are the only thing holding it in place.
+ */
+
+const workerRules = () => workerBrief({ repo: REPO, taskId: 'my-task', decisionsFile: DECISIONS });
+
+test('rule 1: temp files go in the session scratchpad, named by shape and never by a literal path', () => {
+  const brief = workerRules();
+  assert.match(brief, /Temporary files go in your session's own scratchpad/);
+  assert.match(brief, /harness names that directory\s+in your environment/, 'the path comes from the environment');
+  assert.match(brief, /per session/, 'and is said to be per session, so nobody hardcodes one');
+  assert.match(brief, /expected to be written to/, 'and that writing there is expected, which is the point');
+  // A literal path would be wrong for every session but the one it was copied from.
+  assert.doesNotMatch(brief, /\/private\/tmp\//, 'no literal scratchpad path');
+  assert.doesNotMatch(brief, /scratchpad\//, 'not even a leading fragment of one');
+});
+
+test('rule 2: a blocked action is not a prompt, so try once and report rather than retrying', () => {
+  const brief = workerRules();
+  assert.match(brief, /A blocked action is not a prompt you can answer/);
+  assert.match(brief, /it is not asking you anything/, 'says plainly there is nothing to answer');
+  assert.match(brief, /Try once, then/, 'and gives the count, which is the whole rule');
+  assert.match(brief, /room_post/, 'the report channel is named');
+  assert.match(brief, /ask the lead\s+to run it and hand you the output/, 'and the other way out');
+  assert.match(
+    brief,
+    /neither workers nor tmux in particular/,
+    'the lead hit the same wall, so the rule is not about one role or one command',
+  );
+});
+
+test('rule 2 also carries answerPermissionPrompts, without promising an answer', () => {
+  const brief = workerRules();
+  assert.match(brief, /say in the room what it is asking for and why/, 'what a worker on a real prompt does');
+  assert.match(brief, /cite grounds/, 'and what the lead needs before it can answer');
+  assert.match(brief, /CLAUDE\.md/, 'the grounds are named');
+  assert.match(brief, /not a promise an answer is coming/, 'and never overstated into an expectation');
+  assert.match(brief, /never work as though one were owed/);
+});
+
+test('rule 3: a bench that launches anything rewrites the server-global pbcopy bind', () => {
+  const brief = workerRules();
+  assert.match(brief, /Never put right anything the whole machine shares — check and report instead/);
+  assert.match(
+    brief,
+    /scratch port and a scratch `FOREMAN_STATE_DIR` isolate the panel, not the tmux server/,
+    'the isolation that does not cover it is named, because that is the surprising half',
+  );
+  assert.match(brief, /rewrites the \*\*server-global\*\* pbcopy key binding/);
+  assert.match(brief, /the\s+lead restores it/, 'and who puts it back — not the worker');
+});
+
+test('rule 3 describes the seeding pattern that makes the check a non-event', () => {
+  const brief = workerRules();
+  assert.match(brief, /seed your scratch config with this Mac's own session\s+prefix/);
+  assert.match(brief, /the value it already holds/, 'so the rewrite is a no-op');
+  assert.match(brief, /one-line "unchanged"/, 'and the report line it earns');
+});
+
+test('the three rules are the worker\'s, and they carry the detected name like the rest of the brief', () => {
+  const named = workerBrief({ repo: REPO, taskId: 'my-task', decisionsFile: DECISIONS, human: NAME });
+  assert.match(named, new RegExp(`a prompt ${NAME} had to answer`), 'the escalated prompt names the human');
+  assert.match(named, new RegExp(`${NAME}'s mouse-drag-to-clipboard`), 'and so does the broken setting');
+  assert.doesNotMatch(named, /the human had to answer/, 'the fallback is not left in beside the name');
+
+  // Machinery was deliberately not built for any of this — no toggle, no detector.
+  const planner = plannerBrief({
+    repo: REPO,
+    taskId: 'my-plan',
+    planFile: '/t/plans/my-plan.md',
+    decisionsFile: DECISIONS,
+  });
+  assert.doesNotMatch(planner, /pbcopy/, 'a planner launches nothing and gets no bench rule');
+});
