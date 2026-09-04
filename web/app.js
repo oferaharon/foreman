@@ -2755,7 +2755,12 @@ function renderConnections() {
 
   const sig = links
     .map((l) =>
-      [l.id, l.a, l.b, l.label, l.lastAt, l.lastText, l.lastFrom, l.unseen, openHere.has(l.id)].join('|'),
+      // `lastSpeaker` is in here because the card draws from it — `you:` rather than a
+      // project name — and a field the face reads but the signature does not is a card
+      // that stops repainting on a real change. Ordinary punctuation for the join, for
+      // `mergeSig`'s reason: three invisible control bytes once sat inside what every
+      // editor drew as an empty string.
+      [l.id, l.a, l.b, l.label, l.lastAt, l.lastText, l.lastFrom, l.lastSpeaker, l.unseen, openHere.has(l.id)].join('|'),
     )
     .join('~');
   if (sig === connSig) return;
@@ -2834,7 +2839,11 @@ function connCard(link, isOpen) {
     last.className = 'conn-last';
     const from = document.createElement('span');
     from.className = 'conn-last-from';
-    from.textContent = `${projectName(link.lastFrom || '')}:`;
+    // `lastSpeaker`, never `lastFrom`: the maintainer's own message has no sending project
+    // at all, so there is no basename to take and the card would read `:` with nothing in
+    // front of it. Same field, same reason, as the thread's own pill.
+    from.textContent =
+      link.lastSpeaker === 'human' ? 'you:' : `${projectName(link.lastFrom || '')}:`;
     const text = document.createElement('span');
     text.className = 'conn-last-text';
     // One line, cut by CSS. Nothing here is measured: a repaint that measures stops holding
@@ -4221,6 +4230,22 @@ function createPane(slot, host) {
     // own reason: every child is replaced on every paint, so a node's identity is gone by
     // the next arriving line and anything keyed to it would silently re-clamp.
     threadOpen: new Set(),
+    /*
+     * Refusals the thread owes the reader, held **in view state and never on the node that
+     * was pressed**. `roomView.mergeErrors` is the precedent and the reason is on the
+     * record: a 409 painted onto a pressed node came back on a node a concurrent repaint
+     * had already replaced — `isConnected: false`, rendered into a detached tree, and
+     * nobody ever saw why their press did nothing. Every child of the thread is replaced
+     * on every paint, so that is not a hypothetical here.
+     *
+     * Keyed by `'send'` for the composer's own refusal and by `msgId` for one entry's
+     * record control.
+     */
+    linkErrors: new Map(),
+    // Presses in flight, by the same keys. `linkEntryNode` builds fresh nodes on every
+    // paint, so `disabled` on a button is gone by the next arriving line and the flag has
+    // to outlive it — the `duplicating` guard on the rail's ⧉, one screen over.
+    linkBusy: new Set(),
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -4228,6 +4253,9 @@ function createPane(slot, host) {
 
   let streamEl = null;
   let composerEl = null;
+  // The thread's own small composer. Deliberately a second variable rather than a second
+  // shape for `composerEl`: everything that reads that one assumes a session behind it.
+  let linkComposerEl = null;
 
   // The team room — and, since Wave E, the whole team panel: tasks and settings ride the
   // same aside. Lives in the factory because two leads can be open in two slots and must
@@ -4374,8 +4402,27 @@ function createPane(slot, host) {
     persistDrafts();
   }
 
+  /**
+   * A thread's draft key — the **same store**, a different namespace.
+   *
+   * `state.drafts` is keyed by session id, and a link id is a short string of the panel's
+   * own minting. Nothing stops `lnk-5` being a session id one day, and a collision there
+   * would have one draft silently clobber the other. `link:` in front is the whole fix.
+   */
+  const linkDraftKey = (id) => `link:${id}`;
+
+  /** Hold on to what was being typed in the thread we're leaving. */
+  function saveLinkDraft(linkId = view.link?.id) {
+    if (!linkId || !linkComposerEl) return;
+    const text = linkComposerEl.ta.value;
+    if (text.trim()) state.drafts[linkDraftKey(linkId)] = text;
+    else delete state.drafts[linkDraftKey(linkId)];
+    persistDrafts();
+  }
+
   function open(id) {
     if (view.kind === 'session' && view.selected === id) return;
+    saveLinkDraft(); // …and the same for a thread, if that is what this pane was showing
     saveDraft(); // hold on to what was being typed in the session we're leaving
     // Coming back from a thread: the pane stops being a link before anything else, or the
     // guards below would keep refusing on its behalf.
@@ -4408,6 +4455,11 @@ function createPane(slot, host) {
     // A different link's entries can share `repo:seq` with this one's, so an unfolded set
     // carried across would open messages nobody touched.
     view.threadOpen.clear();
+    // Same reasoning one shape along: a held refusal belongs to the message it was about,
+    // and a press in flight belongs to the thread that started it.
+    view.linkErrors.clear();
+    view.linkBusy.clear();
+    linkComposerEl = null;
   }
 
   /**
@@ -4423,6 +4475,7 @@ function createPane(slot, host) {
     const link = linkById(id);
     if (!link) return;
     if (view.kind === 'link' && view.link?.id === id) return;
+    saveLinkDraft(); // this pane may already be holding another thread
     saveDraft();
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
@@ -4596,9 +4649,8 @@ function createPane(slot, host) {
    * this is another thing shown in a slot that already exists. The connections themselves
    * have since stopped being a column too; they are a band at the foot of the rail.
    *
-   * Read-only in this item. The maintainer's composer is item 7 and is built alone,
-   * because it is the one channel in this feature that carries authority — so the pane
-   * says so in a line rather than leaving a reader hunting for a box that is not there.
+   * The maintainer types here too, and that is the one thing on this channel that carries
+   * authority — see `buildLinkComposer`, which is deliberately **not** `buildComposer`.
    */
   function renderLinkPane() {
     host.replaceChildren();
@@ -4619,13 +4671,205 @@ function createPane(slot, host) {
     view.threadEl = { wrap, inner };
     host.append(wrap);
 
-    const foot = document.createElement('div');
-    foot.className = 'link-foot';
-    foot.textContent =
-      'The two leads talk here. Read-only for now — say it to either lead in its own conversation.';
-    host.append(foot);
-
+    host.append(buildLinkComposer());
     renderThread();
+    // Sizing needs the textarea in the document — `scrollHeight` is 0 before that, so a
+    // restored multi-line draft would sit crammed into a two-row box. Same order as the
+    // session composer's own `autoGrow` call, and for the same reason.
+    linkComposerEl.autoGrow();
+  }
+
+  /**
+   * The maintainer's own composer, and it is **not** `buildComposer`.
+   *
+   * That function is about a session: it reads `s.prompt`, `s.plan`, `s.question`,
+   * `s.mode` and `s.model`, draws the permission bar, the queue chip, the ghost-text row
+   * and the interrupt row, and is rebuilt off `composerSig`. A link pane has no session,
+   * so every one of those is null at once — and `shortModel(null)` throwing *inside*
+   * `buildComposer` is a recorded trap here that took a pane down after it had decided to
+   * draw a question card, and left it unable to heal on any later roster frame. So this is
+   * a textarea, a send button and two lines of chrome, and nothing else: no attachments,
+   * no queue, no interrupt, no ghost text, no permission bar, no mode control, and no
+   * signature — a thread's composer is torn down only when the pane stops being a thread.
+   *
+   * What it does reuse is the textarea's auto-grow and its send keys, because those are
+   * the two things a reader's hands already know.
+   */
+  function buildLinkComposer() {
+    const wrap = document.createElement('div');
+    wrap.className = 'link-composer';
+    const inner = document.createElement('div');
+    inner.className = 'link-composer-inner';
+    wrap.append(inner);
+
+    const closed = Boolean(view.link?.closedAt);
+
+    // Who this reaches, said **before** anything is typed rather than only after it is
+    // sent. Repainted on the roster beat, because whether a side has a live lead is a fact
+    // about the roster and moves without anybody touching this pane.
+    const note = document.createElement('div');
+    note.className = 'link-reach';
+
+    // The standing refusal, painted from `view.linkErrors` rather than appended to
+    // whatever node was pressed — see the field's own note.
+    const err = document.createElement('div');
+    err.className = 'link-composer-err';
+    err.hidden = true;
+
+    const ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.disabled = closed;
+    ta.placeholder = closed
+      ? 'This connection is closed — nothing more can be sent on it.'
+      : 'Say it to both leads at once — Enter to send, Shift+Enter for a new line';
+
+    const autoGrow = () => {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 224)}px`;
+    };
+
+    ta.value = state.drafts[linkDraftKey(view.link?.id)] || '';
+    ta.oninput = () => {
+      autoGrow();
+      saveLinkDraft();
+    };
+    ta.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendLinkMessage();
+      }
+    };
+
+    const row = document.createElement('div');
+    row.className = 'link-composer-row';
+
+    // What a line typed here *is*, in the panel's own voice. It is the only box in this
+    // app whose words reach two conversations at once, and the only one whose words a lead
+    // is told it may act on as an instruction — so it says both, quietly, every time.
+    const hint = document.createElement('span');
+    hint.className = 'link-composer-hint';
+    hint.textContent = 'your own words — a lead may act on them';
+
+    const btn = document.createElement('button');
+    btn.className = 'send-btn';
+    btn.textContent = 'send';
+    btn.disabled = closed;
+    btn.onclick = sendLinkMessage;
+
+    row.append(hint, btn);
+    inner.append(note, err, ta, row);
+
+    linkComposerEl = { wrap, ta, btn, note, err, autoGrow };
+    renderLinkReach();
+    renderLinkError();
+    return wrap;
+  }
+
+  /**
+   * A live lead in one project, or null — the client's half of the server's `findLead`,
+   * and deliberately only for *saying* what will happen.
+   *
+   * The same three tests: it is a lead, it has a pane to type into, and its launch folder
+   * is this project. More than one match is null rather than a pick, for `findLead`'s own
+   * reason — the panel does not get to guess which of two leads speaks for a project. The
+   * endpoint re-decides all of it server-side, so a stale roster costs a wrong sentence
+   * here and never a wrong delivery.
+   */
+  function liveLeadIn(repo) {
+    const found = state.sessions.filter((s) => s.isLead && s.interactive && s.paneCwd === repo);
+    return found.length === 1 ? found[0] : null;
+  }
+
+  /**
+   * Who a line typed here reaches — and, when a side has no live lead, that it will not be
+   * delivered there.
+   *
+   * Said before he types rather than only after he sends, because "nobody was listening"
+   * is the one thing about this box that changes what he would write. It is still not a
+   * reason to withhold the message: the endpoint records it either way, and `record as a
+   * ruling` is what gets it to the lead that was not there.
+   */
+  function renderLinkReach() {
+    const el = linkComposerEl;
+    const link = view.link;
+    if (!el || !link) return;
+    el.note.replaceChildren();
+    if (link.closedAt) {
+      el.note.textContent =
+        'This connection is closed. Its history stays readable; nothing more goes down it.';
+      return;
+    }
+    const names = [projectName(link.a), projectName(link.b)];
+    const dark = [link.a, link.b].filter((repo) => !liveLeadIn(repo)).map(projectName);
+    const reach = document.createElement('span');
+    reach.textContent = `goes to the leads of ${names[0]} and ${names[1]}`;
+    el.note.append(reach);
+    if (dark.length) {
+      const miss = document.createElement('span');
+      miss.className = 'link-reach-miss';
+      miss.textContent =
+        dark.length === 2
+          ? ' — neither lead is running, so nobody will hear it. It is still recorded here.'
+          : ` — no lead is running in ${dark[0]}, so it will not be delivered there.`;
+      el.note.append(miss);
+    }
+  }
+
+  /** The composer's standing refusal, drawn from view state and never from a pressed node. */
+  function renderLinkError() {
+    const el = linkComposerEl;
+    if (!el) return;
+    const held = view.linkErrors.get('send');
+    el.err.textContent = held || '';
+    el.err.hidden = !held;
+  }
+
+  /**
+   * Send what is in the box to **both** leads.
+   *
+   * There is no recipient picker and there must not be one: addressing one lead is what
+   * that lead's own conversation already does, and it is one click away in the rail. A
+   * control whose right answer is "both" every time is worse than no control.
+   *
+   * A half-landed send is a **success** here, not a failure — the endpoint records it, the
+   * thread shows it once with a delivery line naming each side, and both rooms carry an
+   * alert. So the box is only kept full when the message was refused outright.
+   */
+  async function sendLinkMessage() {
+    const el = linkComposerEl;
+    const link = view.link;
+    if (!el || !link || link.closedAt || view.linkBusy.has('send')) return;
+    const text = el.ta.value;
+    if (!text.trim()) return;
+
+    view.linkBusy.add('send');
+    el.btn.disabled = true;
+    try {
+      const res = await fetch(`/api/team/links/${link.id}/human-message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `That message was not sent (${res.status}).`);
+      view.linkErrors.delete('send');
+      // The pane may have been given a session, or another thread, while this was out.
+      if (view.kind === 'link' && view.link?.id === link.id && linkComposerEl === el) {
+        el.ta.value = '';
+        el.autoGrow();
+      }
+      delete state.drafts[linkDraftKey(link.id)];
+      persistDrafts();
+      refreshThread(true);
+    } catch (err) {
+      // Held, not appended: this pane repaints whenever a message arrives, and a sentence
+      // painted onto a node that a repaint has already replaced is a sentence nobody sees.
+      view.linkErrors.set('send', err.message);
+    } finally {
+      view.linkBusy.delete('send');
+      if (linkComposerEl === el && !view.link?.closedAt) el.btn.disabled = false;
+      renderLinkError();
+    }
   }
 
   /** The thread's own header: both projects, the label, and the way out of the pane. */
@@ -4675,6 +4919,7 @@ function createPane(slot, host) {
    * a pane looking at itself sees the same thing in both cases.
    */
   function closeThread() {
+    saveLinkDraft();
     if (panes.length > 1 && threadSplit) {
       closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
       return;
@@ -4930,6 +5175,25 @@ function createPane(slot, host) {
     // those are short machinery, and a clamp must never swallow them.
     threadClampable(text, e, pending);
 
+    /*
+     * The maintainer's own line has **two** recipients, so its delivery is a per-side list
+     * rather than one verb, and it is drawn from that list rather than from `delivered`
+     * — the two lead-shaped lines below would say "not delivered" over a message half of
+     * which landed. Quiet register, the same as the `room-ready` line under a report
+     * bubble: a message that reached one lead and not the other is a fact to read, not an
+     * error card.
+     *
+     * Everything here is drawn from data on the entry. Nothing measures a row, a rect or a
+     * height — locked ruling, and the room's five-line clamp is what it cost to learn.
+     */
+    if (human) {
+      if (Array.isArray(e.delivery) && e.delivery.length) bubble.append(deliveryLine(e.delivery));
+      const record = recordControl(e);
+      if (record) bubble.append(record);
+      wrap.append(bubble);
+      return wrap;
+    }
+
     // A message that did not land exists only in the sender's room, which is exactly right
     // — and it has to *say* so, or the thread reads as though it arrived. The reason is the
     // server's own sentence; nothing here rewords it.
@@ -4949,6 +5213,154 @@ function createPane(slot, host) {
     }
     wrap.append(bubble);
     return wrap;
+  }
+
+  /**
+   * What each end actually did with one of his messages: `delivered to alpha · queued for
+   * beta`, `delivered to alpha · not delivered to beta — no lead running`.
+   *
+   * **Queued reads as delivered**, because it is: `queue.js` is holding it and it goes into
+   * the pane the moment that pane is free. Saying "not delivered" there would be the
+   * opposite of the trigger's hard-won honesty, and saying nothing would hide the wait —
+   * so it has its own word.
+   *
+   * Named per side and never summarised into "partly delivered": which lead heard him is
+   * the whole of what he needs from this line.
+   */
+  function deliveryLine(delivery) {
+    const line = document.createElement('div');
+    line.className = 'link-delivery';
+    if (delivery.every((d) => !d.ok)) line.classList.add('is-dark');
+    else if (delivery.some((d) => !d.ok)) line.classList.add('is-partial');
+    line.textContent = delivery
+      .map((d) => {
+        if (!d.ok) return `not delivered to ${d.name}${d.reason ? ` — ${d.reason}` : ''}`;
+        return d.queued ? `queued for ${d.name}` : `delivered to ${d.name}`;
+      })
+      .join(' · ');
+    return line;
+  }
+
+  /**
+   * `record as a ruling`, or what recording it did — one node either way.
+   *
+   * **Post-hoc, and only on his own lines.** A pre-send checkbox has to be decided before
+   * the sentence exists: one that persists records things he did not mean, one that resets
+   * is a thing to remember every time. This stays pressable an hour later, which is also
+   * how `decisions.md` is actually written — the ruling is appended after the decision.
+   *
+   * **The control survives a partial write and a retry writes only the missing side**, so
+   * pressing twice cannot double-append to the file that already took it — the endpoint's
+   * ledger is what makes that arithmetic rather than a guard. Once both sides are in there
+   * is nothing left to press and the line says so.
+   *
+   * A message from before this shipped has no `msgId` and gets no control, which is right:
+   * there is nothing durable to record it against.
+   */
+  function recordControl(e) {
+    if (!e.msgId) return null;
+    const held = e.recorded || null;
+    const link = view.link;
+    const nameOf = (side) => projectName(side === 'a' ? link?.a : link?.b);
+    const done = held && held.a && held.b;
+
+    const box = document.createElement('div');
+    box.className = 'link-record';
+
+    if (done) {
+      box.classList.add('is-done');
+      box.textContent = 'recorded in both';
+      box.title =
+        `Appended to ${nameOf('a')}’s and ${nameOf('b')}’s decisions.md — the standing record ` +
+        'each lead reads before its first reply, including after a /clear.';
+      return box;
+    }
+
+    if (held && (held.a || held.b)) {
+      // Half in. The honest report, and the control stays: appending to markdown has no
+      // transaction and there is no rollback here — the missing side is simply still
+      // missing, and pressing again writes only that one.
+      const said = document.createElement('div');
+      said.className = 'link-record-state';
+      said.textContent = ['a', 'b']
+        .map((side) => {
+          if (held[side]) return `recorded in ${nameOf(side)}`;
+          const why = held[side === 'a' ? 'aError' : 'bError'];
+          return `not recorded in ${nameOf(side)}${why ? ` — ${why}` : ''}`;
+        })
+        .join(' · ');
+      box.append(said);
+    }
+
+    const busy = view.linkBusy.has(e.msgId);
+    const btn = document.createElement('button');
+    btn.className = 'link-record-btn';
+    btn.type = 'button';
+    btn.disabled = busy;
+    btn.textContent = busy
+      ? 'recording…'
+      : held && (held.a || held.b)
+        ? 'record in the other project'
+        : 'record as a ruling';
+    btn.title =
+      'Append these words, verbatim, to both projects’ decisions.md — the file each lead ' +
+      'reads before its first reply, including after a /clear.';
+    btn.onclick = () => recordRuling(e);
+    box.append(btn);
+
+    const refused = view.linkErrors.get(e.msgId);
+    if (refused) {
+      const err = document.createElement('div');
+      err.className = 'link-record-err';
+      err.textContent = refused;
+      box.append(err);
+    }
+    return box;
+  }
+
+  /**
+   * Make one message standing, in both projects.
+   *
+   * The words are not sent: the endpoint reads them back out of the thread, so what is
+   * appended is what he actually said and not what a caller claims he said. All this
+   * carries is which message.
+   *
+   * The answer is applied to the entry in place rather than waiting for a refetch, because
+   * the thread only refetches when `lastAt` moves and recording a ruling is not a message.
+   */
+  async function recordRuling(e) {
+    const link = view.link;
+    if (!link || !e.msgId || view.linkBusy.has(e.msgId)) return;
+    view.linkBusy.add(e.msgId);
+    view.linkErrors.delete(e.msgId);
+    renderThread();
+    try {
+      const res = await fetch(`/api/team/links/${link.id}/ruling`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ msgId: e.msgId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `That ruling was not recorded (${res.status}).`);
+      // Best-effort per side, never a rollback — so a 200 can still carry a side that did
+      // not take it, and the entry has to say which.
+      const live = view.thread.find((x) => x.msgId === e.msgId);
+      if (live) live.recorded = data.recorded || live.recorded;
+      const missed = (data.results || []).filter((r) => r && r.ok === false);
+      if (missed.length) {
+        view.linkErrors.set(
+          e.msgId,
+          `${missed.map((r) => projectName(r.repo)).join(' and ')}: ${missed[0].error}`,
+        );
+      }
+    } catch (err) {
+      // Held on the entry, never on the button: every child of this box is replaced on the
+      // next paint, and a sentence in a detached tree is a press that did nothing.
+      view.linkErrors.set(e.msgId, err.message);
+    } finally {
+      view.linkBusy.delete(e.msgId);
+      renderThread();
+    }
   }
 
   function emptyState(title, body) {
@@ -7340,6 +7752,10 @@ function createPane(slot, host) {
     // the thread refetches when, and only when, `lastAt` says there is something new.
     if (view.kind === 'link') {
       renderLinkHead();
+      // Whether a side has a live lead is a fact about the roster, so it moves without
+      // anybody touching this pane — a lead `/exit`ing while the box is open has to change
+      // the line under it. Nothing here measures anything; it is a comparison of paths.
+      renderLinkReach();
       refreshThread();
       return;
     }
@@ -10110,7 +10526,12 @@ function createPane(slot, host) {
     // here, so it would write nothing; saying so is cheaper than relying on that. The
     // unsubscribe goes out either way: this slot may have been showing a session a moment
     // ago, and an unsubscribe for a slot with nothing on it costs the server nothing.
-    if (view.kind !== 'link') saveDraft();
+    //
+    // A thread *does* have a draft to save now — the maintainer's own composer sits under
+    // it — and it is keyed by the link rather than by `view.selected`, which is why it is
+    // its own call rather than something `saveDraft` could be taught.
+    if (view.kind === 'link') saveLinkDraft();
+    else saveDraft();
     send({ type: 'unsubscribe', slot });
     host.remove();
   }

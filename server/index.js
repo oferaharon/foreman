@@ -91,6 +91,7 @@ import {
   LinkStore,
   jointThread,
   linkLine,
+  rulingBlock,
   assertSendableBody,
   MAX_LINK_TEXT,
 } from './links.js';
@@ -2597,10 +2598,12 @@ app.post('/api/team/tasks/:id/merge-check', async (req, res) => {
  *     409 and a room line, exactly as `/api/trigger` settled it on 2026-08-27: a fresh
  *     lead has not read `decisions.md`, and a visible non-event is the better failure.
  *   - **`speaker` is set by which endpoint composed the message, never read from a request
- *     body.** This is the lead endpoint, so it always composes with the lead prefix. A
- *     `speaker` field a caller could set would be a one-word promotion of another
- *     project's request into the maintainer's word — the same stance `skipPermissions`
- *     has in the dispatch path: not plumbed, so there is no door to find.
+ *     body.** There are two message endpoints and each writes one literal: `/message` is
+ *     the lead's and always composes `'lead'`, `/human-message` is the maintainer's own
+ *     composer and always composes `'human'`. A `speaker` field a caller could set would
+ *     be a one-word promotion of another project's request into the maintainer's word —
+ *     the same stance `skipPermissions` has in the dispatch path: not plumbed, so there is
+ *     no door to find.
  *
  * And the one thing the store deliberately does not check, so this does: **both projects
  * must have a team**. `LinkStore.open` will happily link two folders; a link between
@@ -3065,6 +3068,288 @@ function linkRefusal(repo, link, peerRepo, text, reason) {
 }
 
 /**
+ * The maintainer's own message, to **both** leads at once.
+ *
+ * A sibling of the lead endpoint above, not a parameter on it, and the reason is the one
+ * line in this file that most deserves to be read twice:
+ *
+ * **`speaker: 'human'` is a literal here, exactly as `speaker: 'lead'` is a literal
+ * there.** The field decides whether a message reaching a lead is a request from another
+ * project or the maintainer's own word — the one thing in this whole feature that can
+ * authorize a merge, a dispatch or a plan approval. Read from a request body it would be
+ * a one-word privilege escalation: a lead posting to the endpoint it already has, with
+ * one extra key, promoting its own request into the maintainer's instruction. So which
+ * endpoint was called is the only thing that decides, which is the stance
+ * `skipPermissions` already has in the dispatch path — not plumbed, so there is no door
+ * to find.
+ *
+ * **Both leads, with no per-message choice.** His stated reason for wanting this box is
+ * addressing both at once — correcting a misunderstanding *between* two leads, or giving
+ * both the same instruction once. Addressing one is what that lead's own conversation
+ * already does, and it is one click away in the rail. A recipient picker would be a
+ * control whose right answer is "both" every time, and a control with a wrong setting is
+ * worse than no control.
+ *
+ * **One message can half-land, and that is a fact to show rather than a fault to hide:**
+ *
+ *   - it goes to whichever sides are live, and is **never withheld because the other is
+ *     down** — refusing both would put him back to retyping into the live lead's
+ *     conversation, which is the relaying this feature exists to end;
+ *   - the thread shows it **once**, with a delivery line naming each side;
+ *   - an alert room line goes in **both** rooms, unlike a lead's refused message which
+ *     goes only to the sender's. He is addressing both projects, and "this project's lead
+ *     did not hear this" belongs in that project's own append-only history;
+ *   - **neither side live is accepted and recorded, not refused.** The thread and both
+ *     rooms take it and the delivery line says nobody heard it. That is the case where
+ *     `record as a ruling` stops being a nicety: it is the only path in this design by
+ *     which something he says survives nobody being home;
+ *   - **queued reads as delivered**, because it is — `queue.js` holds it and it goes in
+ *     when the pane frees. The line says so.
+ *
+ * And nothing is ever launched, on either side. The 2026-08-27 ruling holds here exactly
+ * as it does for the trigger and for the lead endpoint above: a fresh lead has not read
+ * `decisions.md`, and a visible non-event is the better failure.
+ *
+ * The refusals:
+ *
+ *   400  a body that is empty, over `MAX_LINK_TEXT`, or carrying a character that can
+ *        make a quoted line draw as an unquoted one — the same rule the lead's body goes
+ *        through, because a rule with an exception in it is a rule with a hole in it
+ *   404  no such link
+ *   409  the link is closed
+ *   200  recorded, with a per-side account of what each end actually did
+ */
+app.post('/api/team/links/:id/human-message', async (req, res) => {
+  const link = links.get(req.params.id);
+  if (!link) return res.status(404).json({ error: `No such link: ${req.params.id}.` });
+  if (link.closedAt) {
+    return res.status(409).json({ error: `${link.id} is closed — nothing can be sent on it.` });
+  }
+
+  const text = String(req.body?.text ?? '');
+  const lines = new Map();
+  try {
+    /*
+     * Composed for **both** sides before anything is delivered, so a body this endpoint
+     * will not accept refuses the whole press and writes nothing anywhere. Each side gets
+     * the maintainer's name as *that repo* resolves it, and is told about the other end —
+     * the envelope says "to you and to the team lead of <peer>", so `peer` here is the
+     * reader's opposite number rather than a sender.
+     */
+    assertSendableBody(text, 'A message in the joint thread');
+    for (const repo of [link.a, link.b]) {
+      const { peer } = linkSides(link, repo);
+      lines.set(repo, linkLine({
+        speaker: 'human',
+        body: text,
+        id: link.id,
+        peer,
+        label: link.label,
+        human: humanName(repo),
+      }));
+    }
+  } catch (err) {
+    return res.status(400).json({ error: err.message, cap: MAX_LINK_TEXT });
+  }
+
+  const sessions = registry.list();
+  const delivery = [];
+  for (const repo of [link.a, link.b]) {
+    const name = path.basename(repo);
+    const lead = findLead(sessions, repo);
+    if (!lead) {
+      // Nothing launched. Not an error for the press — the other side may well have heard
+      // it, and this one is recorded either way.
+      delivery.push({ repo, name, ok: false, queued: false, reason: 'no lead running' });
+      continue;
+    }
+    try {
+      const { queued } = await sendOrQueue(lead, lines.get(repo));
+      delivery.push({ repo, name, ok: true, queued: Boolean(queued), reason: null });
+    } catch (err) {
+      delivery.push({ repo, name, ok: false, queued: false, reason: err.message });
+    }
+  }
+
+  /*
+   * One entry, posted into both rooms with identical content — which is what makes the
+   * joint thread show it **once**: `jointThread` takes a human entry from the A side only,
+   * arbitrarily but consistently, and that is the whole of the de-duplication.
+   *
+   * `msgId` is minted here and is the same string in both copies. It is what a ruling is
+   * recorded against, and it exists because `seq` cannot be: `seq` is per repo, so the two
+   * copies of one message carry two different ones and neither would name the other.
+   *
+   * There is no `sender`. A human message's sender is not a repo at all, and a field that
+   * looked like one would invite a client to work the speaker out from the paths — a second
+   * answer to the only question this feature turns on.
+   */
+  const msgId = links.mintMessageId(link.id);
+  const entry = {
+    from: 'human',
+    to: 'lead',
+    kind: 'link',
+    link: link.id,
+    speaker: 'human',
+    msgId,
+    text,
+    delivery,
+    // Handed off, not read — the lead endpoint's own honesty, and here it is a summary of
+    // a per-side list that is on the entry beside it.
+    delivered: delivery.some((d) => d.ok),
+  };
+  for (const target of [link.a, link.b]) {
+    try {
+      room.post(target, entry);
+    } catch {
+      /* a failed append must not undo a message that is already in somebody's pane */
+    }
+  }
+
+  /*
+   * `speaker: 'human'` is what keeps this off the card's unseen count. The counter means
+   * "anything new for him", and it increments server-side where "is his thread open right
+   * now" is not knowable — so the rule is by speaker rather than by state. Without it every
+   * message he types bumps a badge on the card he is looking at, and it sits at 1 until he
+   * closes the thread and reopens it, because opening zeroes it. Which is exactly what
+   * would hide the bug.
+   */
+  links.touch(link.id, { text, from: null, speaker: 'human' });
+  links.flush();
+
+  // An alert in **both** rooms when a side did not hear it — unlike a lead's refused
+  // message, which goes only to the sender's room. He is addressing both projects, and
+  // that a project's lead missed this belongs in that project's own history.
+  const missed = delivery.filter((d) => !d.ok);
+  if (missed.length) {
+    for (const target of [link.a, link.b]) {
+      try {
+        room.post(target, {
+          from: 'panel', to: 'lead', kind: 'system', event: 'link', alert: true,
+          link: link.id,
+          text:
+            `A message ${humanName(target)} typed in the joint thread on link ${linkNamed(link)} ` +
+            `did not reach ${missed.map((d) => `the lead of ${d.name} (${d.reason})`).join(', and ')}. ` +
+            'Nothing was launched. It is in the thread and in both rooms, and it can be ' +
+            'recorded as a ruling from there.',
+        });
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
+  // No nudge, for the lead endpoint's reason: a link message is already input, sitting in
+  // the composer. Nudging would deliver one event twice.
+  broadcastRoster();
+  res.json({ ok: true, link: link.id, msgId, delivery, entry });
+});
+
+/**
+ * Make one of the maintainer's own messages a standing ruling, in **both** projects.
+ *
+ * Post-hoc and never a pre-send checkbox. A checkbox has to be decided before the sentence
+ * exists; one that persists records things he did not mean, and one that resets is a thing
+ * to remember every time. Post-hoc also matches how `decisions.md` is actually written —
+ * the ruling is appended after the decision, never as it is spoken — and it stays available
+ * an hour later, which a checkbox cannot.
+ *
+ * **Only his own messages.** A lead's message is never recordable this way: if a lead's
+ * request deserves a ruling, the ruling is his answer to it. That is enforced on the
+ * entry's own `speaker`, not on anything the caller sends.
+ *
+ * **The words come from the thread, never from the request.** The ruling is what he said,
+ * verbatim, and reading it back out of the rooms is what makes that true — a `text` field
+ * on this request would be a way to write arbitrary prose into two `decisions.md` files
+ * over an endpoint with no authentication in front of it.
+ *
+ * **Best-effort per side, and never a rollback.** Two files, two independent appends: if
+ * the second fails the first stays, because "rolling back" here means truncating the
+ * maintainer's own standing record. Each side's outcome is written onto the link record,
+ * and a retry writes **only** the side still missing — so pressing twice cannot append the
+ * same ruling twice to the file that took it. Idempotence by construction rather than by a
+ * guard.
+ */
+app.post('/api/team/links/:id/ruling', async (req, res) => {
+  const link = links.get(req.params.id);
+  if (!link) return res.status(404).json({ error: `No such link: ${req.params.id}.` });
+
+  const msgId = String(req.body?.msgId || '').trim();
+  if (!msgId) return res.status(400).json({ error: 'Which message? A ruling needs `msgId`.' });
+
+  // A closed link still records: closing shut the channel, and this is about a message
+  // that was already said on it. The thread of a closed link is deliberately readable for
+  // the same reason.
+  let entries;
+  try {
+    entries = jointThread(room.readAll(link.a), room.readAll(link.b), link);
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+  const found = entries.find((e) => e.msgId === msgId);
+  if (!found) {
+    return res.status(404).json({ error: `No message ${msgId} on ${link.id}.` });
+  }
+  if (found.speaker !== 'human') {
+    return res.status(409).json({
+      error:
+        'Only the maintainer’s own messages can be recorded as a ruling. If another ' +
+        'project’s lead asked for something, the ruling is the answer to it.',
+    });
+  }
+
+  const date = decisionDate(Date.now());
+  const held = links.ruling(link.id, msgId) || { a: null, b: null, aError: null, bError: null };
+  const results = [];
+  for (const side of ['a', 'b']) {
+    const repo = link[side];
+    const { peer } = linkSides(link, repo);
+    const name = path.basename(repo);
+    if (held[side]) {
+      // Already in this file. Skipped rather than rewritten — this is the whole of why a
+      // retry is safe, and it is arithmetic rather than a guard somebody has to remember.
+      results.push({ repo, name, side, ok: true, at: held[side], skipped: true });
+      continue;
+    }
+    const written = await appendDecision(
+      repo,
+      rulingBlock({
+        date,
+        peerName: path.basename(peer),
+        named: linkNamed(link),
+        // Verbatim, out of the thread. His words are the ruling; a summary would be the
+        // panel paraphrasing an instruction.
+        text: found.text || '',
+      }),
+    );
+    if (written.ok) {
+      const at = Date.now();
+      links.recordRuling(link.id, msgId, side, { at });
+      results.push({ repo, name, side, ok: true, at, skipped: false });
+      continue;
+    }
+    links.recordRuling(link.id, msgId, side, { error: written.error });
+    results.push({ repo, name, side, ok: false, error: written.error });
+    try {
+      room.post(repo, {
+        from: 'panel', to: 'lead', kind: 'system', event: 'link', alert: true,
+        link: link.id,
+        text:
+          `A ruling ${humanName(repo)} recorded in the joint thread with ${path.basename(peer)} ` +
+          `could not be written to this project’s decisions.md: ${written.error}. It is ` +
+          'still in the thread, and the control there stays pressable.',
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+  links.flush();
+
+  broadcastRoster();
+  res.json({ ok: true, link: link.id, msgId, recorded: links.ruling(link.id, msgId), results });
+});
+
+/**
  * The joint thread — one conversation, computed from both rooms.
  *
  * A **view**, not a third log: both rooms carry a copy anyway (the `worker_send` house
@@ -3095,6 +3380,17 @@ app.get('/api/team/links/:id/thread', (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
+  /*
+   * Whether one of his own messages has been made a standing ruling is **not** in the
+   * room, and could not be: the room is append-only, and this fact changes after the line
+   * is written — once per side, possibly minutes apart, possibly on a retry. It lives on
+   * the link record and is joined on here, so the thread stays a view over two rooms and
+   * the ledger stays the one place that says what has actually been appended.
+   */
+  for (const e of entries) {
+    if (e.speaker === 'human' && e.msgId) e.recorded = links.ruling(link.id, e.msgId);
+  }
+
   const after = since > 0 ? entries.filter((e) => (Number(e.ts) || 0) > since) : entries;
   res.json({
     link,

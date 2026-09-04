@@ -4036,18 +4036,139 @@ body.row-dragging * { cursor: row-resize !important; }
   margin-top: 0.3rem;
 }
 
-/* Read-only, and it says which — a reader hunting for a box that is not there is the same
-   failure as a card that refuses to draw a button without explaining itself. */
-.link-foot {
-  flex: none;
-  border-top: 1px solid var(--rule);
-  padding: 0.6rem 1.6rem;
+/* What each end did with one of the maintainer's messages, per side. Quiet — the same
+   register as the `room-ready` line under a report bubble, because a message that reached
+   one lead and not the other is a fact to read rather than an error to act on. Amber only
+   when a side missed it, red only when both did; neither is an alarm colour here by
+   accident — they are this panel's own "waiting" and "needs you". */
+.link-delivery {
+  margin-top: 0.3rem;
   font-family: var(--mono);
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+.link-delivery.is-partial { color: var(--working); }
+.link-delivery.is-dark { color: var(--decision); }
+
+/* `record as a ruling` — post-hoc, on his own lines only, and the one control in this
+   thread that writes to something permanent. It sits inside the bubble under the delivery
+   line, so it belongs visibly to the message it is about. */
+.link-record {
+  margin-top: 0.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.3rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
 }
 
-.app.split .link-foot { padding-left: 1rem; padding-right: 1rem; }
+/* Both sides in. Not a control any more — there is nothing left to press — so it is a
+   statement, in the muted ink everything settled in this thread uses. */
+.link-record.is-done { color: var(--ink-faint); }
+
+/* Half in: which file took it and which did not, with the reason. The button stays beside
+   it, because a retry writes only the side still missing. */
+.link-record-state { color: var(--working); flex-basis: 100%; overflow-wrap: anywhere; }
+
+.link-record-btn {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: none;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+.link-record-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.link-record-btn:disabled { opacity: 0.55; cursor: default; }
+
+.link-record-err {
+  flex-basis: 100%;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+/* The maintainer's own composer. Deliberately small: a textarea, a send button and two
+   lines of chrome. It is not `.composer` and shares none of its machinery — that one is
+   about a session, and a link pane has none. */
+.link-composer {
+  flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.link-composer-inner {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0.6rem 1.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.app.split .link-composer-inner { padding-left: 1rem; padding-right: 1rem; }
+
+/* Who this reaches, said **before** anything is typed. The reach half is quiet; the half
+   that names a lead nobody is running takes the panel's waiting colour, because that is
+   the one thing here that changes what he would write. */
+.link-reach {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+.link-reach-miss { color: var(--working); }
+
+/* A refusal, painted from view state so it survives the repaint that arrives with the next
+   message — `mergeErrors`' own lesson, one pane over. */
+.link-composer-err {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+.link-composer textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.link-composer textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong));
+}
+.link-composer textarea:disabled { opacity: 0.6; cursor: default; }
+
+.link-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* What a line typed here *is*. The only box in this panel whose words reach two
+   conversations at once, and the only one a lead is told it may act on — so it says so
+   every time, quietly, rather than in a tooltip nobody opens. */
+.link-composer-hint {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* ======================================================= connections === */
 
