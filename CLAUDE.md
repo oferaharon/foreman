@@ -1,16 +1,17 @@
 # Foreman
 
-One local web panel for every Claude Code session running on this Mac. Read the
+One local web panel for every Claude Code session running on the machine. Read the
 conversations, see status, type back — without hunting for the right terminal window.
 
 `npm run install-agent` once, `npm run restart-panel` after any `server/` change →
-http://127.0.0.1:48770 (`0.0.0.0` per the LaunchAgent's own job environment). `npm start`
-is the scratch-server command only. `npm test` runs the parser tests.
+http://127.0.0.1:48770 (the LaunchAgent's own job environment carries the bind host).
+`npm start` is the scratch-server command only. `npm test` runs the parser tests.
 
-Sessions are launched by **another tool on this Mac**, and now — on request, from `+ new`,
-from a row's `⧉`, by restoring a snapshot, or when a team lead dispatches a worker — by this
-panel too, through a port of that tool's own launcher (`server/launch.js`). It still starts
-nothing on its own: a dispatch happens because a lead asked you first. It *ends* a session
+**The panel does not own the sessions it shows.** Most are started by something else — a
+terminal, a shell function, another launcher — and the panel finds them; it can also start
+one itself, from `+ new`, from a row's `⧉`, by restoring a snapshot, or when a team lead
+dispatches a worker (`server/launch.js`). It still starts nothing on its own: a dispatch
+happens because a lead asked you first. It *ends* a session
 in exactly two places — the bin on a rail row, and a task closed `done` once its PR is
 verified merged. Everything else it does is observe and inject. See `docs/panel.md` for how each
 feature works and `docs/team.md` for the team; this file is the things that will bite you.
@@ -84,21 +85,20 @@ a role handed to every *ordinary* session opened there.
 State lives outside every repo, under `~/.foreman/` (resolved, not fixed — see the trap
 below): `teams/<repo-key>/` holds
 `team.json` (config + autonomy toggles), `room.jsonl` (the append-only team log) and
-`decisions.md` (the maintainer's rulings, which survive the lead's `/clear`); `tasks.json`,
+`decisions.md` (the standing rulings for the repo, which survive the lead's `/clear`); `tasks.json`,
 `worktrees/`, `worker-settings/` and `worker-logs/` sit beside it.
 
 Who does what: `team.js` owns the disk layout — and, beside `leadSettings`, the
 **planner's** stance (`plannerStance`) and where a plan lands (`plansDir`/`planPath`);
 `tasks.js` the task records (including `kind`: `build` or `plan`), `worktree.js` the
 checkouts, `setup-detect.js` the worktree-prepare command (read off the repo's own files and
-shown read-only — the maintainer's ruling: a control the user cannot answer correctly should
-not be a control, so nothing writes `setup` any more and a wrong command is a bug in
-detection), `dispatch.js` the worker's settings file, the one trust gate the panel ever
+shown read-only, on the rule that a control the user cannot answer correctly should not be
+a control — so nothing writes `setup` any more and a wrong command is a bug in detection), `dispatch.js` the worker's settings file, the one trust gate the panel ever
 answers, and the worker-model list (`WORKER_MODELS` + `resolveWorkerModel` — the lead picks
 each worker's model per task, judged on size and complexity; omitted means the team's
 `defaultModel`, Opus, shown as a picker in the team panel; a departure from the default
-requires a reason and gets a `system` room line saying which and why, so the maintainer can
-see when the lead called it wrong; an unknown id fails the dispatch, which is what keeps
+requires a reason and gets a `system` room line saying which and why, so a human can see
+when the lead called it wrong; an unknown id fails the dispatch, which is what keeps
 `model` from becoming a general launch-flags channel), `room.js` the log, `watch.js`
 transitions + stuck + loop + the nudge, `conflicts.js` the path-overlap scan, `gc.js` boot
 housekeeping, `deployed.js` whether a merged task is actually running on this Mac.
@@ -114,8 +114,8 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
 - **Destructive git stays denied** (`GIT_DENY` in `dispatch.js`) regardless of mode. A
   worktree isolates *files*, not history — a force-push from inside one reaches the real
   repository.
-- **Nothing merges on anything but the maintainer's explicit per-PR word — with one named
-  exception, which they turn on themselves.** The lead performs the merge; the decision is
+- **Nothing merges on anything but an explicit per-PR word from a human — with one named
+  exception, which a human turns on themselves.** The lead performs the merge; the decision is
   never inferred from green checks, timers or silence. **Three adjacent things, and
   confusing them is how this rule gets undone:**
   - `mergePRs` means **auto-merge** — the panel merging on a trigger, a timer, or checks
@@ -123,13 +123,13 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
     every patch, and this feature deliberately gave it no way in.
   - `leadMerges` (off by default) is about **the prompt**, not the decision: it only adds
     an allow rule for **that repo's own forge's** merge tool (`mergeRule` in `team.js`) so a
-    merge the maintainer ordered doesn't stop on a harness prompt. What it costs differs by
+    merge that was ordered doesn't stop on a harness prompt. What it costs differs by
     forge and the panel's copy says which — on Gitea one tool both opens and merges PRs, so
     a rule cannot tell those apart and the per-PR rule is then enforced by the lead's
     discipline rather than by a prompt; under `gh` the rule is `Bash(gh pr merge:*)`, which
     genuinely cannot open one; through a GitHub MCP server it adds **nothing**, because
-    nobody here has run that server and an unverified tool name in an allow rule is a rule
-    that silently does nothing.
+    that server's tool name has never been verified here, and an unverified tool name in an
+    allow rule is a rule that silently does nothing.
   - `leadDecidesMerges` (off by default, issue #7) is **the decision**: with it on, the
     lead may merge a worker's PR per PR, on its own judgment, having asked
     `POST /api/team/tasks/:id/merge-check` first (`mergeVerdict`, `merge-check.js`; the
@@ -140,8 +140,8 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
     and then stops at a prompt.
 
   **The wall and the discipline, and the split is the whole design.** The panel holds no
-  forge credential and makes no network call (the maintainer's ruling, 2026-08-30), so
-  only half of a merge's conditions can be enforced. **Wall** — computed from this disk,
+  forge credential and makes no network call — a deliberate design rule, not an omission —
+  so only half of a merge's conditions can be enforced. **Wall** — computed from this disk,
   unarguable: the toggle, an unparseable `humanReviewPaths`, a `push only`/`no remote`
   forge, the task's shape, a head that is not the branch tip here, an unreadable branch, and
   a changed file under `humanReviewPaths`. **Discipline** — the lead's own word, written
@@ -151,8 +151,8 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
   (`selfMergeSection`, `lead-brief.js`) is where that discipline is actually specified,
   which is why its forbidden-flag sentences are pinned by name in `test/brief.test.js`.
   The close line then says whether a decision was recorded for the head that merged — a
-  visible non-event, never a second refusal, because refusing there would catch merges the
-  maintainer ordered. The settings file **and the brief** are
+  visible non-event, never a second refusal, because refusing there would catch merges a
+  human ordered. The settings file **and the brief** are
   written at lead launch (`leadSettings`, `leadBrief` in `index.js`), so a flip of either
   toggle reaches the next lead, not a running one.
 - **Nothing kills a worker automatically.** Stuck, silent, looping — all of it surfaces;
@@ -165,8 +165,8 @@ record, cap slot, the same two `foreman` tools — and two things are not: `plan
 `worker-brief.js`, and `plannerStance` in `team.js`, which denies its own worktree, the
 worktrees root, the real checkout and `git commit`/`git push`. Its branch ends with no
 commits and that is correct. The plan reaches the lead through `plan_read`, never through
-the room (a plan is a page; the room is a log the maintainer scans), and **the lead never
-approves one** — a plan goes to the maintainer, exactly like a merge. Note the honest limit
+the room (a plan is a page; the room is a log a human scans), and **the lead never
+approves one** — a plan goes to a human, exactly like a merge. Note the honest limit
 of that stance: these are file-permission rules, and a shell redirect is a Bash call no path
 rule sees, so it raises the cost of drifting into implementation from nothing to
 deliberately routing around the panel. It is a wall, not a sandbox.
@@ -181,18 +181,21 @@ watcher relearned that the expensive way.
 
 ## Traps, each of which cost real debugging
 
-**A `<repo>-<branch>` title proves nothing.** The `claude()` wrapper in `~/.zshrc` names
-sessions `--name "<repo>-<branch>"`, so every session in one repo on one branch writes
-the *same* `customTitle`. 96 files in one folder on this Mac say `<repo>-main`. Binding by
-that name is a coin flip. The wrapper now prefers the session's own label when inside a
-matching tmux session, which makes titles unique — but only for sessions started after
-that change, and note the wrapper matches a *literal* prefix of its own: setting
-`sessionPrefix` to something that wrapper doesn't look for costs the unique titles, not
-the binding, which has other rules. `binding.js` handles the overlap; don't simplify it without reading the
-tests.
+**A `<repo>-<branch>` title proves nothing.** Claude Code stamps a `customTitle` on a
+session, and a launcher is free to derive it from the repo and branch — which several do,
+including the wrapper this project grew up beside. When it is derived that way, every
+session in one repo on one branch writes the *same* title: one folder on the machine this
+was found on held 96 transcripts all titled `<repo>-main`. **So a title is a hint, never an
+identity** — binding on it is a coin flip, and `binding.js` never does. A launcher that
+prefers the session's own *label* makes titles unique, but only for sessions started after
+it began doing so, and only while it recognises the name: an external launcher matching a
+literal prefix of its own stops producing unique titles the moment `sessionPrefix` is set to
+something it does not look for. That costs the titles and not the binding, which has other
+rules. `binding.js` handles the overlap; don't simplify it without reading the tests.
 
 **A label can collide with the branch.** A session labelled `main` in a repo on branch
-`main` produces `Alpha-main` either way. The guard against branch-derived titles must
+`main` produces `alpha-main` either way, so the title is identical whether it was derived
+from the branch or from the label. The guard against branch-derived titles must therefore
 only fire when a *sibling* could still be writing that default — see `modernNamer` in
 `sessions.js` / `wrapper.js`. Getting this wrong permanently blocks a legitimate binding.
 
@@ -244,8 +247,7 @@ Both widths now yield identical labels, which is also what keeps `expectLabel` h
 terminal is resized between the render and the click. Same lesson as "A question wraps, and
 so do its options", one box over — `test/fixtures/prompt-bash-broad{,-narrow}.txt` pin it,
 and `test/permission.test.js` pins the refusals: misaligned by two columns, and not indented
-at all. It shipped inside the classifier PR rather than on its own, because the brief's
-"committed at both widths" could not be met while the narrow capture parsed as nothing.
+at all.
 
 **…and the box's own advice used to win the subject slot, on exactly the prompts where the
 command matters most.** Claude Code prints a tip *inside* the box, between the title and
@@ -283,13 +285,12 @@ The match is anchored and narrow (`^Tip:\s`) on purpose, and note it runs the *o
 to `classify` one function up. There, a phrase list is the wrong shape because a yes wrongly
 called narrow is a standing grant. Here the asymmetry inverts: a tip we fail to recognise
 costs one wrong header line — today's bug — while a body line wrongly taken for a tip loses
-the command from the card entirely. Same reasoning, opposite answer, because the cost of
-each mistake is opposite.
+the command from the card entirely: same reasoning, opposite answer.
 
 **Exposure is the one thing a LAN peer may not change, and the check is the socket, not
 the header.** `PATCH /api/config` — the settings modal — writes `bindHost` and
-`allowedOrigins`, and both decide who can reach this panel at all. The 2026-08-27 ruling
-says a LAN peer gets everything else; it does not say a LAN peer may *widen its own reach*,
+`allowedOrigins`, and both decide who can reach this panel at all. The no-auth stance says
+a LAN peer gets everything else; it does not say a LAN peer may *widen its own reach*,
 so those two keys are gated on `req.socket.remoteAddress` being loopback (`isLoopbackRemote`
 in `settings-file.js`, 127/8, `::1` and the IPv4-mapped `::ffff:127.0.0.1` a dual-stack
 listener hands you for a plain `curl 127.0.0.1`). **A loopback `Origin` would prove
@@ -325,17 +326,17 @@ never see half a file is a boot deciding what to bind.
 found on the bench.** The forge is derived per repo from `git remote get-url origin`
 (`forge.js`), and detection is deliberately **two independent questions**: what the origin
 points at, and whether tooling for it is installed. Matching the remote's host against the
-registered MCP server's URL is *not* a detector — the Gitea remote and the Gitea MCP server
-on this Mac share an IP by coincidence and differ in port, and a forge's MCP server need
-not live on its git host at all. Four readings come out of the pair, and the words are
-the maintainer's: `GitHub`, `Gitea`, `push only`, `no remote`.
+registered MCP server's URL is *not* a detector — on the machine this was found on, a Gitea
+remote and a registered Gitea MCP server shared an IP by coincidence and differed in port,
+and a forge's MCP server need not live on its git host at all. Four readings come out of the pair, and the words are
+deliberately chosen and are not to be paraphrased: `GitHub`, `Gitea`, `push only`, `no remote`.
 
 The trap is in the second question's *else*. Written as "any non-GitHub host is a
 self-hosted forge, and a registered `gitea` server means we have tools for it", a
-`gitlab.com` repo reads **Gitea** on any machine with that server registered — which is
-this one — and its lead is handed gitea tools for a forge that has never heard of them. So
-`push only`, the reading ruled for exactly that case ("this Mac for any GitLab or Bitbucket
-repo"), could never fire here at all. `NOT_GITEA_HOSTS` names the public forges that are
+`gitlab.com` repo reads **Gitea** on any machine that has a `gitea` server registered at
+all — and its lead is then handed gitea tools for a forge that has never heard of them. So
+`push only`, the reading that exists for exactly that case — a GitLab or Bitbucket repo on
+a machine with no tooling for it — could never fire on such a machine. `NOT_GITEA_HOSTS` names the public forges that are
 neither, `codeberg.org` among them because it runs **Forgejo** — whose API is close enough
 to Gitea's that it may well work, which is precisely why it must not be *implied* to.
 The limit the list cannot fix is written beside it: a **self-hosted** GitLab is
@@ -379,7 +380,7 @@ look. **A merged GitHub PR reads `mergeable: UNKNOWN`** — full read on a merge
 computed yet" and gets retried forever. **`UNKNOWN` is lazy and is never a pass**: the
 first query starts the computation and returns it, a second a moment later has the answer
 — so re-read a few times a couple of seconds apart, and if it is *still* unknown, refuse.
-Passing on it would be passing on nothing. **`statusCheckRollup: []` is two different
+**`statusCheckRollup: []` is two different
 facts** and `gh` cannot tell them apart on its own: either the repo configures no checks,
 or checks exist and none has reported on this head. `mergeStateStatus` disambiguates —
 `CLEAN` means no checks (which is `checks: 'none'`, and then the worker's own quoted suite
@@ -644,7 +645,7 @@ command in the panel read `//model` until it was stripped in `parseCommand`.
 background command or a monitor finishes, Claude Code injects the result back as a
 **synthetic user turn** — a whole `<task-notification>` envelope — and the terminal draws
 one line for it. `normalize.js` drops only by `DROP_TYPES` and `isMeta`, so the panel drew
-every one as a full user bubble: a subagent's entire report, in the maintainer's own voice,
+every one as a full user bubble: a subagent's entire report, in the user's own voice,
 saying something they never typed, two screens tall. Measured across this Mac: 472 of them,
 median 425 bytes, p90 8.5 KB, largest 48 KB. `parseTaskNotice` reads them as a `notice`
 chip.
@@ -658,8 +659,8 @@ to an output file, and their chip is deliberately unopenable rather than opening
 And **detection is two witnesses that must both hold** — a record field (`origin.kind`, or
 `promptSource` for a record carrying no `origin`) *and* an anchored `^<task-notification>`
 envelope — never the sentence inside, which is Claude Code's wording and will be reworded.
-The conjunction is also the scope: a typed message quoting an envelope stays a bubble
-(there is exactly one of those on this Mac), and whatever else `promptSource: 'system'`
+The conjunction is also the scope: a typed message quoting an envelope stays a bubble, and
+whatever else `promptSource: 'system'`
 grows to carry falls through unchanged, which is the right default for a shape nobody has
 read. Unread never counted these — it counts `assistant` records with text — so nothing
 about the inbox moved.
@@ -667,8 +668,8 @@ about the inbox moved.
 **A subscription dies with the socket, and nothing on screen says so.** The tailer holding
 a file offset is server state, so a dropped connection or a server restart ends it — while
 the roster keeps arriving, because that is broadcast to every client. The result is a rail
-that looks perfectly alive above a transcript that silently stopped minutes ago, which is
-how it was found: the terminal had twenty minutes the panel didn't. `ws.onopen` re-subscribes
+that looks perfectly alive above a transcript that silently stopped minutes ago — found
+because the terminal had twenty minutes the panel didn't. `ws.onopen` re-subscribes
 **every open pane**; the version before split view re-subscribed `state.selected`, a variable
 the `createPane` refactor had already deleted, so it re-subscribed nothing at all.
 
@@ -735,16 +736,21 @@ sessions surviving and the ids continuing from `%3`.
 new behaviour and not the relaunch's fault — the panel has always shown that screen — but
 it is the state a relaunched session is most likely to come up in, because the record lives
 in `~/.claude.json` and three sessions answering their gates at once can lose one to the
-last writer. Seen on the bench: two folders came back straight into their history, the
-third came back on the gate and resumed correctly the moment it was answered.
+last writer. Benched: two folders came back straight into their history, the third came
+back on the gate and resumed correctly the moment it was answered.
 
-**Launching is a port, not a rewrite.** `server/launch.js` mirrors the other launcher on
-this Mac line for line, because the name it mints is a contract: `sessions.js` reads the
-label out of `<prefix><folder>-<label>`, and the pbcopy binding is guarded on the same
-prefix. `-ilc` (not `-lc`) and the bare word `claude` (never an exec of the resolved path)
-are the two that have already cost a debugging session each over there — the first sources
-`~/.zshrc` so PATH exists, the second lets its `claude()` wrapper add `--name`.
-`test/launch.test.js` pins the naming.
+**The name a launch mints is a contract, so `launch.js` is a port and not a rewrite.**
+`server/launch.js` was ported line for line from an existing launcher rather than written
+fresh, because `sessions.js` reads the label back out of `<prefix><folder>-<label>` and the
+server-global pbcopy binding is guarded on the same prefix — change the spelling and the
+panel claims sessions it can no longer name. Two details in it look like noise and are not,
+and each cost a debugging session before they were understood. **`-ilc`, not `-lc`**: an
+*interactive* login shell is what sources the user's rc file, and without it `PATH` may not
+contain `claude` at all. **The bare word `claude`, never an exec of the resolved path**: a
+shell function named `claude` in the user's rc file is a common way to add flags such as
+`--name`, and execing the binary directly walks straight past it. Neither depends on any
+particular wrapper existing; both are what make the launch behave the way the user's own
+shell would. `test/launch.test.js` pins the naming.
 
 **…and the prefix in that name is configuration, not a literal.** `sessionPrefix` in
 `<STATE_DIR>/config.json`, default **`foreman-`**, resolved once at boot as
@@ -760,15 +766,18 @@ is a panel binding a transcript to the wrong pane.
 **What a non-matching prefix costs is narrower than "invisible", and it was measured**
 because the first draft of this paragraph said invisible and was wrong. A session whose
 name lacks the configured prefix is *still in the roster* — the panel lists every Claude
-pane on the Mac and always has. Benched on a scratch panel: under `voice-`, the two
-sessions the other launcher had started came back with labels sliced; under `foreman-`,
-the same two rows were still there with `label: null`. So what is lost is the **name**, and
+pane on the machine and always has. Benched on a scratch panel against two sessions minted
+by a different launcher: configured with the prefix those sessions carry, both rows came
+back with their labels sliced; configured with a different one, the same two rows were
+still there with `label: null`. So what is lost is the **name**, and
 everything keyed on it: the rail falls back to the ambiguous `<repo>-<branch>` title,
 `slugFor` yields nothing so `⧉` auto-numbers and a snapshot cannot restore the row under
 its own name, `isLeadName` never matches so a lead among them is not badged, and the
 server-global pbcopy bind is rewritten to the configured prefix at the next launch. That is
-why this machine's `config.json` says `voice-` and a stranger's says nothing. **An existing `config.json` is
-never seeded into** (`seedConfigFile` only writes an absent file), so a panel upgrading
+why an install whose sessions are also minted by some other tool records that tool's prefix
+in `config.json`, while a fresh install records nothing and takes the default.
+**An existing `config.json` is never seeded into** (`seedConfigFile` only writes an absent
+file), so a panel upgrading
 into this code mints under the default until somebody adds the line, and the boot line is
 the only place that shows. An invalid value is a warning and the default, never a refusal
 to boot, and it is never inferred from live tmux sessions — that would key a naming
@@ -800,11 +809,11 @@ what's in this folder first.` / `Claude Code'll be able to read, edit, and execu
 here.` / `1. Yes, I trust this folder` / `2. No, exit`.
 
 **And the panel shipped a button on it.** This file used to say the panel "shows it and
-stops there", citing `paneStartupPrompt` — a function that has never existed in this repo;
-it is the other launcher's, and the stance was inherited as prose rather than as code.
-`buildDecisionBar` had no trust-gate case, so a rail row on that screen drew a full-width,
-unarmed, one-tap **"Yes, I trust this folder"** — one click, from any browser that can reach
-the panel, which by the 2026-08-27 ruling is anything on the LAN, granting read, edit and
+stops there" and cited a function to prove it — a function that has never existed in this
+repo. The stance had been inherited as prose from a sibling tool rather than written as
+code here, and nobody checked. `buildDecisionBar` had no trust-gate case, so a rail row on
+that screen drew a full-width, unarmed, one-tap **"Yes, I trust this folder"** — one click, from any browser that can reach
+the panel, which under a wide bind is anything on the local network, granting read, edit and
 execute in a folder nobody vetted. The phone (`web/m/cards.js`) had the only correct
 handling and the only copy of the witness.
 
@@ -875,8 +884,8 @@ Nothing else was ever going to correct it: the hook is the only thing that write
 and the one that would have has already declined to fire. Measured on a scratch panel with
 the fix disabled — ninety seconds after an interrupt the roster still said `working`, the
 composer button still read `queue`, and a message sent into a session plainly sitting at its
-composer went to the queue instead of the pane. The maintainer hit it live; the tmux window
-was the faster route, which is the tell.
+composer went to the queue instead of the pane. It was hit live, and the tell is that the
+tmux window was the faster route.
 
 So the **interrupt endpoint** drops that session's receipt (`StatusEngine#interrupted`),
 because the panel is the only party that knows. Three things about it. It **drops** rather
@@ -980,9 +989,8 @@ row's content sideways as the selection moves; and `.is-open` deliberately beats
 between two strong states every time the mouse crossed the rail.
 
 **A team row is three lines tall, and every other row must stay two.** `worker · agent/<id>`
-under a worker, `lead · N tasks` under a lead — the maintainer's own choice, over a coloured
-stripe and over a fifth badge, and the *only* thing that makes it affordable is that it
-lands on nothing else. Generalising it to ordinary rows undoes the trade. Three things it
+under a worker, `lead · N tasks` under a lead — chosen over a coloured stripe and over a
+fifth badge, and the *only* thing that makes it affordable is that it lands on nothing else. Generalising it to ordinary rows undoes the trade. Three things it
 has to respect: the extra line rides in the meta line's grid columns (`grid-column: 2 / -1`,
 auto row) so nothing above it moves; it carries no margin that escapes the row, because an
 open group's tint is tiled from full-width siblings and a gap anywhere would cut through it;
@@ -1001,8 +1009,8 @@ row.
 Snapshot/restore replayed every saved entry through `createSession`, which is how a saved
 **team lead** came back as an ordinary session that merely happens to be called `lead` — no
 brief, no `foreman` tools, no permission stance — while the rail, which reads the role off the
-*name*, went on badging it as the lead and counting its tasks. The one row the maintainer would trust
-most was the one lying, and nothing on screen said so. Restore now sends a lead entry
+*name*, went on badging it as the lead and counting its tasks. The one row a reader would
+trust most was the one lying, and nothing on screen said so. Restore now sends a lead entry
 through `launchLead`. Three things about the fix that will matter again:
 
 - **No new field says "this was a lead".** `isLeadName` lives in `launch.js` (with the
@@ -1039,7 +1047,7 @@ keys folders by `basename(cwd)` — that is what `s.project` is — but `task_di
 `wt.dir`, the absolute worktree directory. It matched no session that has ever existed, so
 every team heading read `· 0` with its workers live three rows below it, and it looked
 exactly like the staleness bug it was found next to. Two spellings are now on disk in front
-of the maintainer, which is why `retireWorktree` unfiles both — and why it only reaches for
+of a reader, which is why `retireWorktree` unfiles both — and why it only reaches for
 the basename when the path is genuinely under `worktrees/`: closing a task must never
 quietly unfile a real project that happens to share the name.
 
@@ -1062,10 +1070,10 @@ pulsing dot on the heading, drawn only when collapsed.
 
 The hoisting rule then changed, for workers alone. A worker's permission prompt is its
 lead's to answer and its finished report is its lead's to read, so a worker row no longer
-hoists until `stuck` fires (`stuckAfterMinutes`, default 20) — the maintainer's own call,
-taken knowing that a blocked-but-not-yet-stuck worker inside a *collapsed* team group is
-therefore not visible. The trade was bought with the lead row's `N waiting` count, which
-names the same fact the inbox stopped showing, and backstopped by the stuck timer, which
+hoists until `stuck` fires (`stuckAfterMinutes`, default 20) — a deliberate call, taken
+knowing that a blocked-but-not-yet-stuck worker inside a *collapsed* team group is therefore
+not visible. The trade was bought with the lead row's `N waiting` count, which names the
+same fact the inbox stopped showing, and backstopped by the stuck timer, which
 puts the row in the inbox for real once it has actually been abandoned there.
 
 And the compensating signal is hidden for exactly that window, which is the part nothing
@@ -1090,8 +1098,8 @@ of the window, so unread is *accumulated* across polls rather than recomputed. D
 "simplify" that back.
 
 **Deny beats allow, so a narrow write grant has to be a subfolder, not a carve-out.** The
-planner may write its plan and must not touch `decisions.md` — the maintainer's own record
-of every ruling — which lives in the same team dir. There is no "all of this except those
+planner may write its plan and must not touch `decisions.md` — the human record of every
+ruling — which lives in the same team dir. There is no "all of this except those
 files": a deny on `<teamDir>/**` would swallow the one folder the planner exists to write
 to, and allow-plus-deny on overlapping paths resolves to denied. Hence `plans/` as a
 subfolder and an allow that names only it (`plannerStance`). Any future "this session may
@@ -1130,8 +1138,8 @@ before any rollback of a commit that added a state.** The same paragraph applies
 state list is the strict one.
 
 **"Merged" and "live here" are different facts, and the boot sha is how you tell.** A PR
-merges on the Gitea box; this Mac's checkout and the panel running out of it know nothing
-until somebody pulls and restarts. `deployed.js` answers it by *ancestry*, never
+merges on the forge; the checkout on this machine and the panel running out of it know
+nothing until somebody pulls and restarts. `deployed.js` answers it by *ancestry*, never
 timestamps: the task's branch tip against local `HEAD` is "pulled", and against the sha
 the panel booted on is "running" — the second half only for this repo (another team's
 merge has no process here to be stale) and only when the change touched `server/`
@@ -1165,13 +1173,13 @@ free never arrives on a bench.
 the same rule: leaving the scroll alone means arrivals land off-screen with nothing to mark
 them. A muted `N new below ↓` pill hangs off the room's bottom edge (absolutely positioned
 against `.room-panel`, so it never reflows the list under the reader), exists only while
-`follow` is false, and clicking it rejoins. The maintainer's condition was "keep it quiet" —
+`follow` is false, and clicking it rejoins. The condition on it was "keep it quiet" —
 muted ink, no accent, no motion. The counter is floored at zero on purpose: a full `room`
 frame can *shrink* the list, and a negative count would hide a hint that was due.
 
 **A room line's colour is keyed on what the poster said it is, never on how it reads.**
-The maintainer asked for a dispatch line in green, the way a conflict is amber — and there
-was nothing on the entry to tell one system line from another. `about` looks like the key
+A dispatch line was asked for in green, the way a conflict is amber — and there was nothing
+on the entry to tell one system line from another. `about` looks like the key
 and is not: it is the *task id*, carried by every task-scoped system line, so a dispatch and
 the `→ working` transition a minute later are identical by it. Every `kind: 'system'` post
 in the repo (gc.js, watch.js's `postSystem`, and index.js's dispatch, model, PR and close
@@ -1220,54 +1228,53 @@ blank for hours. That is exactly how it shipped and how it was caught — seven 
 `room.jsonl`, none on screen. The general lesson is about benches, not guards: a feature
 proven against a *busy* fixture is not proven against a quiet one.
 
-**The panel is reachable from the LAN, and that is a standing decision, not a gap.** The maintainer
-ruled it on 2026-08-27, with the exposure spelled out to them first and chosen deliberately
-over three alternatives, including building auth: the panel now runs with
-`FOREMAN_HOST=0.0.0.0` so it can be reached at `http://<this-mac-lan-address>:48770/` from
-any device on their network, and there is no plan to put authentication in front of it. That
-reverses the premise the wave-4 paragraph below used to state as fact — "unauthenticated
-because only this machine can reach it" was true right up until this ruling and false the
-moment it landed. What it actually means: anything that can reach port 48770 can launch
-sessions, type arbitrary text into any session on this Mac, `/exit` them, dispatch workers,
-answer permission prompts, and read every transcript over `/ws` — which is not read-only in
-spirit, it carries `markRead`. The team endpoints live on the same port, so the merge path
-is reachable from the network too. `0.0.0.0` binds **every** interface this Mac has, not
-just home wifi — if it ever joins another network, the panel is on that one as well. It used
-to be true that the setting lived only in the shell that started the process, so a plain
-`npm start` put it back on loopback silently — that is what Gitea issue #1 was for, and it
-is closed: the panel now runs as a LaunchAgent (`npm run install-agent`) whose own job
-environment carries the host, so the setting survives a crash, a reboot, and the routine
-restart (`npm run restart-panel`) rather than living in whoever's fingers typed the last
-start command. `npm start` by hand still binds loopback only — that is now correct and
-expected, not a hazard, because the panel that matters isn't the one `npm start` starts any
-more.
+**The panel can be bound wider than loopback, and it has no authentication — a stated
+non-goal, not a gap.** `bindHost` decides who can reach it: `127.0.0.1` by default, and a
+wider bind is something an operator records deliberately. What a wide bind grants, spelled
+out because it is easy to under-read: anything that can reach the port can launch sessions,
+type arbitrary text into any session on the machine, `/exit` them, dispatch workers, answer
+permission prompts, and read every transcript over `/ws` — which is not read-only in spirit,
+it carries `markRead`. The team endpoints live on the same port, so the merge path is
+reachable too. And `0.0.0.0` is **every** interface the machine has, not one network: a
+machine that later joins another network is on that one as well.
 
-**Where the wide bind is written down changed with B1, and the installer no longer
-hardcodes it.** `jobEnvironment()` used to put a literal `FOREMAN_HOST: '0.0.0.0'` into *every*
-plist it generated, unconditionally — which was correct for this Mac and wrong for anybody
-else, since a stranger running the installer got a LAN-exposed panel without being asked.
-The code default has always been loopback (`config.js`), so the installer was the whole of
-the exposure. Now the host is **resolved** — `$FOREMAN_HOST` → `<STATE_DIR>/config.json`'s
-`bindHost` → `127.0.0.1` — and the plist carries the key only when it is not loopback, the
-same omit-when-default rule `FOREMAN_PORT` and `FOREMAN_STATE_DIR` already followed. The wide bind
-survives here by having been *recorded* rather than by being everyone's default: the panel
-**seeds `config.json` at its first boot** with the host it is actually using, so a machine
-whose plist already carries `0.0.0.0` writes that fact down without anybody doing anything.
-That seeding is the belt to a brace: the environment rename killed the key any older plist
-spells, and only a *reinstall* writes the replacement — so a restart at the wrong moment
-produces a panel that comes up perfectly, on loopback, with nothing in any log and a phone
-that has simply stopped answering. If the seeding is ever removed, doing the rename and the
-reinstall in one sitting is the only thing left guarding that. `server/settings-file.js` is
-the module and its header is the long version. None of this is an argument for adding auth
-back in. It was argued, the cost was named out loud, and the maintainer decided anyway;
-revisit it with the maintainer, never by quietly writing a guard.
+None of that is an oversight. Authentication was argued for this panel, the cost of leaving
+it out was named, and the project's stance is that it stays out — so **do not quietly add an
+auth requirement, or a boot guard that refuses a wide bind.** The origin check below is the
+only thing here that resembles one, and it is a *browser* guard: it must not grow into
+authentication. The stance can be revisited, but deliberately, not by a guard slipped in
+under a bug fix.
+
+The bind used to live only in the shell that started the process, so a plain `npm start` put
+it back on loopback silently. It now rides in the LaunchAgent's own job environment
+(`npm run install-agent`), so it survives a crash, a reboot, and the routine restart
+(`npm run restart-panel`). `npm start` by hand still binds loopback only — correct and
+expected, because the panel that matters isn't the one `npm start` starts.
+
+**The installer must not hardcode the bind, and the panel records the one it is actually
+using.** `jobEnvironment()` used to put a literal `FOREMAN_HOST: '0.0.0.0'` into *every*
+plist it generated, unconditionally — so anybody running the installer got a LAN-exposed
+panel without being asked. The code default has always been loopback (`config.js`), which
+made the installer the whole of the exposure. The host is now **resolved** — `$FOREMAN_HOST`
+→ `<STATE_DIR>/config.json`'s `bindHost` → `127.0.0.1` — and the plist carries the key only
+when it is not loopback, the same omit-when-default rule `FOREMAN_PORT` and
+`FOREMAN_STATE_DIR` already followed. A wide bind survives an upgrade by having been
+*recorded* rather than by being everyone's default: the panel **seeds `config.json` at its
+first boot** with the host it is actually using, so an install whose plist already carries a
+wide host writes that fact down without anybody doing anything. That seeding is the belt to
+a brace: renaming the environment variable killed the key any older plist spells, and only a
+*reinstall* writes the replacement — so a restart at the wrong moment produces a panel that
+comes up perfectly, on loopback, with nothing in any log and a phone that has simply stopped
+answering. If the seeding is ever removed, doing the rename and the reinstall in one sitting
+is the only thing left guarding that. `server/settings-file.js` is the module and its header
+is the long version.
 
 **Two node servers can bind the same port at once, silently, and split traffic by
 interface — VERIFIED.** `SO_REUSEADDR` plus macOS letting a specific bind sit beside a
 wildcard one means a process on `0.0.0.0:48770` and one on `127.0.0.1:48770` both succeed,
 in either order, with no error from either `listen()` call. They then answer differently
 depending on which interface the request arrived on — `curl 127.0.0.1:48770` reaches one,
-`curl 192.0.2.10:48770` reaches the other — and only `lsof -iTCP:48770` shows two
+`curl <lan-address>:48770` reaches the other — and only `lsof -iTCP:48770` shows two
 `LISTEN` rows; nothing on either process's own output says so. Worse than "two panels":
 the hook posts to `127.0.0.1` (`install-hook.js`) and `mcp/foreman.js` calls
 `http://127.0.0.1:${PORT}`, so all hook traffic and every lead tool call reach whichever
@@ -1284,7 +1291,7 @@ looping.
 **A WebSocket handshake is exempt from CORS, so `/ws` was the whole hole — and the guard
 that closes it is a *browser* guard, not authentication.** `new WebSocketServer({server,
 path:'/ws'})` had no `verifyClient`, and a handshake triggers no preflight: any `http://`
-page a browser visited could open `ws://<this-mac>:48770/ws`, be handed the full roster the
+page a browser visited could open `ws://<host>:48770/ws`, be handed the full roster the
 moment it connected, `subscribe` to any transcript and send `markRead`. The roster's `id`
 is the session UUID `/hook` accepts as `text/plain` (also no preflight), so the same page
 could then write false status for any session — `/hook` alone was nearly harmless because
@@ -1294,20 +1301,20 @@ decision with three call sites: an `app.use` gating every non-GET, `verifyClient
 
 Four things about it that a later reader will want to undo, each for a reason:
 
-- **It restricts nobody on the LAN.** The 2026-08-27 ruling stands: no header, no check —
-  curl, the hook's curl and `mcp/foreman.js` are allowed *by construction*, not by a list.
-  the maintainer's phone is allowed by clause 3, derived at run time, so a DHCP lease that moves
-  fixes itself. This is not a boot guard and must never grow into auth.
+- **It restricts nobody on the local network.** The no-auth stance above holds: no header,
+  no check — curl, the hook's curl and `mcp/foreman.js` are allowed *by construction*, not
+  by a list. A device on the local network is allowed by clause 3, derived at run time, so a
+  DHCP lease that moves fixes itself. This is not a boot guard and must never grow into auth.
 - **`GET` is deliberately not gated.** A cross-origin page can send one but cannot read the
   response, because no `Access-Control-Allow-Origin` is ever sent. The socket is the
   exception and that is why it has its own call site.
 - **The address filter is a filter, not "everything non-internal".** RFC-1918 and
-  `fc00::/7` in; `fe80::/10` out — seven of twelve non-internal addresses on this Mac were
-  link-local and two of those are `awdl0`/`llw0`, **AirDrop's peer-to-peer interfaces** —
-  and `utun*` out, because that is where a VPN *and Tailscale* land, and allowing every
-  tunnel ships a panel reachable from every VPN the Mac ever joins with nobody having
-  decided that. Tailscale is a *named* contributor to the assembly later, not a side
-  effect of a loose filter.
+  `fc00::/7` in; `fe80::/10` out, because on macOS most non-internal addresses are
+  link-local and some of those interfaces are peer-to-peer ones a browser has no business
+  reaching across; and `utun*` out, because that is where VPN and overlay-network
+  interfaces land, and allowing every tunnel ships a panel reachable from every VPN the
+  machine ever joins with nobody having decided that. A tunnel that should be reachable is
+  a *named* addition to the list, never a side effect of a loose filter.
 - **`Origin: null` is refused and an absent header is allowed** — they are not the same
   case. `null` is a sandboxed iframe or a `data:` URL, which is attacker-reachable.
 
@@ -1329,9 +1336,9 @@ plist's `EnvironmentVariables` — rotating a plist-held secret would hit this s
 silently keeping the old value alive through the documented restart.
 
 **launchd's `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else — VERIFIED.** Bare
-`git` works (`/usr/bin/git` ships with macOS); bare `node` and bare `tmux` do not. Gitea PR
-`#28` fixed tmux by resolving it absolutely (`tmuxPath()`, moved into `tmux.js` and
-memoised); the plist's injected `PATH` (`jobPath()` in `install-agent.js`) is still
+`git` works (`/usr/bin/git` ships with macOS); bare `node` and bare `tmux` do not. tmux is
+resolved absolutely for that reason (`tmuxPath()`, in `tmux.js`, memoised); the plist's
+injected `PATH` (`jobPath()` in `install-agent.js`) is still
 load-bearing beyond that, because `runSetup` (`worktree.js`) shells a worktree's prepare
 command — typically `npm install` — through `exec()` with the inherited environment, and
 fails
@@ -1382,13 +1389,13 @@ above, which is silent), and `restart-panel` kickstarts whichever is not holding
 that is not the one being installed*: its `…/server/index.js` **no longer exists** (the
 checkout moved out from under it), or it **is this very file** by `realpath`.
 
-Three things about it that will matter again. **The old label is not in the code and must not
-be** — it carries a personal name, so the rule is structural and a *list* of legacy labels
-would be exactly the residue the naming ruling forbids. **The rung that matters most is the
+Three things about it that will matter again. **No legacy label is named in the code and
+none should be** — the rule is structural, and a *list* of superseded labels is exactly the
+residue the naming rule forbids. **The rung that matters most is the
 refusal:** a plist whose program exists and is a *different* file is left strictly alone, and
 that single condition is what stops an installer benched from inside a worktree — where
-`server/index.js` is a copy — from booting out the real job. Verified read-only against this
-Mac's own `~/Library/LaunchAgents` from a worktree: `legacyJobs()` returned `[]`. And it is
+`server/index.js` is a copy — from booting out the real job. Verified read-only against a
+real `~/Library/LaunchAgents` from a worktree: `legacyJobs()` returned `[]`. And it is
 **`bootout`, never a signal**: `KeepAlive: {SuccessfulExit: false}` reads a signal death as a
 crash and starts the job straight back up, so `--takeover`'s SIGTERM is a fight launchd wins.
 The sweep runs *before* the port refusal, deliberately — the orphan may be the thing holding
@@ -1454,7 +1461,7 @@ read **`-z`**, which returns raw bytes with no quoting and no escaping, the same
 `merge-queue.js`'s `mergePaths` and `deployed.js`'s `branchFacts` already carry. Note
 stripping quotes on *both* sides would also have made those two strings equal and is still
 wrong: the path kept is then `web/caf\303\251.js`, and that escaped spelling is what the
-room post names at the maintainer.
+room post puts in front of a human.
 
 **And `-z` changes the porcelain rename encoding, which is the silent half.** A rename is
 `XY new\0old\0` — two NUL-separated fields, **new first** — not the `XY old -> new` arrow
@@ -1469,14 +1476,14 @@ at all — it arrives as two ordinary entries, ` D old` and `?? new`. `test/conf
 pins the non-ASCII match, the space case as a regression guard, and the rename; all three
 against real throwaway repos, and all three verified to fail against the old parse.
 
-**…and rename detection is the same asymmetry from the other end, closed after it as its
-own task.** `diff --name-only` detects renames **by default**, so a *committed* rename
-reports only the new name while the porcelain side reports both — a worker that committed
+**…and rename detection is the same asymmetry from the other end.** `diff --name-only`
+detects renames **by default**, so a *committed* rename reports only the new name while the
+porcelain side reports both — a worker that committed
 `web/x.js` → `web/y.js` shared no path at all with one editing `web/x.js`, and was never
 flagged. `--no-renames` is the fix and it is one flag on three diffs, because all three
 sites ask a question a vanished old name answers wrongly: `conflicts.js` (two workers on
 one file *right now*), `merge-queue.js` (would these two PRs compose — git will either
-carry the edit onto the new name or conflict, and either way the maintainer must be told
+carry the edit onto the new name or conflict, and either way a human must be told
 before one press stands for both), and `deployed.js`, where it is the **restart** answer
 it protects: a branch that moved `server/x.js` out to `web/x.js` reported `changed:
 ['web']` and `needsRestart` said no for a branch that plainly took a file out of `server/`.
@@ -1594,149 +1601,113 @@ runs it in node, the way `trust-gate.js` is tested.
 
 ---
 
-## What's next
+## What exists, and what deliberately doesn't
 
-**D.2 shipped**, and grew in the doing. The queue lives in `server/queue.js`, keyed by pane
-and persisted. Dialog detection went in beside it, then answering Claude's own questions
-(`server/question.js` + the card in `web/app.js`), then dropping finished sessions
-entirely. All of it is the same thread: the panel should never put a keystroke somewhere
-you didn't mean, and never demand attention for something you can't act on.
+Present tense, not a changelog: what the panel has, and the rules that came with each piece.
+How those rules were learned is in the Traps above; what the team deliberately does *not* do
+is in `docs/team.md`'s Non-goals.
 
-Finished sessions and their toggle are **gone**. Only sessions with a live pane make the
-roster now — a transcript whose terminal has closed used to arrive in the inbox with an
+**A per-pane send queue** (`server/queue.js`, keyed by pane and persisted), the dialog
+detection beside it, and the card that answers Claude's own questions (`server/question.js`
+plus `web/app.js`) are all one thread: the panel should never put a keystroke somewhere you
+didn't mean, and never demand attention for something you can't act on.
+
+**Only sessions with a live pane make the roster.** There is no finished-session list and no
+toggle for one — a transcript whose terminal has closed used to arrive in the inbox with an
 unread badge nobody could clear. Reading one back is `claude --resume`'s job.
 
-**Split view** shipped after that — declined in the original plan on width grounds, which
-stopped being true on a big monitor.
+**Split view** puts two sessions side by side, which is why everything per-session lives
+inside the `createPane` factory rather than in module scope.
 
-**Pinning** shipped alongside it: `server/pins.js`, pane-keyed and persisted like the
-queue, and a `pinned` group above the inbox in the rail. Pinned rows come *out* of the
-inbox rather than moving into it — a pin is a promise about where a row will be, and one
-that relocated the moment it needed you would break that promise exactly when you were
-looking for it.
+**Pinning** (`server/pins.js`, pane-keyed and persisted like the queue) adds a `pinned` group
+above the inbox. Pinned rows come *out* of the inbox rather than moving into it — a pin is a
+promise about where a row will be, and one that relocated the moment it needed you would
+break that promise exactly when you were looking for it.
 
-**Groups** followed: `server/groups.js`, and folder headings that can be filed under names
-you choose and folded away. Three things about it that are load-bearing. A group holds
-**folders**, not sessions — sessions rotate with `/clear`, folders don't. A folder is in
-exactly one group, enforced in `assign`, because the one thing worse than an unsorted rail
-is a session drawn twice. And collapse is safe for ordinary sessions and leads because the
-inbox hoists anything blocked or unread *out* of its folder first — no longer true of
-**workers**, which hoist only once `stuck` fires; see the trap above for what a collapsed
-team group can hide and for the measurement of what the dot does and doesn't cover.
+**Groups** (`server/groups.js`) file folder headings under names you choose and fold them
+away. Four things are load-bearing. A group holds **folders**, not sessions — sessions rotate
+with `/clear`, folders don't. A folder is in exactly one group, enforced in `assign`, because
+the one thing worse than an unsorted rail is a session drawn twice. Collapse is safe for
+ordinary sessions and leads because the inbox hoists anything blocked or unread *out* of its
+folder first — no longer true of **workers**, which hoist only once `stuck` fires; see the
+trap above for what a collapsed team group can hide and for the measurement of what the dot
+does and doesn't cover. And **a group the panel made for a team is the only kind it will ever
+delete**: `auto` on the record says which, set only by `teamGroup()`, and those hold
+worktrees the panel itself removes at close, so without reaping the heading outlives
+everything under it, permanently. Not pruning stays right for a group *you* made — a folder
+you filed comes back where you put it, empty or not. Groups written before the flag carry
+none and are read by what they hold: a hand-made group files what the rail draws (a bare
+folder name), and only a dispatch ever wrote an absolute path under `worktrees/`; empty is no
+evidence and stays yours. Reaping is guarded by emptiness alone, which doubles as the guard
+for a team group somebody hand-filed a real project into: it isn't empty, so it stays.
 
-A fourth thing since: **a group the panel made for a team is the only kind it will ever
-delete.** `auto` on the record says which, set only by `teamGroup()` — those hold worktrees
-the panel itself removes at close, so without reaping the heading outlives everything under
-it, permanently. Not pruning stays right for a group *you* made: a folder you filed comes
-back where you put it, empty or not. Groups written before the flag carry none, so they are
-read by what they hold — a hand-made group files what the rail draws (a bare folder name),
-and only a dispatch ever wrote an absolute path under `worktrees/`; empty is no evidence
-and stays yours. Reaping is guarded by emptiness alone, which doubles as the guard for a
-team group somebody hand-filed a real project into: it isn't empty, so it stays.
-
-**Snapshot / restore** shipped next: `server/snapshot.js`, one slot in
-`~/.foreman/snapshot.json`, saved on a button press. It holds `{folder, slug,
-tmuxSession, skipPermissions, pinned}` per session and replays each one — a lead through
-`launchLead`, everything else through `createSession`.
-It holds no groups — those are folder-keyed and outlive any one session, so they survive on
-their own and a copy would be a second source of truth — and no queue, because a message
-written for a conversation that no longer exists must never be replayed into a fresh one. Restore is
-serial, skips names already live (so a second press mints no `-2`), and fails per entry.
-`benchEntries` decides what gets saved and `restoreSessions` runs the loop, both in
+**Snapshot / restore** (`server/snapshot.js`) keeps one slot in `~/.foreman/snapshot.json`,
+written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned}` per
+session, replayed a lead through `launchLead` and everything else through `createSession`. It
+holds **no groups** — those are folder-keyed and outlive any one session, so they survive on
+their own and a copy would be a second source of truth — and **no queue**, because a message
+written for a conversation that no longer exists must never be replayed into a fresh one.
+Restore is serial, skips names already live (so a second press mints no `-2`), and fails per
+entry. `benchEntries` decides what gets saved and `restoreSessions` runs the loop, both in
 `snapshot.js` so both are tested; the endpoints are the two launchers and the pins.
 
-**Relaunch all** shipped on top of it: `+ new` → `Snapshot` → `relaunch all…`, which
-closes every bench session with `/exit` and starts it again — the control for "I updated
-Claude Code". Two modes and no default; the box asks. It builds its list from the **live**
-roster (`relaunchEntries`) rather than the saved slot, so pressing it never spends the
-bench save, and `snapshot.json` still holds no session ids — restoring a saved bench is
-fresh, as it always was. Three guards, all measured: refused outright while any worker is
-live (a worker cannot be put back), a session holding anything is skipped rather than
-forced and named in the result, and everything is reported. The exits all land before any
-relaunch, which costs a window where the bench is down and buys reusing `restoreSessions`
-unchanged — its skip-what-is-already-live rule is also what handles the sessions the guard
-refused to touch.
+**Relaunch all** (`+ new` → `Snapshot` → `relaunch all…`) closes every bench session with
+`/exit` and starts it again — the control for "I updated Claude Code". Two modes and no
+default; the box asks. It builds its list from the **live** roster (`relaunchEntries`) rather
+than the saved slot, so pressing it never spends the bench save, and `snapshot.json` still
+holds no session ids — restoring a saved bench is fresh, as it always was. Three guards, all
+measured: refused outright while any worker is live (a worker cannot be put back), a session
+holding anything is skipped rather than forced and named in the result, and everything is
+reported. The exits all land before any relaunch, which costs a window where the bench is
+down and buys reusing `restoreSessions` unchanged — its skip-what-is-already-live rule is
+also what handles the sessions the guard refused to touch.
 
 **The room reads as three shapes**, all left-aligned: framed system cards (amber for a
 conflict), speech bubbles laned by direction for anyone actually talking, and the loud
-escalation card. What makes the bubbles have traffic at all is that a worker's report is
+escalation card. What gives the bubbles any traffic at all is that a worker's report is
 posted **as the worker** — `from: <task id>`, `kind: 'status'` — rather than as a `system`
-line from `panel` about it, which is how a multi-paragraph summary used to arrive dressed
-as one-line machinery. `report: 'review'` on the entry carries the fact that it *is* the
-done report; the lead reads it out of `room_read`, the card draws it under the bubble.
-Everything else in the room is machinery and stays `system`.
+line from `panel` about it, which is how a multi-paragraph summary used to arrive dressed as
+one-line machinery. `report: 'review'` on the entry carries the fact that it *is* the done
+report; the lead reads it out of `room_read`, the card draws it under the bubble. Everything
+else in the room is machinery and stays `system`.
 
-**The plan-approval box** came after that: `server/plan.js`, the third numbered-screen
-parser, plus the card that renders the plan file itself so you can read what you are
-approving. See the trap above — it is the sharpest one in the file.
+**Row and header controls**: `⧉` duplicates a session into the same folder, the bin `/exit`s
+one behind a confirmation, a folder icon opens the project in Finder, and `recent` drops the
+filing for one recency-ordered list.
 
-**Row and header controls** filled in around them: `⧉` duplicates a session into the same
-folder, the bin `/exit`s one behind a confirmation, and a folder icon opens the project in
-Finder. Plus `recent`, which drops the filing for one recency-ordered list.
+**The team** has a `pending` task state — a task recorded with its brief and nothing else,
+the middle rung between an issue on a tracker and a dispatched worker: added via `task_add`,
+promoted only on a second, explicit yes via `task_start`. Every task row opens a read-only
+brief modal on click, showing a planner's plan alongside its brief where one exists and
+rendering both as markdown rather than raw text. The lead's own `room_read` / `team_status`
+return a tail rather than the whole log, so a long-running lead's context doesn't fill up on
+its own room.
 
-Remaining in wave 4: **search index (3.4)** is the only item still open. Tailscale access
-(3.5) was dropped on 2026-08-26 on the reasoning that the maintainer didn't need the panel
-off this Mac — that reasoning no longer holds. On 2026-08-27 they reversed the wider decision
-it sat on: the panel now binds `0.0.0.0` and answers on the LAN with no authentication in
-front of it, deliberately. See the trap above for what that costs and why it stands. This
-paragraph used to say "the day the panel binds to anything wider than loopback, auth stops
-being optional" — that day came, and the ruling went the other way.
+**A known gap: there is no "refresh brief" control.** A brief change needs a panel restart
+*and* a lead relaunch to take effect. `plannerBrief` reaches a planner at its next dispatch,
+so a restart is enough there; the lead's own brief only ever reaches the *next* lead.
 
-**The team lead is the other line of work**, and it has caught up: waves 0 through E are
-all on `main`. The last of them — stuck detection, worktree GC, conflict flagging, the
-team panel in the lead's aside, `[room]` nudge rendering — merged 2026-08-26 on the
-strength of its own verification, and `team-lead-wave-e` is retired; there is no branch
-left holding any of it back. What the team deliberately does *not* do is in `docs/team.md`'s
-Non-goals; how each rule here was learned is in the Traps above.
+**The panel runs under launchd** — `npm run install-agent` writes and bootstraps the plist,
+`npm run restart-panel` is the day-to-day restart. Its two log files are trimmed once at
+boot, and that policy is deliberate: copy aside, truncate in place, one `.1`, boot only, no
+`newsyslog`, and the file logs are *not* dropped in favour of the unified log, because
+`tail -f` is how this thing is actually debugged. What launchd does, as against what
+reasoning about it predicts, is in the Traps above — the silent port collision first.
 
-Since then the team has grown a **`pending` task state**: a task recorded with its brief and
-nothing else — the middle rung the maintainer wanted between a Gitea issue and a dispatched
-worker — added via `task_add`, promoted only on a second, explicit yes via `task_start`
-(Gitea PRs #16–#19). Every task row now opens a read-only **brief modal** on click, showing
-a planner's plan alongside its brief where one exists (Gitea PR #20), and that modal renders
-its markdown the same way the plan-approval card already did (Gitea PR #22) instead of
-showing raw text. And the lead's own `room_read` / `team_status` tools were trimmed to
-return a tail instead of the whole log, so a long-running lead's context doesn't fill up on
-its own room (Gitea PR #21, "A lead's read tools that fit in a lead's context").
+**It installs as an app**, out of `web/` with no server change: a manifest and a generated
+icon set for each of the two views, plus an opt-in macOS notification when a session walks
+into something it cannot get past. The transitions come off the roster the panel already
+broadcasts, so no socket event was needed. The honest limit of any bench here is worth
+stating, because it applies to every future icon change: a bench can show that Chrome parses
+both manifests without error, that every icon they name is served, and that a real session
+walking into a real prompt raises exactly one notification which opens that session when
+clicked. It cannot press "Add to Dock" — whether an icon looks right in the Dock and on a
+Home Screen is a pair of eyes.
 
-Its one external blocker is still the maintainer's, not the code's: a "refresh brief"
-control is still unbuilt, so a brief change needs a panel restart *and* a lead relaunch to
-take effect. That applies to the **planner** work too — `plannerBrief` reaches a planner at
-its next dispatch (so a panel restart is enough), but the lead's own brief only reaches the
-*next lead*, which means a restart and a relaunch before a running lead knows planners
-exist at all.
-
-**Gitea issue #1 — the panel runs under launchd — is closed**, three PRs on
-2026-08-27 (Gitea #28, #29, #30), dispatched from a planner after a power-cut reboot came
-back on a hand-restarted panel that was silently missing its trigger token for over an hour:
-the same 503 that means "this feature is off" was standing in for "this feature broke", with
-nothing telling a caller which. `npm run install-agent` writes and bootstraps
-`~/Library/LaunchAgents/dev.foreman.panel.plist`; `npm run restart-panel` is the new
-day-to-day restart, replacing `kill && npm start`. See the Traps above for what launchd
-actually does that reasoning about it wouldn't have predicted — the port collision chief
-among them, and the `kickstart` finding that decided where the trigger token lives. Gitea PR
-#32 landed the same evening, a separate ask — see the inbox paragraph under Groups above for
-what it changed and what it left as Gitea issue #31.
-
-**Gitea issue #33 — those launchd logs grow without bound — is closed too**, and it was split
-out of Gitea issue #1 on the strength of measurements taken there rather than discovered
-later as a full disk. `server/logs.js` owns the two paths and trims them once at boot; the
-traps above are what it cost. The maintainer decided the policy up front (copy aside,
-truncate in place, one `.1`, boot only, no `newsyslog`, no dropping the file logs for the
-unified log because `tail -f` is how this thing is actually debugged), so the build had
-nothing to escalate.
-
-**GitHub issue #8 — install the panel as an app — shipped as one `web/` change and no server
-change at all.** A manifest and a generated icon set for each of the two views, plus an
-opt-in macOS notification when a session walks into something it cannot get past. The
-transitions come off the roster the panel already broadcasts, so the issue's allowance for
-"one small socket event if the client cannot derive them" was not spent. What it cost is in
-the five Traps paragraphs above; what it could *not* prove is worth repeating here, because
-it is the honest limit of any bench for this feature: **whether an icon looks right in the
-Dock and on a Home Screen is a pair of eyes on a Mac and on a phone.** The bench can show
-that Chrome parses both manifests without error, that every icon it names is served, that a
-real session walking into a real prompt raises exactly one notification and that clicking it
-opens that session — and it did. It cannot press "Add to Dock".
+**Not built, and not oversights.** A search index across transcripts: wanted, unbuilt.
+Authentication: a stated non-goal, argued and decided — see the exposure trap above before
+reaching for it. And anything that merges a PR, kills a worker, or approves a plan without a
+human saying so: see the five rules under *The team*.
 
 ## Working here
 
@@ -1756,18 +1727,15 @@ opens that session — and it did. It cannot press "Add to Dock".
   is not tidiness, and knowing it is what stops the rule being optimised away. This
   panel's purpose is watching real Claude Code sessions, so proving a change works has
   always meant touching real work — and the proof then carries those projects' names into
-  test fixtures, measurements, commit messages and PR bodies. Measured in this repo
-  today: three unrelated projects of the maintainer's are named across 25 tracked files. None of
-  it is secret and none of it is this project's to publish, and by their ruling of
-  2026-08-31 the work is
-  developed **in the open**, where a branch is public the moment it is pushed and
-  permanent afterwards. So `alpha`, `beta` and `gamma` are the only project names allowed
-  in a fixture, a screenshot, a commit message, a PR or a report. Where a measurement can
-  genuinely only be taken against something real, write down its *shape* and not its name
-  — "a session in another folder", not the folder. And note what the rule does not do,
-  because assuming otherwise is how it fails: it does not stop anyone *seeing* every
-  project on this Mac, since any panel lists every tmux session on it. It governs what is
-  written down, because that is what gets published.
+  test fixtures, measurements, commit messages and PR bodies. None of that is anyone's to
+  publish, and this project is developed **in the open**, where a branch is public the
+  moment it is pushed and permanent afterwards. So `alpha`, `beta` and `gamma` are the only
+  project names allowed in a fixture, a screenshot, a commit message, a PR or a report.
+  Where a measurement can genuinely only be taken against something real, write down its
+  *shape* and not its name — "a session in another folder", not the folder. And note what
+  the rule does not do, because assuming otherwise is how it fails: it does not stop anyone
+  *seeing* every project on the machine, since any panel lists every tmux session on it. It
+  governs what is written down, because that is what gets published.
 - **Capture at a narrow width too.** Pane width is an input to every parser here. The
   launcher opens 220 columns; sessions started from a plain terminal are far
   narrower, and at 70 the plan box's header, its footer path and long option labels all
@@ -1821,7 +1789,7 @@ opens that session — and it did. It cannot press "Add to Dock".
   re-read null, answered 409 "the model picker is not open" and **left the box up**; every
   later `/model/open` answered 409, `closeModelDialog` returned `true` without pressing
   Escape *because it asked the same failing parser*, and the composer stayed blocked until
-  somebody pressed Esc in the terminal. the maintainer hit it live on a lead.
+  somebody pressed Esc in the terminal. Hit live, on a lead.
 
   Four measurements, taken in the sandbox's `alpha`, and the first is the one that decides
   where to look. **It is height, not width**: 220×23 windows exactly as 80×23 does, while
@@ -1856,8 +1824,8 @@ opens that session — and it did. It cannot press "Add to Dock".
 - **The panel is probably already running.** Check `lsof -iTCP:48770` before starting
   one, use `FOREMAN_PORT` for a second, and never `pkill -f "node server/index.js"` — that
   pattern matches the one the user is using; kill by port (`lsof -tiTCP:<port>`). Give the
-  second one `FOREMAN_STATE_DIR` too — and since the team shipped, that is no longer just
-  tidiness. Two servers must not run the queue at once (they share
+  second one `FOREMAN_STATE_DIR` too, and that is not just tidiness. Two servers must not
+  run the queue at once (they share
   `~/.foreman/queue.json` and would both flush the same message), a test run would
   otherwise be saving snapshots over the bench you actually rely on, and **a second
   server boots its own worktree GC**: pointed at the real state dir it will sweep real
