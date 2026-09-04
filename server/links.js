@@ -361,6 +361,46 @@ export function linkLine({ speaker, body, id, peer, label = '', human = HUMAN_FA
 }
 
 /* -------------------------------------------------------------------------- */
+/* Recording a ruling.                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The `decisions.md` block for a message the maintainer chose to make standing.
+ *
+ * Composed here, beside the envelope, for the envelope's own reason: one measured fact
+ * with two readers must not become two facts, and this block goes into **two** files
+ * whose whole purpose is that they agree.
+ *
+ * **The words are verbatim and unprefixed.** They *are* the ruling — a summary would be
+ * the panel paraphrasing an instruction, and the two-character prefix belongs to the
+ * channel a lead reads a message on, not to the standing record of a decision. There is
+ * no quoting to do here and nothing to forge: this file is read by a lead as its own
+ * project's history, so a line at column 0 in it is not a line pretending to be the
+ * panel's.
+ *
+ * It **may name the other project**, and that is deliberate rather than an oversight of
+ * the sandbox-names rule: that rule governs what reaches a **forge**, and `decisions.md`
+ * is local — it is the one mechanism in this design that reaches a lead after a `/clear`,
+ * and a ruling that would not say who it was agreed with would be useless there.
+ *
+ * @param {object} opts
+ * @param {string} opts.date     `2026-09-03`, from the press
+ * @param {string} opts.peerName the *other* project's basename, as this file's reader sees it
+ * @param {string} opts.named    the link as it names itself — `lnk-3`, or `lnk-3, "label"`
+ * @param {string} opts.text     the maintainer's own words, exactly as the thread holds them
+ */
+export function rulingBlock({ date, peerName, named, text } = {}) {
+  return (
+    `## ${date} — Ruling in the connections thread with ${peerName} (link ${named})\n` +
+    `\n` +
+    `${String(text ?? '')}\n` +
+    `\n` +
+    `Recorded by the panel on his press, from the connections thread. The other project’s\n` +
+    `decisions.md carries this same entry.\n`
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* The joint thread.                                                           */
 /* -------------------------------------------------------------------------- */
 
@@ -451,6 +491,34 @@ function normalizeRepo(repo, which) {
   return path.resolve(raw);
 }
 
+/**
+ * The ruling ledger for one link, read tolerantly off a hand-editable file.
+ *
+ * Shape: `{ '<msgId>': { a: <ts>|null, b: <ts>|null, aError: <string>|null, bError } }`,
+ * keyed by the id the panel stamped on the message when it was sent. **Per side, and
+ * never a rollback** — appending to markdown has no transaction, and undoing half of one
+ * would mean truncating the maintainer's own standing record, the one direction
+ * `writeConfigFile` already refuses to go.
+ *
+ * A side that is already a timestamp is what makes a retry write **only** the missing
+ * side, so pressing the control twice cannot append the same ruling twice to the file
+ * that took it. Idempotence by construction rather than by a guard.
+ */
+function loadRulings(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [msgId, r] of Object.entries(raw)) {
+    if (!msgId || !r || typeof r !== 'object') continue;
+    out[msgId] = {
+      a: Number(r.a) || null,
+      b: Number(r.b) || null,
+      aError: typeof r.aError === 'string' ? r.aError : null,
+      bError: typeof r.bError === 'string' ? r.bError : null,
+    };
+  }
+  return out;
+}
+
 /** The highest `lnk-N` already on disk, so a re-load can never mint a duplicate id. */
 function highestSeq(links) {
   let top = 0;
@@ -484,7 +552,9 @@ export class LinkStore {
   /** @param {string} [file] override the store location (tests) */
   constructor(file = FILE) {
     this.file = file;
-    this.links = []; // [{ id, a, b, label, createdAt, closedAt, lastAt, lastText, lastFrom, unseen, seenAt }]
+    // [{ id, a, b, label, createdAt, closedAt, lastAt, lastText, lastFrom, lastSpeaker,
+    //    unseen, seenAt, humanSeq, rulings }]
+    this.links = [];
     this.seq = 0;
     this.dirty = false;
     this.corrupt = false; // a file that existed and would not parse — preserve it before writing
@@ -536,8 +606,15 @@ export class LinkStore {
         lastAt: Number(l.lastAt) || null,
         lastText: typeof l.lastText === 'string' ? l.lastText.slice(0, MAX_LAST_TEXT) : '',
         lastFrom: typeof l.lastFrom === 'string' ? l.lastFrom : null,
+        // Who spoke last, so the card can say `you:` for the one speaker whose `lastFrom`
+        // is not a project at all. Absent on every record written before the maintainer
+        // could type here, which reads as a lead — the safe default, and the same one
+        // `speakerOf` takes for the same reason.
+        lastSpeaker: l.lastSpeaker === 'human' ? 'human' : 'lead',
         unseen: Number.isInteger(l.unseen) && l.unseen > 0 ? l.unseen : 0,
         seenAt: Number(l.seenAt) || null,
+        humanSeq: Number.isInteger(l.humanSeq) && l.humanSeq > 0 ? l.humanSeq : 0,
+        rulings: loadRulings(l.rulings),
       });
     }
 
@@ -662,8 +739,11 @@ export class LinkStore {
       lastAt: null,
       lastText: '',
       lastFrom: null,
+      lastSpeaker: 'lead',
       unseen: 0,
       seenAt: null,
+      humanSeq: 0,
+      rulings: {},
     };
     this.links.push(link);
     this.dirty = true;
@@ -715,9 +795,62 @@ export class LinkStore {
     link.lastAt = at;
     link.lastText = String(text ?? '').slice(0, MAX_LAST_TEXT);
     link.lastFrom = from;
+    // The card names the speaker off this rather than off `lastFrom`, because the
+    // maintainer's `lastFrom` is not a project and has no basename to take — the same
+    // reason the thread's own pill reads `speaker` and never the paths.
+    link.lastSpeaker = speaker;
     if (speaker === 'lead') link.unseen += 1;
     this.dirty = true;
     return { ...link };
+  }
+
+  /**
+   * The id one of the maintainer's messages is known by, minted before it is posted.
+   *
+   * It goes into **both** rooms' copies, so a ruling recorded against it survives a
+   * restart, a `/clear` and either lead being relaunched — and it is what lets the ledger
+   * above be keyed by something stable. `seq` could not: it is per repo
+   * (`server/room.js`), so the two copies of one message carry two different ones.
+   *
+   * Counted per link and persisted, so the ids are readable (`lnk-5-h1`) and a restart
+   * cannot mint one that is already in use — the same argument as `highestSeq`, one level
+   * down.
+   */
+  mintMessageId(id) {
+    const link = this.#record(id);
+    if (!link) return null;
+    link.humanSeq += 1;
+    this.dirty = true;
+    return `${link.id}-h${link.humanSeq}`;
+  }
+
+  /** What has been recorded for one message, as a copy, or null if nothing has. */
+  ruling(id, msgId) {
+    const held = this.#record(id)?.rulings?.[msgId];
+    return held ? { ...held } : null;
+  }
+
+  /**
+   * Write down what one side's `decisions.md` append actually did.
+   *
+   * One side at a time and never a rollback: `at` on success, `error` on failure, and the
+   * other side is left exactly as it was. A retry reads this back and writes only what is
+   * still missing, which is why pressing twice cannot double-append.
+   *
+   * @param {string} id     the link
+   * @param {string} msgId  the message the ruling is
+   * @param {'a'|'b'} side  which end's file this is about
+   * @param {{at?: number, error?: string}} outcome
+   */
+  recordRuling(id, msgId, side, { at = null, error = null } = {}) {
+    const link = this.#record(id);
+    if (!link || !msgId || (side !== 'a' && side !== 'b')) return null;
+    const held = link.rulings[msgId] || { a: null, b: null, aError: null, bError: null };
+    held[side] = at || null;
+    held[side === 'a' ? 'aError' : 'bError'] = at ? null : error || null;
+    link.rulings[msgId] = held;
+    this.dirty = true;
+    return { ...held };
   }
 
   /** The thread has been opened: nothing is new any more. */
