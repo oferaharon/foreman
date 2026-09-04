@@ -1567,6 +1567,19 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 .room-pill.is-lead { color: var(--accent); border-color: currentColor; }
+/* A link entry names the **project** that spoke, not the role — both ends of a link are
+   leads, so `lead` on each of them told you nothing. Deliberately *not* the thread's
+   green/blue: that pair is per link and a room can carry more than one, so four projects
+   would be sharing two colours here. The name is what does the work; the pill just has to
+   stop looking like the lead's own. Filled rather than outlined, so a project reads as a
+   different kind of speaker from the accent-outlined lead at a glance. */
+.room-pill.is-project {
+  color: var(--ink);
+  border-color: transparent;
+  background: var(--surface-sunk);
+  max-width: 9rem;
+}
+.room-pill.is-project.is-human { color: var(--accent); border-color: currentColor; background: none; }
 .room-arrow { color: var(--ink-faint); font-size: 0.7rem; flex: none; }
 .room-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
 
@@ -3833,6 +3846,13 @@ body.row-dragging * { cursor: row-resize !important; }
   padding: 1.4rem 0 1.6rem;
 }
 
+/* The thread reads at the **room's** scale, not the transcript's, and the reason is that
+   it is the room's content: a joint thread is a view over the two projects' `room.jsonl`
+   files, the same entries the aside draws one pane over. It was inheriting the body's 16px
+   serif — measured identical, to the pixel, to an ordinary transcript message — which is
+   what made it read as a conversation rather than a log, and too big beside the room it is
+   a view of. 0.82rem is `.room-list`'s own size, so this is the second scale in the panel
+   rather than a third one. Same serif; only the size moves. */
 .link-thread-inner {
   max-width: 52rem;
   margin: 0 auto;
@@ -3840,6 +3860,7 @@ body.row-dragging * { cursor: row-resize !important; }
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+  font-size: 0.82rem;
 }
 
 .app.split .link-thread-inner { padding-left: 1rem; padding-right: 1rem; }
@@ -3891,6 +3912,31 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 
+/* Two speakers, told apart at a glance — **on the header only**. The bubble body is
+   deliberately unchanged: the maintainer corrected an earlier coloured-bubbles suggestion
+   to exactly this, and two tinted bodies in one column would be two competing page
+   backgrounds rather than two labels.
+
+   The pair is `--idle` and `--mode-edits`, both already in the palette, and the choice is
+   argued rather than picked. Measured in the dark theme against `--ground`, which is what
+   the pill actually sits on (the bubble starts below it): green 8.04:1, blue 8.93:1 —
+   both past WCAG AAA's 7:1 for body text at a pill's size. Told apart from each other by
+   ΔE2000 **23.0**, which is a large difference rather than a just-noticeable one.
+
+   `--accent` measures further still (ΔE 44 from the green) and is **reserved**: it is the
+   maintainer's own colour in this very list — `.link-pill.is-human` below — and item 7
+   puts his lines here beside these. Two identical pills in one thread, one of them the one
+   speaker whose word can authorize, is not a trade worth a few ΔE. `--working` and
+   `--decision` are refused for the reason the room refuses them: amber and red mean
+   attention and trouble everywhere else in this panel, and neither project is either.
+
+   Which side is which never moves — see `linkEntryNode`. `a` and `b` are the two paths
+   sorted, written once when the link is opened and never rewritten, so the same project
+   keeps its colour across a reopen, a restart and a relaunch of either lead. */
+.link-msg.from-a .link-pill { color: var(--idle); border-color: currentColor; }
+.link-msg.from-b .link-pill { color: var(--mode-edits); border-color: currentColor; }
+/* Later than the two above on purpose: a human line is `from-human`, so neither of them
+   can reach it — but if a lane is ever added or renamed, the accent still wins here. */
 .link-pill.is-human { color: var(--accent); border-color: currentColor; }
 
 .link-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
@@ -3914,6 +3960,43 @@ body.row-dragging * { cursor: row-resize !important; }
 
 /* Two leads writing prose: keep their paragraphs. */
 .link-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* **Ten** lines, then a quiet way in — twice the room's five, and the difference is what
+   is being folded. The room logs events, a line each, and five is generous there; these
+   are whole messages between two leads, and cutting one at five hides the message instead
+   of trimming it. Ten is the maintainer's own number.
+
+   `scrollHeight > clientHeight` is what decides a message gets a control at all, so a short
+   one keeps its own height and grows nothing (see `threadClampable`). */
+.link-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 10;
+  overflow: hidden;
+}
+/* Deliberately no standard `line-clamp: 10` beside that, for the room's reason and it is
+   the same reason here: Chrome 151 answers `CSS.supports('line-clamp','10')` with false,
+   so it is dead weight today — and the shape it will eventually ship is `continue: discard`,
+   which *removes* the clamped lines from the box rather than hiding them. The overflow test
+   above is `scrollHeight > clientHeight`; discard them and those two are equal, every
+   message reads as fitting, and the control silently stops appearing on exactly the ones
+   that need it. Add it the day it can be measured, not the day it parses. */
+
+/* Inside the bubble, never floating over it, in the thread's own muted ink — the same
+   restraint as the room's: no accent, no motion, nothing competing with the two coloured
+   name pills for the eye. */
+.link-more {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.link-more:hover { color: var(--ink); }
 
 /* A message that did not land exists only in the sender's room, which is right — and it
    has to say so, or the thread reads as though it arrived. */
@@ -4254,8 +4337,9 @@ body.row-dragging * { cursor: row-resize !important; }
   cursor: default;
 }
 
-/* The relaunch sentence, and the "nothing to link to yet" sentence. Fine print rather than
-   an error: neither of them is anything going wrong. */
+/* The "reading the projects on this Mac" line and the "nothing to link to yet" one. Fine
+   print rather than an error: neither of them is anything going wrong. (It used to carry
+   the relaunch sentence too — that is gone; see the link-create endpoint for why.) */
 .conn-form-note {
   color: var(--ink-faint);
   font-size: 0.7rem;
