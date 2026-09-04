@@ -1668,14 +1668,18 @@ body.row-dragging * { cursor: row-resize !important; }
    "whatever the block turns out to be" without anything measuring it. A `max-height`
    would need a number, and the number is wrong the day somebody adds a row — too small
    clips the block, too large spends the transition on empty space. */
-.team-settings-fold {
+/* Shared with the aside's `connect` fold (`.conn-fold`): one mechanism, two blocks. A
+   second copy of this trick is a second thing to get wrong the day it changes. */
+.team-settings-fold,
+.conn-fold {
   flex: none;
   display: grid;
   grid-template-rows: 0fr;
   overflow: hidden;
   transition: grid-template-rows 200ms ease;
 }
-.team-settings-fold.is-open { grid-template-rows: 1fr; }
+.team-settings-fold.is-open,
+.conn-fold.is-open { grid-template-rows: 1fr; }
 /* The grid item, and it is deliberately bare. `min-height: auto` is a grid item's default
    and would hold the row open at content height — the fold would never close at all. And
    even at `min-height: 0` an item cannot be shorter than its own padding and border, so
@@ -1683,7 +1687,8 @@ body.row-dragging * { cursor: row-resize !important; }
    (0.5rem twice, plus the 1px rule) under the heading with the block shut. */
 .team-settings-clip { min-height: 0; overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
-  .team-settings-fold { transition: none; }
+  .team-settings-fold,
+  .conn-fold { transition: none; }
 }
 
 .team-settings {
@@ -4058,6 +4063,126 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .conn-close:hover { color: var(--decision); border-color: currentColor; }
 .conn-close:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- the `connect` block in a lead's aside: the control that MAKES a link ----
+
+   A form, not a list. The column beside the rail is where links are read; this is where one
+   is opened, and it lives in the aside because a link is between two *projects* and this is
+   the only per-project surface that already exists.
+
+   It borrows the settings block's chrome deliberately — `--mono` on `--ground` inside a
+   `--rule` border, the accent halo on focus — because it is the same kind of thing one
+   heading up: values you set, on a panel this narrow. */
+.conn-form {
+  padding: 0.5rem 0.7rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.8rem;
+}
+
+/* The plus, in the gear's own slot. It rotates into a cross when the form is open — the
+   gear turns 60°, which reads as a dial being adjusted; a plus wants 45°, where it stops
+   being a plus and starts being the way back out. */
+.conn-add {
+  font-family: var(--mono);
+  font-size: 1.15rem;
+  font-weight: 500;
+}
+.conn-add.is-open { transform: rotate(45deg); }
+
+.conn-form-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+.conn-form-cap { flex: none; color: var(--ink-muted); cursor: pointer; }
+
+/* Wider than the settings knobs' 60%: a project name is longer than a number, and the one
+   thing this control must not do is show two projects as the same truncated word. */
+.conn-pick { max-width: 68%; }
+
+/* The chosen project's whole path, on the page rather than on a hover — an `<option>`'s
+   `title` is not drawn at all in a native macOS dropdown, and this line is the only thing
+   that separates two projects sharing a basename.
+
+   It **wraps** rather than truncating, and that is the second thing tried. A one-line box
+   truncates at the wrong end (the head of a path is where two projects sharing a basename
+   differ), and `direction: rtl` — the usual way to move an ellipsis to the front — renders
+   a leading `/` at the *right* of the line, because a slash is bidi-neutral and lands at
+   the paragraph direction's end: measured, `/Users/…/beta` came out as `…/foreman-sandbox/
+   beta/`, a path that is not the one on disk. Two or three wrapped lines inside a form that
+   is only open while you fill it in is the cheaper answer than a line that reads wrongly.
+
+   It holds one line's height when nothing is chosen, so the form does not jump on the
+   first selection. */
+.conn-form-path {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.4;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+  margin-top: -0.2rem;
+  min-height: 1.4em;
+}
+.conn-form-path.is-quiet { color: transparent; }
+
+.conn-form-input {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink);
+  background: var(--ground);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.15rem 0.35rem;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+.conn-form-input::placeholder { color: var(--ink-faint); font-family: inherit; }
+.conn-form-input:hover:not(:disabled) { border-color: var(--rule-strong); }
+.conn-form-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.conn-form-input:disabled { color: var(--ink-faint); cursor: default; }
+
+.conn-form-foot { display: flex; justify-content: flex-end; }
+
+/* The one press in this block. Opening a link is not destructive — closing one is, and that
+   control asks first on the card — so this is an ordinary filled button rather than a quiet
+   one, and it is simply not pressable until a project is chosen. */
+.conn-form-go {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--surface);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0.15rem 0.7rem;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+.conn-form-go:hover:not(:disabled) { opacity: 0.85; }
+.conn-form-go:disabled {
+  color: var(--ink-faint);
+  background: none;
+  border-color: var(--rule);
+  cursor: default;
+}
+
+/* The relaunch sentence, and the "nothing to link to yet" sentence. Fine print rather than
+   an error: neither of them is anything going wrong. */
+.conn-form-note {
+  color: var(--ink-faint);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
 
 /* The chip on a lead's row: which other project this lead is connected to, and the way into
    that thread. On the third line team rows already have — never a fourth. */
