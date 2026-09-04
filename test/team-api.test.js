@@ -1965,7 +1965,12 @@ test('opening appends to both decisions.md — never rewriting what was already 
     assert.match(text, /Keep this\./);
     assert.match(text, new RegExp(`## \\d{4}-\\d{2}-\\d{2} — Connected to ${peer} \\(link lnk-5, "shared auth schema"\\)`));
     assert.match(text, /request, never authority/);
-    assert.match(text, /need one relaunch/, 'the one thing a lead cannot find out for itself');
+    // The relaunch sentence lives **here and nowhere else**. It came off every live
+    // surface — the room line, the connect form, the toast — because it is only true of a
+    // lead launched before the link tools shipped, and it had no expiry. `decisions.md` is
+    // a dated record of what was true when the link was opened rather than a live surface,
+    // so it keeps its line for the same reason an append-only room is never rewritten.
+    assert.match(text, /need one relaunch/, 'the durable record keeps what was true on the day');
     // Appended below what was there, never inserted above it.
     assert.ok(
       text.indexOf('Something already decided') < text.indexOf('Connected to'),
@@ -1985,7 +1990,21 @@ test('opening posts a room line in both rooms, keyed on `event` so a reword cann
     assert.equal(entry.link, 'lnk-5');
     assert.equal(entry.from, 'panel');
     assert.match(entry.text, new RegExp(`Connected to ${peer}`));
-    assert.match(entry.text, /relaunch/);
+    /*
+     * And it does **not** tell anybody to relaunch. That sentence was only ever true of a
+     * lead launched before the link tools shipped — one started now has `link_list` /
+     * `link_send` / `link_read` from birth and resolves a link when it uses one, so it can
+     * be connected an hour later and simply work. With no expiry on it, it was permanent
+     * noise on every link anyone would ever make.
+     *
+     * Removed rather than made conditional, and that is the approved plan's decision 3
+     * rather than a preference: the panel cannot tell what a running lead was launched
+     * with, and the plan refused to build a detector because a stamped tools-version
+     * compared at run time is a second source of truth about a running process. There is
+     * no honest conditional, so there is no sentence. The one copy that stays is the
+     * `decisions.md` block above — a dated record, not a live surface.
+     */
+    assert.doesNotMatch(entry.text, /relaunch/, 'no live surface asks for a relaunch any more');
   }
 });
 

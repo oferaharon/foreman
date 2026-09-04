@@ -1122,21 +1122,18 @@ const linkNamedFor = (link) => (link.label ? `${link.id}, “${link.label}”` :
 /** One open link by id, or null. Closed links are not in the roster frame at all. */
 const linkById = (id) => state.links.find((l) => l.id === id) || null;
 
-/**
- * What a new link costs, in the words the server already uses.
+/*
+ * `RELAUNCH_NOTE` used to live here — "both leads need one relaunch before they can send
+ * on it" — spelled once and rendered twice, in the connect form's fine print and in the
+ * toast after the press. Both are gone, along with the server's own copy of the sentence;
+ * `server/index.js`'s link-create endpoint carries the whole reasoning.
  *
- * `POST /api/team/links` composes this same sentence for both `decisions.md` blocks and
- * both room lines, and plan decision 3 is that the panel does **not** try to detect the
- * relaunch — a stamped tools-version compared at run time would be a second source of
- * truth about what a running process holds. So every surface that announces a link says
- * it instead, and the create form is the first one the maintainer reads. Spelled once
- * here and used twice (the form's fine print, and the notice after the press) rather
- * than reworded per surface: the whole point of the rule is that it reads the same
- * everywhere it appears.
+ * The short version, so nobody reintroduces it here: it was only true of a lead launched
+ * before the link tools shipped. A lead started now has them from birth and resolves a
+ * link when it uses one, so it can be connected an hour later and just work. And it could
+ * not be made conditional — the panel cannot tell what a running lead was launched with,
+ * and the approved plan refused to build a detector for exactly that reason.
  */
-const RELAUNCH_NOTE =
-  'Both leads need one relaunch before they can send on it: a lead’s tools and rules ' +
-  'are written into its launch flags.';
 
 /** Every open link this session's project is an endpoint of. Not a lead: not linked. */
 function linksForSession(s) {
@@ -6105,12 +6102,9 @@ function createPane(slot, host) {
     foot.append(go);
     form.append(foot);
 
-    // Said before the press, not after it: this is the one consequence of linking that the
-    // panel cannot take care of for you.
-    const note = document.createElement('div');
-    note.className = 'conn-form-note';
-    note.textContent = RELAUNCH_NOTE;
-    form.append(note);
+    // The relaunch note used to sit here, under the button. The node is *removed* rather
+    // than emptied — a `.conn-form-note` with no text still takes its line-height, and a
+    // gap under the button is a thing a reader looks for a reason for.
 
     if (roomView.connectErr) {
       const err = document.createElement('div');
@@ -6163,7 +6157,7 @@ function createPane(slot, host) {
         missed.length
           ? `Linked to ${name}, but the note could not be written to ` +
               `${missed.map((d) => projectName(d.repo)).join(' and ')}: ${missed[0].error}`
-          : `Linked to ${name}. ${RELAUNCH_NOTE}`,
+          : `Linked to ${name}.`,
       );
       roomView.connectSel = '';
       roomView.connectLabel = '';

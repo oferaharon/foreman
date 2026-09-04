@@ -147,6 +147,47 @@ test('`speaker` decides the shape, never the path — in both readers, identical
   }
 });
 
+/* ------------------------------------------------- the relaunch sentence --- */
+
+test('no live surface asks for a relaunch, and there is no constant left to render', () => {
+  /*
+   * The sentence was composed once in the link-create endpoint and rendered in three
+   * places: the room line, the connect form's fine print, and the toast after the press.
+   * All three are gone. It was only true of a lead launched *before* the link tools
+   * shipped — one started now has `link_list` / `link_send` / `link_read` from birth and
+   * resolves a link at the moment it uses one — and it carried no expiry, so it was
+   * permanent noise on every link anybody would ever make.
+   *
+   * Removed rather than softened into a conditional, which is the approved plan's decision
+   * 3 rather than a preference: the panel cannot tell what a running lead was launched
+   * with, and the plan refused to build a detector because a stamped tools-version
+   * compared at run time is a second source of truth about a running process.
+   *
+   * Whole mechanism, not one rendering — so this pins that the constant itself is gone
+   * too. A dead `RELAUNCH_NOTE` sitting there is an invitation to render it again.
+   */
+  // Patterns are *code* shapes, not the bare word: the comment left where the constant
+  // used to be names it, on purpose, so nobody reintroduces it without reading why.
+  assert.doesNotMatch(app, /const RELAUNCH_NOTE\b/, 'no orphan constant left declared');
+  assert.doesNotMatch(app, /\$\{RELAUNCH_NOTE\}/, 'nothing interpolates it');
+  assert.doesNotMatch(app, /=\s*RELAUNCH_NOTE\s*;/, 'nothing assigns it into a node');
+  assert.doesNotMatch(app, /'Both leads need one relaunch/, 'and no inlined copy of it');
+  // The node is removed rather than emptied: a `.conn-form-note` with no text still takes
+  // its line-height, and a gap under the button is a thing a reader looks for a reason for.
+  const form = app.match(/const foot = document\.createElement\('div'\)[\s\S]*?renderConnect/)?.[0] ?? app;
+  assert.doesNotMatch(form, /note\.textContent/, 'the fine-print node is gone, not blanked');
+  // `server/index.js` keeps exactly one copy, in the `decisions.md` block — a dated record
+  // of what was true when the link was opened, which is not a live surface.
+  const server = text('server/index.js');
+  const hits = [...server.matchAll(/Both leads need one relaunch/g)];
+  assert.equal(hits.length, 1, 'one copy only, and it is the decisions.md block');
+  assert.ok(
+    server.slice(0, hits[0].index).lastIndexOf('appendDecision') >
+      server.slice(0, hits[0].index).lastIndexOf('room.post'),
+    'the surviving copy is inside the decisions.md append, not a room post',
+  );
+});
+
 /* ------------------------------------------------------- speaker colours --- */
 
 /** The dark palette — the only one this project renders. Read, never restated. */

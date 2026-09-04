@@ -4337,8 +4337,9 @@ body.row-dragging * { cursor: row-resize !important; }
   cursor: default;
 }
 
-/* The relaunch sentence, and the "nothing to link to yet" sentence. Fine print rather than
-   an error: neither of them is anything going wrong. */
+/* The "reading the projects on this Mac" line and the "nothing to link to yet" one. Fine
+   print rather than an error: neither of them is anything going wrong. (It used to carry
+   the relaunch sentence too — that is gone; see the link-create endpoint for why.) */
 .conn-form-note {
   color: var(--ink-faint);
   font-size: 0.7rem;

@@ -2738,17 +2738,29 @@ app.post('/api/team/links', async (req, res) => {
   links.flush();
 
   /*
-   * Neither lead can *use* the link until it is relaunched: the tools ride
-   * `--mcp-config` and the rules ride `--append-system-prompt-file`, both written at
-   * launch. The panel deliberately does not try to detect that (plan decision 3) — a
-   * stamped tools-version compared at run time would be a second source of truth about
-   * what a running process holds. So every surface that announces a link says it instead,
-   * and this is one of them.
+   * There used to be a sentence composed here — "both leads need one relaunch before they
+   * can send on it" — rendered into the room line, the connect form and the toast. It is
+   * **gone from every live surface**, and the reasoning is the point rather than the
+   * deletion.
+   *
+   * It was only ever true of a lead launched *before* the link tools shipped: the tools
+   * ride `--mcp-config` and the rules ride `--append-system-prompt-file`, so a lead from
+   * that era genuinely had neither. Every lead started since has `link_list`/`link_send`/
+   * `link_read` from birth and resolves a link at the moment it uses one — so it can be
+   * connected to something an hour after it started and simply work. The sentence had no
+   * expiry, so from here on it was permanent noise on every link anybody ever makes,
+   * telling them to do a thing they do not need to do.
+   *
+   * **Removed rather than made conditional**, and that is plan decision 3 rather than a
+   * preference: the panel cannot tell whether a running lead was launched with the tools,
+   * and the plan explicitly refused to build a detector, because a stamped tools-version
+   * compared at run time is a second source of truth about what a running process holds.
+   * There is no honest conditional to write, so there is no sentence.
+   *
+   * The `decisions.md` block below keeps its line, deliberately. That file is a durable,
+   * dated record of what was true when the link was opened, not a live surface — the same
+   * reason an append-only room is never rewritten.
    */
-  const relaunch =
-    'Both leads need one relaunch before they can send on it: a lead’s tools and rules are ' +
-    'written into its launch flags.';
-
   const date = decisionDate(link.createdAt);
   const decisions = [];
   // The record's own order, not the request's — `{a,b}` and `{b,a}` are one pair, and the
@@ -2780,8 +2792,7 @@ app.post('/api/team/links', async (req, res) => {
     try {
       room.post(repo, {
         from: 'panel', to: 'lead', kind: 'system', event: 'link', link: link.id, peer,
-        text:
-          `Connected to ${path.basename(peer)} — link ${linkNamed(link)}. ${relaunch}`,
+        text: `Connected to ${path.basename(peer)} — link ${linkNamed(link)}.`,
       });
     } catch {
       /* a room post must never turn an opened link into an error */
