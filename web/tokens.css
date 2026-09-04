@@ -29,6 +29,18 @@
      mode rather than a fallback, which is why `.room-sized` on the root exists. */
   --aside: 21.25rem;
 
+  /* Where split view divides, dragged from the boundary between the two panes.
+
+     A **percentage**, and that is the whole trick: the default has to be exactly half and
+     half, and `50%` of the main area with the second pane taking `1fr` of the remainder is
+     byte-for-byte the `1fr 1fr` the split shipped with. It also lets one number drive two
+     things that must never disagree — the grid's first track and the grip's own `left` —
+     because a reader who has dragged nothing still has a boundary for the grip to sit on.
+     Spelled here for the reason `--rail`, `--aside` and `--conn-h` are: a reset *removes*
+     the custom property, so this is the one place the default lives. Only the first pane's
+     width is ever stored; the second takes what is left. */
+  --pane-a: 50%;
+
   /* An open group's block, lifted off the rail. Mixed rather than hard-coded so it tracks
      both themes from one line — 4% of the ink colour darkens white and lightens the dark
      surface, which is "slightly different" either way round. Deliberately not

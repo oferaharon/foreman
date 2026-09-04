@@ -46,9 +46,10 @@ button {
 
 /* ------------------------------------------------------------- grips --- */
 
-/* The three draggable dividers: the rail's right edge, the lead aside's left edge, and
-   the Tasks/Room split inside that aside. One class, because they are one behaviour —
-   see `resizer` in app.js.
+/* The five draggable dividers: the rail's right edge, the connections band's top edge,
+   the lead aside's left edge, the Tasks/Room split inside that aside, and the boundary
+   between two panes in split view. One class, because they are one behaviour — see
+   `resizer` in app.js.
 
    Each overhangs its own 1px rule by three pixels each way, so there is something to grab
    without the cursor having to land on a hairline, and each is positioned *over* the
@@ -120,6 +121,28 @@ button {
 
 /* The rail's own edge, overhanging its border. Measured: 315–322 against a 320px rail. */
 .rail-grip { right: -3px; }
+
+/* The split's boundary. The fifth divider and the first that hangs off nothing — the two
+   panes meet at a line the grid computes, so the grip is placed at that line from the same
+   variable the track is: `--pane-a` minus half the strip. `.rail-grip` and `.aside-grip`
+   can each sit on a border they overhang; this one has to be told where the border is.
+
+   On screen only while there are two panes, which is `.app.split` — the same show/hide
+   trade `.app.split .main` and `.app.has-links .conn-grip` already make, and what makes
+   the handle appear and disappear with the split for free. */
+.split-grip {
+  display: none;
+  left: calc(var(--pane-a) - 3px);
+}
+.app.split .split-grip { display: flex; }
+/* …and off again where the boundary has nowhere to go: a frame that cannot afford both
+   panes' floors with room to spare is pinned at half and half, and a handle on a line that
+   will not move reads as broken. `split-fixed` is set from the same predicate that decides
+   whether the stored width applies at all — see `splitFits` in app.js, and `.room-sized`
+   one aside over for why the signal is a class rather than a second variable. It is also
+   why this grip has no narrow-viewport rule beside the rail's: at phone width the frame is
+   the whole viewport, so this catches it, and it catches a fat rail on a wide window too. */
+:root.split-fixed .app.split .split-grip { display: none; }
 
 /* While dragging, the pointer is captured by the grip and every other cursor on the page
    would otherwise fight it — and a drag across a rail full of text selects all of it. */
@@ -1988,9 +2011,17 @@ body.row-dragging * { cursor: row-resize !important; }
   min-width: 0;
   min-height: 0;
   background: var(--ground);
+  /* The containing block for the split's own grip, which is the one child of this box
+     that is not a pane. Absolutely positioned, so it is not a grid item and the two
+     columns below never have to account for it. */
+  position: relative;
 }
 
-.app.split .main { grid-template-columns: 1fr 1fr; }
+/* `--pane-a` defaults to `50%` in `tokens.css`, so a reader who has dragged nothing gets
+   exactly the `1fr 1fr` the split shipped with — 50% of the frame, then the remainder.
+   With one pane the track list above has no `var()` in it at all, which is what makes a
+   stored width simply not apply until there is a boundary for it to be about. */
+.app.split .main { grid-template-columns: var(--pane-a) 1fr; }
 
 .pane {
   display: flex;

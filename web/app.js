@@ -158,16 +158,17 @@ const el = {
   connGrip: document.getElementById('connGrip'),
   connList: document.getElementById('connList'),
   main: document.getElementById('main'),
+  splitGrip: document.getElementById('splitGrip'),
 };
 
 /* ----------------------------------------------------------- resizers --- */
 
 /**
- * One draggable divider, three of them on screen.
+ * One draggable divider, five of them on screen.
  *
  * The rail's right edge shipped first (#4) and this is that code generalised, not a
- * second copy of it: the rail, the lead's aside and the Tasks/Room split inside it all
- * want the same five things — a floor, a live ceiling, a preference remembered in this
+ * second copy of it: the rail, the connections band, the lead's aside, the Tasks/Room
+ * split inside it and the boundary between two panes all want the same five things — a floor, a live ceiling, a preference remembered in this
  * browser, a double-click that forgets it, and a grip you can see. What differs is only
  * *which* number the pointer is asking for and where that number lands, so those two are
  * functions and everything else is shared.
@@ -375,6 +376,19 @@ resizer({
   // asking for.
   measure: (e) => e.clientX,
   apply: (rem) => setRootVar('--rail', rem),
+  /*
+   * The rail is the *other* thing that changes how wide the main area is, and until the
+   * split had a divider of its own nothing downstream had a ceiling that depended on it.
+   * Now one does: dragging the rail out narrows the frame the two panes divide, and the
+   * split's stored width is a number that was clamped against the frame it was dragged in.
+   *
+   * Measured before this line existed, on a scratch panel at a 1470px window: a split of
+   * 680/470 with the rail taken from 20rem to 40rem left the first pane holding its 680
+   * and **the second at 150px** — 9.4rem, well under its own floor, because its ceiling
+   * was never re-asked. A window resize has always gone through `applyResizers`; this is
+   * the same event by another route, so it takes the same door.
+   */
+  onMove: applyResizers,
 });
 
 /* -------------------------------------------- the connections band --- */
@@ -418,6 +432,133 @@ resizer({
   // distance back from that edge *is* the height being asked for.
   measure: (e) => (el.connCol?.getBoundingClientRect().bottom ?? window.innerHeight) - e.clientY,
   apply: (rem) => setRootVar('--conn-h', rem),
+});
+
+/* ------------------------------------------------ the split's boundary --- */
+
+/**
+ * How split view divides, dragged from the line the two panes meet at.
+ *
+ * The fifth divider, and the first with no edge of its own to hang off: the rail, the
+ * aside and the connections band each overhang a border something else already draws,
+ * while these two panes simply abut at a line the grid computes. So the grip is *placed*
+ * from the same `--pane-a` that sizes the first track — one number, two readers, no way
+ * for the handle and the boundary to disagree. Everything else is the shared `resizer`:
+ * rem in `localStorage`, a floor, a live ceiling, double-click to forget.
+ *
+ * **Only the first pane's width is stored.** The second takes `1fr` of what is left, which
+ * is what makes the default cost nothing — `--pane-a` is `50%` in `tokens.css`, so a
+ * reader who never drags gets the `1fr 1fr` the split has had since it shipped. It also
+ * means a window that grows hands the new width to the second pane rather than splitting
+ * it, which is the same answer `--rail` and `--aside` give: a dragged size is a size, not
+ * a ratio.
+ *
+ * It applies to **every** split — two sessions side by side is the older and commoner case
+ * — because nothing here knows or asks what a pane is holding.
+ */
+
+/**
+ * rem. The floor either pane keeps, and the bound a stored value has to clear.
+ *
+ * Chosen from the case with the least room to give, which is a **team lead**: its pane
+ * carries the room aside inside it, `.room-panel` holds a 15rem floor of its own, and the
+ * conversation is whatever is left after that. Measured on a scratch panel in the dark
+ * theme, a 1470px window, a lead beside an ordinary session — the aside is pinned to its
+ * own floor at 240px from a 32rem pane downwards, so the conversation is simply the pane
+ * less 240: **175px at a 26rem floor**, 207 at 28, 239 at 30, against 320px at plain half
+ * and half on that window.
+ *
+ * The number is a trade against travel, not only against legibility, and that is what
+ * settles it. It is symmetric, so twice it is what a frame must afford before the boundary
+ * can move at all: 26rem a side is 52rem, which a 1280px window with the default rail
+ * clears with 8rem of travel either way. The 30rem a lead would actually like leaves that
+ * same window **exactly none**, and it would also cap what this feature exists to give —
+ * on a 71.9rem frame it holds the first pane 96px short of where 26 lets it go.
+ *
+ * The thing it is deliberately *not* chosen from is the pane header, which stops fitting
+ * far higher — 30rem for an ordinary pane, 34rem for a lead's, measured the same way — and
+ * cannot be bought at any affordable floor. It overflows at plain half and half on any
+ * window under about 1400px today, with nothing dragged, so it is not this divider's to
+ * answer; see the report.
+ *
+ * What it deliberately does not do is vary by what the pane holds. A floor that jumped when
+ * a pane changed session would be a control that moves under the hand, and the recovery
+ * from a squeezed lead is already one double-click.
+ */
+const PANE_MIN = 26;
+/** rem. Only a bound on what a stored number may say — an ultrawide can afford a first
+ *  pane far wider than any other divider here, and the live ceiling is what actually
+ *  stops the drag. */
+const PANE_MAX = 160;
+
+/** The frame the two panes divide, in rem. Zero before the panel has been laid out, which
+ *  every caller here reads as "no answer yet" rather than as a width. */
+function mainRem() {
+  const width = el.main?.getBoundingClientRect().width ?? 0;
+  return width > 0 ? width / remPx() : 0;
+}
+
+/**
+ * Whether this frame has room for the boundary to move at all.
+ *
+ * **Strictly** more than both floors, because two floors that exactly fill the frame leave
+ * zero travel, and a divider that cannot move is the thing this predicate exists to catch.
+ *
+ * Two consequences, and they are the same fact from either end. The *preference is not
+ * applied*: the custom property comes off, `tokens.css` answers `50%`, and the number the
+ * reader chose is untouched and comes back when the window does — which is better than what
+ * the shared `bound()` would otherwise produce here, a first pane at its floor beside a
+ * second crushed under one, since a floor wins over a ceiling there. And the *grip is not
+ * drawn*: a handle on a boundary that will not move reads as broken, and this panel's
+ * standing preference is to show nothing rather than something wrong.
+ *
+ * That second half is why there is no narrow-viewport rule for this grip beside the rail's
+ * and the band's. At phone width the rail is hidden and the frame *is* the viewport, so a
+ * frame over 52rem is unreachable there and this predicate already covers it — while a
+ * media query would miss the case it does not know about, a fat rail on a wide window.
+ * One spelling, and the more accurate one.
+ *
+ * A frame of zero is a panel that has not been laid out yet, not a narrow one: the stored
+ * width stands until something measurable happens. Same fallback the connections band's
+ * ceiling makes for the same reason.
+ */
+const splitFits = () => {
+  const frame = mainRem();
+  return frame === 0 || frame > 2 * PANE_MIN;
+};
+
+resizer({
+  handle: el.splitGrip,
+  axis: 'x',
+  storageKey: 'foreman.paneWidth',
+  min: PANE_MIN,
+  max: PANE_MAX,
+  // Everything the frame has, less the floor the second pane keeps. Before the panel is
+  // laid out there is no frame to measure and the preference's own `max` is a better
+  // answer than a negative one.
+  ceiling: () => (mainRem() > 0 ? mainRem() - PANE_MIN : PANE_MAX),
+  // The first pane starts at the frame's left edge, so the pointer's distance from that
+  // edge *is* the width it is asking for. The frame's own left, not the window's: the rail
+  // is to the left of it and is itself draggable.
+  measure: (e) => e.clientX - (el.main?.getBoundingClientRect().left ?? 0),
+  apply: (rem) => {
+    const fits = splitFits();
+    // CSS cannot ask whether a frame is wide enough to bother with, and a second variable
+    // saying so would be a second source of truth about one fact — `.room-sized` on the
+    // root, one divider over, for exactly the same reason.
+    document.documentElement.classList.toggle('split-fixed', !fits);
+    setRootVar('--pane-a', fits ? rem : null);
+  },
+  // Both panes change width here, so anything inside one that was measured at the old
+  // width is now stale: the Tasks block's five-row cap is a height in pixels taken from
+  // rows that wrap differently in a narrower aside, and a room pinned to its newest line
+  // drifts off the bottom as its own text rewraps. Not in `apply`, which also runs at
+  // module load before there is a pane to ask — and a window resize has never re-taken
+  // either of these, which is unchanged by this divider existing.
+  onMove: () => {
+    recapTaskLists();
+    pinRooms();
+  },
 });
 
 /* ------------------------------------------------- the lead's two edges --- */
