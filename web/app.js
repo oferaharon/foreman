@@ -1,10 +1,11 @@
 import { marked } from '/vendor/marked.js';
 import { isTrustGate, buildTrustNotice } from './trust-gate.js';
 import { step, alertText } from './notify.js';
-// The ghost-text auto-send flag. In `web/prefs.js` rather than here because the phone's
-// lead screen reads the same key, and two spellings of one setting is a setting that
-// appears to work — see that file's header.
-import { ghostSend } from './prefs.js';
+// The ghost-text auto-send flag, the TASKS filter, and the one definition of what that
+// filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
+// the same keys, and two spellings of one setting is a setting that appears to work — see
+// that file's header.
+import { ghostSend, hideFinished, isFinishedState } from './prefs.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -650,6 +651,23 @@ function recapTaskLists() {
  */
 function pinRooms() {
   for (const pane of panes) pane.pinRoom?.();
+}
+
+/**
+ * Repaint every lead aside's TASKS block, for a change that is not about one pane's data.
+ *
+ * There is exactly one such change: the `hide finished` filter, which lives in this
+ * browser rather than in a pane. Split view can hold two lead asides — two different
+ * repos, even — and the filter is one answer for the browser, so pressing it in one aside
+ * has to reach the other or the two disagree about a fact neither of them owns.
+ *
+ * Same shape as `recapTaskLists` and `pinRooms` above, and asking each pane rather than
+ * walking `.team-tasks` nodes for the same reason `pinRooms` does: the rows have to be
+ * rebuilt from the pane's own task list, and the repaint has to go through `renderTasks`
+ * so the scroll hold, the confirm disarm, the cap and the re-pin all still happen.
+ */
+function renderTaskLists() {
+  for (const pane of panes) pane.renderTasks?.();
 }
 
 /* --------------------------------------------------------- rail footer --- */
@@ -4277,6 +4295,12 @@ function createPane(slot, host) {
     tasksSig: '',
     tasksAt: 0,
     tasksBusy: false,
+    // The TASKS heading's two controls, and what the second of them has to say. The count
+    // is written by `renderTasks` — the only place that knows it, because it is the number
+    // of rows that paint decided not to draw — and read by `renderTasksHead`.
+    tasksToggleEl: null,
+    tasksNoteEl: null,
+    tasksHidden: 0,
     config: null,
     // Is the aside's SETTINGS block open? `null` means "the config hasn't said yet" and
     // draws closed — closed is the default, so there is no flash of a block that folds
@@ -6054,6 +6078,84 @@ function createPane(slot, host) {
   };
   const CLOSED_RANK = 4;
 
+  /**
+   * The TASKS heading, and the one control on it.
+   *
+   * It used to be a bare text line from `buildRoomPanel`'s `section()` helper, with
+   * nothing on it at all. `buildSettingsHead` two functions up is the worked example of a
+   * heading that holds a control and the shape is copied from it — label on the left, the
+   * control at the right edge, negative margins so the button does not make this heading
+   * taller than `room` two blocks below it.
+   *
+   * **A pill button, not a switch, and that was decided rather than picked.** In this
+   * panel a sliding switch means a stored *team* setting that changes what the panel does
+   * — the autonomy dials in `team-toggle-row`, written to `team.json`. This changes only
+   * what you are looking at, in this browser. The rail header's `recent` is already the
+   * control that means "filter this list", so this is that control: the same
+   * `aria-pressed` button, plain outline off, accent outline and `--accent-soft` on.
+   *
+   * **The label says `finished`, never `done`.** It hides three states and two of them are
+   * not `done` — a failed task swept away by a control saying "done" would be the control
+   * lying about itself, which is the same rule as preferring to show nothing over showing
+   * something wrong. No state named `finished` exists; see `CLOSED_TASK_STATES`.
+   */
+  function buildTasksHead() {
+    const head = document.createElement('div');
+    head.className = 'room-head has-controls';
+    head.title = 'Every task this team holds — stored state joined with what the pane shows now.';
+
+    const label = document.createElement('span');
+    label.className = 'room-head-label';
+    label.textContent = 'tasks';
+
+    // What the filter is holding back, in the heading rather than down in the list: the
+    // list cannot say it, because with the filter on the rows it would say it about are
+    // the rows that are not there. Empty while the filter is off, and empty while it is on
+    // and hiding nothing — a `0 hidden` is noise about a non-event.
+    const note = document.createElement('span');
+    note.className = 'room-head-note';
+    roomView.tasksNoteEl = note;
+
+    const btn = document.createElement('button');
+    btn.className = 'room-head-toggle';
+    btn.textContent = 'hide finished';
+    btn.onclick = (e) => {
+      // `buildSettingsHead`'s line, for its reason: this heading carries no click handler
+      // today, and this is what keeps that a free choice rather than something the button
+      // silently depends on.
+      e.stopPropagation();
+      hideFinished.set(!hideFinished.on);
+      // Every aside, not this one: the filter is one answer for the browser and split view
+      // can have two Tasks blocks on screen. See `renderTaskLists`.
+      renderTaskLists();
+    };
+    roomView.tasksToggleEl = btn;
+
+    // No `onclick` on the heading itself. SETTINGS has one because that whole line stands
+    // for the block it folds; this line stands for the task list, and a press anywhere on
+    // the word `tasks` quietly hiding rows would be a surprise nobody asked for.
+    head.append(label, note, btn);
+    return head;
+  }
+
+  /** Paint the heading's control off the filter, and its note off the last paint's count. */
+  function renderTasksHead() {
+    const btn = roomView.tasksToggleEl;
+    if (!btn) return;
+    const on = hideFinished.on;
+    btn.setAttribute('aria-pressed', String(on));
+    // Both halves name the three states, because that is the fact the two-word label
+    // cannot carry — and both say `review` stays, which is the one reading of "finished"
+    // that would be wrong.
+    btn.title = on
+      ? 'Showing open tasks only. Press to bring back done, failed and abandoned.'
+      : 'Hide the tasks nobody is waiting on — done, failed and abandoned. Anything in review stays.';
+    const note = roomView.tasksNoteEl;
+    if (!note) return;
+    const n = roomView.tasksHidden;
+    note.textContent = on && n > 0 ? `${n} hidden` : '';
+  }
+
   function renderTasks() {
     const list = roomView.tasksEl;
     if (!list || !list.isConnected) return;
@@ -6065,6 +6167,11 @@ function createPane(slot, host) {
     disarmConfirm(list);
     list.replaceChildren();
     if (!roomView.tasks.length) {
+      // A team with no tasks at all. Note this branch is reached whether the filter is on
+      // or off, and says the same thing either way, which is correct: there is nothing
+      // being held back, so `tasksHidden` is zeroed and the heading's note goes quiet.
+      roomView.tasksHidden = 0;
+      renderTasksHead();
       const quiet = document.createElement('div');
       quiet.className = 'room-quiet';
       quiet.textContent = 'No tasks yet. The lead dispatches them.';
@@ -6081,8 +6188,39 @@ function createPane(slot, host) {
       // for a record written before it was, not a real ordering.
       return ra - rb || (b.updatedAt || 0) - (a.updatedAt || 0);
     });
+    /*
+     * The filter, and note *what* it reads: `taskChipState`, the same derived word the
+     * chip on the row draws and `TASK_RANK` sorts on — never the stored `t.state`. The
+     * rule is then sayable in one line, which is the point: a row is hidden exactly when
+     * the word on its own chip is `done`, `failed` or `abandoned`. `isFinishedState` in
+     * `web/prefs.js` is that set and carries the reasoning, including what happens to the
+     * two derived states (`stuck`, `blocked`) and to a state nobody has added yet.
+     */
+    const shown = hideFinished.on ? rows.filter((t) => !isFinishedState(taskChipState(t))) : rows;
+    roomView.tasksHidden = rows.length - shown.length;
+    renderTasksHead();
+    if (!shown.length) {
+      /*
+       * Emptied by the filter, which with all three closed states hidden is the *common*
+       * case rather than an edge one: a long-running team whose work is finished lands
+       * here every time. It must not read like the branch above — a team that has never
+       * dispatched anything and a team whose every task is closed are different facts, and
+       * a list that showed the same sentence for both would look broken exactly when it is
+       * working.
+       */
+      const n = roomView.tasksHidden;
+      const quiet = document.createElement('div');
+      quiet.className = 'room-quiet';
+      quiet.textContent =
+        `Nothing open. ${n} finished ${n === 1 ? 'task is' : 'tasks are'} hidden — ` +
+        'turn “hide finished” off to see them.';
+      list.append(quiet);
+      capTaskList(list, []);
+      pinRoom(); // this box just changed height; the room below it moved with it
+      return;
+    }
     const nodes = [];
-    for (const t of rows) {
+    for (const t of shown) {
       const chipState = taskChipState(t);
       const row = document.createElement('div');
       row.className = 'team-task';
@@ -6643,6 +6781,12 @@ function createPane(slot, host) {
     applySettingsOpen();
     buildSettings(settings);
 
+    // The TASKS heading is no longer a `section()` line: it carries the `hide finished`
+    // filter. Built here, painted from renderMain like everything else in this aside —
+    // `renderTasks` sets the button's own state on every paint, and the first of those
+    // arrives right after the mount.
+    const tasksHead = buildTasksHead();
+
     const tasksList = document.createElement('div');
     tasksList.className = 'team-tasks';
     roomView.tasksEl = tasksList;
@@ -6837,7 +6981,7 @@ function createPane(slot, host) {
       settingsFold,
       connectHead,
       connectFold,
-      section('tasks', 'Every task this team holds — stored state joined with what the pane shows now.'),
+      tasksHead,
       tasksList,
       tasksGrip,
       roomHead,
@@ -10568,6 +10712,10 @@ function createPane(slot, host) {
      * inside. Exposed because the thing that changes that height is a *resizer*, which
      * lives outside every pane — see `pinRooms`. */
     pinRoom,
+    /* Repaint this pane's TASKS block. Exposed for the same reason `pinRoom` is: the thing
+     * that changes it — the `hide finished` filter — is one answer for the browser and
+     * lives outside every pane. See `renderTaskLists`. */
+    renderTasks,
     /*
      * The session this pane is showing, and **null while it is showing a thread** — said
      * explicitly rather than leaning on `view.selected` happening to be null. Three things
