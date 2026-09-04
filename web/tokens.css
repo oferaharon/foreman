@@ -63,10 +63,12 @@
      the three: 8.28 / 7.54 / 8.70, where `.is-open`'s own accent edge measures 6.36
      against surface. Same "three signals rather than one" argument the selected row makes.
 
-     The connections column's own width sits here for the reason `--rail` and `--aside` do:
-     it is the one place the default is spelled. */
+     The connections band's own height sits here for the reason `--rail` and `--aside` do:
+     a reset *removes* the custom property, so this is the one place the default is
+     spelled. 13rem is about two cards — enough to read the pair and the last line without
+     the band taking a third of the rail before anybody has dragged anything. */
   --row-linked: color-mix(in srgb, var(--mode-edits) 16%, var(--surface));
-  --conn: 15rem;
+  --conn-h: 13rem;
 }
 
 @media (prefers-color-scheme: dark) {

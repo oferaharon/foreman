@@ -55,6 +55,40 @@
         </div>
         <div class="rail-list" id="railList"></div>
 
+        <!--
+          The connections: one card per open link, at the bottom of the rail under the
+          session list. It was a column of its own for one day; the maintainer moved it
+          here — same content, new home.
+
+          A **sibling** of `.rail-list`, never a block inside it, for the reason the footer
+          below says in its own words: an open group's tint is tiled from three full-width
+          rows *in that list*, and anything joining that flow has to answer to it. Out here
+          it is simply another band in the rail's own flex column, and the tint has nothing
+          to know about.
+
+          In the markup always, on screen only while at least one open link exists —
+          `.app.has-links` is what shows it, the same show/hide trade `.app.split .main`
+          already makes. With no links the rail is what it was before this feature. The
+          narrow query hides the whole rail, so this comes for free there.
+
+          The grip is the Tasks/Room divider's twin, down to the negative margins: a row
+          divider between two blocks that simply meet, with nothing to hang it off. It is
+          a sibling above the block rather than a child of it, because that is where the
+          edge it drags actually is.
+        -->
+        <div
+          class="pane-grip grip-row conn-grip"
+          id="connGrip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Connections height"
+          title="Drag to set how much of the rail the connections take · double-click to reset"
+        ></div>
+        <aside class="rail-conn" id="connCol" aria-label="Connections">
+          <div class="conn-head">connections</div>
+          <div class="conn-list" id="connList"></div>
+        </aside>
+
         <!-- A sibling of the list, never inside it: an open group's tint is tiled from
              three full-width rows in `.rail-list`, and anything joining that flow would
              have to answer to it. Out here the footer is just the last thing in the
@@ -85,22 +119,6 @@
           aria-label="Rail width"
           title="Drag to set the rail's width · double-click to reset"
         ></div>
-      </aside>
-
-      <!--
-        The connections column. A **sibling** of `.rail`, never a block inside
-        `.rail-list`: an open group's tint in that list is tiled from three full-width
-        rows, and anything joining that flow would have to answer to it.
-
-        It is in the markup always and on screen only while at least one open link exists
-        — `.app.has-links` is what gives the grid its middle column, the same show/hide
-        trade `.app.split .main` already makes. With no links the panel is what it was
-        before this feature. The narrow query hides it too, or a phone-width window gets a
-        column and no rail.
-      -->
-      <aside class="conn-col" id="connCol" aria-label="Connections">
-        <div class="conn-head">connections</div>
-        <div class="conn-list" id="connList"></div>
       </aside>
 
       <main class="main" id="main"></main>
