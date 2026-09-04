@@ -21,6 +21,24 @@ marked.setOptions({ gfm: true, breaks: true });
 /** Server-driven filter + brief=0 already did the work; nothing here re-filters. */
 const POLL_MS = 3000;
 
+/*
+ * …and that includes the desktop's `hide finished` filter, which this screen deliberately
+ * does **not** read. Said here because it is one `localStorage` key on one origin (`/` and
+ * `/m/` are the same one), so a future reader will find the key set and this list showing
+ * everything, and should know that is the answer rather than a miss.
+ *
+ * The filter exists because the desktop's Tasks block trades height with the room in a
+ * fixed aside — a growing list pushes the room off the bottom, which is why `capTaskList`
+ * exists over there. This tab is its own full screen with nothing under it, as the
+ * comment above `.m-tk-row` in `tasks.css` already says, so the problem is not here to
+ * solve. And the two halves have to arrive together: a filter with no control on this
+ * screen would be a list silently short with no way to lengthen it — which is exactly the
+ * "looks broken" the desktop's own empty state was written to avoid.
+ *
+ * The key and the set live in `web/prefs.js` for the day this tab grows a header to hang
+ * the control on. One spelling either way.
+ */
+
 /** Stored state joined with the live pane — stuck and blocked outrank the record. Copied
  *  from `web/app.js`'s `taskChipState`, not imported — items here share no render code
  *  with the desktop. */
