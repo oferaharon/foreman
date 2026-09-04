@@ -1311,10 +1311,26 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 .room-panel { position: relative; } /* the "new below" pill hangs off the room's bottom */
+
+/* Nothing in this column may leave it silently.
+ *
+ * Measured on a scratch panel, 879px viewport, both folds open: the room was squeezed to
+ * 16px and pushed 178px *below* this panel's own bottom edge — fifteen entries in it, none
+ * on screen, and no scrollbar anywhere to say so. The folds are `flex: 0 0 auto` and could
+ * not give, `.room-list` was `min-height: 0` and gave everything. The floor below is the
+ * first half of the answer; this is the second, and it is the honest one: when the floors
+ * genuinely do not fit, the aside scrolls and you can see that it does. */
+.room-panel { overflow-y: auto; }
+
 .room-list {
-  /* The room takes whatever the tasks and settings sections above it leave. */
+  /* The room takes whatever the folds and the tasks block above it leave — until the
+     divider is dragged, when it holds the height it was given and the tasks block becomes
+     the one that gives way. `.room-sized` on the root is what switches the two; see the
+     room's resizer in app.js for why the number lives on this block and not that one. */
   flex: 1;
-  min-height: 0;
+  /* The floor, and it is load-bearing rather than tidy: this is the only block in the aside
+     that had none, which is how it came to be evicted from the panel entirely. */
+  min-height: 8rem;
   overflow-y: auto;
   padding: 0.5rem 0.8rem;
   display: flex;
@@ -1563,12 +1579,13 @@ body.row-dragging * { cursor: row-resize !important; }
    two). The value here is only the fallback for a block that was not laid out. */
 .team-tasks {
   flex: none;
+  min-height: 0;
   /* Dragged, or not. With no preference this is `auto` and the five-row cut above is what
      bounds the block; with one, the height is exactly what was dragged and `capTaskList`
      stands down. A height rather than a max-height on purpose: the divider has to follow
      the pointer even on a team with three tasks, where there is no sixth row to reveal.
      The rows do not stretch into it — they are ordinary blocks in a column that scrolls. */
-  height: var(--tasks-h, auto);
+  height: auto;
   overflow-y: auto;
   overscroll-behavior: contain; /* scrolling out of this box must not drag the room */
   padding: 0.5rem 0.7rem;
@@ -1579,6 +1596,16 @@ body.row-dragging * { cursor: row-resize !important; }
   font-size: 0.82rem;
 }
 .team-tasks.is-capped { max-height: 12rem; }
+
+/* The dragged mode. The room holds the height the divider gave it; the tasks block above
+   becomes the block that absorbs a fold opening, a window resize or a task arriving, and
+   scrolls inside itself as it already could. `capTaskList` takes its five-row cut off in
+   the same breath — the two are answers to one question and only one may be in force. */
+:root.room-sized .room-list {
+  flex: 0 0 auto;
+  height: var(--room-h);
+}
+:root.room-sized .team-tasks { flex: 1 1 auto; }
 /* Every row opens its brief, so it needs to look pressable. The panel's existing idiom,
    not a new one — the same `--surface-sunk` tint `.session-row`, `.menu-item`,
    `.complete-row` and `.perm-opt` all use. The negative margin is horizontal *only*: the

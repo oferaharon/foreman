@@ -385,8 +385,8 @@ resizer({
  * The fourth divider and the third mechanism it deliberately is not: same `resizer`, same
  * rem-in-`localStorage`, same double-click-to-forget, same "the preference and the applied
  * size are two numbers" — the band is the Tasks/Room split turned to face the rail, and
- * `--conn-h` is its `--tasks-h` with a default, because there is no five-row cut here to
- * stand in for one.
+ * `--conn-h` is the room's `--room-h` with a default, because there is no five-row cut here
+ * to stand in for one.
  */
 
 /** rem. `CONN_MAX` also bounds what a stored value may say; the live ceiling is below. */
@@ -429,12 +429,14 @@ const ASIDE_MIN = 15;
 const ASIDE_MAX = 40;
 const LEAD_LEFT_MIN = 20;
 
-/** rem. The Tasks block's floor and the room's, either side of the split inside the
- *  aside. `TASKS_MAX` bounds a stored value; what the panel can actually afford is
- *  measured off it at drag time. */
+/**
+ * rem. Either side of the one internal split in the aside — see `the room's own height`
+ * below for which block now holds the dragged number and why. `ROOM_MAX` bounds a stored
+ * value; what the panel can actually afford is measured off it at drag time.
+ */
 const TASKS_MIN = 3;
-const TASKS_MAX = 40;
 const ROOM_MIN = 8;
+const ROOM_MAX = 60;
 
 /** How many task rows the block shows before it stops growing and scrolls. */
 const TASKS_VISIBLE = 5;
@@ -456,11 +458,13 @@ const TASKS_VISIBLE = 5;
  */
 function capTaskList(list, nodes) {
   list.style.maxHeight = '';
-  // A dragged Tasks/Room divider is an explicit answer to the question this cap is
-  // guessing at, so it wins outright: the block's height comes from `--tasks-h` and the
-  // five-row cut is not taken at all. Leaving the cut on as well would clip a block
-  // somebody had just deliberately made taller.
-  if (readPref('foreman.tasksHeight', TASKS_MIN, TASKS_MAX) != null) {
+  // A dragged divider is an explicit answer to the question this cap is guessing at, so it
+  // wins outright: the room holds the height it was given, the Tasks block takes what is
+  // left, and the five-row cut is not taken at all. Leaving the cut on as well would pin
+  // the block at five rows and leave dead space between it and a room somebody had just
+  // deliberately made shorter. The key is the *room's* now — the number moved blocks when
+  // the divider became the room's grip, and this is the one other place that reads it.
+  if (readPref('foreman.roomHeight', ROOM_MIN, ROOM_MAX) != null) {
     list.classList.remove('is-capped');
     return;
   }
@@ -484,12 +488,27 @@ function capTaskList(list, nodes) {
  * is in force the other must not be left on the element — and the cut can only be
  * *re-taken* from the rows, which is why this reads them back off the DOM rather than
  * asking each pane to repaint. Split view can hold two lead asides and a reset in one of
- * them is a reset in both, `--tasks-h` being one number for the browser.
+ * them is a reset in both, `--room-h` being one number for the browser.
  */
 function recapTaskLists() {
   for (const box of document.querySelectorAll('.team-tasks')) {
     capTaskList(box, [...box.querySelectorAll(':scope > .team-task')]);
   }
+}
+
+/**
+ * Re-pin every room on the page, for a height change that was not a drag.
+ *
+ * `pinRoom` is per pane because `follow` is per pane — it is an *intention*, flipped only
+ * by a real scroll, and it is not readable off the DOM. So this asks each pane rather than
+ * walking `.room-list` nodes and guessing, which would scroll a room the reader had
+ * deliberately scrolled up in.
+ *
+ * Split view can hold two lead asides and one number sizes both, which is the same reason
+ * `recapTaskLists` above exists and reads the page rather than one pane.
+ */
+function pinRooms() {
+  for (const pane of panes) pane.pinRoom?.();
 }
 
 /* --------------------------------------------------------- rail footer --- */
@@ -4070,6 +4089,13 @@ function createPane(slot, host) {
     entries: [],
     cursor: 0,
     listEl: null,
+    /* The room list's height when `pinRoom` last ran. The scroll handler compares against
+     * it to tell a resize's own scroll event from a reader's — see there. `null` until the
+     * box has been laid out, which never equals a real `clientHeight`, so the very first
+     * event after mount is treated as the layout's. That is the correct reading: the first
+     * thing that happens to this box is the tasks block and the settings fold sizing
+     * themselves after their own fetches. */
+    followH: null,
     tasksEl: null,
     tasks: [],
     tasksSig: '',
@@ -5980,6 +6006,23 @@ function createPane(slot, host) {
     // as "the user scrolled up" and stops following forever. The scroll handler is the
     // only thing that flips it.
     list.addEventListener('scroll', () => {
+      /*
+       * A scroll event that arrives because the *box* changed height is the layout moving,
+       * not the reader — Chrome emits one when a resize clamps `scrollTop`, and it is
+       * indistinguishable from a real scroll by anything except the height. So a height
+       * change swallows the one event it caused, and following survives it.
+       *
+       * The comment above says only a real scroll may flip this. That was already the
+       * intent and this is what makes it true: the room now has a grip of its own, and
+       * without this, dragging it *smaller* left the room silently not following — the
+       * shrink pushes the reader away from the bottom, the event fires, and `pinRoom`
+       * afterwards returns early because `follow` had just been set false. Measured: the
+       * grow drag ended pinned, the shrink drag did not.
+       */
+      if (list.clientHeight !== roomView.followH) {
+        roomView.followH = list.clientHeight;
+        return;
+      }
       roomView.follow = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
       if (roomView.follow) roomView.unseen = 0; // scrolled back down: you have seen them
       updateRoomHint();
@@ -6007,7 +6050,10 @@ function createPane(slot, host) {
     const asideGrip = paneGrip('x', 'Panel width', "Drag to set the panel's width · double-click to reset");
     asideGrip.classList.add('aside-grip');
     const roomHead = section('room', 'Workers and the lead coordinate here. View only — talk to the lead in the composer.');
-    const tasksGrip = paneGrip('y', 'Tasks and room split', 'Drag to split tasks and room · double-click to reset');
+    // The room's own edge. It is still the Tasks/Room divider — one boundary, one control
+    // — but it sizes the *room* now, so it says so: the reader drags the thing they want
+    // bigger, not the thing above it.
+    const tasksGrip = paneGrip('y', 'Room height', "Drag to set the room's height · double-click to reset");
     tasksGrip.classList.add('tasks-grip');
 
     resizer({
@@ -6029,29 +6075,73 @@ function createPane(slot, host) {
       onMove: pinRoom,
     });
 
+    /*
+     * The room's own height — the third thing this task was asked for, and it is this
+     * divider rather than a new one.
+     *
+     * **Which grip owns which edge.** `asideGrip` owns the aside's left edge and answers
+     * for its width. This one owns the aside's *only* internal horizontal boundary. The
+     * room's other edge is the panel's own bottom, with nothing under it to trade against,
+     * so there is no second edge for a third grip to sit on — two controls on one line is
+     * exactly the fight this must not pick. What changed is not where it is but **which
+     * block holds the number**: it used to size the Tasks block and let the room be
+     * whatever was left over, which is why the room had no size of its own.
+     *
+     * That mattered for a reason worse than tidiness, measured on a scratch panel at an
+     * 879px viewport with both folds open: `.room-list` is the one block in the aside with
+     * no floor, so it was squeezed to **16px and pushed 178px below the panel's own bottom
+     * edge** — fifteen entries in it, none of them on screen, and this divider could not
+     * get them back because the space had gone to the folds, not to Tasks. The floor in
+     * `.room-list` and the panel's own scroll are the other half of this fix.
+     *
+     * **Two modes, which is how it composes with the five-row Tasks cap.** Nothing dragged:
+     * Tasks is content-height under its cap and the room takes the remainder — byte for
+     * byte the layout that shipped. Dragged: the room holds the height you gave it, Tasks
+     * becomes the block that absorbs a fold opening or a window resize, and its cap stands
+     * down. That is the rule `capTaskList` already applied, keyed on the room's preference
+     * now that the room is what the divider sizes.
+     *
+     * `--tasks-h` is gone rather than left unread: two spellings of one split is how they
+     * drift. A browser holding the old `foreman.tasksHeight` is simply not consulted for
+     * it any more, so that aside opens on the default split once — a preference re-dragged
+     * in a second, and the honest alternative to reinterpreting a number that used to mean
+     * something else.
+     */
     resizer({
       handle: tasksGrip,
       axis: 'y',
-      storageKey: 'foreman.tasksHeight',
-      min: TASKS_MIN,
-      max: TASKS_MAX,
-      // What is left under the Tasks block once the room's own floor and the `room`
-      // heading are taken out of it. Measured off the panel rather than declared: the
-      // settings fold above can be open or shut, and the heading is one line of whatever
-      // the type scale says today.
+      storageKey: 'foreman.roomHeight',
+      min: ROOM_MIN,
+      max: ROOM_MAX,
+      // What the room can have once the Tasks block keeps its own floor. Measured off the
+      // panel rather than declared: the folds above can be open or shut, and every heading
+      // is one line of whatever the type scale says today.
       ceiling: () => {
         const bottom = panel.getBoundingClientRect().bottom;
         const top = tasksList.getBoundingClientRect().top;
         const head = roomHead.getBoundingClientRect().height;
         // Before the aside is laid out every rect is zero; the preference's own `max`
         // is a better answer than a negative one.
-        if (bottom <= top) return TASKS_MAX;
-        return (bottom - top - head) / remPx() - ROOM_MIN;
+        if (bottom <= top) return ROOM_MAX;
+        return (bottom - top - head) / remPx() - TASKS_MIN;
       },
-      measure: (e) => e.clientY - tasksList.getBoundingClientRect().top,
+      // The room's bottom is the panel's bottom, so it grows upward and the pointer's
+      // distance back from that edge *is* the height being asked for — the connections
+      // band's measure, one column over.
+      measure: (e) => panel.getBoundingClientRect().bottom - e.clientY,
       apply: (rem) => {
-        setRootVar('--tasks-h', rem);
+        // The class is what switches the two modes above; CSS cannot ask whether a custom
+        // property is set, and a second variable saying so would be a second source of
+        // truth about one fact.
+        document.documentElement.classList.toggle('room-sized', rem != null);
+        setRootVar('--room-h', rem);
         recapTaskLists();
+        // Every path into here is a height change on the box the reader is scrolled inside
+        // — a drag, a window resize through `applyResizers`, a double-click reset — and the
+        // room's `follow` is an intention with no scroll event behind it. Pinning only in
+        // `onMove` would cover the drag and leave the other two hundreds of pixels short of
+        // the newest line. This is the trap that box is named for.
+        pinRooms();
       },
       onMove: pinRoom,
     });
@@ -6165,7 +6255,12 @@ function createPane(slot, host) {
    */
   function pinRoom() {
     const list = roomView.listEl;
-    if (!list || !list.isConnected || roomView.follow === false) return;
+    if (!list || !list.isConnected) return;
+    // The height this pin was taken at, so the scroll handler above can tell a resize's
+    // own event from a reader's. Recorded even when we are not following: the box still
+    // changed size, and the next event is still the layout's rather than theirs.
+    roomView.followH = list.clientHeight;
+    if (roomView.follow === false) return;
     list.scrollTop = list.scrollHeight;
   }
 
@@ -9735,6 +9830,10 @@ function createPane(slot, host) {
     receive,
     renderHead,
     renderStream,
+    /* Re-pin this pane's room after something changed the height of the box it is scrolled
+     * inside. Exposed because the thing that changes that height is a *resizer*, which
+     * lives outside every pane — see `pinRooms`. */
+    pinRoom,
     /*
      * The session this pane is showing, and **null while it is showing a thread** — said
      * explicitly rather than leaning on `view.selected` happening to be null. Three things
