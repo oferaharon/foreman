@@ -1300,7 +1300,54 @@ body.row-dragging * { cursor: row-resize !important; }
   cursor: pointer;
 }
 .room-head.is-foldable:hover { color: var(--ink); }
+/* The other header that carries a control: TASKS, and its `hide finished` filter. Same
+   line as `is-foldable` minus the two things that are about folding — no pointer cursor
+   and no hover tint, because this heading is not itself a control. */
+.room-head.has-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
 .room-head-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* What the filter is holding back. Pushed to the right so it sits against the control it
+   is about, and `flex: none` so a two-digit count never gets ellipsised into a lie. Empty
+   most of the time, which costs nothing: an empty span still carries the `auto` margin
+   that puts the button at the edge. */
+.room-head-note {
+  margin-left: auto;
+  flex: none;
+  color: var(--ink-faint);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.68rem;
+}
+/* The rail header's `recent` control, in this heading: the panel's one shape for "filter
+   this list". Same outline, same accent-when-pressed. The negative vertical margins are
+   `.room-head-gear`'s trick and are load-bearing for the same reason — without them this
+   heading stands a few pixels taller than `room` two blocks below it, and the three
+   headings in this aside have to line up. */
+.room-head-toggle {
+  flex: none;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--ink-muted);
+  background: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 0.2rem 0.4rem;
+  margin: -0.25rem -0.2rem -0.25rem 0;
+  cursor: pointer;
+}
+.room-head-toggle:hover { color: var(--accent); border-color: var(--accent); }
+.room-head-toggle[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
 /* The drawing is `1em` of the button's own font-size, so 1.1rem here is 17.6px of gear —
    up from a 0.82rem font glyph that read as a speck. The *box* is 1.5rem square whatever
    the glyph does, which is the hit target; the negative margins keep that box from
