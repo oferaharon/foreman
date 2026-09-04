@@ -912,6 +912,22 @@ const linkNamedFor = (link) => (link.label ? `${link.id}, “${link.label}”` :
 /** One open link by id, or null. Closed links are not in the roster frame at all. */
 const linkById = (id) => state.links.find((l) => l.id === id) || null;
 
+/**
+ * What a new link costs, in the words the server already uses.
+ *
+ * `POST /api/team/links` composes this same sentence for both `decisions.md` blocks and
+ * both room lines, and plan decision 3 is that the panel does **not** try to detect the
+ * relaunch — a stamped tools-version compared at run time would be a second source of
+ * truth about what a running process holds. So every surface that announces a link says
+ * it instead, and the create form is the first one the maintainer reads. Spelled once
+ * here and used twice (the form's fine print, and the notice after the press) rather
+ * than reworded per surface: the whole point of the rule is that it reads the same
+ * everywhere it appears.
+ */
+const RELAUNCH_NOTE =
+  'Both leads need one relaunch before they can send on it: a lead’s tools and rules ' +
+  'are written into its launch flags.';
+
 /** Every open link this session's project is an endpoint of. Not a lead: not linked. */
 function linksForSession(s) {
   if (!s?.isLead || !s.paneCwd) return [];
@@ -4052,6 +4068,29 @@ function createPane(slot, host) {
     // The room learned the same lesson with `expanded`: state that has to survive a paint
     // cannot live on a node the paint throws away. Keyed by task id, `'*'` for the batch.
     mergeErrors: new Map(), // id | '*' -> {text, at}
+
+    /*
+     * The `connect` block — the one control that makes a link, and everything it holds.
+     *
+     * All of it lives here rather than on the nodes, and it is all cleared in `syncRoom`,
+     * for the reason the settings block above learned first: a half-filled form is *this
+     * project's* half-filled form, and a select still holding another lead's peer when you
+     * switch panes is a control that lies about what it is about to do. It is also what
+     * makes the block redrawable — `renderConnect` replaces its children, so anything kept
+     * only in the DOM would be thrown away by the fetch that lands a beat after the fold
+     * opens (`expanded`'s lesson, one block up).
+     */
+    connectOpen: false, // is the fold open? closed on arrival — the room is what you came to read
+    connectTeams: null, // `GET /api/teams`' last answer; null means "not asked yet"
+    connectListBusy: false, // that GET, in flight
+    connectBusy: false, // the POST, in flight
+    connectSel: '', // the chosen peer's **repo path**, never its name — two can share a name
+    connectLabel: '', // the optional why, capped at 80 by the field and refused by the server
+    connectErr: '', // the last refusal, rendered in the block that was pressed
+    connectFoldEl: null,
+    connectFormEl: null,
+    connectAddEl: null,
+    connectPinTimer: null,
   };
 
   /** How long a locally-pressed row stays locked before the server's answer is the only one. */
@@ -4081,6 +4120,21 @@ function createPane(slot, host) {
     roomView.mergeAt = 0;
     roomView.mergeSent.clear(); // another team's task ids mean nothing here either
     roomView.mergeErrors.clear();
+    // The connect form is per project in every field it has: the peer, the reason, and the
+    // refusal that named one of them. Carried across, it would offer to link the project
+    // you just left.
+    roomView.connectOpen = false;
+    roomView.connectTeams = null;
+    roomView.connectSel = '';
+    roomView.connectLabel = '';
+    roomView.connectErr = '';
+    // The two in-flight flags go too, and it is the busy one that matters: a POST fired for
+    // the project you just left would otherwise leave the *next* project's form disabled
+    // and saying `connecting…` about a link that has nothing to do with it. Both requests
+    // already check `roomView.repo` against the project that asked before writing anything
+    // back, so letting them land after this is safe — they simply find nobody waiting.
+    roomView.connectBusy = false;
+    roomView.connectListBusy = false;
     disarmMerge();
     if (repo) send({ type: 'subscribe-room', repo, slot });
   }
@@ -4274,6 +4328,7 @@ function createPane(slot, host) {
       // entries in room.jsonl, none on screen, hours since the last post.
       renderRoom();
       renderTasks();
+      renderConnect();
     }
 
     const stream = document.createElement('div');
@@ -5406,6 +5461,360 @@ function createPane(slot, host) {
     roomView.tasksBusy = false;
   }
 
+  /* ---------------------------------------------------------- connect --- */
+
+  /*
+   * The control that MAKES a link.
+   *
+   * Where it is, and why it is not somewhere more obvious: a link joins two *projects*,
+   * only a lead can be linked, and this aside is the only per-project surface that already
+   * exists — so this is where you are standing when you decide to link the thing you are
+   * looking at (plan decision 1). The rejected alternative was a fifth button in the rail
+   * head, which `web/index.html`'s own comment already warns against.
+   *
+   * **Only the maintainer opens a link** (plan decision 2). There is no `foreman` tool for
+   * it and there must not be one — a lead opening a link would be a lead granting itself a
+   * standing channel, the same shape as "the lead never approves a plan". Nothing in this
+   * block is reachable by a lead: it is a form in a browser, and the endpoint behind it is
+   * the only door.
+   *
+   * Two things it deliberately does **not** do:
+   *
+   * - **It does not list links.** The column beside the rail is that surface, and it is one
+   *   card per open link with the close control on it. A second list here would be two
+   *   places that can disagree about what a link is — and it would have to repaint on the
+   *   roster beat, which is how a form comes to be rebuilt under the cursor typing into it.
+   *   This block repaints only when *you* do something to it, and never on a broadcast.
+   * - **It does not insert a card on success.** `POST /api/team/links` calls
+   *   `broadcastRoster()` before it answers, so the record is on the very next roster
+   *   frame and `renderConnections` draws it — measured with the browser open and no
+   *   reload. Building a card here would be a second writer for one card.
+   */
+
+  /** How long the connect fold takes, so the room can be re-pinned once it has settled. */
+  const CONNECT_FOLD_MS = 200;
+
+  function buildConnectHead() {
+    const head = document.createElement('div');
+    head.className = 'room-head is-foldable';
+    head.title = 'Link this project to another one, so their two leads can talk.';
+
+    const label = document.createElement('span');
+    label.className = 'room-head-label';
+    label.textContent = 'connect';
+
+    // A plus rather than a gear, because this opens a form rather than a panel of dials —
+    // and it turns 45° into a cross when the form is open, which is the same "this control
+    // is the way back out" the gear's own rotation means.
+    const add = document.createElement('button');
+    add.className = 'room-head-gear conn-add';
+    add.type = 'button';
+    add.setAttribute('aria-label', 'Connect this project to another');
+    add.textContent = '+';
+    add.onclick = (e) => {
+      e.stopPropagation(); // or the header behind it toggles straight back
+      toggleConnect();
+    };
+    roomView.connectAddEl = add;
+
+    head.append(label, add);
+    head.onclick = () => toggleConnect();
+    return head;
+  }
+
+  /**
+   * Draw the fold. Same mechanism as SETTINGS one block up, and for the same reasons —
+   * `grid-template-rows` between `0fr` and `1fr` so nothing measures the form's height,
+   * `inert` so a folded form cannot be tabbed into, and the room re-pinned at both ends of
+   * the transition because the box the reader is scrolled inside is changing height for
+   * 200ms after the click.
+   */
+  function applyConnectOpen() {
+    const open = roomView.connectOpen === true;
+    const fold = roomView.connectFoldEl;
+    if (fold) {
+      fold.classList.toggle('is-open', open);
+      fold.inert = !open;
+    }
+    const add = roomView.connectAddEl;
+    if (add) {
+      add.setAttribute('aria-expanded', String(open));
+      add.title = open ? 'Close this form' : 'Connect this project to another';
+      add.classList.toggle('is-open', open);
+    }
+    pinRoom();
+    clearTimeout(roomView.connectPinTimer);
+    roomView.connectPinTimer = setTimeout(pinRoom, CONNECT_FOLD_MS + 60);
+  }
+
+  /**
+   * Open or shut the form.
+   *
+   * Unlike SETTINGS this is **not** remembered in `team.json`. Folding the dials away is a
+   * preference about a panel you read; this is a form you fill in once and are then done
+   * with, and a create form that came back open every time you opened the lead would be
+   * one more thing to close. It starts shut on every pane, every time.
+   */
+  function toggleConnect() {
+    roomView.connectOpen = !roomView.connectOpen;
+    if (roomView.connectOpen) {
+      roomView.connectErr = ''; // last time's refusal is not this time's
+      refreshTeams();
+    }
+    applyConnectOpen();
+    renderConnect();
+  }
+
+  /**
+   * Every project on this Mac with a team, from the panel's own list.
+   *
+   * Asked each time the form opens rather than once: a project gets a team the moment you
+   * tick **Team lead** in `+ new`, and a picker that had cached the list before that would
+   * be missing the one you just made. It is a read of a handful of small files.
+   *
+   * `repo` is the key and the name is only a face: `teamKey` maps every `/` to `-` and is
+   * not invertible, so the directory name cannot be turned back into a path — and two
+   * projects in different trees can perfectly well share a basename.
+   */
+  async function refreshTeams() {
+    if (roomView.connectListBusy) return;
+    roomView.connectListBusy = true;
+    const asked = roomView.repo; // the answer belongs to the project that asked for it
+    try {
+      const res = await fetch('/api/teams');
+      const data = await res.json();
+      if (roomView.repo !== asked) return; // another lead is in this pane now
+      roomView.connectTeams = Array.isArray(data.teams) ? data.teams : [];
+    } catch {
+      if (roomView.repo === asked) roomView.connectTeams = [];
+    } finally {
+      roomView.connectListBusy = false;
+    }
+    renderConnect();
+  }
+
+  /**
+   * The form, from `roomView` and nothing else.
+   *
+   * It replaces its own children, so every value it shows has to be state — see the
+   * `connect*` fields' own comment. It is called from `renderMain` (after the aside is
+   * mounted, never from `buildRoomPanel`, whose isConnected guards would skip silently),
+   * from the fold toggle, from the teams fetch, and from the press. Not from `renderRail`:
+   * a form rebuilt on the roster beat is a form rebuilt under the cursor.
+   */
+  function renderConnect() {
+    const form = roomView.connectFormEl;
+    if (!form || !form.isConnected) return;
+    form.replaceChildren();
+
+    const teams = roomView.connectTeams;
+    if (!teams) {
+      const wait = document.createElement('div');
+      wait.className = 'conn-form-note';
+      wait.textContent = 'Reading the projects on this Mac…';
+      form.append(wait);
+      pinRoom();
+      return;
+    }
+
+    const others = teams.filter((t) => t.repo && t.repo !== roomView.repo);
+    if (!others.length) {
+      // A control nobody can answer correctly should not be a control (the maintainer,
+      // 2026-08-26). With nothing to link to there is no press to make, so the block says
+      // what would have to be true first instead of offering an empty picker.
+      const none = document.createElement('div');
+      none.className = 'conn-form-note';
+      none.textContent =
+        'No other project on this Mac has a team yet. Give one a team lead first — tick ' +
+        '“Team lead” in + new — and it appears here.';
+      form.append(none);
+      pinRoom();
+      return;
+    }
+
+    // Which of them this project is already linked to. Read off the roster's own list, so
+    // it is as fresh as anything else on screen — and the 409 still stands behind it for
+    // the one case this cannot cover, a link made from somewhere else while the form is
+    // open. Nothing here refuses on its own reading; it only stops offering the press.
+    const linked = new Map();
+    for (const l of state.links) {
+      if (l.a === roomView.repo) linked.set(l.b, l);
+      else if (l.b === roomView.repo) linked.set(l.a, l);
+    }
+
+    // Two projects can share a basename, and then a picker showing basenames offers the
+    // same word twice. The parent folder is what tells them apart, and it is only added
+    // where it is actually needed — a list where every entry carried its whole path would
+    // be a list of paths, which is the thing the maintainer must never have to read.
+    const seen = new Map();
+    for (const t of others) seen.set(t.name, (seen.get(t.name) || 0) + 1);
+    const faceOf = (t) => {
+      if ((seen.get(t.name) || 0) < 2) return t.name;
+      const parent = projectName(String(t.repo).slice(0, -t.name.length - 1));
+      return parent ? `${t.name} · in ${parent}` : t.name;
+    };
+
+    const pickRow = document.createElement('div');
+    pickRow.className = 'conn-form-row';
+    const pickCap = document.createElement('label');
+    pickCap.className = 'conn-form-cap';
+    pickCap.textContent = 'connect to';
+    pickCap.htmlFor = 'connPick';
+
+    const wrap = document.createElement('span');
+    wrap.className = 'team-select conn-pick';
+    const select = document.createElement('select');
+    select.id = 'connPick';
+    select.disabled = roomView.connectBusy;
+
+    const blank = document.createElement('option');
+    blank.value = '';
+    blank.textContent = 'choose a project…';
+    select.append(blank);
+    for (const t of others) {
+      const opt = document.createElement('option');
+      opt.value = t.repo;
+      const existing = linked.get(t.repo);
+      opt.textContent = existing ? `${faceOf(t)} · already linked` : faceOf(t);
+      // Offered but not pressable, rather than absent: a project missing from the list
+      // reads as a project with no team, which is a different problem with a different
+      // fix. The card for it is in the column, one panel over.
+      opt.disabled = Boolean(existing);
+      select.append(opt);
+    }
+    select.value = roomView.connectSel;
+    if (select.value !== roomView.connectSel) roomView.connectSel = ''; // it went away
+    select.onchange = () => {
+      roomView.connectSel = select.value;
+      roomView.connectErr = '';
+      renderConnect();
+    };
+    wrap.append(select);
+    pickRow.append(pickCap, wrap);
+    form.append(pickRow);
+
+    // The whole path, on the page rather than on a hover. An `<option>`'s `title` is not
+    // drawn at all in a native macOS dropdown, and this is the one fact that separates two
+    // projects with one name — so it is a line you can read, under the picker that chose
+    // it. It wraps rather than truncating; the stylesheet says what truncating cost.
+    const path = document.createElement('div');
+    path.className = 'conn-form-path';
+    path.textContent = roomView.connectSel || ' ';
+    path.title = roomView.connectSel;
+    if (!roomView.connectSel) path.classList.add('is-quiet');
+    form.append(path);
+
+    const labelRow = document.createElement('div');
+    labelRow.className = 'conn-form-row';
+    const labelCap = document.createElement('label');
+    labelCap.className = 'conn-form-cap';
+    labelCap.textContent = 'why';
+    labelCap.htmlFor = 'connLabel';
+    const label = document.createElement('input');
+    label.id = 'connLabel';
+    label.type = 'text';
+    label.className = 'conn-form-input';
+    label.placeholder = 'optional';
+    // The cap the server enforces, on the field as well — it is **refused** rather than
+    // shortened over there (`assertSendableLabel`), so a field that let you type 200
+    // characters would be a field that throws your sentence away on the press. The 400 is
+    // still rendered below: this stops the ordinary path reaching it, it does not replace
+    // it.
+    label.maxLength = 80;
+    label.value = roomView.connectLabel;
+    label.disabled = roomView.connectBusy;
+    label.oninput = () => {
+      roomView.connectLabel = label.value;
+    };
+    labelRow.append(labelCap, label);
+    form.append(labelRow);
+
+    const foot = document.createElement('div');
+    foot.className = 'conn-form-foot';
+    const go = document.createElement('button');
+    go.className = 'conn-form-go';
+    go.type = 'button';
+    go.textContent = roomView.connectBusy ? 'connecting…' : 'connect';
+    go.disabled = roomView.connectBusy || !roomView.connectSel;
+    go.title = roomView.connectSel
+      ? `Link this project to ${projectName(roomView.connectSel)}`
+      : 'Choose a project first';
+    go.onclick = () => submitLink();
+    foot.append(go);
+    form.append(foot);
+
+    // Said before the press, not after it: this is the one consequence of linking that the
+    // panel cannot take care of for you.
+    const note = document.createElement('div');
+    note.className = 'conn-form-note';
+    note.textContent = RELAUNCH_NOTE;
+    form.append(note);
+
+    if (roomView.connectErr) {
+      const err = document.createElement('div');
+      err.className = 'team-err';
+      err.textContent = roomView.connectErr;
+      form.append(err);
+    }
+
+    pinRoom(); // the block just changed height under the room
+  }
+
+  /**
+   * Press `connect`.
+   *
+   * The success path is **await, then close** — and nothing else. The card comes from the
+   * roster frame the endpoint broadcasts before it answers.
+   *
+   * Every refusal is rendered where the press happened. They are the endpoint's own
+   * sentences, which already say what to do about each one; the only thing added is a
+   * pointer to the card for the 409, since that one is answered by looking at a panel
+   * rather than by changing the form.
+   */
+  async function submitLink() {
+    if (roomView.connectBusy || !roomView.connectSel) return;
+    const a = roomView.repo;
+    const b = roomView.connectSel;
+    if (!a) return;
+    roomView.connectBusy = true;
+    roomView.connectErr = '';
+    renderConnect();
+    try {
+      const res = await fetch('/api/team/links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ a, b, label: roomView.connectLabel }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (roomView.repo !== a) return; // another lead is in this pane; its form is not this answer's
+      if (!res.ok) {
+        roomView.connectErr = data.error || `That link could not be opened (${res.status}).`;
+        if (data.link) roomView.connectErr += ' Its card is in the connections column.';
+        return;
+      }
+      // Two `decisions.md` appends and two room posts, best-effort and never rolled back —
+      // so a partial write is reported rather than hidden. Read exactly the way `closeLink`
+      // reads the same shape, because it is the same shape.
+      const missed = (data.decisions || []).filter((d) => d && d.ok === false);
+      const name = projectName(b);
+      toast(
+        missed.length
+          ? `Linked to ${name}, but the note could not be written to ` +
+              `${missed.map((d) => projectName(d.repo)).join(' and ')}: ${missed[0].error}`
+          : `Linked to ${name}. ${RELAUNCH_NOTE}`,
+      );
+      roomView.connectSel = '';
+      roomView.connectLabel = '';
+      roomView.connectOpen = false;
+      applyConnectOpen();
+    } catch (err) {
+      roomView.connectErr = err.message || 'That link could not be opened.';
+    } finally {
+      roomView.connectBusy = false;
+      renderConnect();
+    }
+  }
+
   /**
    * The team panel — settings, tasks, and the room, stacked in the lead pane's right
    * aside. The room stays view-only by design: you talk to the lead, the lead talks
@@ -5470,6 +5879,30 @@ function createPane(slot, host) {
     tasksList.className = 'team-tasks';
     roomView.tasksEl = tasksList;
     refreshTasks(true);
+
+    // The connect form, folded away. Built here, painted from renderMain like everything
+    // else in this aside — and the same three-element fold the settings block uses, whose
+    // middle element carries nothing for the reason its own comment gives (a grid item
+    // cannot be shorter than its own padding and border, so a padded block as the item
+    // never closes).
+    const connectHead = buildConnectHead();
+    const connectFold = document.createElement('div');
+    connectFold.className = 'team-settings-fold conn-fold';
+    const connectClip = document.createElement('div');
+    connectClip.className = 'team-settings-clip';
+    const connectForm = document.createElement('div');
+    connectForm.className = 'conn-form';
+    connectClip.append(connectForm);
+    connectFold.append(connectClip);
+    roomView.connectFoldEl = connectFold;
+    roomView.connectFormEl = connectForm;
+    // Wired once, here, for the reason the settings fold's own listener is: `applyConnectOpen`
+    // runs on every flip and a listener added there would stack. The property guard matters —
+    // a control inside the form finishing its own transition bubbles up to this node.
+    connectFold.addEventListener('transitionend', (e) => {
+      if (e.target === connectFold && e.propertyName === 'grid-template-rows') pinRoom();
+    });
+    applyConnectOpen();
 
     const list = document.createElement('div');
     list.className = 'room-list';
@@ -5557,6 +5990,12 @@ function createPane(slot, host) {
     });
 
     // Settings on top (folded, so it is one line), then the two things actually read.
+    // CONNECT joins it up there, folded, for the same reason and the same cost: a header
+    // line at the top is free, and this aside's own rule is that the control panel does not
+    // sit *between* the task list and the room. It is also why it is not between the tasks
+    // grip and the room heading — that grip's ceiling is measured from the tasks list down
+    // to the panel's bottom, and a block growing inside that span would let a drag squeeze
+    // the room below its own floor.
     // Both of the blocks above the room still call `pinRoom` when their own fetch lands
     // — reordering them does not change *which* boxes resize the room, only where they
     // sit, and the room still opens on its newest line rather than 454px short of it.
@@ -5564,6 +6003,8 @@ function createPane(slot, host) {
     panel.append(
       settingsHead,
       settingsFold,
+      connectHead,
+      connectFold,
       section('tasks', 'Every task this team holds — stored state joined with what the pane shows now.'),
       tasksList,
       tasksGrip,
