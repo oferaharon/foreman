@@ -121,7 +121,24 @@
         ></div>
       </aside>
 
-      <main class="main" id="main"></main>
+      <!--
+        The frame the panes sit in, and — between them, in split view only — the fifth
+        grip. It is a child of the frame rather than of either pane because the edge it
+        drags belongs to neither: it is the line the grid's two tracks meet at, placed from
+        the same `--pane-a` that sizes the first track. Absolutely positioned, so it is not
+        a grid item and adding it cost the split nothing; the panes are appended after it
+        and removed from under it, and it neither notices nor cares.
+      -->
+      <main class="main" id="main">
+        <div
+          class="pane-grip grip-col split-grip"
+          id="splitGrip"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Split width"
+          title="Drag to set how the two panes divide · double-click to reset"
+        ></div>
+      </main>
     </div>
 
     <script type="module" src="/app.js"></script>
