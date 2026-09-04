@@ -1215,33 +1215,6 @@ function openNewSession() {
     'Distinguishes several sessions in one folder, and names the session. Blank auto-numbers.';
   box.append(hint);
 
-  const skipCap = document.createElement('label');
-  skipCap.className = 'field-check';
-  const skip = document.createElement('input');
-  skip.type = 'checkbox'; // off every time: this is opt-in per session, never remembered
-  skipCap.append(skip, document.createTextNode('Skip all permission prompts (dangerous)'));
-  box.append(skipCap);
-
-  const danger = document.createElement('p');
-  danger.className = 'field-hint';
-  danger.textContent = "Claude won't ask before running commands or editing files.";
-  box.append(danger);
-
-  const termCap = document.createElement('label');
-  termCap.className = 'field-check';
-  const term = document.createElement('input');
-  term.type = 'checkbox';
-  term.checked = true; // what a launch has always done; unticking is the new thing
-  termCap.append(term, document.createTextNode('Open a Terminal window'));
-  box.append(termCap);
-
-  const termHint = document.createElement('p');
-  termHint.className = 'field-hint';
-  termHint.textContent =
-    'Unticked, it runs in tmux only — nothing on the desktop to look at. The session header ' +
-    'grows a button to open one later.';
-  box.append(termHint);
-
   // A lead is not a variant of a session — it is a different thing wearing the same
   // launcher. Ticking this hands the folder a team: the label is forced to `lead` (one
   // per project, refused server-side), bypass is off the table, and the session arrives
@@ -1259,6 +1232,32 @@ function openNewSession() {
     'Coordinates workers on this project instead of writing code itself. One per project; ' +
     'named “lead”, pinned, and unable to edit files or commit.';
   box.append(leadHint);
+
+  const termCap = document.createElement('label');
+  termCap.className = 'field-check';
+  const term = document.createElement('input');
+  term.type = 'checkbox'; // off by default now — see decisions.md, not a bug to "restore"
+  termCap.append(term, document.createTextNode('Open a Terminal window'));
+  box.append(termCap);
+
+  const termHint = document.createElement('p');
+  termHint.className = 'field-hint';
+  termHint.textContent =
+    'Unticked, it runs in tmux only — nothing on the desktop to look at. The session header ' +
+    'grows a button to open one later.';
+  box.append(termHint);
+
+  const skipCap = document.createElement('label');
+  skipCap.className = 'field-check';
+  const skip = document.createElement('input');
+  skip.type = 'checkbox'; // off every time: this is opt-in per session, never remembered
+  skipCap.append(skip, document.createTextNode('Skip all permission prompts (dangerous)'));
+  box.append(skipCap);
+
+  const danger = document.createElement('p');
+  danger.className = 'field-hint';
+  danger.textContent = "Claude won't ask before running commands or editing files.";
+  box.append(danger);
 
   let savedLabel = '';
   lead.onchange = () => {
