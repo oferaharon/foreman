@@ -843,9 +843,8 @@ the Mac, and it sits ahead of the `dialog`/`working`/`needs-decision` chain for 
 reason the card's own branch does.
 
 The gate is still one reason the launcher opens a Terminal window. The `+ new` box's tick for
-it is **off** by default (Ofer's ruling, 2026-09-04) despite this cost — recoverable via the
-pane header's attach button, but only if you notice. Verified originally by launching into an
-empty scratch folder.
+it is **off** by default despite this cost — recoverable via the pane header's attach button,
+but only if you notice. Verified originally by launching into an empty scratch folder.
 
 **Attaching a Terminal resizes the pane, and pane width is an input to every parser here.**
 `+ new` can start a session detached (`terminal: false`) and the pane header offers to

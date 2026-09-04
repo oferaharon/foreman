@@ -1236,7 +1236,7 @@ function openNewSession() {
   const termCap = document.createElement('label');
   termCap.className = 'field-check';
   const term = document.createElement('input');
-  term.type = 'checkbox'; // off by default: Ofer's ruling of 2026-09-04
+  term.type = 'checkbox'; // off by default now — see decisions.md, not a bug to "restore"
   termCap.append(term, document.createTextNode('Open a Terminal window'));
   box.append(termCap);
 
