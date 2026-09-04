@@ -23,8 +23,10 @@
   /* The lead's aside, dragged from its left edge. Here rather than in the resizer for the
      same reason `--rail` is: a reset *removes* the custom property, so this is the only
      place the default is spelled. 21.25rem is the 340px the aside shipped at.
-     `--tasks-h`, the Tasks/Room split inside it, deliberately has no default — unset means
-     the Tasks block is content-height under its five-row cap, which is what it was. */
+     `--room-h`, the room's height inside it, deliberately has no default — unset means the
+     room is still the remainder and the Tasks block is content-height under its five-row
+     cap, which is the layout that shipped. It is the one size here whose *absence* is a
+     mode rather than a fallback, which is why `.room-sized` on the root exists. */
   --aside: 21.25rem;
 
   /* An open group's block, lifted off the rail. Mixed rather than hard-coded so it tracks
@@ -63,10 +65,12 @@
      the three: 8.28 / 7.54 / 8.70, where `.is-open`'s own accent edge measures 6.36
      against surface. Same "three signals rather than one" argument the selected row makes.
 
-     The connections column's own width sits here for the reason `--rail` and `--aside` do:
-     it is the one place the default is spelled. */
+     The connections band's own height sits here for the reason `--rail` and `--aside` do:
+     a reset *removes* the custom property, so this is the one place the default is
+     spelled. 13rem is about two cards — enough to read the pair and the last line without
+     the band taking a third of the rail before anybody has dragged anything. */
   --row-linked: color-mix(in srgb, var(--mode-edits) 16%, var(--surface));
-  --conn: 15rem;
+  --conn-h: 13rem;
 }
 
 @media (prefers-color-scheme: dark) {

@@ -22,8 +22,8 @@ const state = {
   snapshot: { savedAt: null, count: 0, drift: { missing: [], extra: [] } },
   // Open cross-project links, verbatim as the store holds them — the same records the
   // lead's `link_list` gets, from the same call. They ride the roster frame beside the
-  // groups because everything drawn from a link is drawn beside the rail and moves with
-  // it, and half a frame is a pane naming a link nothing else knows about.
+  // groups because everything drawn from a link is drawn in or beside the rail and moves
+  // with it, and half a frame is a pane naming a link nothing else knows about.
   //
   // The record carries no per-side lead liveness (item 2's note): whether either end has
   // a lead running right now is a question about the *roster*, which is in the same frame,
@@ -113,9 +113,15 @@ function rememberOpen(slot, sessionId) {
  * thread, misses on both keys, and drops whatever session sorts first into the slot — the
  * thread silently replaced by a conversation nobody opened. `kind` is what `adopt` reads
  * to tell the two apart; a session entry has never carried one and does not start now.
+ *
+ * `autoSplit` rides along because closing a thread asks a question a reloaded window would
+ * otherwise answer differently from the one it replaced: whether this pane exists *because*
+ * of the thread, and so whether closing it should take the panel back to one pane. See
+ * `threadSplit`. An entry written before this field says `undefined`, which reads as false —
+ * the conservative half, since it keeps a pane rather than taking one away.
  */
-function rememberOpenLink(slot, linkId) {
-  if (linkId) state.opened[slot] = { kind: 'link', link: linkId };
+function rememberOpenLink(slot, linkId, autoSplit = false) {
+  if (linkId) state.opened[slot] = { kind: 'link', link: linkId, autoSplit: Boolean(autoSplit) };
   else delete state.opened[slot];
   persistOpen();
 }
@@ -149,6 +155,7 @@ const el = {
   railVersion: document.getElementById('railVersion'),
   railGrip: document.getElementById('railGrip'),
   connCol: document.getElementById('connCol'),
+  connGrip: document.getElementById('connGrip'),
   connList: document.getElementById('connList'),
   main: document.getElementById('main'),
 };
@@ -370,6 +377,49 @@ resizer({
   apply: (rem) => setRootVar('--rail', rem),
 });
 
+/* -------------------------------------------- the connections band --- */
+
+/**
+ * How much of the rail the connections take, dragged from the band's top edge.
+ *
+ * The fourth divider and the third mechanism it deliberately is not: same `resizer`, same
+ * rem-in-`localStorage`, same double-click-to-forget, same "the preference and the applied
+ * size are two numbers" — the band is the Tasks/Room split turned to face the rail, and
+ * `--conn-h` is the room's `--room-h` with a default, because there is no five-row cut here
+ * to stand in for one.
+ */
+
+/** rem. `CONN_MAX` also bounds what a stored value may say; the live ceiling is below. */
+const CONN_MIN = 4;
+const CONN_MAX = 30;
+/** rem. What the session list keeps whatever the band asks for — a rail whose sessions had
+ *  been squeezed to nothing would be a rail that stopped being one. */
+const RAIL_LIST_MIN = 6;
+
+resizer({
+  handle: el.connGrip,
+  axis: 'y',
+  storageKey: 'foreman.connHeight',
+  min: CONN_MIN,
+  max: CONN_MAX,
+  // Everything between the top of the session list and the bottom of the band, less the
+  // floor the list keeps. Measured off the page rather than declared: the rail's head and
+  // footer are whatever the type scale says today, and the window resizes.
+  ceiling: () => {
+    const top = el.railList?.getBoundingClientRect().top ?? 0;
+    const bottom = el.connCol?.getBoundingClientRect().bottom ?? 0;
+    // Before the rail is laid out — or while the band is hidden, which is every panel with
+    // no links — every rect is zero. The preference's own `max` is a better answer than a
+    // negative one.
+    if (bottom <= top) return CONN_MAX;
+    return (bottom - top) / remPx() - RAIL_LIST_MIN;
+  },
+  // The band's bottom is pinned by the footer under it, so it grows upward and the pointer's
+  // distance back from that edge *is* the height being asked for.
+  measure: (e) => (el.connCol?.getBoundingClientRect().bottom ?? window.innerHeight) - e.clientY,
+  apply: (rem) => setRootVar('--conn-h', rem),
+});
+
 /* ------------------------------------------------- the lead's two edges --- */
 
 /** rem. The aside's floor and the ceiling on a stored value; the live ceiling is the
@@ -379,12 +429,14 @@ const ASIDE_MIN = 15;
 const ASIDE_MAX = 40;
 const LEAD_LEFT_MIN = 20;
 
-/** rem. The Tasks block's floor and the room's, either side of the split inside the
- *  aside. `TASKS_MAX` bounds a stored value; what the panel can actually afford is
- *  measured off it at drag time. */
+/**
+ * rem. Either side of the one internal split in the aside — see `the room's own height`
+ * below for which block now holds the dragged number and why. `ROOM_MAX` bounds a stored
+ * value; what the panel can actually afford is measured off it at drag time.
+ */
 const TASKS_MIN = 3;
-const TASKS_MAX = 40;
 const ROOM_MIN = 8;
+const ROOM_MAX = 60;
 
 /** How many task rows the block shows before it stops growing and scrolls. */
 const TASKS_VISIBLE = 5;
@@ -406,11 +458,13 @@ const TASKS_VISIBLE = 5;
  */
 function capTaskList(list, nodes) {
   list.style.maxHeight = '';
-  // A dragged Tasks/Room divider is an explicit answer to the question this cap is
-  // guessing at, so it wins outright: the block's height comes from `--tasks-h` and the
-  // five-row cut is not taken at all. Leaving the cut on as well would clip a block
-  // somebody had just deliberately made taller.
-  if (readPref('foreman.tasksHeight', TASKS_MIN, TASKS_MAX) != null) {
+  // A dragged divider is an explicit answer to the question this cap is guessing at, so it
+  // wins outright: the room holds the height it was given, the Tasks block takes what is
+  // left, and the five-row cut is not taken at all. Leaving the cut on as well would pin
+  // the block at five rows and leave dead space between it and a room somebody had just
+  // deliberately made shorter. The key is the *room's* now — the number moved blocks when
+  // the divider became the room's grip, and this is the one other place that reads it.
+  if (readPref('foreman.roomHeight', ROOM_MIN, ROOM_MAX) != null) {
     list.classList.remove('is-capped');
     return;
   }
@@ -434,12 +488,27 @@ function capTaskList(list, nodes) {
  * is in force the other must not be left on the element — and the cut can only be
  * *re-taken* from the rows, which is why this reads them back off the DOM rather than
  * asking each pane to repaint. Split view can hold two lead asides and a reset in one of
- * them is a reset in both, `--tasks-h` being one number for the browser.
+ * them is a reset in both, `--room-h` being one number for the browser.
  */
 function recapTaskLists() {
   for (const box of document.querySelectorAll('.team-tasks')) {
     capTaskList(box, [...box.querySelectorAll(':scope > .team-task')]);
   }
+}
+
+/**
+ * Re-pin every room on the page, for a height change that was not a drag.
+ *
+ * `pinRoom` is per pane because `follow` is per pane — it is an *intention*, flipped only
+ * by a real scroll, and it is not readable off the DOM. So this asks each pane rather than
+ * walking `.room-list` nodes and guessing, which would scroll a room the reader had
+ * deliberately scrolled up in.
+ *
+ * Split view can hold two lead asides and one number sizes both, which is the same reason
+ * `recapTaskLists` above exists and reads the page rather than one pane.
+ */
+function pinRooms() {
+  for (const pane of panes) pane.pinRoom?.();
 }
 
 /* --------------------------------------------------------- rail footer --- */
@@ -592,7 +661,7 @@ function notifyShow(alert) {
     });
     n.onclick = () => {
       window.focus();
-      if (state.sessions.some((s) => s.id === alert.id)) focused().open(alert.id);
+      if (state.sessions.some((s) => s.id === alert.id)) openSession(alert.id);
       n.close();
     };
   } catch {
@@ -1104,7 +1173,7 @@ function openNewSession() {
       close();
       // Show it straight away. A brand-new pane has no transcript yet, so it arrives as a
       // pane-only session and earns its real id the moment it first speaks.
-      if (made.sessionId) focused().open(made.sessionId);
+      if (made.sessionId) openSession(made.sessionId);
     } catch (err) {
       say(err.message, 'err');
       start.disabled = false;
@@ -2527,7 +2596,8 @@ function bindingMark(s) {
 let connSig = '';
 
 /**
- * The connections column: one card per open link, and nothing at all when there are none.
+ * The connections band at the foot of the rail: one card per open link, and nothing at all
+ * when there are none.
  *
  * Called from the end of `renderRail`, which is every place the panel already redraws for
  * — the roster beat, a pane opening, a group folding. It is deliberately **not** on
@@ -2539,9 +2609,10 @@ function renderConnections() {
   const links = state.links;
   const openHere = new Set(panes.map((p) => p.linkId()).filter(Boolean));
 
-  // The middle grid column exists only while there is something in it — the same show/hide
-  // trade `.app.split .main` already makes, and what keeps a panel with no links the panel
-  // it was before this feature.
+  // The band exists only while there is something in it — the same show/hide trade
+  // `.app.split .main` already makes, and what keeps a panel with no links the panel it was
+  // before this feature. The class stays on `.app` rather than on the rail: it is one fact
+  // about the whole window, and the band's grip is a sibling of the band, not a child.
   el.app.classList.toggle('has-links', links.length > 0);
 
   const sig = links
@@ -3021,7 +3092,7 @@ function sessionRow(s) {
   const isOpen = panes.some((p) => p.selected() === s.id);
   btn.setAttribute('aria-selected', String(isOpen));
   if (isOpen) row.classList.add('is-open');
-  btn.onclick = () => focused().open(s.id);
+  btn.onclick = () => openSession(s.id);
 
   const dot = document.createElement('span');
   dot.className = `dot ${s.status}`;
@@ -3288,7 +3359,7 @@ function dupBtn(s) {
     dup.classList.add('is-busy');
     try {
       const made = await postJSON(`/api/sessions/${encodeURIComponent(s.id)}/duplicate`, {});
-      if (made.sessionId) focused().open(made.sessionId);
+      if (made.sessionId) openSession(made.sessionId);
     } catch (err) {
       dup.title = err.message;
       dup.classList.add('is-error');
@@ -4018,6 +4089,13 @@ function createPane(slot, host) {
     entries: [],
     cursor: 0,
     listEl: null,
+    /* The room list's height when `pinRoom` last ran. The scroll handler compares against
+     * it to tell a resize's own scroll event from a reader's — see there. `null` until the
+     * box has been laid out, which never equals a real `clientHeight`, so the very first
+     * event after mount is treated as the layout's. That is the correct reading: the first
+     * thing that happens to this box is the tasks block and the settings fold sizing
+     * themselves after their own fetches. */
+    followH: null,
     tasksEl: null,
     tasks: [],
     tasksSig: '',
@@ -4206,7 +4284,9 @@ function createPane(slot, host) {
     chipNodes.clear();
     clearThread();
     view.link = link;
-    rememberOpenLink(slot, id);
+    // `threadSplit` is already settled by the caller — `openLinkThread` sets it before it
+    // gets here, and `adopt` restores it off the stored entry before it calls this.
+    rememberOpenLink(slot, id, threadSplit);
     renderRail();
     renderMain();
     refreshThread(true);
@@ -4362,7 +4442,8 @@ function createPane(slot, host) {
    *
    * It reuses **split view** rather than taking a column of its own — the locked ruling:
    * four columns (rail, connections, conversation, lead aside) do not fit a laptop, and
-   * this is another thing shown in a slot that already exists.
+   * this is another thing shown in a slot that already exists. The connections themselves
+   * have since stopped being a column too; they are a band at the foot of the rail.
    *
    * Read-only in this item. The maintainer's composer is item 7 and is built alone,
    * because it is the one channel in this feature that carries authority — so the pane
@@ -4416,34 +4497,46 @@ function createPane(slot, host) {
     stat.className = 'head-status link-status';
     meta.append(stat);
 
-    // One pane offers to split; two offer to close. A thread never offers to split — it is
-    // already the second thing on screen, and a panel showing two threads and no
-    // conversation is not a state worth being able to reach.
+    // A thread never offers to split — it is already the second thing on screen, and a
+    // panel showing two threads and no conversation is not a state worth being able to
+    // reach. What `close` *does* is decided when it is pressed and never here: this head is
+    // drawn once, and the other pane can be opened or closed under it afterwards.
     const close = document.createElement('button');
     close.className = 'ghost-btn';
-    if (panes.length > 1) {
-      close.textContent = 'close';
-      close.title = 'Close this pane (⌘\\)';
-      close.onclick = () => closePane(slot);
-    } else {
-      close.textContent = 'close';
-      close.title = 'Close the thread and go back to a session';
-      close.onclick = () => {
-        rememberOpenLink(slot, null);
-        view.kind = 'session';
-        clearThread();
-        adopt();
-        // `adopt` repaints by opening something. With nothing to open — no sessions at all
-        // — it returns silently, and the pane would still be showing the thread it was
-        // just told to close. Repaint into the empty state instead.
-        if (!view.selected) renderMain();
-        renderRail();
-      };
-    }
+    close.textContent = 'close';
+    close.title = 'Close the thread';
+    close.onclick = closeThread;
     meta.append(close);
     head.append(meta);
     renderLinkHead(head);
     return head;
+  }
+
+  /**
+   * Leave the thread, and put the panel back where it came from — which is two different
+   * places, and telling them apart is the whole of this function.
+   *
+   * A reader who was in **one pane** and pressed the chip gets one pane back: somebody who
+   * never asked for split view must not be left holding it, and the split only ever existed
+   * to carry the thread. A reader who was **already in split** keeps both panes and this
+   * slot goes back to a session, because taking their second pane away would be answering a
+   * question they did not ask. `threadSplit` is the only thing that can distinguish them —
+   * a pane looking at itself sees the same thing in both cases.
+   */
+  function closeThread() {
+    if (panes.length > 1 && threadSplit) {
+      closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
+      return;
+    }
+    rememberOpenLink(slot, null);
+    view.kind = 'session';
+    clearThread();
+    adopt();
+    // `adopt` repaints by opening something. With nothing to open — no sessions at all —
+    // it returns silently, and the pane would still be showing the thread it was just
+    // told to close. Repaint into the empty state instead.
+    if (!view.selected) renderMain();
+    renderRail();
   }
 
   /** Repaint the head's words from whatever the record now says. */
@@ -5480,7 +5573,7 @@ function createPane(slot, host) {
    *
    * Two things it deliberately does **not** do:
    *
-   * - **It does not list links.** The column beside the rail is that surface, and it is one
+   * - **It does not list links.** The band at the foot of the rail is that surface, and it is one
    *   card per open link with the close control on it. A second list here would be two
    *   places that can disagree about what a link is — and it would have to repaint on the
    *   roster beat, which is how a form comes to be rebuilt under the cursor typing into it.
@@ -5789,7 +5882,7 @@ function createPane(slot, host) {
       if (roomView.repo !== a) return; // another lead is in this pane; its form is not this answer's
       if (!res.ok) {
         roomView.connectErr = data.error || `That link could not be opened (${res.status}).`;
-        if (data.link) roomView.connectErr += ' Its card is in the connections column.';
+        if (data.link) roomView.connectErr += ' Its card is at the foot of the rail.';
         return;
       }
       // Two `decisions.md` appends and two room posts, best-effort and never rolled back —
@@ -5913,6 +6006,23 @@ function createPane(slot, host) {
     // as "the user scrolled up" and stops following forever. The scroll handler is the
     // only thing that flips it.
     list.addEventListener('scroll', () => {
+      /*
+       * A scroll event that arrives because the *box* changed height is the layout moving,
+       * not the reader — Chrome emits one when a resize clamps `scrollTop`, and it is
+       * indistinguishable from a real scroll by anything except the height. So a height
+       * change swallows the one event it caused, and following survives it.
+       *
+       * The comment above says only a real scroll may flip this. That was already the
+       * intent and this is what makes it true: the room now has a grip of its own, and
+       * without this, dragging it *smaller* left the room silently not following — the
+       * shrink pushes the reader away from the bottom, the event fires, and `pinRoom`
+       * afterwards returns early because `follow` had just been set false. Measured: the
+       * grow drag ended pinned, the shrink drag did not.
+       */
+      if (list.clientHeight !== roomView.followH) {
+        roomView.followH = list.clientHeight;
+        return;
+      }
       roomView.follow = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
       if (roomView.follow) roomView.unseen = 0; // scrolled back down: you have seen them
       updateRoomHint();
@@ -5940,7 +6050,10 @@ function createPane(slot, host) {
     const asideGrip = paneGrip('x', 'Panel width', "Drag to set the panel's width · double-click to reset");
     asideGrip.classList.add('aside-grip');
     const roomHead = section('room', 'Workers and the lead coordinate here. View only — talk to the lead in the composer.');
-    const tasksGrip = paneGrip('y', 'Tasks and room split', 'Drag to split tasks and room · double-click to reset');
+    // The room's own edge. It is still the Tasks/Room divider — one boundary, one control
+    // — but it sizes the *room* now, so it says so: the reader drags the thing they want
+    // bigger, not the thing above it.
+    const tasksGrip = paneGrip('y', 'Room height', "Drag to set the room's height · double-click to reset");
     tasksGrip.classList.add('tasks-grip');
 
     resizer({
@@ -5962,29 +6075,73 @@ function createPane(slot, host) {
       onMove: pinRoom,
     });
 
+    /*
+     * The room's own height — the third thing this task was asked for, and it is this
+     * divider rather than a new one.
+     *
+     * **Which grip owns which edge.** `asideGrip` owns the aside's left edge and answers
+     * for its width. This one owns the aside's *only* internal horizontal boundary. The
+     * room's other edge is the panel's own bottom, with nothing under it to trade against,
+     * so there is no second edge for a third grip to sit on — two controls on one line is
+     * exactly the fight this must not pick. What changed is not where it is but **which
+     * block holds the number**: it used to size the Tasks block and let the room be
+     * whatever was left over, which is why the room had no size of its own.
+     *
+     * That mattered for a reason worse than tidiness, measured on a scratch panel at an
+     * 879px viewport with both folds open: `.room-list` is the one block in the aside with
+     * no floor, so it was squeezed to **16px and pushed 178px below the panel's own bottom
+     * edge** — fifteen entries in it, none of them on screen, and this divider could not
+     * get them back because the space had gone to the folds, not to Tasks. The floor in
+     * `.room-list` and the panel's own scroll are the other half of this fix.
+     *
+     * **Two modes, which is how it composes with the five-row Tasks cap.** Nothing dragged:
+     * Tasks is content-height under its cap and the room takes the remainder — byte for
+     * byte the layout that shipped. Dragged: the room holds the height you gave it, Tasks
+     * becomes the block that absorbs a fold opening or a window resize, and its cap stands
+     * down. That is the rule `capTaskList` already applied, keyed on the room's preference
+     * now that the room is what the divider sizes.
+     *
+     * `--tasks-h` is gone rather than left unread: two spellings of one split is how they
+     * drift. A browser holding the old `foreman.tasksHeight` is simply not consulted for
+     * it any more, so that aside opens on the default split once — a preference re-dragged
+     * in a second, and the honest alternative to reinterpreting a number that used to mean
+     * something else.
+     */
     resizer({
       handle: tasksGrip,
       axis: 'y',
-      storageKey: 'foreman.tasksHeight',
-      min: TASKS_MIN,
-      max: TASKS_MAX,
-      // What is left under the Tasks block once the room's own floor and the `room`
-      // heading are taken out of it. Measured off the panel rather than declared: the
-      // settings fold above can be open or shut, and the heading is one line of whatever
-      // the type scale says today.
+      storageKey: 'foreman.roomHeight',
+      min: ROOM_MIN,
+      max: ROOM_MAX,
+      // What the room can have once the Tasks block keeps its own floor. Measured off the
+      // panel rather than declared: the folds above can be open or shut, and every heading
+      // is one line of whatever the type scale says today.
       ceiling: () => {
         const bottom = panel.getBoundingClientRect().bottom;
         const top = tasksList.getBoundingClientRect().top;
         const head = roomHead.getBoundingClientRect().height;
         // Before the aside is laid out every rect is zero; the preference's own `max`
         // is a better answer than a negative one.
-        if (bottom <= top) return TASKS_MAX;
-        return (bottom - top - head) / remPx() - ROOM_MIN;
+        if (bottom <= top) return ROOM_MAX;
+        return (bottom - top - head) / remPx() - TASKS_MIN;
       },
-      measure: (e) => e.clientY - tasksList.getBoundingClientRect().top,
+      // The room's bottom is the panel's bottom, so it grows upward and the pointer's
+      // distance back from that edge *is* the height being asked for — the connections
+      // band's measure, one column over.
+      measure: (e) => panel.getBoundingClientRect().bottom - e.clientY,
       apply: (rem) => {
-        setRootVar('--tasks-h', rem);
+        // The class is what switches the two modes above; CSS cannot ask whether a custom
+        // property is set, and a second variable saying so would be a second source of
+        // truth about one fact.
+        document.documentElement.classList.toggle('room-sized', rem != null);
+        setRootVar('--room-h', rem);
         recapTaskLists();
+        // Every path into here is a height change on the box the reader is scrolled inside
+        // — a drag, a window resize through `applyResizers`, a double-click reset — and the
+        // room's `follow` is an intention with no scroll event behind it. Pinning only in
+        // `onMove` would cover the drag and leave the other two hundreds of pixels short of
+        // the newest line. This is the trap that box is named for.
+        pinRooms();
       },
       onMove: pinRoom,
     });
@@ -6098,7 +6255,12 @@ function createPane(slot, host) {
    */
   function pinRoom() {
     const list = roomView.listEl;
-    if (!list || !list.isConnected || roomView.follow === false) return;
+    if (!list || !list.isConnected) return;
+    // The height this pin was taken at, so the scroll handler above can tell a resize's
+    // own event from a reader's. Recorded even when we are not following: the box still
+    // changed size, and the next event is still the layout's rather than theirs.
+    roomView.followH = list.clientHeight;
+    if (roomView.follow === false) return;
     list.scrollTop = list.scrollHeight;
   }
 
@@ -6447,24 +6609,12 @@ function createPane(slot, host) {
     // nothing.
 
     // One pane offers to split; two offer to close. The control is always in the header
-    // of the pane it acts on, so there is never a question of which one it means.
+    // of the pane it acts on, so there is never a question of which one it means. What it
+    // says is `syncSplitBtn`'s, because the answer changes without this header being
+    // rebuilt — see there.
     const split = document.createElement('button');
-    split.className = 'ghost-btn';
-    if (panes.length > 1) {
-      split.textContent = 'close';
-      split.title = 'Close this pane (⌘\\)';
-      split.onclick = () => closePane(slot);
-    } else if (s.isLead) {
-      // A lead's pane is already two frames — the room owns the right half, and a third
-      // column would leave nothing readable. Decided in the spec, not a limitation.
-      split.textContent = 'split';
-      split.disabled = true;
-      split.title = 'A team lead pane holds the room on its right — split view is off here.';
-    } else {
-      split.textContent = 'split';
-      split.title = 'Open a second session beside this one (⌘\\)';
-      split.onclick = () => openSplit(); // never the click event — it now takes options
-    }
+    split.className = 'ghost-btn split-toggle';
+    syncSplitBtn(split, s);
     meta.append(split);
 
     // Last, the two that act outside the panel entirely — a window onto this session, and
@@ -6523,6 +6673,45 @@ function createPane(slot, host) {
     if (existing?.dataset.url === url) return; // already this link — the common beat
     existing?.remove();
     head.insertBefore(forgeLink(url, forge.reading), head.querySelector('.head-meta'));
+  }
+
+  /**
+   * What the split/close control says, decided from what is on screen right now.
+   *
+   * It used to be decided once, where the header is built — and a header is built when its
+   * *session* changes, which is not when the number of panes changes. Close the second pane
+   * and the survivor's header went on reading `close`, calling `closePane` on the only pane
+   * there is, which returns immediately: a dead control, silently, with nothing to say so.
+   *
+   * Pre-existing and reachable with no link anywhere near it — split from a session's own
+   * header, close the second pane, and the button is dead — but the thread put it on the
+   * path most likely to be walked, since "close the thread" is exactly a two-panes-to-one
+   * transition. Measured before the fix: `['pin','thinking','images','close']` with one pane
+   * on screen.
+   *
+   * So the answer is re-asked wherever the count can have moved — `openSplit`, `closePane`
+   * and `openLinkThread` all already call `renderHead` on every pane for this kind of reason.
+   */
+  function syncSplitBtn(btn = host.querySelector('.split-toggle'), s = current()) {
+    if (!btn) return;
+    btn.disabled = false;
+    if (panes.length > 1) {
+      btn.textContent = 'close';
+      btn.title = 'Close this pane (⌘\\)';
+      btn.onclick = () => closePane(slot);
+      return;
+    }
+    btn.textContent = 'split';
+    if (s?.isLead) {
+      // A lead's pane is already two frames — the room owns the right half, and a third
+      // column would leave nothing readable. Decided in the spec, not a limitation.
+      btn.disabled = true;
+      btn.onclick = null;
+      btn.title = 'A team lead pane holds the room on its right — split view is off here.';
+      return;
+    }
+    btn.title = 'Open a second session beside this one (⌘\\)';
+    btn.onclick = () => openSplit(); // never the click event — it now takes options
   }
 
   /** Redraw the header's forge link now that the team config has an answer. */
@@ -6855,6 +7044,9 @@ function createPane(slot, host) {
       // only ones this patch-in-place path has to add or remove rather than just repaint.
       syncAttach(head.querySelector('.head-meta'), s);
       syncForgeLink(head, s);
+      // …and the one that stays put and changes what it *does*, because the split can be
+      // opened or closed without this header ever being rebuilt.
+      syncSplitBtn(head.querySelector('.split-toggle'), s);
     }
 
     // The task list rides the roster beat: renderHead is what every `sessions` frame
@@ -9580,7 +9772,15 @@ function createPane(slot, host) {
      * which is what the ruling promises; it does not survive a reload.
      */
     if (last?.kind === 'link') {
-      if (linkById(last.link)) return openLink(last.link);
+      if (linkById(last.link)) {
+        // Restore the fact that decides what *closing* this thread does, before `openLink`
+        // writes the memory back out. A window reloaded with a thread on screen has to
+        // answer that question the way the window it replaced would have — otherwise one
+        // reload silently turns "close the thread and go back to one pane" into "close the
+        // thread and keep a split nobody asked for".
+        threadSplit = Boolean(last.autoSplit);
+        return openLink(last.link);
+      }
       rememberOpenLink(slot, null);
     }
 
@@ -9630,6 +9830,10 @@ function createPane(slot, host) {
     receive,
     renderHead,
     renderStream,
+    /* Re-pin this pane's room after something changed the height of the box it is scrolled
+     * inside. Exposed because the thing that changes that height is a *resizer*, which
+     * lives outside every pane — see `pinRooms`. */
+    pinRoom,
     /*
      * The session this pane is showing, and **null while it is showing a thread** — said
      * explicitly rather than leaning on `view.selected` happening to be null. Three things
@@ -9657,7 +9861,68 @@ function createPane(slot, host) {
 const panes = [];
 let focusedSlot = 'a';
 
+/**
+ * Whether the second pane exists **because a thread was opened**, rather than because
+ * somebody asked for split view.
+ *
+ * Closing a thread has to put the panel back where it came from, and "back" is two
+ * different places: a reader who was in one pane and pressed the chip gets one pane back,
+ * a reader who was already in split keeps both and that slot goes back to a session. The
+ * pane cannot tell those apart by looking at itself — this is the one fact that separates
+ * them, so it is written down when the split is made rather than guessed at afterwards.
+ */
+let threadSplit = false;
+
 const focused = () => panes.find((p) => p.slot === focusedSlot) || panes[0];
+
+/**
+ * The pane a session opens into — and the fix for the navigation regression in #36.
+ *
+ * "The rail drives the focused pane" was true and sufficient right up until a pane could
+ * hold something that is not a session. Opening a joint thread focused the pane it went
+ * into, so the very next rail click resolved to the *thread's* slot: `open()` turned that
+ * pane back into a session, the thread was gone, and the split the panel had opened for
+ * itself stayed — after which every click filled the second slot instead of replacing the
+ * first, which is navigation having stopped behaving like navigation.
+ *
+ * Measured before the fix, on a scratch panel: one pane showing `alpha-lead`, press the
+ * chip, click `alpha-lead` in the rail — it is drawn **twice**, each with its own aside,
+ * the thread gone and the split permanent.
+ *
+ * So a session resolves to a pane that can hold one: the focused pane when it is showing a
+ * session, otherwise the other one. A thread is a thing you consult *beside* what you were
+ * doing, and ordinary navigation must never be what takes it away — that is the locked
+ * ruling ("once open it stays until closed") read from the navigation side.
+ *
+ * The one case with no session pane to find is a thread left alone after its neighbour was
+ * closed by hand. There is nowhere else for the click to go, so it takes that pane: the
+ * reader closed the other one themselves, and a rail click that did nothing at all would
+ * be the worse answer.
+ */
+function sessionPane() {
+  const here = focused();
+  if (here && !here.linkId()) return here;
+  return panes.find((p) => !p.linkId()) || here;
+}
+
+/**
+ * Open a session, in the pane a session belongs in, and focus that pane.
+ *
+ * Every path that means "show me this conversation" comes through here — a rail row, ⇧⇥, a
+ * notification, and a session just launched or duplicated — so there is one answer to
+ * *which pane*, not five copies of `focused().open`. The pane the click changed is the pane
+ * the keyboard should now be in, which is what makes the split's focus ring keep pointing
+ * at the half a click will move.
+ */
+function openSession(id) {
+  const pane = sessionPane();
+  if (!pane) return;
+  // The only way here lands on a thread is the last-pane fallback above, and it is about to
+  // stop being one — so the split is nobody's thread any more.
+  if (pane.linkId()) threadSplit = false;
+  setFocus(pane.slot);
+  pane.open(id);
+}
 
 function addPane(slot) {
   const host = document.createElement('section');
@@ -9695,13 +9960,20 @@ function paintFocus() {
  * letting it adopt first would subscribe to a session, draw it, and then have it replaced
  * a line later, which is a transcript fetched for nobody and a visible flash of the wrong
  * thing.
+ *
+ * `focus: false` is for a caller putting something *unfocusable* in the new pane. Focus
+ * here means "the pane the rail and the keyboard drive", and a read-only thread is never
+ * that — handing it focus is precisely how a rail click came to eat one. See `sessionPane`.
  */
-function openSplit({ adopt = true } = {}) {
+function openSplit({ adopt = true, focus = true } = {}) {
   if (panes.length > 1) return panes.find((p) => p.slot === 'b');
   const pane = addPane('b');
+  // A split is somebody's split until a thread says otherwise; `openLinkThread` sets the
+  // flag back after this returns, which is the only caller that ever does.
+  threadSplit = false;
   paintFocus();
   if (adopt) pane.adopt();
-  setFocus('b');
+  if (focus) setFocus('b');
   for (const p of panes) p.renderHead();
   renderRail();
   return pane;
@@ -9719,17 +9991,30 @@ function openSplit({ adopt = true } = {}) {
  * And it never opens on selection — the maintainer selects a lead constantly, and a pane
  * that appeared every time would be noise. It opens when you press for it, and once open
  * it stays until it is closed. Both are locked rulings.
+ *
+ * Two things it must not do, both learned from the regression this fixes (#36). It never
+ * leaves **focus** on the thread — see `sessionPane` for what that cost. And it never puts a
+ * second thread on screen: a pane already holding one is what it replaces, ahead of any
+ * session, which is also what guarantees `sessionPane` always has somewhere to send a click.
  */
 function openLinkThread(id) {
-  const already = panes.find((p) => p.linkId() === id);
-  if (already) {
-    setFocus(already.slot);
-    return;
-  }
-  const target = panes.length > 1 ? panes.find((p) => p.slot !== focusedSlot) || panes[0] : openSplit({ adopt: false });
+  // Already on screen. Doing nothing is the whole answer: taking focus to it is the bug
+  // above, and there is nothing else a second press could reveal.
+  if (panes.some((p) => p.linkId() === id)) return;
+
+  const holder = panes.find((p) => p.linkId());
+  const madeSplit = !holder && panes.length < 2;
+  const target =
+    holder ||
+    (panes.length > 1
+      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
+      : openSplit({ adopt: false, focus: false }));
   if (!target) return;
+  if (madeSplit) threadSplit = true;
   target.openLink(id);
-  setFocus(target.slot);
+  // Put focus where a click will land, which after this is never the thread.
+  const keep = sessionPane();
+  if (keep) setFocus(keep.slot);
   for (const p of panes) p.renderHead();
   renderRail();
 }
@@ -9741,6 +10026,8 @@ function closePane(slot) {
   panes[at].close();
   panes.splice(at, 1);
   rememberOpen(slot, null); // closed on purpose — don't reopen it on the next load
+  // One pane left, so there is no split for a thread to have opened.
+  threadSplit = false;
   focusedSlot = panes[0].slot;
   paintFocus();
   for (const p of panes) p.renderHead();
@@ -9757,7 +10044,10 @@ function renderAllStreams() {
 /**
  * ⇧⇥ jumps to the next session wanting attention — blocked first, then unread.
  * Skips the one you're already on so repeated presses walk the queue, and it walks the
- * focused pane, leaving the other where you parked it.
+ * focused pane, leaving the other where you parked it — or, if a thread is what you are
+ * focused in, the pane that can actually hold a session. Same rule as a rail click, and it
+ * is `sessionPane`'s for the same reason: a keypress meaning "next session" must not be
+ * what closes a thread.
  */
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab' || !e.shiftKey) return;
@@ -9768,9 +10058,10 @@ document.addEventListener('keydown', (e) => {
   if (!queue.length) return;
   e.preventDefault();
 
-  const pane = focused();
+  const pane = sessionPane();
+  if (!pane) return;
   const at = queue.findIndex((s) => s.id === pane.selected());
-  pane.open(queue[(at + 1) % queue.length].id);
+  openSession(queue[(at + 1) % queue.length].id);
 });
 
 /** ⌘\ / Ctrl+\ opens the split, and closes the pane you are not in. */

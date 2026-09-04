@@ -33,11 +33,6 @@ button {
   height: 100vh;
 }
 
-/* The connections column takes a middle column only while there is a link to put in it —
-   the same show/hide trade `.app.split .main` makes for the second pane. With no links the
-   grid is what it always was and the column is not laid out at all. */
-.app.has-links { grid-template-columns: var(--rail) var(--conn) 1fr; }
-
 /* =============================================================== rail === */
 
 .rail {
@@ -1316,10 +1311,26 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 .room-panel { position: relative; } /* the "new below" pill hangs off the room's bottom */
+
+/* Nothing in this column may leave it silently.
+ *
+ * Measured on a scratch panel, 879px viewport, both folds open: the room was squeezed to
+ * 16px and pushed 178px *below* this panel's own bottom edge — fifteen entries in it, none
+ * on screen, and no scrollbar anywhere to say so. The folds are `flex: 0 0 auto` and could
+ * not give, `.room-list` was `min-height: 0` and gave everything. The floor below is the
+ * first half of the answer; this is the second, and it is the honest one: when the floors
+ * genuinely do not fit, the aside scrolls and you can see that it does. */
+.room-panel { overflow-y: auto; }
+
 .room-list {
-  /* The room takes whatever the tasks and settings sections above it leave. */
+  /* The room takes whatever the folds and the tasks block above it leave — until the
+     divider is dragged, when it holds the height it was given and the tasks block becomes
+     the one that gives way. `.room-sized` on the root is what switches the two; see the
+     room's resizer in app.js for why the number lives on this block and not that one. */
   flex: 1;
-  min-height: 0;
+  /* The floor, and it is load-bearing rather than tidy: this is the only block in the aside
+     that had none, which is how it came to be evicted from the panel entirely. */
+  min-height: 8rem;
   overflow-y: auto;
   padding: 0.5rem 0.8rem;
   display: flex;
@@ -1568,12 +1579,13 @@ body.row-dragging * { cursor: row-resize !important; }
    two). The value here is only the fallback for a block that was not laid out. */
 .team-tasks {
   flex: none;
+  min-height: 0;
   /* Dragged, or not. With no preference this is `auto` and the five-row cut above is what
      bounds the block; with one, the height is exactly what was dragged and `capTaskList`
      stands down. A height rather than a max-height on purpose: the divider has to follow
      the pointer even on a team with three tasks, where there is no sixth row to reveal.
      The rows do not stretch into it — they are ordinary blocks in a column that scrolls. */
-  height: var(--tasks-h, auto);
+  height: auto;
   overflow-y: auto;
   overscroll-behavior: contain; /* scrolling out of this box must not drag the room */
   padding: 0.5rem 0.7rem;
@@ -1584,6 +1596,16 @@ body.row-dragging * { cursor: row-resize !important; }
   font-size: 0.82rem;
 }
 .team-tasks.is-capped { max-height: 12rem; }
+
+/* The dragged mode. The room holds the height the divider gave it; the tasks block above
+   becomes the block that absorbs a fold opening, a window resize or a task arriving, and
+   scrolls inside itself as it already could. `capTaskList` takes its five-row cut off in
+   the same breath — the two are answers to one question and only one may be in force. */
+:root.room-sized .room-list {
+  flex: 0 0 auto;
+  height: var(--room-h);
+}
+:root.room-sized .team-tasks { flex: 1 1 auto; }
 /* Every row opens its brief, so it needs to look pressable. The panel's existing idiom,
    not a new one — the same `--surface-sunk` tint `.session-row`, `.menu-item`,
    `.complete-row` and `.perm-opt` all use. The negative margin is horizontal *only*: the
@@ -3921,34 +3943,59 @@ body.row-dragging * { cursor: row-resize !important; }
    is the object: it survives scrolling, sorting and a collapsed group, and nothing about it
    knows where either row is.
 
-   A sibling of `.rail`, not a block inside `.rail-list` — an open group's tint in that list
-   is tiled from three full-width rows, and anything joining that flow has to answer to it. */
-.conn-col {
+   The bottom band of the rail, under the session list — the maintainer moved it here from a
+   column of its own the day after it shipped. A **sibling** of `.rail-list`, never a block
+   inside it: an open group's tint in that list is tiled from three full-width rows, and
+   anything joining that flow has to answer to it. Out here it is one more band in the
+   rail's flex column, exactly as `.rail-foot` below it already is, and the tint is
+   untouched.
+
+   `flex: none` with an explicit height, so the session list above takes what is left — and
+   so the grip always does something visible, which is what `--rail` and `--aside` promise
+   and what a content-height block with a `max-height` could not. */
+.rail-conn {
   display: none;
-  border-right: 1px solid var(--rule);
-  background: var(--surface);
-  flex-direction: column;
+  flex: none;
+  height: var(--conn-h);
   min-height: 0;
-  min-width: 0;
+  flex-direction: column;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
 }
 
-.app.has-links .conn-col { display: flex; }
+.app.has-links .rail-conn { display: flex; }
+.app.has-links .conn-grip { display: flex; }
 
+/* The Tasks/Room divider's twin: a row grip between two blocks that simply meet, so it is
+   a flex item rather than an overlay, and the negative margins are what stop it costing
+   seven pixels of the rail — -4 above and -3 below nets zero, landing its hairline on the
+   block's own top rule. `position: relative` because the shared `.pane-grip` is absolute
+   and a row divider has to sit where the flow put it. */
+.conn-grip {
+  display: none;
+  position: relative;
+  flex: none;
+  margin: -4px 0 -3px;
+}
+
+/* The rail's own headings scale, not the lead aside's — this is a band in the rail and it
+   should read as one. No rule under it: the block already carries one above, and two
+   hairlines two lines apart in a 20rem column is furniture. */
 .conn-head {
+  flex: none;
   font-family: var(--mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
+  font-size: 0.63rem;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
   color: var(--ink-faint);
-  padding: 0.9rem 0.8rem 0.5rem;
-  border-bottom: 1px solid var(--rule);
+  padding: 0.7rem 1.1rem 0.4rem;
 }
 
 .conn-list {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
-  padding: 0.6rem;
+  padding: 0 0.7rem 0.7rem;
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
@@ -4066,7 +4113,7 @@ body.row-dragging * { cursor: row-resize !important; }
 
 /* ---- the `connect` block in a lead's aside: the control that MAKES a link ----
 
-   A form, not a list. The column beside the rail is where links are read; this is where one
+   A form, not a list. The band at the foot of the rail is where links are read; this is where one
    is opened, and it lives in the aside because a link is between two *projects* and this is
    the only per-project surface that already exists.
 
@@ -4236,15 +4283,17 @@ body.row-dragging * { cursor: row-resize !important; }
 
 @media (max-width: 52rem) {
   .app { grid-template-columns: 1fr; }
-  /* …including when there are links: the query collapses the grid to one column, and a
-     connections column here would be a column with no rail beside it. */
-  .app.has-links { grid-template-columns: 1fr; }
-  .app.has-links .conn-col { display: none; }
   .rail { display: none; }
   .app[data-view="rail"] .rail { display: flex; }
   .app[data-view="rail"] .main { display: none; }
   /* The rail is the whole viewport here, so there is no edge between two columns to
      drag — and a col-resize strip down the right of a phone-width list is a thing to
-     catch a thumb on. `--rail` is overridden by the `1fr` above either way. */
-  .rail-grip { display: none; }
+     catch a thumb on. `--rail` is overridden by the `1fr` above either way.
+
+     The connections grip goes with it, and for the same reason: the rail is the whole
+     viewport here, and the band under it does not want a row-resize strip across a
+     phone-width list. The band itself stays — it is inside the rail, so it comes and goes
+     with it, which is half of why it lives there. */
+  .rail-grip,
+  .app.has-links .conn-grip { display: none; }
 }
