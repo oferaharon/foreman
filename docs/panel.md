@@ -53,6 +53,50 @@ footer's model and context percentage. No restart is needed to graduate. Claude 
 re-reads its hook config while running, so a session picks the hook up the next time you
 speak to it, whenever it was started.
 
+### Rate-limit gauges
+
+Two thin bars for a subscription account's own usage: a five-hour window that refills
+through the day, and a seven-day one behind it. Neither exists until `npm run
+install-statusline` has run once (see [Running it](running.md#the-status-line-wrapper)),
+and neither exists at all for an API-key account — Claude Code never hands that kind of
+session a `rate_limits` block to show.
+
+**Colour is the number and nothing else:** green under 50% used, amber from 50% to 74%,
+red from 75% up. A bar and its percentage share one `currentColor`, so a row can't read
+amber in its text and neutral in its fill.
+
+A reset reads as a countdown inside a day — `2h 53m`, or `45m` under an hour with nothing
+to separate — and as a weekday plus the hour beyond it, `Mon 5PM`. The phone's five-hour
+bar is the one exception: it shows the clock time it actually resets at, `23:10`, because a
+countdown glanced at once an hour never reads as anything but "still running out."
+
+A reading older than fifteen minutes draws dim, its own age printed underneath — `as of
+12m ago` — because the feed only moves when some session on the machine takes a turn: a
+quiet bench can sit on a real number for hours with nothing wrong. No record at all draws
+nothing at all, never a zero and never a placeholder — a bar at 0% would be a claim about a
+quota nobody has actually measured yet.
+
+Placement differs by client. On the desktop the bars sit in the rail head, visible
+whenever there's a record to show. On the phone they live in the shell header **on the
+home (leads) screen only** — tapping them opens the reset times and the reading's age
+underneath; the lead screen draws its own header with no room budgeted for a number that
+reads the same everywhere, so a phone that wants it is one tap back.
+
+**Two gaps, both accepted rather than chased.** Right after a five-hour window's own reset
+passes, the old reading disappears — correctly, the same instant client-side as it would
+server-side — and the bar stays empty until the next status-line render actually carries a
+fresh one, which can be up to a minute away if every session on the machine is idle. And
+right after a panel restart the persisted record comes back immediately, so an ordinary
+restart never blanks a live gauge — but the store only flushes to disk every two seconds,
+so a hard kill inside that window can lose the very latest reading, and a genuinely fresh
+install with no file yet shows nothing until the first payload arrives.
+
+**There is deliberately no notification for a gauge crossing into red.**
+[Notifications](#notifications) covers a session waiting on you — a prompt, a question, a
+plan, the trust gate — and stops there on purpose. A rate limit is an account-wide fact,
+not a session blocked on a human, and nothing here would tell you which session to go
+answer anyway. If red is worth chasing, that's what the bar is for.
+
 ### Unread and the needs-you queue
 
 Each session carries a read watermark — an ISO timestamp, stored server-side in
@@ -886,6 +930,10 @@ Two quiet rules it inherits rather than invents. A **worker's** own prompts stay
 its stuck timer fires, because a worker's prompt is its lead's to answer — the same rule that
 keeps it out of the inbox. And "it replied and you haven't read it" is not a notification; it
 is an unread badge, which is where it stays.
+
+A third thing this deliberately does not cover: the [rate-limit gauges](#rate-limit-gauges).
+A subscription running low is an account fact, not a session waiting on you, and nothing here
+raises a notification for it, on purpose — read the bar.
 
 **It only works where the browser will allow it, which means on this Mac.** Notifications need
 a secure context: `http://127.0.0.1` counts as one, a LAN address over plain `http://` does
