@@ -4595,6 +4595,225 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 .shared-hint:hover { color: var(--ink); }
 
+/* ---------------------------------------------- the room's @ composer --- */
+
+/* The maintainer's own box, and it sits **beside** `.shared-body` rather than inside it.
+   That frame exists to anchor the `N new below` pill to the scroll box's bottom edge
+   (`bottom: 1rem` against it), so a composer added as a third child of it would put the
+   pill above the *textarea* instead of above the words it is about. As a sibling under
+   `.pane` — a flex column — it takes the height it needs and the scroller keeps the rest,
+   which is `.link-composer`'s own placement.
+
+   Its rules are `.shared-*` and duplicate the link composer's rather than sharing them, for
+   the reason the whole shared room does: the link feature is on a documented path to
+   deletion, and a view quietly depending on `.link-*` would come apart on the day that
+   lands, in a stylesheet nobody was looking at.
+
+   `position: relative` is load-bearing and not tidiness — the picker is absolutely placed
+   against it, which is what lets the popover open *over* the room instead of pushing the
+   textarea down under whoever is typing into it. */
+.shared-composer {
+  flex: none;
+  position: relative;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.shared-composer-inner {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0.6rem 1.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.app.split .shared-composer-inner { padding-left: 1rem; padding-right: 1rem; }
+
+/* Who this reaches, said before anything is typed. Quiet — except the half that says the
+   session picked is no longer here, which takes the panel's waiting colour because it is
+   the one thing on this line that changes what he would do next. */
+.shared-reach {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+  min-height: 1.1rem;
+}
+.shared-reach-to { color: var(--ink-muted); }
+.shared-reach-miss { color: var(--working); }
+
+/* The chosen target. It wears the same ring the room's name pills wear, keyed on the same
+   name by the same function, so the line being written is already the colour it will be
+   when it lands. `currentColor` on the border keeps that one value per speaker rather than
+   two, exactly as `.shared-pill` does. */
+.shared-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: none;
+  margin-right: 0.4rem;
+  padding: 0.05rem 0.4rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  max-width: 18rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.shared-chip-x {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.7;
+  cursor: pointer;
+}
+.shared-chip-x:hover { opacity: 1; }
+
+/* A refusal, painted from view state so it survives the repaint that arrives with the next
+   message in the room — `linkErrors`' lesson, and it bites harder here because this box
+   repaints on every entry rather than on a press. */
+.shared-composer-err {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+.shared-composer textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.shared-composer textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong));
+}
+
+.shared-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* What a line typed here *is* — the same claim the envelope makes on the way out, said in
+   the panel's own voice every time rather than in a tooltip nobody opens. */
+.shared-composer-hint {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The `@` picker. It opens **upward, over the room** — anchored to the composer's top edge
+   — because a popover that grew downward would either leave the pane or push the textarea
+   out from under the caret mid-word.
+
+   Its rows are visibly *sessions*: a status dot, a name, a folder. `@` means files in the
+   session composer one pane over and a reader's hands know that meaning, so these two lists
+   must not be mistakable for each other at a glance. */
+.shared-picker {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: min(28rem, calc(100% - 2rem));
+  max-height: 15rem;
+  overflow-y: auto;
+  margin-bottom: 0.35rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.22);
+  padding: 0.25rem;
+}
+
+.shared-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+/* The highlight is one strong state and the hover is the same one, because the keyboard and
+   the mouse are picking from the same list and two different marks would be two answers to
+   "which one does Enter take". */
+.shared-picker-row:hover,
+.shared-picker-row.is-on { background: var(--surface-sunk); }
+
+.shared-picker-name {
+  flex: none;
+  max-width: 14rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A lead says so, in the rail's own chip, because "which of these is the lead" is the
+   question this list is most often being asked. */
+.shared-picker-role {
+  flex: none;
+  padding: 0 0.28rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+}
+
+.shared-picker-where {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Nothing matched. A sentence rather than an empty box, in the register the rest of this
+   view uses — and when the room has nobody addressable at all it says *why*, because
+   "workers are shown but cannot be messaged" is the one thing about this list that is
+   surprising. */
+.shared-picker-none {
+  padding: 0.45rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
 /* The rail's way in: one row, always here, above the connections band. A sibling of
    `.rail-list` rather than a block inside it — an open group's tint in that list is tiled
    from three full-width rows, and anything joining that flow has to answer to it.
