@@ -186,12 +186,16 @@ select {
 .m-quota-gauge.is-warn { --gauge: var(--working); }
 .m-quota-gauge.is-hot { --gauge: var(--decision); }
 
+/* `--ink`, the rail's own primary-label token (`.session-title` and friends inherit it from
+   the body), not `--ink-muted` — that read too faint against the dark surface, the
+   maintainer's own report. The tone classes below still own the colour whenever one applies;
+   this is only the neutral fallback for a tone `toneFor` never hands back in practice. */
 .m-quota-label {
   font-family: var(--mono);
   font-size: 0.66rem;
   line-height: 1;
   letter-spacing: -0.02em;
-  color: var(--ink-muted);
+  color: var(--ink);
   white-space: nowrap;
 }
 
@@ -217,13 +221,14 @@ select {
   background: var(--gauge);
 }
 
-/* Opened: each window's reset under its own bar, so the block grows down and not across. */
+/* Opened: each window's reset under its own bar, so the block grows down and not across.
+   `--ink`, not `--ink-faint` — same fix and same reason as `.m-quota-label` above. */
 .m-quota-reset,
 .m-quota-as-of {
   font-family: var(--mono);
   font-size: 0.6rem;
   line-height: 1;
-  color: var(--ink-faint);
+  color: var(--ink);
   white-space: nowrap;
 }
 

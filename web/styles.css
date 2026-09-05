@@ -759,12 +759,14 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 
-/* Which window, and when it comes back — both quiet at every tone. The number between
-   them is the only part that changes colour, so the row has one loud element and not
-   three. */
+/* Which window, and when it comes back. `--ink-faint` read as too faint against the dark
+   surface — the maintainer's own report — so this is `--ink`, the same token the rail's own
+   primary labels (`.session-title` and friends) fall back to by inheriting the body colour,
+   rather than a colour named here. The percentage is still the one element that changes with
+   the tone; this is a stronger neutral for the two around it, not a second loud element. */
 .quota-win,
 .quota-reset {
-  color: var(--ink-faint);
+  color: var(--ink);
 }
 
 /* At the rail's 14rem floor `5H 100% · RESETS 4H59M` is the longest line this can draw and
