@@ -19,7 +19,7 @@
  */
 
 import { ghostSend } from '../prefs.js';
-import { formatReset, staleness, windowsOf } from '../quota.js';
+import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.js';
 import { mountLead, updateLead } from './lead.js';
 
 /* ------------------------------------------------------------- state --- */
@@ -658,6 +658,14 @@ function quotaWindows(now) {
   return windowsOf(state.rateLimits, now).filter((w) => QUOTA_WINDOWS.has(w.key));
 }
 
+/** The reset label for one window: a 24-hour clock time for `five_hour` (the maintainer's
+ *  call — a countdown that never reaches zero on a phone glanced at once an hour is less
+ *  useful than the time it actually resets), the ordinary countdown/weekday label from
+ *  `formatReset` for everything else, `seven_day` included. */
+function resetLabel(win, now) {
+  return win.key === 'five_hour' ? formatResetClock24(win.resetsAt) : formatReset(win.resetsAt, now);
+}
+
 /**
  * Everything about the gauges a reader could see, as one string, folded into
  * `homeSignature` by all three of its branches.
@@ -677,7 +685,7 @@ function quotaSignature(now) {
   return [
     quotaOpen ? 'open' : 'shut',
     dim ? `dim:${relativeTime(state.rateLimits.at)}` : 'live',
-    ...wins.map((w) => `${w.key}:${Math.round(w.pct)}:${w.tone}:${formatReset(w.resetsAt, now)}`),
+    ...wins.map((w) => `${w.key}:${Math.round(w.pct)}:${w.tone}:${resetLabel(w, now)}`),
   ].join('|');
 }
 
@@ -739,7 +747,7 @@ function renderQuota(now) {
 
 function quotaGauge(win, now, age) {
   const pct = Math.round(win.pct);
-  const reset = formatReset(win.resetsAt, now);
+  const reset = resetLabel(win, now);
 
   const gauge = document.createElement('span');
   // `win.tone` is `toneFor`'s answer, computed inside `windowsOf`. 50 and 75 are spelled in
