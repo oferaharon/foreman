@@ -14,6 +14,12 @@ export const PORT = Number(process.env.FOREMAN_PORT || 48770);
 
 export const HOME = os.homedir();
 export const PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
+/**
+ * Claude Code's own peer-session registry — one `<pid>.json` per live session, the
+ * directory `ListAgents` reads to build its roster. Gone within seconds of that session
+ * exiting; see `server/peers.js`, the only reader of it in this repo.
+ */
+export const PEER_SESSIONS_DIR = path.join(HOME, '.claude', 'sessions');
 export const SETTINGS_PATH = path.join(HOME, '.claude', 'settings.json');
 /**
  * Claude Code's user config — where MCP servers are registered. **Read, never written**:
