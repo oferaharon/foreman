@@ -77,6 +77,29 @@
         <div class="rail-list" id="railList"></div>
 
         <!--
+          The shared room: one row, always here, above the connections band.
+
+          It is a *row* rather than a card because there is exactly one of it — the machine
+          has one room, however many sessions are on it — and a band that can hold only one
+          card is a band that should have been a row. It is persistent for the same reason:
+          the connections band shows and hides with `.app.has-links` because a panel with no
+          links should be the panel it was before that feature, but a room with nothing in
+          it yet still has something to say (`renderShared`'s empty line says it), and a
+          control that only appears once traffic exists is a control nobody discovers.
+
+          A sibling of `.rail-list`, never a block inside it — an open group's tint is tiled
+          from three full-width rows in that list, and anything joining that flow has to
+          answer to it. Out here it is one more band in the rail's own flex column. The
+          unseen count is filled by `renderSharedRow` off the roster frame's `sharedRoom`
+          summary; the log itself never rides that frame.
+        -->
+        <button class="rail-shared" id="railShared" type="button">
+          <span class="rail-shared-mark" aria-hidden="true">⁂</span>
+          <span class="rail-shared-name">shared room</span>
+          <span class="rail-shared-unseen" id="railSharedUnseen" hidden></span>
+        </button>
+
+        <!--
           The connections: one card per open link, at the bottom of the rail under the
           session list. It was a column of its own for one day; the maintainer moved it
           here — same content, new home.
