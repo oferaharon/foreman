@@ -16,6 +16,17 @@ const REAL = {
   seven_day: { used_percentage: 4, resets_at: 1789084800 },
 };
 
+/*
+ * Wall clocks, in **milliseconds**, positioned against REAL's two resets — because every
+ * window now lives or dies by its own reset against the `now` it is ingested at, and a
+ * fixture that reset in 1970 would expire the moment it arrived.
+ *
+ *   NOW          both windows still open
+ *   PAST_5H      the five-hour window has reset; the weekly one has not
+ */
+const NOW = 1788_500_000_000;
+const PAST_5H = 1788_600_000_000;
+
 /* ---------------------------------------------------------------- ingest --- */
 
 test('a payload with rate_limits becomes the record', () => {
@@ -49,34 +60,140 @@ test('nothing but the windows is kept — no cost, no USD, no session id', () =>
   s.stop();
 });
 
-test('a later payload replaces the windows wholesale', () => {
+test('a later payload updates the window it names and leaves the others alone', () => {
   const s = new RateLimitStore(tmpStore());
-  s.ingest({ rate_limits: REAL }, 1000);
-  assert.equal(s.ingest({ rate_limits: { five_hour: { used_percentage: 44, resets_at: 1788571200 } } }, 2000), true);
-  assert.deepEqual(Object.keys(s.get().windows), ['five_hour'], 'seven_day is gone, not merged');
-  assert.equal(s.get().windows.five_hour.usedPercentage, 44);
+  s.ingest({ rate_limits: REAL }, NOW);
+  assert.equal(
+    s.ingest({ rate_limits: { five_hour: { used_percentage: 44, resets_at: 1788571200 } } }, NOW + 1000),
+    true,
+  );
+  assert.deepEqual(Object.keys(s.get().windows).sort(), ['five_hour', 'seven_day']);
+  assert.equal(s.get().windows.five_hour.usedPercentage, 44, 'the same window, read again');
+  assert.deepEqual(
+    s.get().windows.seven_day,
+    { usedPercentage: 4, resetsAt: 1789084800 },
+    'not mentioned is not evidence — it is untouched',
+  );
+  s.stop();
+});
+
+/* ------------------------------------------------------- stale re-posts --- */
+
+/*
+ * The bug this merge exists for, in the shape it was confirmed in on a real panel.
+ *
+ * `statusLine.refreshInterval` is 60, so a session idle for hours re-renders every minute
+ * and re-posts the payload it is *holding* — hours-old percentages, and no `five_hour` at
+ * all, because that window's reset passed long ago and Claude Code dropped it from that
+ * session's copy. Wholesale replacement let the sleeper blank the live five-hour bar once a
+ * minute; the file alternated between the two readings.
+ */
+test('a seven_day-only re-post from an idle session does not clear a live five_hour', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: REAL }, NOW);
+  assert.equal(
+    s.ingest({ rate_limits: { seven_day: { used_percentage: 4, resets_at: 1789084800 } } }, NOW + 60_000),
+    false,
+    'nothing a reader sees moved, so nothing is broadcast',
+  );
+  assert.deepEqual(
+    s.get().windows.five_hour,
+    { usedPercentage: 43, resetsAt: 1788571200 },
+    'the bar the sleeper had forgotten about is still there',
+  );
+  assert.equal(s.get().at, NOW + 60_000, 'the arrival is still the newest one');
+  s.stop();
+});
+
+/* An older `resetsAt` is the previous five-hour window — a memory, not a reading. */
+test('a five_hour whose reset is older than the stored one is ignored', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: REAL }, NOW);
+  const stale = { five_hour: { used_percentage: 99, resets_at: 1788571200 - 5 * 3600 } };
+  assert.equal(s.ingest({ rate_limits: stale }, NOW + 60_000), false);
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 43, resetsAt: 1788571200 });
+  s.stop();
+});
+
+/* …and a *later* one is the next window, which is exactly what must get through. */
+test('a five_hour whose reset is later than the stored one replaces it', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: REAL }, NOW);
+  const next = { five_hour: { used_percentage: 2, resets_at: 1788571200 + 5 * 3600 } };
+  assert.equal(s.ingest({ rate_limits: next }, NOW + 1000), true);
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 2, resetsAt: 1788571200 + 5 * 3600 });
   s.stop();
 });
 
 /*
- * T10, the half that is easy to get backwards. Claude Code drops a window once its reset
- * has passed, so a window missing from a *present* object has genuinely expired — keep it
- * and a five-hour bar outlives its own reset for ever.
+ * Equal resets are one window read twice, and the incoming reading is taken as-is —
+ * downwards included. Within a window a percentage only climbs, but that is an assumption
+ * about a number this panel does not own, and a store that argued with its own source of
+ * truth could not be corrected by it.
  */
-test('a window that disappears from a present object is cleared', () => {
+test('the same window read again takes the incoming percentage, even downwards', () => {
   const s = new RateLimitStore(tmpStore());
-  s.ingest({ rate_limits: REAL }, 1000);
-  assert.equal(s.ingest({ rate_limits: { seven_day: { used_percentage: 4, resets_at: 1789084800 } } }, 2000), true);
-  assert.equal(s.get().windows.five_hour, undefined);
-  assert.equal(s.get().windows.seven_day.usedPercentage, 4);
+  s.ingest({ rate_limits: REAL }, NOW);
+  assert.equal(
+    s.ingest({ rate_limits: { five_hour: { used_percentage: 11, resets_at: 1788571200 } } }, NOW + 1000),
+    true,
+  );
+  assert.equal(s.get().windows.five_hour.usedPercentage, 11);
   s.stop();
 });
 
-test('a present but empty rate_limits clears everything', () => {
+/* Beyond comparison is not the same as stale: the incoming wins, as it did before. */
+test('an unreadable resets_at on either side falls back to latest-wins', () => {
   const s = new RateLimitStore(tmpStore());
-  s.ingest({ rate_limits: REAL }, 1000);
-  assert.equal(s.ingest({ rate_limits: {} }, 2000), true);
-  assert.deepEqual(s.get(), { windows: {}, at: 2000 });
+  s.ingest({ rate_limits: REAL }, NOW);
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 7, resets_at: null } } }, NOW + 1000);
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 7, resetsAt: null });
+
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 8, resets_at: 1788571200 } } }, NOW + 2000);
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 8, resetsAt: 1788571200 });
+  s.stop();
+});
+
+/* ------------------------------------------------------------- expiry --- */
+
+/*
+ * The one and only thing that removes a window — measured against this machine's clock,
+ * never inferred from a payload that simply did not mention it.
+ */
+test('a stored window is dropped once its own reset has passed', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: REAL }, NOW);
+  assert.equal(s.ingest({ rate_limits: { seven_day: REAL.seven_day } }, PAST_5H), true);
+  assert.equal(s.get().windows.five_hour, undefined, 'its reset is behind us now');
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 4, resetsAt: 1789084800 }, 'the weekly one is not');
+  s.stop();
+});
+
+test('a window that arrives already expired is not stored', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 43, resets_at: 1788571200 } } }, PAST_5H);
+  assert.deepEqual(s.get().windows, {});
+  s.stop();
+});
+
+test('a window with no readable reset never expires, and is left to the view to refuse', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 43, resets_at: null } } }, NOW);
+  assert.equal(s.ingest({ rate_limits: { seven_day: REAL.seven_day } }, PAST_5H), true);
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 43, resetsAt: null });
+  s.stop();
+});
+
+test('a present but empty rate_limits clears nothing that is still valid', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: REAL }, NOW);
+  assert.equal(s.ingest({ rate_limits: {} }, NOW + 1000), false);
+  assert.deepEqual(Object.keys(s.get().windows).sort(), ['five_hour', 'seven_day']);
+  assert.equal(s.get().at, NOW + 1000);
+
+  // …and still expires what has genuinely run out, on the same empty payload.
+  assert.equal(s.ingest({ rate_limits: {} }, PAST_5H), true);
+  assert.deepEqual(Object.keys(s.get().windows), ['seven_day']);
   s.stop();
 });
 
@@ -144,6 +261,32 @@ test('a moved percentage and a moved reset are both changes', () => {
   s.stop();
 });
 
+/*
+ * The point of the whole thing, from the broadcast's side. A machine full of idle sessions
+ * posts once a minute each and moves nothing; every one of those must be silent, or the
+ * rail rebuilds on a timer for a record that has not changed since breakfast.
+ */
+test('a stale re-post that the merge refuses reports no change at all', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: REAL }, NOW);
+  for (let i = 1; i <= 5; i++) {
+    const stale = { seven_day: { used_percentage: 4, resets_at: 1789084800 } };
+    assert.equal(s.ingest({ rate_limits: stale }, NOW + i * 60_000), false, `minute ${i}`);
+  }
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 43, resetsAt: 1788571200 });
+  s.stop();
+});
+
+/* A window leaving the set is as much a change as a number moving inside it. */
+test('an expiry is a change, and so is a window appearing', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { seven_day: REAL.seven_day } }, NOW);
+  assert.equal(s.ingest({ rate_limits: REAL }, NOW + 1000), true, 'five_hour appeared');
+  assert.equal(s.ingest({ rate_limits: { seven_day: REAL.seven_day } }, PAST_5H), true, 'and then expired');
+  assert.equal(s.ingest({ rate_limits: { seven_day: REAL.seven_day } }, PAST_5H + 1000), false, 'and stays gone quietly');
+  s.stop();
+});
+
 /* -------------------------------------------------------------- the keys --- */
 
 /*
@@ -160,7 +303,7 @@ test('`utilization` is read when `used_percentage` is absent', () => {
 
 test('`used_percentage` wins when both are present', () => {
   const s = new RateLimitStore(tmpStore());
-  s.ingest({ rate_limits: { five_hour: { used_percentage: 43, utilization: 61, resets_at: 1 } } }, 1000);
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 43, utilization: 61, resets_at: 1788571200 } } }, 1000);
   assert.equal(s.get().windows.five_hour.usedPercentage, 43);
   s.stop();
 });
@@ -214,7 +357,7 @@ test('percentages are coerced, clamped, and never NaN', () => {
 
 test('a null `used_percentage` falls through to `utilization`, the way ?? should', () => {
   const s = new RateLimitStore(tmpStore());
-  s.ingest({ rate_limits: { five_hour: { used_percentage: null, utilization: 61, resets_at: 1 } } }, 1000);
+  s.ingest({ rate_limits: { five_hour: { used_percentage: null, utilization: 61, resets_at: 1788571200 } } }, 1000);
   assert.equal(s.get().windows.five_hour.usedPercentage, 61);
   s.stop();
 });
