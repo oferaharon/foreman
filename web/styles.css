@@ -4355,6 +4355,300 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 
+/* ======================================================= shared room === */
+
+/* The machine-wide room: one log of what the sessions on this Mac say to each other, in a
+   pane. It borrows the joint thread's furniture — a `.main-head` above, a scrolling middle,
+   bubbles under name pills — because a slot holding the room should read as the same kind
+   of object as a slot holding a thread or a conversation.
+
+   It does **not** borrow the joint thread's classes. Everything here is `.shared-*` with
+   its own rules, deliberately: the link feature is on a documented path to deletion (the
+   plan's §12 removes every `.link-*` rule in one commit), and a view that quietly depended
+   on those rules would come apart on the day that lands, in a stylesheet nobody was looking
+   at. The duplication is the price of that independence and it is worth paying once. */
+
+.main-head.is-shared .shared-mark {
+  font-family: var(--mono);
+  color: var(--ink-muted);
+  flex: none;
+}
+
+.main-head.is-shared h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* The frame the scroll box and its `N new below` pill share, and it exists because the pill
+   can be anchored to neither of the obvious things. Absolute inside the *scroller* anchors
+   to the content and scrolls the pill away with the words it is about; `.pane` is shared
+   with every session pane and giving it a position would re-anchor anything else ever
+   placed absolutely in one. Measured on the bench: without this frame the pill drew half
+   off the left edge of the pane, having anchored to the window. */
+.shared-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.shared-room {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1.4rem 0 1.6rem;
+}
+
+/* The room reads at the joint thread's scale, which is `.room-list`'s — this is the same
+   kind of content, a log of messages rather than a conversation, and it would be too big
+   beside the room aside it sits next to. Same serif; only the size moves. */
+.shared-room-inner {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  font-size: 0.82rem;
+}
+
+.app.split .shared-room-inner { padding-left: 1rem; padding-right: 1rem; }
+
+/* An empty room says what it is waiting for. The register is `renderThread`'s and
+   `renderRoom`'s: a quiet sentence in muted ink, never an error and never a placeholder
+   card. */
+.shared-quiet {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  max-width: 34rem;
+}
+
+/* **One lane, all left-aligned.** A link has exactly two ends and lanes them left and
+   right; this room has N sessions and there is no second side to lane against, so the name
+   pill carries the identity and every peer line starts at the same edge. Laning by sender
+   would put a message from one session on the right for no reason a reader could name. */
+.shared-msg { max-width: 82%; line-height: 1.45; align-self: flex-start; }
+
+/* The maintainer's own line. Full width rather than laned, because it is not one of N
+   speakers — it is the one voice on this channel whose word can authorize, and it has to be
+   **structurally** distinguishable rather than merely a different colour of the same shape.
+   The joint thread's `from-human` shape, for exactly that reason. */
+.shared-msg.from-human {
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.shared-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0 0.1rem 0.15rem;
+  flex-wrap: wrap;
+}
+
+/* The pill is the identity, and it is the **only** thing here that carries colour. The
+   maintainer's own recorded correction of an earlier coloured-bubbles suggestion was to the
+   header alone: two tinted bubble bodies in one column are two competing page backgrounds
+   rather than two labels, and this room can hold seven at once. So `.shared-bubble` below
+   is byte-identical whoever spoke, and the hue is set inline on this node off the
+   `--peer-N` ring (`web/session-colour.js`, keyed on the session's name).
+
+   The ring's own contrast is measured and recorded in `tokens.css` — every hue clears 7:1
+   against `--ground` in both themes, which is what this pill sits on: the bubble starts
+   below it. */
+.shared-pill {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: var(--ink-muted);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Later than any hue the ring can set, and it wins over the inline colour for nobody —
+   `renderSharedRow`'s human branch never sets one. It is here so the maintainer's pill is
+   the accent whatever else is added beside it later: the accent is *his* colour in this
+   panel, and it is deliberately not in the peer ring. */
+.shared-pill.is-human { color: var(--accent); border-color: currentColor; }
+
+/* A worker's line says so, and the guessed-identity line says that. Both are quiet tags
+   rather than badges: neither is asking for anything, they are qualifying a name. The guess
+   marker is *visible* rather than only true on the record, because a wrong guess believed
+   is worse than a right one labelled. */
+.shared-tag {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 0 0.25rem;
+  flex: none;
+}
+
+.shared-tag.is-guess { border-style: dashed; }
+
+/* Who it was sent to. A machine-wide log has no "other end" the way a two-ended thread
+   does, so the recipient is what makes a line a message rather than an utterance — quiet,
+   and after the sender, because the sender is the identity. */
+.shared-to {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shared-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
+
+.shared-bubble {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  border-top-left-radius: 3px;
+  padding: 0.45rem 0.7rem;
+  background: var(--surface);
+}
+
+/* The maintainer's line gets the accent edge the room and the joint thread already use, and
+   for the same reason: this is the shape that carries authority. */
+.shared-msg.from-human .shared-bubble {
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+/* Sessions writing to each other in prose: keep their paragraphs. */
+.shared-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* **Ten** lines, then a quiet way in — the joint thread's number rather than the room
+   aside's five, and the difference is what is being folded. The aside logs events, a line
+   each, and five is generous there; these are whole messages between two sessions, and
+   cutting one at five hides the message instead of trimming it.
+
+   `scrollHeight > clientHeight` is what decides a message gets a control at all, so a short
+   one keeps its own height and grows nothing (see `sharedClampable`). */
+.shared-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 10;
+  overflow: hidden;
+}
+/* Deliberately no standard `line-clamp: 10` beside that, for the reason the other two
+   clamps in this file both record: Chrome answers `CSS.supports('line-clamp', '10')` with
+   false, so it is dead weight today — and the shape it will eventually ship is
+   `continue: discard`, which *removes* the clamped lines from the box rather than hiding
+   them. The overflow test above is `scrollHeight > clientHeight`; discard the lines and
+   those two are equal, every message reads as fitting, and the control silently stops
+   appearing on exactly the ones that need it. Add it the day it can be measured, not the
+   day it parses. */
+
+/* Inside the bubble, never floating over it, in muted ink — the same restraint as the room
+   aside's: no accent, no motion, nothing competing with the coloured name pills for the
+   eye. */
+.shared-more {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.shared-more:hover { color: var(--ink); }
+
+/* What became of one of the maintainer's own messages. Quiet — the same register as the
+   `room-ready` line under a report bubble — because "queued" is a fact to read rather than
+   an error to act on. Amber is this panel's own "waiting" and is used for nothing else
+   here. */
+.shared-delivery {
+  margin-top: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+.shared-delivery.is-waiting { color: var(--working); }
+
+/* "Keep it quiet" — the maintainer's condition on the room aside's own pill, and the same
+   one applies here. Muted ink on the surface, no accent, no motion; it sits over the box's
+   bottom edge so it never reflows the list under the reader. */
+.shared-hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
+}
+.shared-hint:hover { color: var(--ink); }
+
+/* The rail's way in: one row, always here, above the connections band. A sibling of
+   `.rail-list` rather than a block inside it — an open group's tint in that list is tiled
+   from three full-width rows, and anything joining that flow has to answer to it.
+
+   Persistent, unlike the connections band that hides itself when there are no links: a room
+   with nothing in it yet still has something to say, and a control that only appears once
+   traffic exists is a control nobody discovers. The narrow query hides the whole rail, so
+   this costs the phone-width layout nothing. */
+.rail-shared {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.45rem 1.1rem;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.rail-shared:hover { background: var(--surface-sunk); color: var(--ink); }
+
+/* Open, and legible over both of the backgrounds this row can have — its own surface and
+   the hover's sunk one. `--row-open` is the rail's own answer to that question, borrowed
+   here rather than re-derived: a second tint a couple of points off the surface is exactly
+   what made the rail's selected row invisible before that token existed. */
+.rail-shared.is-open {
+  background: var(--row-open);
+  color: var(--ink);
+}
+
+.rail-shared-mark { flex: none; }
+.rail-shared-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* What has arrived since anybody last opened the room. Zero draws nothing — a `· 0` is
+   furniture, the same reason an empty group heading is not drawn — and this is deliberately
+   quiet rather than an accent badge: the room is a **log, not an inbox**. Every message in
+   it was answered by the session it was sent to before the panel ever saw it, so a count
+   that asked for attention would be asking for something nobody owes. */
+.rail-shared-unseen {
+  flex: none;
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+}
+
 /* ======================================================= connections === */
 
 /* Links as **cards**, never lines drawn between two rows. The maintainer's own call, after

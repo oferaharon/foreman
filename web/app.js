@@ -13,6 +13,12 @@ import { ghostSend, hideFinished, isFinishedState } from './prefs.js';
 // phone goes amber at another is the `isLeadName` lesson in another costume. Nothing here
 // may define a threshold, a format or a staleness rule of its own.
 import { windowsOf, staleness, formatReset } from './quota.js';
+// One colour per speaker in the shared room, keyed on the session's name. The fifth shared
+// pure module in `web/`, node-tested like the four above it — and the reason it is a module
+// rather than four lines here is the same one every time: the name→hue map has to be
+// stable across restarts and provable in a test, and a hash inlined into a render function
+// is neither.
+import { colourFor } from './session-colour.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -47,6 +53,16 @@ const state = {
   // been wrapped, an API-key account, or simply a panel that has been up for less time
   // than any session has taken a turn. It draws nothing.
   rateLimits: null,
+  // The shared room, **as a summary and nothing else**: `{unseen, lastAt}`, or nulls until
+  // a frame has carried one. A sibling of `sessions` like the groups, the links and the
+  // rate limits, and for the sharpest version of that reason — this one summarises a
+  // machine-wide log with a 4 MB ceiling, so the entries deliberately never ride the roster
+  // frame at all. They arrive once on `subscribe-shared` and one at a time after that.
+  //
+  // It is not an inbox and `unseen` is not a badge that asks for anything: every message in
+  // this log was answered by the session it was sent to before the panel ever saw it. The
+  // count says the room moved, which is all it may say.
+  sharedRoom: { unseen: 0, lastAt: null },
   // Shelving off: one recency-ordered list instead of groups and folder headings. Kept in
   // this browser rather than on the server, unlike a group's collapse state — that is a
   // fact about your filing and should follow you between windows, while this is a fact
@@ -144,6 +160,24 @@ function rememberOpenLink(slot, linkId, autoSplit = false) {
   persistOpen();
 }
 
+/**
+ * The fourth shape a slot can be remembered in: the shared room.
+ *
+ * It carries no id, because there is one room on the machine — which is exactly why it
+ * needs its own `kind` rather than a `link` entry with a reserved id. `adopt` reads `kind`
+ * to tell the shapes apart, and a slot remembering something it cannot name would fall
+ * through both session keys and be replaced by whatever session sorts first.
+ *
+ * `autoSplit` means the same thing it means for a thread — whether this pane exists
+ * *because* the room was opened, and so whether closing it should take the panel back to
+ * one pane. See `threadSplit`.
+ */
+function rememberOpenShared(slot, on, autoSplit = false) {
+  if (on) state.opened[slot] = { kind: 'shared', autoSplit: Boolean(autoSplit) };
+  else delete state.opened[slot];
+  persistOpen();
+}
+
 function persistOpen() {
   try {
     localStorage.setItem('foreman.opened', JSON.stringify(state.opened));
@@ -173,6 +207,8 @@ const el = {
   railRepo: document.getElementById('railRepo'),
   railVersion: document.getElementById('railVersion'),
   railGrip: document.getElementById('railGrip'),
+  railShared: document.getElementById('railShared'),
+  railSharedUnseen: document.getElementById('railSharedUnseen'),
   connCol: document.getElementById('connCol'),
   connGrip: document.getElementById('connGrip'),
   connList: document.getElementById('connList'),
@@ -911,6 +947,12 @@ function handle(msg) {
     // field being present at all so a frame from a panel that predates it leaves whatever
     // we have alone rather than blanking it.
     if ('rateLimits' in msg) state.rateLimits = msg.rateLimits;
+    // `in`, not a truth test, for `rateLimits`' reason one line up: a summary of
+    // `{unseen: 0, lastAt: null}` is the ordinary answer for a room nothing has been said
+    // in yet, and a truth test would read that as "the frame didn't mention it" and pin
+    // whatever was on screen last. Keyed on presence so a frame from a panel that predates
+    // the field leaves what we have alone rather than blanking it.
+    if ('sharedRoom' in msg) state.sharedRoom = msg.sharedRoom || { unseen: 0, lastAt: null };
     // Before the render, so a notification is never held up behind a rail repaint — and
     // before `adopt`, which can change what is on screen but never what happened.
     notifyRoster(msg.sessions);
@@ -2776,6 +2818,46 @@ function bindingMark(s) {
 let connSig = '';
 
 /**
+ * The rail's shared-room row: one persistent line, and the count of what has arrived since
+ * anybody last looked.
+ *
+ * **Patched in place, never rebuilt.** The row is one node with three spans and it is
+ * repainted on the roster beat — rebuilding it would take the button out from under a
+ * cursor that is on its way to press it, which is the same correctness argument `connSig`
+ * makes for the cards below and `renderMergeQueue` makes one pane over. There is nothing
+ * here worth a signature: three `textContent` writes cost less than the comparison would.
+ *
+ * It is deliberately **not** on `composerSig`, and nothing about the shared room may ever
+ * join it. That signature tears the whole composer down when it changes, and a message
+ * landing in the room would take the textarea out from under whoever is typing.
+ *
+ * The count is not a badge that asks for anything — see `state.sharedRoom`. Zero draws
+ * nothing at all, for the reason a `· 0` on a group heading draws nothing: furniture.
+ */
+function renderSharedRow() {
+  const row = el.railShared;
+  if (!row) return;
+  const { unseen = 0, lastAt = null } = state.sharedRoom || {};
+  const open = panes.some((p) => p.sharedOpen());
+  row.classList.toggle('is-open', open);
+  row.title = lastAt
+    ? `Everything the sessions on this Mac say to each other · last ${new Date(lastAt).toLocaleString()}`
+    : 'Everything the sessions on this Mac say to each other';
+
+  const badge = el.railSharedUnseen;
+  if (!badge) return;
+  // A room you are looking at has nothing unseen in it, whatever the summary last said:
+  // `markSharedRead` is a round trip and the next roster frame is the one that clears the
+  // count, so without this the number sits on the row for a beat after it stopped being
+  // true. Drawn from what is on screen rather than waiting to be told.
+  const n = open ? 0 : unseen;
+  badge.hidden = n === 0;
+  if (n === 0) return;
+  badge.textContent = n > 99 ? '99+' : String(n);
+  badge.title = `${n} message${n === 1 ? '' : 's'} since you last opened the room`;
+}
+
+/**
  * The connections band at the foot of the rail: one card per open link, and nothing at all
  * when there are none.
  *
@@ -3111,6 +3193,7 @@ function renderRail() {
     }
     for (const s of rest) frag.append(...rowsFor(s));
     el.railList.replaceChildren(frag);
+    renderSharedRow();
     renderConnections();
     return;
   }
@@ -3159,6 +3242,7 @@ function renderRail() {
   }
 
   el.railList.replaceChildren(frag);
+  renderSharedRow();
   // The column is a sibling of the rail and is drawn from the same frame, so it is drawn on
   // the same beat: every place that already redraws the rail — the roster, a pane opening, a
   // group folding — is a place the column could otherwise go stale. It holds its own
@@ -4420,6 +4504,47 @@ function createPane(slot, host) {
     // paint, so `disabled` on a button is gone by the next arriving line and the flag has
     // to outlive it — the `duplicating` guard on the rail's ⧉, one screen over.
     linkBusy: new Set(),
+
+    /* ------------------------------------------------- the shared room --- */
+
+    /*
+     * `kind === 'shared'` is the third thing a pane can hold: the machine-wide room, one
+     * log of what the sessions on this Mac say to each other. Everything about it lives
+     * **inside this factory** for the reason everything per-session already does — split
+     * view means two panes at once, and module-scope state is where a second pane gets
+     * caught. There is exactly one shared room on the machine and it can still only be
+     * open in one pane at a time (`openSharedRoom` enforces that), but its scroll
+     * position, its follow intention, its unseen count and its unfolded entries are facts
+     * about *this* pane's box and belong to it.
+     */
+    shared: [],
+    sharedCursor: 0,
+    // Is the room pinned to its newest line? An *intention*, flipped only by a real
+    // scroll — the room aside's rule and its reason: this box repaints in full when a
+    // message arrives, and being yanked to the bottom mid-read is worse than scrolling
+    // down for the new line yourself.
+    sharedFollow: true,
+    // What arrived while the reader was up in the history, for the `N new below` pill.
+    sharedUnseen: 0,
+    // How many entries the last paint drew, so the arithmetic above has something to
+    // subtract from. Floored at zero where it is used: a fresh `shared` frame can be
+    // *shorter* than the list it replaces (the tail is capped), and a negative count would
+    // hide a hint that is due.
+    sharedPainted: 0,
+    sharedEl: null,
+    sharedHintEl: null,
+    sharedHeadEl: null,
+    /* The scroll box's height when the pin was last taken, so the scroll handler can tell
+     * a resize's own event from a reader's — Chrome emits one when a resize clamps
+     * `scrollTop` and it is indistinguishable from a real scroll by anything else. `null`
+     * until the box has been laid out, which never equals a real `clientHeight`. */
+    sharedFollowH: null,
+    // Which entries the reader has opened out of their ten-line clamp. Keyed by the
+    // entry's own `seq`, which is unique in this log by construction — one file, one
+    // counter, monotonic across a rotation. (The joint thread needs `repo:seq` because it
+    // merges two rooms whose seqs collide; there is only one room here.) Keyed on the
+    // *record* rather than the node, because every child is replaced on every paint.
+    sharedOpenKeys: new Set(),
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -4604,6 +4729,7 @@ function createPane(slot, host) {
     if (view.kind === 'session' && view.selected === id) return;
     saveLinkDraft(); // …and the same for a thread, if that is what this pane was showing
     saveDraft(); // hold on to what was being typed in the session we're leaving
+    leaveShared(); // …and the room's subscription, if that is what this pane was holding
     // Coming back from a thread: the pane stops being a link before anything else, or the
     // guards below would keep refusing on its behalf.
     view.kind = 'session';
@@ -4657,6 +4783,7 @@ function createPane(slot, host) {
     if (view.kind === 'link' && view.link?.id === id) return;
     saveLinkDraft(); // this pane may already be holding another thread
     saveDraft();
+    leaveShared(); // …or the shared room, whose subscription is the server's to stop
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'link';
@@ -4741,6 +4868,549 @@ function createPane(slot, host) {
     }
   }
 
+  /* ------------------------------------------------------------ shared --- */
+
+  /**
+   * Put the machine-wide room in this pane.
+   *
+   * The transcript subscription goes first, and the team room's with it — both are *server*
+   * state, and a pane that stopped drawing a session while the server went on tailing its
+   * file is the "subscription that outlives its slot" trap from the other end. The room's
+   * own subscription then replaces them: `subscribe-shared` answers with the tail and every
+   * entry after it, which is why nothing here fetches over HTTP.
+   *
+   * Opening zeroes the rail row's count, which is the only thing that ever does.
+   */
+  function openShared() {
+    if (view.kind === 'shared') return;
+    saveLinkDraft(); // this pane may have been holding a thread
+    saveDraft();
+    send({ type: 'unsubscribe', slot });
+    syncRoom(null);
+    view.kind = 'shared';
+    view.selected = null;
+    view.messages = [];
+    view.hasEarlier = false;
+    view.error = null;
+    view.lastMarked = null;
+    chipNodes.clear();
+    clearThread();
+    clearShared();
+    // `threadSplit` is already settled by the caller — `openSharedRoom` sets it before it
+    // gets here, and `adopt` restores it off the stored entry before it calls this.
+    rememberOpenShared(slot, true, threadSplit);
+    send({ type: 'subscribe-shared', slot });
+    // Nothing in the room is new any more. Server-side and account-wide, the same shape
+    // `markRead` has for a transcript: the count is one number for the machine, not one
+    // per browser.
+    send({ type: 'markSharedRead' });
+    renderRail();
+    renderMain();
+  }
+
+  /**
+   * Give the room's subscription back, on the way to holding something else.
+   *
+   * Every other way out of the room already does this — `closeShared` and `close` both say
+   * so in their own words — but a pane can also stop holding it by being *given* a session
+   * or a thread, and those two paths are easy to miss because nothing looks wrong when they
+   * are: the frames go on arriving and `receive` quietly drops them. What is left behind is
+   * a server-side listener pushing every entry into a socket for a slot that is drawing a
+   * transcript, which is the "subscription that outlives its slot" trap in its cheapest
+   * form. A no-op for a pane that was not holding the room, which is what lets both callers
+   * say it unconditionally.
+   */
+  function leaveShared() {
+    if (view.kind !== 'shared') return;
+    send({ type: 'unsubscribe-shared', slot });
+    clearShared();
+  }
+
+  /** Everything the room leaves behind, dropped in one place so nothing half-clears. */
+  function clearShared() {
+    view.shared = [];
+    view.sharedCursor = 0;
+    view.sharedFollow = true;
+    view.sharedUnseen = 0;
+    view.sharedPainted = 0;
+    view.sharedEl = null;
+    view.sharedHintEl = null;
+    view.sharedHeadEl = null;
+    view.sharedFollowH = null;
+    view.sharedOpenKeys.clear();
+  }
+
+  /**
+   * Leave the room, and put the panel back where it came from.
+   *
+   * `closeThread`'s reasoning verbatim, and it is the same two places: a reader who was in
+   * one pane and pressed the rail row gets one pane back, a reader who was already in split
+   * keeps both and this slot goes back to a session. `threadSplit` is the only thing that
+   * can tell those apart — a pane looking at itself sees the same thing either way.
+   */
+  function closeShared() {
+    if (panes.length > 1 && threadSplit) {
+      closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
+      return;
+    }
+    send({ type: 'unsubscribe-shared', slot });
+    rememberOpenShared(slot, false);
+    view.kind = 'session';
+    clearShared();
+    adopt();
+    // `adopt` repaints by opening something. With nothing to open — no sessions at all —
+    // it returns silently and the pane would still be showing the room it was just told to
+    // close. Repaint into the empty state instead.
+    if (!view.selected) renderMain();
+    renderRail();
+  }
+
+  /**
+   * The shared room, in a pane: every message one session on this Mac sent another, in the
+   * order the messages actually happened.
+   *
+   * It reuses **split view** rather than taking a column of its own — the joint thread's
+   * locked ruling, on the same grounds — and it borrows the pane's own furniture (a
+   * `.main-head` above, a scrolling middle) so a slot holding the room reads as the same
+   * kind of object as a slot holding a conversation.
+   *
+   * It has no composer, and `buildComposer` is never called here. That function reads
+   * `s.prompt`, `s.plan`, `s.question`, `s.mode` and `s.model`, all null at once with no
+   * session behind the pane, and `shortModel(null)` throwing *inside* it once took a pane
+   * down after it had decided to draw a question card and left it unable to heal on any
+   * later frame. So this is a head and a list, and nothing else.
+   */
+  function renderSharedPane() {
+    host.replaceChildren();
+    host.append(buildSharedHead());
+
+    const wrap = document.createElement('div');
+    wrap.className = 'shared-room';
+    const inner = document.createElement('div');
+    inner.className = 'shared-room-inner';
+    wrap.append(inner);
+
+    /*
+     * Following is an intention, flipped only by a real scroll — never a geometry test at
+     * paint time. And a scroll event that arrives because the *box* changed height is the
+     * layout moving rather than the reader: Chrome emits one when a resize clamps
+     * `scrollTop`, and it is indistinguishable from a real scroll by anything except the
+     * height. So a height change swallows the one event it caused, and following survives
+     * the split grip being dragged. Both halves are the room aside's, and both were
+     * learned there rather than here.
+     */
+    wrap.addEventListener('scroll', () => {
+      if (wrap.clientHeight !== view.sharedFollowH) {
+        view.sharedFollowH = wrap.clientHeight;
+        return;
+      }
+      view.sharedFollow = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 40;
+      if (view.sharedFollow) {
+        view.sharedUnseen = 0; // scrolled back down: you have seen them
+        markSharedSeen();
+      }
+      updateSharedHint();
+    });
+
+    // The quiet half of "don't yank the reader": if the room moves on while you are
+    // reading back through it, something has to say so — softly. A muted pill over the
+    // bottom edge, counting what arrived, clicking it is how you rejoin, and it exists only
+    // while you are *not* following. Absolutely positioned against the box, so it never
+    // reflows the list under whoever is reading.
+    const hint = document.createElement('button');
+    hint.className = 'shared-hint';
+    hint.type = 'button';
+    hint.hidden = true;
+    hint.onclick = () => {
+      view.sharedFollow = true;
+      view.sharedUnseen = 0;
+      pinShared();
+      markSharedSeen();
+      updateSharedHint();
+    };
+    view.sharedHintEl = hint;
+
+    /*
+     * The pill hangs off the scroll box's bottom edge, so it needs a positioned ancestor
+     * that is **not** the scrolling box itself — absolute inside a scroller anchors to the
+     * content, which scrolls the pill away with the words it is about. `.pane` is not that
+     * ancestor either: it is shared with every session pane and giving it a position would
+     * re-anchor anything else that is ever absolutely placed in one. So the box and the
+     * pill share a frame of their own. Found on the bench, where the pill drew half off the
+     * left edge of the pane — it had been anchoring to the window.
+     */
+    const body = document.createElement('div');
+    body.className = 'shared-body';
+    body.append(wrap, hint);
+
+    view.sharedEl = { wrap, inner };
+    host.append(body);
+    renderShared();
+  }
+
+  /** The room's own header: what it is, how much is in it, and the way out of the pane. */
+  function buildSharedHead() {
+    const head = document.createElement('div');
+    head.className = 'main-head is-shared';
+
+    const mark = document.createElement('span');
+    mark.className = 'shared-mark';
+    mark.textContent = '⁂';
+    mark.title = 'The shared room — what the sessions on this Mac say to each other';
+    head.append(mark);
+
+    const h1 = document.createElement('h1');
+    h1.textContent = 'shared room';
+    h1.title = 'Every message one Claude Code session on this machine sent another.';
+    head.append(h1);
+
+    const meta = document.createElement('div');
+    meta.className = 'head-meta';
+    const stat = document.createElement('span');
+    stat.className = 'head-status shared-status';
+    view.sharedHeadEl = stat;
+    meta.append(stat);
+
+    // The room never offers to split — it is already the second thing on screen, and a
+    // panel showing the room twice is not a state worth being able to reach. What `close`
+    // *does* is decided when it is pressed and never here: this head is drawn once, and the
+    // other pane can be opened or closed under it afterwards.
+    const close = document.createElement('button');
+    close.className = 'ghost-btn';
+    close.textContent = 'close';
+    close.title = 'Close the shared room';
+    close.onclick = closeShared;
+    meta.append(close);
+    head.append(meta);
+    return head;
+  }
+
+  /** How much is in the room, and from how many sessions. Repainted with the list, not on
+   *  the roster beat — nothing on this line is a fact about the roster. */
+  function renderSharedHead(entries) {
+    const stat = view.sharedHeadEl;
+    if (!stat) return;
+    if (!entries.length) {
+      stat.textContent = '';
+      return;
+    }
+    // Sessions, so the maintainer's own lines are not counted as one: `from.name` on a
+    // `human` entry is a person resolved for the folder that will read it, not a session on
+    // this Mac, and a room he has typed twice into would otherwise claim a session that
+    // does not exist.
+    const names = new Set(entries.filter((e) => e.kind !== 'human').map((e) => e.from?.name).filter(Boolean));
+    const m = entries.length;
+    stat.textContent = `${m} message${m === 1 ? '' : 's'} · ${names.size} session${names.size === 1 ? '' : 's'}`;
+  }
+
+  /**
+   * **Sorted on `ts`, never on `seq`.**
+   *
+   * `seq` is the order the log was *written* and `ts` is the order the messages actually
+   * happened, and they come apart for a measured reason rather than a theoretical one: one
+   * sweep pass reads several transcripts, so it can meet a reply before it meets the
+   * message being replied to and write them in that order (`server/observe.js` stamps each
+   * entry with the record's own time for exactly this). A view that trusted `seq` would put
+   * an answer above its question, occasionally, with nothing on screen to say why.
+   *
+   * `seq` is still the tie-break: two messages inside one millisecond have to land in a
+   * stable order or they swap places between paints.
+   */
+  function sharedOrdered() {
+    return [...view.shared].sort((a, b) => (a.ts || 0) - (b.ts || 0) || (a.seq || 0) - (b.seq || 0));
+  }
+
+  /**
+   * Paint the room. Held scroll, one batched measurement — the room aside's two rules, and
+   * they are copied for their reasons rather than for their code.
+   *
+   * `scrollTop` is read **before** the swap. Reading it after `replaceChildren` is a forced
+   * layout on an emptied box, which clamps the answer to zero before you have read it — the
+   * room's own bug, which put the reader at the top of the list on every arriving line.
+   *
+   * And every clamp candidate is measured before anything is written to any of them.
+   * Interleaving a layout read with a class write per entry is a reflow per entry on a box
+   * that repaints whenever a message arrives; two passes is one layout. The controls are
+   * built only where they are needed, never built-for-all-and-removed-from-most — that was
+   * 66px of silent creep per incoming line, with no scroll event to notice it by.
+   */
+  function renderShared() {
+    const el = view.sharedEl;
+    if (!el || !el.inner.isConnected) return;
+    const held = el.wrap.scrollTop;
+    const follow = view.sharedFollow !== false;
+    const entries = sharedOrdered();
+    renderSharedHead(entries);
+
+    el.inner.replaceChildren();
+    if (!entries.length) {
+      const quiet = document.createElement('div');
+      quiet.className = 'shared-quiet';
+      quiet.textContent =
+        'Nothing yet. When one session on this Mac messages another, it lands here.';
+      el.inner.append(quiet);
+      view.sharedPainted = 0;
+      view.sharedUnseen = 0;
+      updateSharedHint();
+      return;
+    }
+
+    const before = view.sharedPainted ?? 0;
+    const clamps = [];
+    for (const e of entries) el.inner.append(sharedEntryNode(e, clamps));
+    for (const c of clamps) c.overflows = c.el.scrollHeight > c.el.clientHeight + 1;
+    for (const c of clamps) applySharedClamp(c);
+    view.sharedPainted = entries.length;
+
+    if (follow) {
+      pinShared();
+      view.sharedUnseen = 0;
+    } else {
+      // Put the reader back exactly where they were. The entries above them are the same
+      // entries at the same heights they had last paint — an expanded one re-renders
+      // clamped and is un-clamped again before this line — so the old offset is still the
+      // right one, and it is only wrong to keep if you are following the bottom.
+      el.wrap.scrollTop = held;
+      // Floored rather than trusted: a full `shared` frame can *shrink* the list (the tail
+      // is capped), and a negative count would hide a hint that is due.
+      view.sharedUnseen += Math.max(0, entries.length - before);
+    }
+    updateSharedHint();
+  }
+
+  /** Put the room back on its newest line — but only while you are following it. */
+  function pinShared() {
+    const el = view.sharedEl;
+    if (!el || !el.wrap.isConnected) return;
+    // The height this pin was taken at, so the scroll handler can tell a resize's own event
+    // from a reader's. Recorded even when we are not following: the box still changed size,
+    // and the next event is still the layout's rather than theirs.
+    view.sharedFollowH = el.wrap.clientHeight;
+    if (view.sharedFollow === false) return;
+    el.wrap.scrollTop = el.wrap.scrollHeight;
+  }
+
+  /** Draw (or drop) the "new below" pill. Quiet by design — muted ink, no accent, no
+   *  motion, and it exists only while the reader is not following. */
+  function updateSharedHint() {
+    const hint = view.sharedHintEl;
+    if (!hint) return;
+    const n = view.sharedFollow === false ? view.sharedUnseen || 0 : 0;
+    hint.hidden = n === 0;
+    if (n === 0) return;
+    hint.textContent = n === 1 ? '1 new below ↓' : `${n} new below ↓`;
+    hint.title = 'Jump to the newest message and follow the room again.';
+  }
+
+  /** Tell the server the count is spent. Only ever from this pane, and only while it is
+   *  actually the room on screen — the count is one number for the machine. */
+  function markSharedSeen() {
+    if (view.kind !== 'shared') return;
+    send({ type: 'markSharedRead' });
+  }
+
+  /**
+   * Clamp one long message to ten lines behind a quiet "view more" — the joint thread's
+   * number rather than the aside's five, and for its reason: these are whole messages
+   * between two sessions, and folding one at five hides the message instead of trimming it.
+   *
+   * Nothing is decided here and nothing is drawn here. The element goes out clamped and
+   * registered; `renderShared` measures the whole batch at once and `applySharedClamp` is
+   * what puts a control on screen, because a message that fits must not grow a "view more"
+   * that does nothing when clicked.
+   */
+  function sharedClampable(node, e, pending) {
+    node.classList.add('shared-clamp');
+    pending.push({ key: sharedKey(e), el: node, btn: null, overflows: false });
+  }
+
+  /** One entry's identity across paints. `seq` alone is enough here and is not in the joint
+   *  thread: that view merges two rooms whose per-repo seqs collide, this is one file with
+   *  one counter, monotonic across a rotation. */
+  const sharedKey = (e) => String(e.seq ?? '');
+
+  /** Settle one measured candidate: no overflow, no control; otherwise draw its state. */
+  function applySharedClamp(c) {
+    if (!c.overflows) {
+      c.el.classList.remove('shared-clamp');
+      return;
+    }
+    const open = view.sharedOpenKeys.has(c.key);
+    c.el.classList.toggle('shared-clamp', !open);
+    if (!c.btn) {
+      c.btn = document.createElement('button');
+      c.btn.className = 'shared-more';
+      c.btn.type = 'button';
+      c.btn.onclick = () => toggleSharedEntry(c);
+      c.el.after(c.btn); // directly under the words it cut off, inside the bubble
+    }
+    c.btn.textContent = open ? 'view less' : 'view more';
+    c.btn.title = open ? 'Fold this message back to ten lines.' : 'Show the whole message.';
+  }
+
+  /**
+   * Open or fold one message, keeping it where the reader is looking.
+   *
+   * `sharedFollow` is deliberately untouched and nothing is pinned: expanding changes the
+   * box's height and that must never read as the reader having scrolled away, and a message
+   * you have just opened is one you are about to read, so snapping to the newest line is
+   * exactly the yank the rule exists to stop. Growing a node never moves its own top, so
+   * the anchor holds for free on the way open; folding is the case that needs the
+   * arithmetic, because the browser clamps `scrollTop` to the new maximum.
+   */
+  function toggleSharedEntry(c) {
+    if (view.sharedOpenKeys.has(c.key)) view.sharedOpenKeys.delete(c.key);
+    else view.sharedOpenKeys.add(c.key);
+    const wrap = view.sharedEl?.wrap;
+    const node = c.el.closest('.shared-msg');
+    if (!wrap || !node || !node.isConnected) {
+      applySharedClamp(c);
+      return;
+    }
+    const was = node.getBoundingClientRect().top;
+    applySharedClamp(c);
+    const now = node.getBoundingClientRect().top;
+    if (now !== was) wrap.scrollTop += now - was;
+  }
+
+  /**
+   * One message in the shared room.
+   *
+   * **One lane, all left-aligned.** A link has exactly two ends and lanes them left and
+   * right; this room has N sessions and there is no second side to lane against. The name
+   * pill carries the identity instead, and the maintainer's own `@` lines take the
+   * `from-human` shape the joint thread already uses — full width with an accent left edge
+   * — because that shape already means *this one can authorize*, and it is the one thing in
+   * here that has to be structurally distinguishable rather than merely a different colour.
+   *
+   * **Colour goes on the pill, never on the bubble body.** The maintainer's own recorded
+   * correction: two tinted bodies in one column are two competing page backgrounds rather
+   * than two labels. So the pill takes a `--peer-N` hue keyed on the speaker's name and the
+   * bubble is byte-identical whoever spoke.
+   *
+   * **Keyed on `from.name`**, which is what `colourFor` wants and why: a pid dies with the
+   * sender and a pane id can be reissued as `%0` by a fresh tmux server, while the name is
+   * the one thing an entry still carries when it is read back tomorrow. Two sessions that
+   * share a name share a colour, which is fine for a colour and would be fatal for an
+   * identity — and is exactly why the identity is stored resolved on the entry and only the
+   * hue is derived.
+   */
+  function sharedEntryNode(e, pending = []) {
+    const human = e.kind === 'human';
+    const name = e.from?.name || 'unknown';
+
+    const wrap = document.createElement('div');
+    wrap.className = `shared-msg ${human ? 'from-human' : 'from-peer'}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'shared-meta';
+
+    const who = document.createElement('span');
+    who.className = `shared-pill${human ? ' is-human' : ''}`;
+    who.textContent = human ? 'you' : name;
+    if (!human) {
+      // The hue is set inline off the ring rather than by a class per slot: `--peer-N` is
+      // seven tokens and a class each would be seven near-identical rules that a later
+      // change to `PEER_COLOUR_COUNT` would silently leave short. `currentColor` on the
+      // border is what keeps the ring one value per speaker rather than two.
+      who.style.color = `var(--peer-${colourFor(name)})`;
+      who.style.borderColor = 'currentColor';
+      who.title = e.from?.cwd ? `${name}\n${e.from.cwd}` : name;
+    } else {
+      who.title = 'You, from the shared room in this panel';
+    }
+    meta.append(who);
+
+    /*
+     * A worker's line says so. The maintainer's ruling of 2026-09-04 split the two
+     * directions: a worker cannot be `@`-addressed, but a worker's message *to its lead* is
+     * shown — the one real non-scratch peer message on this machine is exactly that, a
+     * worker reporting a release done. The tag is what stops it reading as a peer session
+     * talking to another, and it is read off `fromRole` on the entry rather than guessed at
+     * from the name, because the role was resolved when the message was collected and the
+     * roster row behind it may be long gone.
+     */
+    if (!human && e.fromRole === 'worker') {
+      const tag = document.createElement('span');
+      tag.className = 'shared-tag';
+      tag.textContent = 'worker';
+      tag.title = 'A worker reporting to its lead — workers are shown here but cannot be addressed.';
+      meta.append(tag);
+    }
+
+    /*
+     * How well the sender was identified, when the answer is "not very". `fromSource` is
+     * `registry` when the pid still resolved to a live roster row, and `name` when it did
+     * not and the row was matched on the session's name instead — a *guess*, because the
+     * registry file is deleted within seconds of a session exiting. It has to be visible
+     * rather than merely true on the record: a wrong guess believed is worse than a right
+     * one labelled. `panel` is this panel's own line and needs no marker.
+     */
+    if (!human && e.fromSource === 'name') {
+      const tag = document.createElement('span');
+      tag.className = 'shared-tag is-guess';
+      tag.textContent = 'by name';
+      tag.title =
+        'The sender had already exited, so this was matched on its session name rather than ' +
+        'resolved from the sender itself. Two sessions that share a name are indistinguishable here.';
+      meta.append(tag);
+    }
+
+    // Who it was sent to. A machine-wide log has no "other end" the way a two-ended thread
+    // does, so the recipient is the only thing that makes a line a message rather than an
+    // utterance — quiet, and after the sender, because the sender is the identity.
+    if (e.to?.name) {
+      const to = document.createElement('span');
+      to.className = 'shared-to';
+      to.textContent = `→ ${e.to.name}`;
+      to.title = e.to.cwd ? `to ${e.to.name}\n${e.to.cwd}` : `to ${e.to.name}`;
+      meta.append(to);
+    }
+
+    if (e.ts) {
+      const t = document.createElement('span');
+      t.className = 'shared-time';
+      const d = new Date(e.ts);
+      t.textContent = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      t.title = d.toLocaleString();
+      meta.append(t);
+    }
+    wrap.append(meta);
+
+    const bubble = document.createElement('div');
+    bubble.className = 'shared-bubble';
+    const text = document.createElement('div');
+    text.className = 'shared-text';
+    // `text` is `origin.body` and nothing else — the observer's own rule, upheld here by
+    // rendering the field and never reaching for anything beside it. The record the message
+    // arrived in carries the same words wrapped in ~600 characters of peer-safety
+    // boilerplate, and a bubble built from that would be the boilerplate.
+    text.textContent = e.text || '';
+    bubble.append(text);
+    // The control lands under the words it cut off and above the delivery line below —
+    // that is short machinery, and a clamp must never swallow it.
+    sharedClampable(text, e, pending);
+
+    // The maintainer's own line, and what became of it. `queued` means handed off, not
+    // read: the queue may hold it for hours, and the vaguer verb is the trigger's own
+    // hard-won honesty. Quiet register either way — this is a fact to read, not an error.
+    if (human) {
+      const line = document.createElement('div');
+      line.className = 'shared-delivery';
+      const to = e.to?.name || 'that session';
+      if (e.queued) {
+        line.classList.add('is-waiting');
+        line.textContent = `queued for ${to} — waiting for its pane to be free`;
+      } else {
+        line.textContent = `delivered to ${to}`;
+      }
+      bubble.append(line);
+    }
+
+    wrap.append(bubble);
+    return wrap;
+  }
+
   /* -------------------------------------------------------------- main --- */
 
   function renderMain() {
@@ -4752,6 +5422,9 @@ function createPane(slot, host) {
     // thread gets its own small pane rather than teaching that one to cope with having no
     // session.
     if (view.kind === 'link') return renderLinkPane();
+    // …and the machine-wide room, for every word of the same reason. It has no session
+    // either, and `buildComposer` must not be taught to cope with having none.
+    if (view.kind === 'shared') return renderSharedPane();
 
     const s = current();
     host.replaceChildren();
@@ -8050,6 +8723,11 @@ function createPane(slot, host) {
     // The roster beat, and a link pane's only clock. The record moves under it — a label
     // edited, `lastAt` advancing when either lead speaks — so the head repaints from it and
     // the thread refetches when, and only when, `lastAt` says there is something new.
+    // The room's head says how much is in the log and from how many sessions — neither of
+    // which is a fact about the roster, so it repaints with the list rather than on this
+    // beat. Nothing else on this pane moves when the roster does.
+    if (view.kind === 'shared') return;
+
     if (view.kind === 'link') {
       renderLinkHead();
       // Whether a side has a live lead is a fact about the roster, so it moves without
@@ -8132,9 +8810,12 @@ function createPane(slot, host) {
   }
 
   function renderStream() {
-    // `renderAllStreams` fires this on every pane when the thinking toggle flips. A thread
-    // has no transcript to redraw and no `streamEl` to redraw it into.
-    if (view.kind === 'link') return;
+    // `renderAllStreams` fires this on every pane when the thinking toggle flips. Neither a
+    // thread nor the shared room has a transcript to redraw, or a live `streamEl` to redraw
+    // it into — the node the last session left behind is detached, and writing into it is
+    // a paint nobody sees rather than an error, which is the sort of thing that survives
+    // until it doesn't.
+    if (view.kind !== 'session') return;
     if (!streamEl) return;
     chipNodes.clear();
     const frag = document.createDocumentFragment();
@@ -10738,11 +11419,43 @@ function createPane(slot, host) {
 
   /** Route a websocket message meant for this pane. */
   function receive(msg) {
-    // Nothing addressed to a session or a room belongs to a thread. Every branch below
-    // already tests `view.selected` or `roomView.repo`, both of which are null here — but
-    // `error` does not, and it would call `renderMain` on a pane holding something the
-    // message has nothing to do with. Said once, at the top, rather than five times.
-    if (view.kind === 'link') return;
+    /*
+     * The shared room's two frames, ahead of the guard below because they are the one thing
+     * a pane holding something that is not a session is *entitled* to receive. `shared` is
+     * the tail, sent once when the subscription is taken; `shared-append` is one entry.
+     *
+     * Both are checked against this pane actually holding the room. The subscription is one
+     * per **socket** rather than one per slot (`server/index.js`), and the frames carry the
+     * slot of whoever asked — so a pane that has since been given a session must not go on
+     * accumulating a log it is not drawing.
+     */
+    if (msg.type === 'shared') {
+      if (view.kind !== 'shared') return;
+      view.shared = msg.entries || [];
+      view.sharedCursor = msg.cursor || 0;
+      renderShared();
+      return;
+    }
+    if (msg.type === 'shared-append') {
+      if (view.kind !== 'shared' || !msg.entry) return;
+      view.shared.push(msg.entry);
+      view.sharedCursor = msg.entry.seq || view.sharedCursor;
+      renderShared();
+      // The reader is at the newest line, so the count is spent the moment this lands.
+      // Scrolled up it is not spent, and the `N new below` pill over the box is what says
+      // so — the rail row stays quiet either way while the room is on screen
+      // (`renderSharedRow` zeroes it for an open pane), because two counters saying
+      // different things about one box is worse than one saying it in the right place.
+      if (view.sharedFollow !== false) markSharedSeen();
+      return;
+    }
+
+    // Nothing addressed to a session or a team room belongs to a pane holding a thread or
+    // the shared room. Every branch below already tests `view.selected` or `roomView.repo`,
+    // both of which are null here — but `error` does not, and it would call `renderMain` on
+    // a pane holding something the message has nothing to do with. Said once, at the top,
+    // rather than five times.
+    if (view.kind !== 'session') return;
 
     switch (msg.type) {
       case 'transcript':
@@ -10815,7 +11528,7 @@ function createPane(slot, host) {
      * maintainer opened on purpose and it stays until it is closed (the locked ruling), so
      * the answer is not a better pick: it is not picking at all.
      */
-    if (view.kind === 'link') return;
+    if (view.kind !== 'session') return;
 
     if (view.selected && state.sessions.some((s) => s.id === view.selected)) return;
     const taken = panes.filter((p) => p !== api).map((p) => p.selected());
@@ -10845,6 +11558,18 @@ function createPane(slot, host) {
       rememberOpenLink(slot, null);
     }
 
+    /*
+     * A reload of a window that had the shared room open. The fourth shape
+     * (`rememberOpenShared`), and unlike a link it is restored unconditionally: there is no
+     * record behind it that could have been closed, and there always is a room. Same
+     * `threadSplit` restore for the same reason — a window reloaded with the room on screen
+     * has to answer "what does closing this do" the way the window it replaced would have.
+     */
+    if (last?.kind === 'shared') {
+      threadSplit = Boolean(last.autoSplit);
+      return openShared();
+    }
+
     const pick =
       (last && state.sessions.find((s) => s.id === last.id && free(s))) ||
       // The id rotated while the tab was closed — same terminal, new conversation.
@@ -10863,8 +11588,13 @@ function createPane(slot, host) {
     // it — and it is keyed by the link rather than by `view.selected`, which is why it is
     // its own call rather than something `saveDraft` could be taught.
     if (view.kind === 'link') saveLinkDraft();
-    else saveDraft();
+    else if (view.kind !== 'shared') saveDraft();
     send({ type: 'unsubscribe', slot });
+    // The room's subscription is server state like a tailer's, and a pane that stopped
+    // drawing it while the server went on pushing entries into a dead slot is the
+    // "subscription that outlives its slot" trap from the other end. Harmless for a socket
+    // about to close, load-bearing for a slot closed while the window stays open.
+    if (view.kind === 'shared') send({ type: 'unsubscribe-shared', slot });
     host.remove();
   }
 
@@ -10879,6 +11609,16 @@ function createPane(slot, host) {
      */
     if (view.kind === 'link') return void refreshThread(true);
 
+    /*
+     * The room *is* a subscription, so it is re-taken exactly as a transcript's is — and it
+     * is the one this trap was written about. A subscription is server state and dies with
+     * the socket, while the roster keeps arriving because that is broadcast to every
+     * client: without this the rail goes on looking alive above a room that silently
+     * stopped at the moment the connection dropped. The server answers `subscribe-shared`
+     * with the whole tail, so nothing has to be reconciled here.
+     */
+    if (view.kind === 'shared') return void send({ type: 'subscribe-shared', slot });
+
     if (view.selected) send({ type: 'subscribe', sessionId: view.selected, slot });
     // The room subscription is server state too, and dies with the socket the same way
     // a tailer does — this is the exact shape of the "silently stopped transcript" trap.
@@ -10890,6 +11630,7 @@ function createPane(slot, host) {
     host,
     open,
     openLink,
+    openShared,
     close,
     adopt,
     resubscribe,
@@ -10915,6 +11656,17 @@ function createPane(slot, host) {
     selected: () => (view.kind === 'link' ? null : view.selected),
     /** The link this pane is holding, or null — the same question from the other side. */
     linkId: () => (view.kind === 'link' ? view.link?.id ?? null : null),
+    /*
+     * What this pane is holding, as a word. Added when the shared room became the third
+     * answer, and it is what every routing decision outside the factory now asks — because
+     * the two that used to ask `linkId()` were really asking "can this pane hold a
+     * session", and a shared pane answers `null` to `linkId()` while emphatically not being
+     * one. That mismatch is exactly the shape of the navigation regression #36: a rail
+     * click resolving to a pane that was showing something else, taking it away.
+     */
+    kind: () => view.kind,
+    /** Is the shared room in this pane? The rail row reads it to mark itself open. */
+    sharedOpen: () => view.kind === 'shared',
   };
   return api;
 }
@@ -10971,8 +11723,8 @@ const focused = () => panes.find((p) => p.slot === focusedSlot) || panes[0];
  */
 function sessionPane() {
   const here = focused();
-  if (here && !here.linkId()) return here;
-  return panes.find((p) => !p.linkId()) || here;
+  if (here && here.kind() === 'session') return here;
+  return panes.find((p) => p.kind() === 'session') || here;
 }
 
 /**
@@ -10987,9 +11739,9 @@ function sessionPane() {
 function openSession(id) {
   const pane = sessionPane();
   if (!pane) return;
-  // The only way here lands on a thread is the last-pane fallback above, and it is about to
-  // stop being one — so the split is nobody's thread any more.
-  if (pane.linkId()) threadSplit = false;
+  // The only way here lands on a thread or the room is the last-pane fallback above, and it
+  // is about to stop being one — so the split is nobody's any more.
+  if (pane.kind() !== 'session') threadSplit = false;
   setFocus(pane.slot);
   pane.open(id);
 }
@@ -11072,7 +11824,11 @@ function openLinkThread(id) {
   // above, and there is nothing else a second press could reveal.
   if (panes.some((p) => p.linkId() === id)) return;
 
-  const holder = panes.find((p) => p.linkId());
+  // A pane already holding something that is not a session is what this replaces, ahead of
+  // any session — the shared room included. Two non-session panes and no conversation is
+  // not a state worth being able to reach, and it is also what guarantees `sessionPane`
+  // always has somewhere to send a click.
+  const holder = panes.find((p) => p.kind() !== 'session');
   const madeSplit = !holder && panes.length < 2;
   const target =
     holder ||
@@ -11083,6 +11839,42 @@ function openLinkThread(id) {
   if (madeSplit) threadSplit = true;
   target.openLink(id);
   // Put focus where a click will land, which after this is never the thread.
+  const keep = sessionPane();
+  if (keep) setFocus(keep.slot);
+  for (const p of panes) p.renderHead();
+  renderRail();
+}
+
+/**
+ * Put the shared room on screen — `openLinkThread`'s shape, and deliberately so.
+ *
+ * Where it lands, and why it is never the pane you are in: **one pane open** → split, and
+ * the room takes the new slot, so the conversation you were reading stays where it is.
+ * **Two open** → it replaces the pane you are *not* focused in, for the same reason. The
+ * room is a thing you consult beside what you were doing; taking that away to show it would
+ * defeat the point of putting it in a slot at all.
+ *
+ * It never leaves **focus** on the room, for the reason `sessionPane` records: focus means
+ * "the pane the rail and the keyboard drive", and a read-only view is never that — handing
+ * it focus is precisely how a rail click came to eat a thread (#36). And it never puts a
+ * second one on screen: a pane already holding the room, or a thread, is what it replaces.
+ */
+function openSharedRoom() {
+  // Already on screen. Doing nothing is the whole answer — taking focus to it is the bug
+  // above, and there is nothing else a second press could reveal.
+  if (panes.some((p) => p.sharedOpen())) return;
+
+  const holder = panes.find((p) => p.kind() !== 'session');
+  const madeSplit = !holder && panes.length < 2;
+  const target =
+    holder ||
+    (panes.length > 1
+      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
+      : openSplit({ adopt: false, focus: false }));
+  if (!target) return;
+  if (madeSplit) threadSplit = true;
+  target.openShared();
+  // Put focus where a click will land, which after this is never the room.
   const keep = sessionPane();
   if (keep) setFocus(keep.slot);
   for (const p of panes) p.renderHead();
@@ -11145,6 +11937,9 @@ document.addEventListener('keydown', (e) => {
 el.newSession.onclick = openNewSession;
 el.settings.onclick = openSettings;
 el.snapshot.onclick = openSnapshot;
+// The one way into the shared room. Bound once, at boot, because the row is markup rather
+// than something a repaint rebuilds — see `renderSharedRow` for why it is patched in place.
+if (el.railShared) el.railShared.onclick = openSharedRoom;
 
 function paintFlatToggle() {
   el.flatRail.setAttribute('aria-pressed', String(state.flatRail));
