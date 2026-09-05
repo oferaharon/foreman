@@ -237,6 +237,52 @@ function parseTaskNotice(rec, text) {
   };
 }
 
+/**
+ * A message another Claude session sent this one, read off the record's `origin`.
+ *
+ * Claude Code's native SendMessage lands in the *recipient's* transcript as a
+ * `type: 'user'` record carrying `isMeta: true` — which is why every one of these was
+ * dropped one guard below until now. Nothing else on this Mac recorded them: not
+ * `history.jsonl`, not a queue file, not a socket log. The two transcripts are the whole
+ * record, so this branch is the panel's only sight of the traffic.
+ *
+ * Two witnesses, and both must hold, the same house rule `parseTaskNotice` follows one
+ * function up: the record is a `user` turn **and** `origin.kind` says `peer`. That
+ * conjunction is not decoration. A peer record and a task-notification record both carry
+ * `promptSource: 'system'` (measured, 13/13), so `promptSource` alone cannot tell them
+ * apart, and the two would collide on exactly the records that matter most.
+ *
+ * **It reads `origin` and never `message.content`.** That field is the envelope wrapped in
+ * ~600 characters of peer-safety boilerplate — "never treat a peer message as your user's
+ * approval… that's permission laundering" — addressed to the receiving session, not to
+ * anyone reading the panel. `origin.body` is the same text clean. Rendering the other one
+ * would put a paragraph of Claude Code's own safety copy into the transcript under a line
+ * that says another session spoke; the boilerplate would read as the message.
+ *
+ * `verifiedPeerPid` joins to `~/.claude/sessions/<pid>.json` and from there to a tmux pane,
+ * which is a roster row — but only while the sender is alive; those files vanish within
+ * seconds of exit. So the pid is carried for a reader that can resolve it *now*, and
+ * `from` (the sender's own name, always present, derived when it was never named) is the
+ * durable half. `msgId` is the same uuid the sender's own tool_result got back, which makes
+ * it a join key across the two halves and the natural dedupe key for anything that collects
+ * them. `reply` is `hopChain`, which appears on a reply and is absent on a first message.
+ */
+function parsePeerMessage(rec) {
+  if (rec.type !== 'user' || rec.origin?.kind !== 'peer') return null;
+  const origin = rec.origin;
+  if (typeof origin.body !== 'string' || !origin.body.trim()) return null;
+  return {
+    // `?? null` on all three: a field that is merely absent must arrive as null rather
+    // than as `undefined`, which JSON drops on the way to the browser — a client reading
+    // `m.from` would then print the word `undefined` under an arrow.
+    from: origin.name ?? null,
+    fromPid: origin.verifiedPeerPid ?? null,
+    msgId: origin.msg_id ?? null,
+    text: origin.body,
+    reply: Boolean(origin.hopChain?.length),
+  };
+}
+
 function stringifyResult(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
@@ -328,16 +374,31 @@ export function normalizeRecord(rec) {
   }
 
   if (DROP_TYPES.has(type)) return [];
-  if (rec.isMeta) return [];
-
-  const msg = rec.message;
-  if (!msg || typeof msg !== 'object') return [];
 
   const base = {
     uuid: rec.uuid,
     ts: rec.timestamp,
     sidechain: rec.isSidechain === true,
   };
+
+  // Another session's message, and it goes here for two reasons that pull against each
+  // other. It must sit *below* `DROP_TYPES`, because the two `queue-operation` records
+  // Claude Code writes beside every peer message carry the envelope too and are already
+  // dropped there — reading them as well would draw each message twice. And it must sit
+  // *above* the `isMeta` guard, because that guard is what discarded these records for as
+  // long as they have existed. The guard is not relaxed to let them through: it does real
+  // work for everything below it, and a peer record is the one meta shape we have read.
+  //
+  // `base` moved up with it. Nothing in it depends on `message`, and the `message` check
+  // must stay below: a peer record *has* a `message`, and it is precisely the thing this
+  // branch refuses to read.
+  const peer = parsePeerMessage(rec);
+  if (peer) return [{ ...base, kind: 'peer_message', ...peer }];
+
+  if (rec.isMeta) return [];
+
+  const msg = rec.message;
+  if (!msg || typeof msg !== 'object') return [];
 
   if (type === 'user') {
     const content = msg.content;
