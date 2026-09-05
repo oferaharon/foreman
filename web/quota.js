@@ -27,7 +27,7 @@
  * than broken outright.
  */
 
-/** The one pair of thresholds, for both windows. Ofer's to adjust; nothing else may define its own. */
+/** The one pair of thresholds, for both windows. The maintainer's to adjust; nothing else may define its own. */
 export const THRESHOLDS = { warn: 75, hot: 90 };
 
 const STALE_MS = 15 * 60 * 1000;
