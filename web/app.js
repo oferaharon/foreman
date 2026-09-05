@@ -8271,6 +8271,38 @@ function createPane(slot, host) {
         div.textContent = m.text;
         return div;
       }
+      /*
+       * Another Claude session, talking to this one. Claude Code delivers a peer message
+       * as a `user` turn in the recipient's transcript, so without this case it is the
+       * `task-notification` bug for the fourth time in this file — a whole message from
+       * somewhere else, in the maintainer's own bubble, with nothing saying it came from
+       * another session.
+       *
+       * A quiet `← name` line above the body rather than a chip: this is the *cause* of
+       * whatever the session says next, and a reply whose cause is folded shut reads as
+       * the session talking to itself. The body is `origin.body`, composed server-side —
+       * the ~600 characters of peer-safety boilerplate that Claude Code wraps around it
+       * never left `normalize.js`, deliberately.
+       *
+       * The text is drawn whole and never parsed, `pre-wrap` for the same reason the link
+       * message above keeps its whitespace. `m.reply` (the sender's `hopChain`) is
+       * deliberately not drawn: the room is where a thread reads as a thread, and one more
+       * word on this line would be a second, quieter place to read one.
+       */
+      case 'peer_message': {
+        const div = document.createElement('div');
+        div.className = 'msg-peer';
+        const who = document.createElement('div');
+        who.className = 'msg-peer-from';
+        // `from` is null only if a sender ever arrives unnamed — never measured, since
+        // Claude Code derives a name for a session launched without one.
+        who.textContent = `\u2190 ${m.from || 'another session'}`;
+        const body = document.createElement('div');
+        body.className = 'msg-peer-body';
+        body.textContent = m.text || '';
+        div.append(who, body);
+        return div;
+      }
       // A subagent, background command or monitor reporting back. Claude Code injects it
       // as a user turn and the terminal never shows it, so a chip is the honest register:
       // the summary is self-describing (`Agent "…" finished`, `Background command "…"

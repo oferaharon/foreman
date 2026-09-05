@@ -2636,6 +2636,41 @@ body.row-dragging * { cursor: row-resize !important; }
   margin: 0.2rem 0;
 }
 
+/* Another Claude session's message, landing in this one's transcript.
+
+   Same frame as `.msg-link` above and for the same reason — it is a body, not a one-line
+   event, so it must wrap rather than ellipsise — with one line added above it naming who
+   spoke. That line is the whole of the register: without it the block reads as something
+   this session said, and a message from elsewhere wearing the local voice is exactly what
+   the frame exists to prevent.
+
+   Muted ink, no accent. The room is a log, not an inbox: by the time the panel draws this
+   the session has already read it and very likely answered. */
+.msg-peer {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  color: var(--ink-muted);
+  border-left: 2px solid var(--rule-strong);
+  background: var(--surface);
+  border-radius: 0 3px 3px 0;
+  padding: 0.5rem 0.7rem;
+  margin: 0.2rem 0;
+}
+
+.msg-peer-from {
+  color: var(--ink-faint);
+  padding-bottom: 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.msg-peer-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .divider {
   display: flex;
   align-items: center;
