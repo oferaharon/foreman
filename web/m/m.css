@@ -127,6 +127,120 @@ select {
 
 .m-conn.is-down { color: var(--decision); }
 
+/*
+ * The account's two rate-limit gauges, between the title and the connection dot. Home
+ * screen only, because this is the shell header and the lead screen hides it outright.
+ *
+ * Sized to sit *inside* the 44px row `.m-icon-btn` already establishes, so adding it moves
+ * nothing: `min-height` matches the control beside it and the content is two short lines
+ * of mono well under that. And it is `flex: none` next to a `.m-title` that is `flex: 1`
+ * with `min-width: 0`, so the title gives up the room rather than the header widening —
+ * a header that outgrew the viewport would put the whole page into a horizontal scroll,
+ * which on a phone is a bug you cannot get back out of by scrolling.
+ */
+.m-quota {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.15rem;
+  min-height: 44px;
+  padding: 0 0.15rem;
+  border-radius: 8px;
+  text-align: left;
+}
+
+/* `display: flex` above is a class rule and beats the UA stylesheet's `[hidden]` — the
+   shell's own header learned this the expensive way three rules up, and a block with no
+   record to draw must genuinely disappear rather than reserve an empty column. */
+.m-quota[hidden] { display: none; }
+
+.m-quota:active { background: var(--surface-sunk); }
+
+.m-quota-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+/*
+ * One gauge. `--gauge` is the tone, set once here and read by the bar and by the label, so
+ * a tone change cannot colour one and miss the other. The default is `--ink-faint` rather
+ * than an accent: an ordinary reading should be furniture, and only 75 and 90 —
+ * `web/quota.js`'s numbers, never restated here — should pull the eye. It is not
+ * `--rule-strong`, which was the first try and is one step off the track colour it sits on:
+ * furniture still has to be visible, or the bar reads as empty at every percentage.
+ */
+.m-quota-gauge {
+  --gauge: var(--ink-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 3.1rem;
+}
+
+.m-quota-gauge.is-warn { --gauge: var(--working); }
+.m-quota-gauge.is-hot { --gauge: var(--decision); }
+
+.m-quota-label {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
+.m-quota-gauge.is-warn .m-quota-label,
+.m-quota-gauge.is-hot .m-quota-label {
+  color: var(--gauge);
+  font-weight: 600;
+}
+
+.m-quota-bar {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.m-quota-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--gauge);
+}
+
+/* Opened: each window's reset under its own bar, so the block grows down and not across. */
+.m-quota-reset,
+.m-quota-as-of {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+/*
+ * A reading old enough that `staleness` calls it dim. The fill is hollowed rather than the
+ * whole block faded, so a genuinely alarming red stays as red as it was — the number is
+ * still true, it is just no longer news — and the age moves out of the tooltip and onto the
+ * line beside it, which is the only thing on this screen that says so.
+ */
+.m-quota.is-dim .m-quota-fill {
+  background: color-mix(in srgb, var(--gauge) 45%, transparent);
+}
+
+.m-quota-age {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
 /* Header controls: 44px is Apple's own minimum target, and the whole reason this view
    exists is that the desktop's controls were laid out for a mouse. */
 .m-icon-btn {

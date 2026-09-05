@@ -19,6 +19,7 @@
  */
 
 import { ghostSend } from '../prefs.js';
+import { formatReset, staleness, windowsOf } from '../quota.js';
 import { mountLead, updateLead } from './lead.js';
 
 /* ------------------------------------------------------------- state --- */
@@ -36,6 +37,16 @@ const state = {
   /** The roster, or null until the first frame — an empty array is a real answer and
       would otherwise be indistinguishable from "we have not asked yet". */
   sessions: null,
+  /**
+   * The account's two rate-limit gauges, or null until a record exists — a sibling of
+   * `sessions` on the roster frame, never a field on a session row, because it is one
+   * account-wide number rather than anything a row owns.
+   *
+   * Null is the ordinary state and not an error: the feed only ticks when a session's
+   * status line redraws, so a phone opened before anything on the Mac has spoken has no
+   * record at all. Nothing is drawn then — not a zero, not a grey placeholder.
+   */
+  rateLimits: null,
   connected: false,
 };
 
@@ -130,6 +141,9 @@ function send(msg) {
 function handle(msg) {
   if (msg.type === 'sessions') {
     state.sessions = msg.sessions || [];
+    // `?? null` rather than `||`: the server sends the key on every roster frame and its
+    // absence means an older panel, which reads the same as "no record yet" here.
+    state.rateLimits = msg.rateLimits ?? null;
     onRoster();
   } else if (msg.type === 'rebound') {
     onRebound(msg);
@@ -193,6 +207,7 @@ const app = document.getElementById('app');
 const el = {
   head: document.createElement('header'),
   title: document.createElement('div'),
+  quota: document.createElement('button'),
   conn: document.createElement('span'),
   refresh: document.createElement('button'),
   screen: document.createElement('div'),
@@ -201,6 +216,29 @@ const el = {
 el.head.className = 'm-head';
 el.title.className = 'm-title';
 el.title.textContent = 'Leads';
+/*
+ * The account's two rate-limit gauges live in the shell header, which means **home screen
+ * only** — and that is a placement decision, not an accident of where the node was
+ * appended. The lead screen hides this header outright (`.m-app.no-head`, `.m-head[hidden]`)
+ * and draws its own, whose height is budgeted to the pixel by its own comment; putting a
+ * second pair of bars there would spend that budget on a number that is the same on every
+ * screen. A phone that wants the reading goes back one tap.
+ *
+ * It is a `<button>` because a `title` is not reachable by a thumb. Tapping opens the reset
+ * times and the "as of" age underneath the bars; the `title` carries the same sentence for
+ * a pointer, so neither kind of reader is left with two bare percentages.
+ */
+el.quota.className = 'm-quota';
+el.quota.type = 'button';
+el.quota.hidden = true;
+el.quota.addEventListener('click', () => {
+  quotaOpen = !quotaOpen;
+  // Through `renderHome` rather than straight to `renderQuota`: the open state is part of
+  // the home signature, so repainting past it would leave the guard holding a signature
+  // that no longer describes the screen, and the next tick would repaint for nothing.
+  renderHome();
+});
+
 el.conn.className = 'm-conn';
 el.conn.textContent = '●';
 el.refresh.className = 'm-icon-btn';
@@ -208,7 +246,7 @@ el.refresh.type = 'button';
 el.refresh.textContent = '⟳';
 el.refresh.setAttribute('aria-label', 'Refresh');
 el.refresh.addEventListener('click', refresh);
-el.head.append(el.title, el.conn, el.refresh);
+el.head.append(el.title, el.quota, el.conn, el.refresh);
 
 el.screen.className = 'm-screen';
 
@@ -535,10 +573,20 @@ function stateWord(row) {
 function renderHome() {
   if (!homeList?.isConnected) return;
 
+  /*
+   * One clock for the whole paint. The gauges' signature and the nodes it guards both ask
+   * what time it is, and a paint that read the clock twice could bucket a reset string one
+   * minute either side of the signature that was supposed to describe it — a gauge frozen
+   * at the wrong number until something unrelated moved.
+   */
+  const now = Date.now();
+  const quota = quotaSignature(now);
+
   if (!state.teams || !state.sessions) {
-    const sig = 'loading';
+    const sig = `${quota}::loading`;
     if (sig === homeSignature) return;
     homeSignature = sig;
+    renderQuota(now);
     const note = document.createElement('div');
     note.className = 'm-note';
     note.textContent = 'Loading teams…';
@@ -547,9 +595,10 @@ function renderHome() {
   }
 
   if (!state.teams.length) {
-    const sig = 'empty';
+    const sig = `${quota}::empty`;
     if (sig === homeSignature) return;
     homeSignature = sig;
+    renderQuota(now);
     const note = document.createElement('div');
     note.className = 'm-note';
     note.textContent =
@@ -562,27 +611,168 @@ function renderHome() {
 
   // Repaint only when something a reader could see has changed. The roster is broadcast on
   // every real change and a list rebuilt under a thumb is a list that eats taps.
-  const sig = JSON.stringify(
-    rows.map((r) => [
-      r.team.repo,
-      r.lead?.id || null,
-      stateWord(r),
-      // The rendered string, not `lastActivity` — see the field's own note in `homeRow`.
-      r.age,
-      r.dot,
-      r.working,
-      r.ctx,
-      r.unread,
-      r.workers,
-      r.review,
-      launching.has(r.team.repo),
-      launchErrors.get(r.team.repo) || '',
-    ]),
-  );
+  const sig =
+    `${quota}::` +
+    JSON.stringify(
+      rows.map((r) => [
+        r.team.repo,
+        r.lead?.id || null,
+        stateWord(r),
+        // The rendered string, not `lastActivity` — see the field's own note in `homeRow`.
+        r.age,
+        r.dot,
+        r.working,
+        r.ctx,
+        r.unread,
+        r.workers,
+        r.review,
+        launching.has(r.team.repo),
+        launchErrors.get(r.team.repo) || '',
+      ]),
+    );
   if (sig === homeSignature) return;
   homeSignature = sig;
 
+  renderQuota(now);
   homeList.replaceChildren(...rows.map(teamNode));
+}
+
+/* --------------------------------------------------------------- quota --- */
+
+/*
+ * The two windows this header draws, and the only two. `windowsOf` deliberately carries an
+ * unknown key through — `spend_limit` exists in Claude Code's own string table but has never
+ * been observed on a real account — so the filter lives here rather than there: the day a
+ * third window arrives the phone is wrong by omission, which is a missing bar, rather than
+ * broken, which is a header that reflows on a shape nobody has ever seen.
+ */
+const QUOTA_WINDOWS = new Map([
+  ['five_hour', 'Five-hour'],
+  ['seven_day', 'Seven-day'],
+]);
+
+/** Tapped open, showing each window's reset time and how old the reading is. */
+let quotaOpen = false;
+
+function quotaWindows(now) {
+  return windowsOf(state.rateLimits, now).filter((w) => QUOTA_WINDOWS.has(w.key));
+}
+
+/**
+ * Everything about the gauges a reader could see, as one string, folded into
+ * `homeSignature` by all three of its branches.
+ *
+ * The rule is the same one `homeRow`'s `age` field already follows and for the same reason:
+ * it is the **rendered** strings in here, never `record.at` or a raw percentage. The record
+ * arrives every time any session on the Mac redraws its status line, which is several times
+ * a turn, and a signature carrying the arrival stamp would differ on every one of them —
+ * retiring the guard that stops the team list being rebuilt under a thumb. The rounded
+ * percentage and the minute-bucketed reset string move only when the screen does, which on
+ * a quiet phone is about once a minute.
+ */
+function quotaSignature(now) {
+  const wins = quotaWindows(now);
+  if (!wins.length) return '-';
+  const dim = staleness(state.rateLimits, now) === 'dim';
+  return [
+    quotaOpen ? 'open' : 'shut',
+    dim ? `dim:${relativeTime(state.rateLimits.at)}` : 'live',
+    ...wins.map((w) => `${w.key}:${Math.round(w.pct)}:${w.tone}:${formatReset(w.resetsAt, now)}`),
+  ].join('|');
+}
+
+/**
+ * Draw the pair, or draw nothing at all.
+ *
+ * Nothing is the common case and it is a real answer, not a failure — no record yet, or one
+ * whose windows have both reset. A zero, or a grey placeholder, would be the panel showing
+ * something wrong in the one slot on this screen a reader would trust without checking.
+ */
+function renderQuota(now) {
+  const record = state.rateLimits;
+  const wins = quotaWindows(now);
+  if (!wins.length) {
+    el.quota.replaceChildren();
+    el.quota.hidden = true;
+    return;
+  }
+
+  const dim = staleness(record, now) === 'dim';
+  const age = relativeTime(record.at) || 'now';
+
+  const row = document.createElement('span');
+  row.className = 'm-quota-row';
+  row.append(...wins.map((w) => quotaGauge(w, now, age)));
+
+  /*
+   * A dim record's age goes into the visible line rather than staying in the tooltip. The
+   * feed is event-driven — a bench measured two status-line renders in five and a half
+   * minutes with nothing else happening — so a bar that has been sitting still for hours
+   * looks exactly like a live one, and that is the whole reason the record carries `at`.
+   * Fifteen minutes is `staleness`'s call, not this file's.
+   */
+  if (dim && !quotaOpen) {
+    const stale = document.createElement('span');
+    stale.className = 'm-quota-age';
+    stale.textContent = age;
+    row.appendChild(stale);
+  }
+
+  const kids = [row];
+  if (quotaOpen) {
+    const asOf = document.createElement('span');
+    asOf.className = 'm-quota-as-of';
+    asOf.textContent = `as of ${age}`;
+    kids.push(asOf);
+  }
+
+  el.quota.replaceChildren(...kids);
+  el.quota.hidden = false;
+  el.quota.classList.toggle('is-dim', dim);
+  el.quota.classList.toggle('is-open', quotaOpen);
+  el.quota.setAttribute('aria-expanded', quotaOpen ? 'true' : 'false');
+  el.quota.setAttribute(
+    'aria-label',
+    `Rate limits, ${wins.map((w) => `${QUOTA_WINDOWS.get(w.key)} ${Math.round(w.pct)}% used`).join(', ')}`,
+  );
+}
+
+function quotaGauge(win, now, age) {
+  const pct = Math.round(win.pct);
+  const reset = formatReset(win.resetsAt, now);
+
+  const gauge = document.createElement('span');
+  // `win.tone` is `toneFor`'s answer, computed inside `windowsOf`. 75 and 90 are spelled in
+  // `web/quota.js` and nowhere else — a phone drawing amber at one number and a desktop at
+  // another is the `isLeadName` lesson in a smaller costume.
+  gauge.className = `m-quota-gauge${win.tone ? ` is-${win.tone}` : ''}`;
+  gauge.title = `${QUOTA_WINDOWS.get(win.key)} limit ${pct}% used · resets ${reset} · as of ${age}`;
+
+  const label = document.createElement('span');
+  label.className = 'm-quota-label';
+  label.textContent = `${win.label} ${pct}%`;
+
+  const bar = document.createElement('span');
+  bar.className = 'm-quota-bar';
+  const fill = document.createElement('span');
+  fill.className = 'm-quota-fill';
+  fill.style.width = `${pct}%`;
+  bar.appendChild(fill);
+
+  gauge.append(label, bar);
+
+  // Opened, the reset time sits under its own bar rather than in a sentence beside the
+  // pair: the strings are the same handful of characters wide as the labels above them, so
+  // the block grows downward by one line and never sideways. A header that got wider on a
+  // tap is a header that can push the page into a horizontal scroll on a narrow phone.
+  if (quotaOpen) {
+    const resetEl = document.createElement('span');
+    resetEl.className = 'm-quota-reset';
+    resetEl.textContent = reset;
+    gauge.appendChild(resetEl);
+  }
+
+  return gauge;
 }
 
 function teamNode(row) {
