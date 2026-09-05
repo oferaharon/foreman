@@ -1,0 +1,204 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { STATE_DIR } from './config.js';
+
+const FILE = path.join(STATE_DIR, 'rate-limits.json');
+
+/**
+ * How much of the account's quota is gone, and when we last heard.
+ *
+ * A Claude subscription has two windows — a five-hour one that refills through the day and
+ * a weekly one — and when either runs out every session on the machine stops. Claude Code
+ * already knows both numbers: it hands them to the status-line command in the JSON it
+ * feeds it on stdin, several times a session. The wrapper posts a copy of that JSON to
+ * `POST /status`; this is where the copy lands.
+ *
+ * **The whole payload arrives and this module extracts.** The endpoint does not filter,
+ * deliberately: issue #52 wants the per-session fields out of the same body, and drawing
+ * the line here means it adds a second store rather than a second install step.
+ *
+ * Three rules the shape depends on, each measured rather than assumed:
+ *
+ * - **Absent and empty are opposite facts.** A payload with no `rate_limits` key at all is
+ *   ignored entirely — it is the launch render (measured: missing from the very first
+ *   render of a session, present on every one after it), an API-key session, or a session
+ *   before its first reply. A payload *with* the key replaces the stored windows
+ *   wholesale, because Claude Code drops a window once its reset has passed, so a window
+ *   missing from a present object has genuinely expired. Get it backwards and either a
+ *   five-hour bar outlives its own reset for ever, or one API-key session wipes the
+ *   gauges every few seconds.
+ * - **`used_percentage`, falling back to `utilization`.** The capture says
+ *   `used_percentage`. The binary's string table puts `utilization` next to `five_hour`
+ *   and every internal telemetry name is `priorFiveHourUtilization`, so one `??` is cheap
+ *   insurance against a rename that the string table says is plausible.
+ * - **`resets_at` is Unix *seconds*** and is stored as given, seconds and all. Multiply by
+ *   1000 before `new Date` — `new Date(1788571200)` is January 1970 and renders a
+ *   plausible-looking wrong answer rather than throwing.
+ *
+ * And one rule that is not about the data: **no USD, ever** (ruling of 2026-09-04). The
+ * payload carries `cost.total_cost_usd`; this is a subscription and the number is
+ * meaningless here, so it is never extracted, never stored and never sent.
+ *
+ * `ingest` answers whether anything a *reader* would see changed, so the caller can decide
+ * whether to broadcast. A re-post of the same numbers answers false even though `at` has
+ * moved: the age is computed in the browser from `at`, and a server that re-broadcast to
+ * keep it fresh would rebuild the rail on every render of every status line. The record is
+ * still rewritten and still persisted, so the age on disk is the truth if the panel
+ * restarts.
+ *
+ * On disk, in the shape of `pins.js` and `read-state.js`, so a panel restart doesn't blank
+ * a gauge that was right a second ago — the feed is event-driven and can be quiet for
+ * hours.
+ */
+export class RateLimitStore {
+  /** @param {string} [file] override the store location (tests) */
+  constructor(file = FILE) {
+    this.file = file;
+    /** @type {{windows: Record<string, {usedPercentage: number|null, resetsAt: number|null}>, at: number}|null} */
+    this.record = null;
+    this.dirty = false;
+    this.#load();
+
+    this.timer = setInterval(() => this.#flush(), 2000);
+    this.timer.unref?.();
+  }
+
+  #load() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      if (!isPlainObject(raw) || !Number.isFinite(raw.at)) return;
+      // Re-coerced rather than trusted: this file is ours, but a hand-edit is a hand-edit
+      // and a `NaN%` on the rail is worse than no rail.
+      this.record = { windows: windowsFrom(raw.windows, storedWindow), at: raw.at };
+    } catch {
+      /* first run, or hand-edited into nonsense — start clean */
+    }
+  }
+
+  #flush() {
+    if (!this.dirty) return;
+    this.dirty = false;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      fs.writeFileSync(this.file, JSON.stringify(this.record, null, 2));
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  /** Write now rather than waiting for the next tick (tests, shutdown). */
+  flush() {
+    this.#flush();
+  }
+
+  /** The whole record, or null if nothing has ever arrived. Rides the roster frame. */
+  get() {
+    return this.record;
+  }
+
+  /**
+   * Take a status-line payload.
+   *
+   * @param {any} payload the whole JSON body, unfiltered
+   * @param {number} [now] server clock; latest arrival wins, with no attempt to reconcile
+   *   two sessions posting in the same second — it is one account-wide number and they agree
+   * @returns {boolean} whether anything a reader would see changed
+   */
+  ingest(payload, now = Date.now()) {
+    const raw = isPlainObject(payload) ? payload.rate_limits : null;
+    if (!isPlainObject(raw)) return false; // absent is not empty — see the header
+
+    const windows = windowsFrom(raw, payloadWindow);
+    const changed = signature(windows) !== signature(this.record?.windows);
+    this.record = { windows, at: now };
+    this.dirty = true;
+    return changed;
+  }
+
+  stop() {
+    clearInterval(this.timer);
+    this.#flush();
+  }
+}
+
+function isPlainObject(v) {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * A number, or null — and `Number()` on its own is not that function.
+ *
+ * The type is not promised: the capture had integers (43, 4) where the documentation shows
+ * `23.5`, so a string has to work. But `Number(null)` is **0**, and so are `Number('')`,
+ * `Number(false)` and `Number([])` — every one of which would turn "the field is there and
+ * says nothing" into a `0%` bar resetting in January 1970. A plausible-looking wrong answer
+ * is the one thing this panel prefers to show nothing over. So: a real number, or a string
+ * that is one, and nothing else coerces.
+ */
+function numeric(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** A percentage, clamped, or null when there is nothing drawable — never a `NaN` width. */
+function percent(value) {
+  const n = numeric(value);
+  return n === null ? null : Math.min(100, Math.max(0, n));
+}
+
+/** Unix **seconds**, kept as seconds. */
+function resetSeconds(value) {
+  return numeric(value);
+}
+
+/** As it arrives from Claude Code. */
+function payloadWindow(w) {
+  return { usedPercentage: percent(w.used_percentage ?? w.utilization), resetsAt: resetSeconds(w.resets_at) };
+}
+
+/** As it comes back off our own file. */
+function storedWindow(w) {
+  return { usedPercentage: percent(w.usedPercentage), resetsAt: resetSeconds(w.resetsAt) };
+}
+
+/**
+ * Every window that arrived, whatever it is called.
+ *
+ * `five_hour` and `seven_day` are the two seen on this account; `spend_limit` sits beside
+ * them in the binary and is not exercisable here. An unknown key is carried through rather
+ * than dropped — the view decides what it can draw, and a store that only knows two names
+ * would silently swallow the third the day it appears.
+ */
+function windowsFrom(raw, read) {
+  const windows = {};
+  if (!isPlainObject(raw)) return windows;
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isPlainObject(value)) continue;
+    windows[key] = read(value);
+  }
+  return windows;
+}
+
+/**
+ * Order-independent, and covers exactly what a reader sees — never `at`.
+ *
+ * The no-record sentinel is a plain visible word, and that is not fussiness. Every real
+ * entry contains an `=`, so a bare `none` cannot collide with one, and the obvious
+ * alternative — a control byte nothing renders — is the trap this repo has already been
+ * bitten by twice: `mergeSig` joined its fields with three literal control characters that
+ * looked like an empty string in every editor, and `normalize.js` spells its ESC as
+ * `\u001b` because an invisible character in source lasts until the next careless edit.
+ * A NUL here has a third cost on top of those: git reads the whole file as binary, so it
+ * gets no diff, no blame and no review on the forge.
+ */
+function signature(windows) {
+  if (!windows) return 'none';
+  return Object.keys(windows)
+    .sort()
+    .map((k) => `${k}=${windows[k].usedPercentage}@${windows[k].resetsAt}`)
+    .join('|');
+}

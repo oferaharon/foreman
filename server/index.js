@@ -46,6 +46,7 @@ import { parseEffortDialog, nudgeToward } from './effort.js';
 import { MessageQueue } from './queue.js';
 import { PaneLock } from './claim.js';
 import { PinStore } from './pins.js';
+import { RateLimitStore } from './rate-limits.js';
 import { GroupStore } from './groups.js';
 import {
   SnapshotStore,
@@ -120,6 +121,7 @@ const status = new StatusEngine();
 const readState = new ReadState();
 const queue = new MessageQueue();
 const pins = new PinStore();
+const rateLimits = new RateLimitStore();
 const groups = new GroupStore();
 const snapshot = new SnapshotStore();
 const tasks = new TaskStore();
@@ -208,6 +210,19 @@ app.use(originGuard({ port: PORT, config: { allowedOrigins: ALLOWED_ORIGINS } })
  * again), so the receiver stops being fussy.
  */
 app.use('/hook', express.json({ type: () => true, limit: '2mb' }));
+
+/*
+ * And the status line's body is JSON whatever *it* calls itself, for the same reason.
+ *
+ * The wrapper does send `Content-Type: application/json` — measured at a scratch sink —
+ * and the receiver still must not depend on it. The proof is one file away: the Foreman
+ * hook entry sitting in `~/.claude/settings.json` on this Mac has no `Content-Type` at
+ * all, because an entry already written is never rewritten. A sender that is out in the
+ * world is not ours to fix.
+ *
+ * `100kb` rather than the hook's `2mb`: the measured payload is 1751 bytes.
+ */
+app.use('/status', express.json({ type: () => true, limit: '100kb' }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(WEB_DIR));
 
@@ -227,6 +242,38 @@ app.post('/hook', (req, res) => {
     status.ingest(event, payload, pane && pane !== '' ? pane : null);
   } catch {
     /* never let a malformed hook take the server down */
+  }
+});
+
+/* ---------------------------------------------------------- status line --- */
+
+/**
+ * What Claude Code hands its status-line command, forwarded by the wrapper.
+ *
+ * The body is the whole payload, unfiltered, and it is handed to the store whole — the
+ * endpoint extracts nothing. That split is deliberate rather than lazy: everything issue
+ * #52 wants (context window, prompt cache, effort, fast mode, lines added) is already in
+ * this body, so it adds a second store fed from this same route, with no change to the
+ * wrapper, the installer, `settings.json` or this line.
+ *
+ * **Answer first**, exactly as `/hook` does: this runs on every redraw of the line under
+ * somebody's prompt, and a status line waiting on a socket is a status line that stutters.
+ *
+ * **No origin special case.** `originGuard` runs above every route and gates every non-GET;
+ * curl sends no `Origin` and clause 1 of `origin.js` allows that by construction, which is
+ * the whole design. No allowlist entry, no path exemption, no token — the 2026-08-27 ruling
+ * stands and this is not the crack in it.
+ *
+ * The broadcast is conditional on `ingest` reporting a change, and the age deliberately is
+ * not a change: `at` moves on every arrival, and re-broadcasting to keep a browser-computed
+ * age fresh would rebuild the rail on every render of every status line on the machine.
+ */
+app.post('/status', (req, res) => {
+  res.status(204).end();
+  try {
+    if (rateLimits.ingest(req.body || {})) broadcastRoster();
+  } catch {
+    /* never let a malformed payload take the server down */
   }
 });
 
@@ -4577,12 +4624,7 @@ function unsubscribeRoom(ws, repo) {
 }
 
 wss.on('connection', (ws) => {
-  send(ws, 'sessions', {
-    sessions: registry.list(),
-    groups: groups.list(),
-    snapshot: snapshotSummary(),
-    links: links.list({ open: true }),
-  });
+  send(ws, 'sessions', rosterFrame());
 
   ws.on('message', async (raw) => {
     let msg;
@@ -4691,22 +4733,42 @@ registry.on('tick', (sessions) => {
   flushQueues(sessions).catch((err) => console.error('[queue]', err.message));
 });
 
-/** The rail redraws from one frame, so the shelving goes out with the sessions on it. */
+/**
+ * One frame, three senders.
+ *
+ * The rail redraws from this and nothing else, so the shelving, the snapshot, the links and
+ * the account's rate limits all go out with the sessions on them. It is a helper rather than
+ * three object literals because it *was* three literals and they had already drifted — the
+ * connect frame called `snapshotSummary()` with no argument while the other two passed the
+ * roster they had just computed. A fourth field added by hand in three places gets forgotten
+ * in one, and the symptom is a gauge that stays blank until something unrelated moves, which
+ * reads as "the feature is broken".
+ *
+ * `rateLimits` is a **sibling of `sessions`**, like `snapshot`, `groups` and `links` — never
+ * a field on a session row. It is one account-wide number, and a copy of it on every row
+ * would make `sessions.js`'s `#diff` broadcast the whole roster every time it moved, for a
+ * value that already has its own change signal.
+ */
+function rosterFrame(sessions = registry.list()) {
+  return {
+    sessions,
+    groups: groups.list(),
+    snapshot: snapshotSummary(sessions),
+    links: links.list({ open: true }),
+    rateLimits: rateLimits.get(),
+  };
+}
+
 function broadcastRoster() {
-  const sessions = registry.list();
-  const shelves = groups.list();
-  const snap = snapshotSummary(sessions);
-  const open = links.list({ open: true });
-  for (const ws of wss.clients) send(ws, 'sessions', { sessions, groups: shelves, snapshot: snap, links: open });
+  const frame = rosterFrame();
+  for (const ws of wss.clients) send(ws, 'sessions', frame);
 }
 
 /* Broadcast roster changes, and re-attach any client whose session rotated. */
 registry.on('update', (sessions) => {
-  const shelves = groups.list();
-  const snap = snapshotSummary(sessions);
-  const open = links.list({ open: true });
+  const frame = rosterFrame(sessions);
   for (const ws of wss.clients) {
-    send(ws, 'sessions', { sessions, groups: shelves, snapshot: snap, links: open });
+    send(ws, 'sessions', frame);
     const slots = subs.get(ws);
     if (!slots) continue;
 
@@ -4858,8 +4920,8 @@ const configSeed = seedConfigFile(CONFIG_FILE, { bindHost: HOST, sessionPrefix: 
  * Flush every store, then go.
  *
  * Each store is a Map behind a 2-second debounced write, so any stop loses up to two
- * seconds of task records, queued messages, pins, group filings, read marks and the
- * session bench. That was already true — but `launchctl kickstart -k`, the restart
+ * seconds of task records, queued messages, pins, group filings, read marks, the session
+ * bench and the account's rate-limit record. That was already true — but `launchctl kickstart -k`, the restart
  * command, sends SIGTERM, and `KeepAlive` adds restarts nobody asked for, so it stops
  * being theoretical. `queue.js`'s public `flush()` has said "(tests, shutdown)" in its
  * comment since it was written; this is the shutdown half finally wired up.
@@ -4869,7 +4931,7 @@ const configSeed = seedConfigFile(CONFIG_FILE, { bindHost: HOST, sessionPrefix: 
  * throws must not stop the four after it.
  */
 process.on('SIGTERM', () => {
-  for (const store of [queue, tasks, pins, groups, readState, snapshot, links]) {
+  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, links]) {
     try {
       store.flush();
     } catch {

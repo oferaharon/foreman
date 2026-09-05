@@ -2231,6 +2231,11 @@ test('the roster frame carries the open links — on connect, and again when one
     const first = await waitFor((f) => Array.isArray(f.links));
     assert.equal(first.links.some((l) => l.id === 'lnk-5'), true);
     assert.equal(first.links.every((l) => !l.closedAt), true, 'open links only — the column shows the live ones');
+    // A sibling of `sessions`, present on the wire from the first frame. Null here because
+    // no status line has posted to this panel — and null is what draws no gauge at all,
+    // rather than a zero or a grey placeholder.
+    assert.ok('rateLimits' in first, 'the account-wide record rides the same frame');
+    assert.equal(first.rateLimits, null);
 
     // …and the broadcast frame, on a change. `POST .../close` calls `broadcastRoster`.
     frames.length = 0;
@@ -2241,7 +2246,7 @@ test('the roster frame carries the open links — on connect, and again when one
   }
 });
 
-test('all three roster-frame sites carry `links`, and the un-pin refusal is still in the pin handler', () => {
+test('the roster frame has one builder and three senders, and the un-pin refusal is still in the pin handler', () => {
   /*
    * Structural pins, because HTTP cannot reach either.
    *
@@ -2250,11 +2255,39 @@ test('all three roster-frame sites carry `links`, and the un-pin refusal is stil
    * benched by hand against real leads in the sandbox — this is the guard that stops one
    * of them being quietly dropped in between, the way `test/logs.test.js` reads two files
    * it cannot import.
+   *
+   * This assertion used to read the *literals*: three `send(ws, 'sessions', {…})` objects,
+   * each of which had to be checked for the field by hand. That is precisely what drifted
+   * — the connect frame called `snapshotSummary()` with no argument while the other two
+   * passed the roster — so the literals are now one `rosterFrame()` and what is pinned is
+   * that they stayed that way. A fourth field added by hand in three places gets forgotten
+   * in one, and the symptom is a column that is right on connect and stale afterwards.
    */
   const source = fs.readFileSync(path.join(ROOT, 'server', 'index.js'), 'utf8');
-  const frames = source.match(/send\(ws, 'sessions', \{[^}]*\}/g) || [];
-  assert.equal(frames.length, 3, 'the roster frame is built in exactly three places');
-  for (const frame of frames) assert.match(frame, /links/, `every roster frame carries links: ${frame}`);
+  const senders = source.match(/send\(ws, 'sessions', [^;]*?\);/g) || [];
+  assert.equal(senders.length, 3, 'the roster frame is still sent from exactly three places');
+  for (const sender of senders) {
+    assert.doesNotMatch(sender, /\{/, `no sender builds its own frame literal: ${sender}`);
+  }
+
+  const builders = source.match(/function rosterFrame\(/g) || [];
+  assert.equal(builders.length, 1, 'and there is exactly one builder to add a field to');
+  // One definition plus one call per sender, and nothing else reaching for it.
+  assert.equal((source.match(/rosterFrame\(/g) || []).length, 4, 'three senders, one builder');
+
+  const body = source.slice(source.indexOf('function rosterFrame('));
+  const frame = body.slice(0, body.indexOf('\n}'));
+  for (const field of ['sessions', 'groups', 'snapshot', 'links', 'rateLimits']) {
+    assert.match(frame, new RegExp(`\\b${field}\\b`), `the frame carries ${field}`);
+  }
+  // Account-wide, so it is a sibling of `sessions` and never a field on one — a copy on
+  // every row would make `sessions.js`'s `#diff` broadcast the whole roster whenever it
+  // moved, for a value that already has its own change signal.
+  assert.doesNotMatch(
+    fs.readFileSync(path.join(ROOT, 'server', 'sessions.js'), 'utf8'),
+    /rateLimits/,
+    'rateLimits is not a session field, and `#diff` has never heard of it',
+  );
 
   const pin = source.slice(source.indexOf("app.post('/api/sessions/:id/pin'"));
   const handler = pin.slice(0, pin.indexOf('\n});'));
