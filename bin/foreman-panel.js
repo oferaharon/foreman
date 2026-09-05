@@ -47,6 +47,8 @@ const COMMANDS = [
   ['restart', 'restart the background service — do this after `brew upgrade`'],
   ['install-hook', "register the status hook in ~/.claude/settings.json (once, per machine)"],
   ['uninstall-hook', 'remove it again'],
+  ['install-statusline', 'wrap the status line so the panel sees the rate-limit numbers'],
+  ['uninstall-statusline', 'put the original status line back'],
   ['logs', 'print the two log paths this panel is actually using'],
   ['version', 'print the version'],
 ];
@@ -115,6 +117,18 @@ switch (command) {
     passThrough(process.execPath, [
       path.join(SERVER, 'install-hook.js'),
       ...(command === 'uninstall-hook' ? ['--remove'] : []),
+      ...rest,
+    ]);
+    break;
+
+  // `install-statusline.js` has the `invokedDirectly()` guard its sibling lacks, so
+  // importing it would be safe — it is spawned anyway, because a refusal there exits
+  // non-zero and `passThrough` is what turns a child's exit code into this one's.
+  case 'install-statusline':
+  case 'uninstall-statusline':
+    passThrough(process.execPath, [
+      path.join(SERVER, 'install-statusline.js'),
+      ...(command === 'uninstall-statusline' ? ['--remove'] : []),
       ...rest,
     ]);
     break;

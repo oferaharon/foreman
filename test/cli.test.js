@@ -83,7 +83,9 @@ test('the command name is the formula name', () => {
 test('--help lists every subcommand, and exits 0', async () => {
   const { code, stdout } = await cli(['--help']);
   assert.equal(code, 0);
-  for (const name of ['serve', 'start', 'stop', 'restart', 'install-hook', 'uninstall-hook', 'logs', 'version']) {
+  const names = ['serve', 'start', 'stop', 'restart', 'install-hook', 'uninstall-hook',
+    'install-statusline', 'uninstall-statusline', 'logs', 'version'];
+  for (const name of names) {
     assert.match(stdout, new RegExp(`\\b${name}\\b`), `--help does not mention ${name}`);
   }
 });
@@ -171,6 +173,51 @@ test('install-hook registers the hook, and uninstall-hook takes it back out', as
   assert.equal(removed.code, 0, removed.stderr);
   const after = JSON.parse(fs.readFileSync(settings, 'utf8'));
   assert.equal(after.hooks?.Stop, undefined, 'the entry should be gone again');
+});
+
+/*
+ * The status-line pair. Spawned like the hook pair, and covered here by the same two
+ * facts: help writes nothing, and the subcommands reach the same scratch `$HOME` the
+ * in-repo `npm run` scripts would. What each one *does* to settings.json is
+ * `test/statusline.test.js`'s subject; this is the wiring.
+ */
+test('install-statusline wraps the status line, and uninstall-statusline puts it back', async (t) => {
+  const home = scratchHome(t);
+  const settings = path.join(home, '.claude', 'settings.json');
+  const original = { type: 'command', command: 'bash /scratch/alpha/line.sh' };
+  fs.writeFileSync(settings, `${JSON.stringify({ statusLine: original }, null, 2)}\n`);
+
+  // The state dir is named rather than inherited: a suite run inside a scratch panel's
+  // environment carries `FOREMAN_STATE_DIR`, and that one would be the real one.
+  const state = { HOME: home, FOREMAN_STATE_DIR: path.join(home, '.foreman') };
+  const wrapped = await cli(['install-statusline'], state);
+  assert.equal(wrapped.code, 0, wrapped.stderr);
+  const after = JSON.parse(fs.readFileSync(settings, 'utf8'));
+  assert.match(after.statusLine.command, /statusline-wrapper\.sh/, 'the wrapper should be in place');
+  assert.ok(fs.existsSync(path.join(home, '.foreman', 'statusline-wrapper.sh')));
+
+  const back = await cli(['uninstall-statusline'], state);
+  assert.equal(back.code, 0, back.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(settings, 'utf8')).statusLine, original);
+  assert.equal(fs.existsSync(path.join(home, '.foreman', 'statusline-wrapper.sh')), false);
+});
+
+/*
+ * A refusal has to survive the spawn. `passThrough` exits with the child's code, so a
+ * `settings.json` that does not parse must come back non-zero here as well — a shell
+ * script that ran `foreman-panel install-statusline` and read `$?` is the whole point.
+ */
+test('a refusal from the status-line installer is the shim\'s exit code too', async (t) => {
+  const home = scratchHome(t);
+  const settings = path.join(home, '.claude', 'settings.json');
+  fs.writeFileSync(settings, '{ "statusLine": { "type": "command", }\n');
+
+  const { code, stderr } = await cli(['install-statusline'], {
+    HOME: home,
+    FOREMAN_STATE_DIR: path.join(home, '.foreman'),
+  });
+  assert.notEqual(code, 0, 'a refusal must not look like success to a shell script');
+  assert.match(stderr, /UNREADABLE_SETTINGS/);
 });
 
 // --------------------------------------------------------------------- the detector ---
