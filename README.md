@@ -26,6 +26,7 @@ and inject.
 ```
 brew install oferaharon/tap/foreman-panel
 foreman-panel install-hook
+foreman-panel install-statusline  # optional — rate-limit gauges in the rail
 brew services start foreman-panel
 ```
 
@@ -37,13 +38,21 @@ Then open **http://127.0.0.1:48770**.
 git clone https://github.com/oferaharon/foreman.git
 cd foreman
 npm install
-npm run install-hook     # once — registers the status hook, backs up settings.json
-npm run install-agent    # once — runs the panel as a LaunchAgent → http://127.0.0.1:48770
-npm test                 # parsers, stores, binding, launch naming, and the team modules
+npm run install-hook        # once — registers the status hook, backs up settings.json
+npm run install-statusline  # optional, once — rate-limit gauges in the rail
+npm run install-agent       # once — runs the panel as a LaunchAgent → http://127.0.0.1:48770
+npm test                    # parsers, stores, binding, launch naming, and the team modules
 ```
 
 `npm start` still works, but it is the scratch-server command, not how the real panel
 runs — see [Running it under launchd](docs/running.md#running-it-under-launchd).
+
+`install-statusline` is separate from the hook and reversible on its own
+(`npm run uninstall-statusline`): it wraps whatever `statusLine` command is already
+configured so a copy of Claude Code's own usage JSON reaches the panel, and it changes
+nothing about what shows up in your terminal. The gauges it turns on only ever appear for
+a subscription account — an API-key account has no usage percentage to show.
+[Docs →](docs/panel.md#rate-limit-gauges)
 
 There is no signed installer package and no bundled Node runtime, and that's deliberate:
 Homebrew owns the runtime and the dependency graph for the first path, and the second

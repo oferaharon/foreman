@@ -44,6 +44,11 @@ written into your repositories. Beyond that:
   status hook. The file is copied to a timestamped backup beside itself first, and
   registration only ever *appends* to the arrays already there, so other hooks are
   untouched (`server/install-hook.js:42`). `npm run uninstall-hook` removes it again.
+- `npm run install-statusline` **writes** the same `settings.json`'s `statusLine` key —
+  optional, separate from the hook, and the source of the [rate-limit
+  gauges](panel.md#rate-limit-gauges). It backs the file up the same way first, and every
+  other key (`hooks` included) is copied through untouched. See [The status-line
+  wrapper](#the-status-line-wrapper) below for what it wraps and how to undo it.
 - `npm run install-agent` **writes** `~/Library/LaunchAgents/<label>.plist` and bootstraps
   it. launchd then appends to two files in `~/Library/Logs`, which the panel trims itself at
   boot — see [Running it under launchd](#running-it-under-launchd). It also **removes** a
@@ -289,6 +294,39 @@ The panel prints the origins it resolved at boot, one line each with the interfa
 reason, next to the `Triggers:` line. To add one — a reverse proxy, a tunnel you have
 decided on — set `FOREMAN_ALLOWED_ORIGIN` to a full `http://host:port` (comma- or
 space-separated for more than one) and restart.
+
+## The status-line wrapper
+
+Optional, and separate from `install-hook` — it's what turns on the [rate-limit
+gauges](panel.md#rate-limit-gauges) in the rail and on the phone. Claude Code already hands
+its configured `statusLine` command a JSON blob on every redraw, and in that blob are the
+account's own usage percentages; nothing has to be asked of anyone, because the number is
+already arriving on the machine and being thrown away.
+
+```
+npm run install-statusline      # once — wraps the existing statusLine command
+npm run uninstall-statusline    # puts the original command back
+```
+
+(`foreman-panel install-statusline` / `uninstall-statusline` under Homebrew.)
+
+It generates a small script under `FOREMAN_STATE_DIR` that captures the JSON once, forks a
+POST to `127.0.0.1:$FOREMAN_PORT/status` in the background, and then feeds the *original*
+command the same payload it would have read from stdin anyway — so **the terminal status
+line is unchanged**, byte for byte, whatever it was before. Idempotent: running it again
+regenerates the wrapper from its own record rather than wrapping the wrapper. If
+`statusLine.refreshInterval` is absent it sets it to `60`, so an idle session keeps posting
+fresh numbers instead of the gauges sitting on whatever was last typed; a value you had
+already set is never touched.
+
+`npm run uninstall-statusline` restores the whole `statusLine` object exactly as it was
+found — including `refreshInterval`, removed again if the installer was the one who added
+it — from a sidecar record beside the wrapper, and both are deleted.
+
+**Subscription accounts only.** Claude Code never puts a `rate_limits` block in the JSON
+for an API-key account, or before a session's first reply, so on those the gauges simply
+never appear — see [Rate-limit gauges](panel.md#rate-limit-gauges) for what "never appear"
+looks like versus a real gap.
 
 ## Backing up state
 
