@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { THRESHOLDS, toneFor, windowsOf, ageOf, staleness, formatReset } from '../web/quota.js';
+import {
+  THRESHOLDS,
+  toneFor,
+  windowsOf,
+  ageOf,
+  staleness,
+  formatReset,
+  formatResetClock24,
+} from '../web/quota.js';
 
 /*
  * The two subscription gauges are drawn from one record, and this pins the arithmetic
@@ -160,9 +168,9 @@ function STALE_MINUTES(n) {
 
 /* ───────────────────────────────────────────────────────────── formatReset ─── */
 
-test('formatReset within a day reads as hours and minutes', () => {
+test('formatReset within a day reads as hours and minutes, space-separated', () => {
   const resetsAt = Math.round((NOW + 2 * 3600 * 1000 + 10 * 60 * 1000) / 1000);
-  assert.equal(formatReset(resetsAt, NOW), '2h10m');
+  assert.equal(formatReset(resetsAt, NOW), '2h 10m');
 });
 
 test('formatReset under an hour drops the hours entirely', () => {
@@ -199,6 +207,44 @@ test('formatReset on an unreadable resetsAt answers an empty string, not a throw
   assert.equal(formatReset('not-a-number', NOW), '');
 });
 
+/* ────────────────────────────────────────────────── formatResetClock24 ─── */
+
+// Built from local wall-clock components, not an offset from NOW — the point of this
+// function is a fixed clock time, so the fixture has to name one rather than derive it.
+function localResetsAt(hour, minute) {
+  return Math.round(new Date(2026, 8, 4, hour, minute, 0).getTime() / 1000);
+}
+
+test('formatResetClock24 on the hour reads HH:00', () => {
+  const resetsAt = localResetsAt(23, 0);
+  assert.equal(formatResetClock24(resetsAt), '23:00');
+  assert.equal(formatResetClock24(resetsAt), HOUR24(resetsAt));
+});
+
+test('formatResetClock24 with minutes keeps them', () => {
+  const resetsAt = localResetsAt(23, 10);
+  assert.equal(formatResetClock24(resetsAt), '23:10');
+  assert.equal(formatResetClock24(resetsAt), HOUR24(resetsAt));
+});
+
+test('formatResetClock24 zero-pads a single-digit hour', () => {
+  const resetsAt = localResetsAt(9, 5);
+  assert.equal(formatResetClock24(resetsAt), '09:05');
+  assert.equal(formatResetClock24(resetsAt), HOUR24(resetsAt));
+});
+
+test('formatResetClock24 at midnight reads 00:00, not 24:00', () => {
+  const resetsAt = localResetsAt(0, 0);
+  assert.equal(formatResetClock24(resetsAt), '00:00');
+  assert.equal(formatResetClock24(resetsAt), HOUR24(resetsAt));
+});
+
+test('formatResetClock24 on an unreadable resetsAt answers an empty string, not a throw', () => {
+  assert.doesNotThrow(() => formatResetClock24(undefined));
+  assert.equal(formatResetClock24(undefined), '');
+  assert.equal(formatResetClock24('not-a-number'), '');
+});
+
 function DAY_MS() {
   return 24 * 3600 * 1000;
 }
@@ -221,4 +267,20 @@ function HOUR12(resetsAtSec) {
   const minute = parts.find((p) => p.type === 'minute').value;
   const period = parts.find((p) => p.type === 'dayPeriod').value.toUpperCase();
   return minute === '00' ? `${hour}${period}` : `${hour}:${minute}${period}`;
+}
+
+// Independent of `formatResetClock24` in the source for the same reason `HOUR12` is
+// independent of `formatHour12` above it. `hourCycle: 'h23'` rather than `hour12: false` —
+// the latter is free to pick `h24` under some locales/engines, which spells midnight
+// `24:00` instead of `00:00` and would make this helper wrong on exactly the case it exists
+// to check.
+function HOUR24(resetsAtSec) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(resetsAtSec * 1000));
+  const hour = parts.find((p) => p.type === 'hour').value;
+  const minute = parts.find((p) => p.type === 'minute').value;
+  return `${hour}:${minute}`;
 }
