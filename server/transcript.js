@@ -5,8 +5,16 @@ import { EventEmitter } from 'node:events';
 import { BACKFILL_BYTES } from './config.js';
 import { normalizeRecord, stitch } from './normalize.js';
 
-/** Read a byte range and return whole JSON lines, dropping any leading partial. */
-async function readRange(file, start, end, { dropLeadingPartial }) {
+/**
+ * Read a byte range and return whole JSON lines, dropping any leading partial.
+ *
+ * Exported for `observe.js`, which reads its own byte windows out of the same transcripts
+ * this file tails. It is exported rather than reimplemented there deliberately: two byte-
+ * window readers that could disagree about where a line ends is the `imageBlocks` lesson —
+ * one walk, two callers, or the day a record straddles a window boundary they hand back
+ * different records and nothing says so.
+ */
+export async function readRange(file, start, end, { dropLeadingPartial }) {
   if (end <= start) return { records: [], nextOffset: end };
   const fh = await fsp.open(file, 'r');
   try {
