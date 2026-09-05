@@ -126,20 +126,68 @@ test('a five_hour whose reset is later than the stored one replaces it', () => {
 });
 
 /*
- * Equal resets are one window read twice, and the incoming reading is taken as-is —
- * downwards included. Within a window a percentage only climbs, but that is an assumption
- * about a number this panel does not own, and a store that argued with its own source of
- * truth could not be corrected by it.
+ * Equal resets are one window read twice, and inside a window usage only climbs — quota is
+ * spent, never returned, until the reset that ends the window and mints a new `resetsAt`.
+ * So the higher reading is the later one.
  */
-test('the same window read again takes the incoming percentage, even downwards', () => {
+test('the same window read again keeps the higher percentage', () => {
   const s = new RateLimitStore(tmpStore());
   s.ingest({ rate_limits: REAL }, NOW);
   assert.equal(
-    s.ingest({ rate_limits: { five_hour: { used_percentage: 11, resets_at: 1788571200 } } }, NOW + 1000),
+    s.ingest({ rate_limits: { five_hour: { used_percentage: 51, resets_at: 1788571200 } } }, NOW + 1000),
     true,
+    'a climb is the newer reading and gets through',
   );
-  assert.equal(s.get().windows.five_hour.usedPercentage, 11);
+  assert.equal(s.get().windows.five_hour.usedPercentage, 51);
   s.stop();
+});
+
+/*
+ * The weekly flap, which the reset comparison alone could not catch. A session asleep for
+ * hours still holds the *current* seven-day window — same `resetsAt`, hours-old percentage
+ * — so only the number separates the two readings, and the bar walked 9 → 5 → 9 once a
+ * minute until it did. Same bug as the five-hour one, one field across.
+ */
+test('a lower percentage on the same window is the stale copy and is ignored', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { ...REAL, seven_day: { used_percentage: 9, resets_at: 1789084800 } } }, NOW);
+
+  const idle = { seven_day: { used_percentage: 5, resets_at: 1789084800 } };
+  assert.equal(s.ingest({ rate_limits: idle }, NOW + 60_000), false, 'and it is not a broadcast either');
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 9, resetsAt: 1789084800 });
+
+  // …and it stays refused, minute after minute, for as long as that session sleeps.
+  for (let i = 2; i <= 5; i++) assert.equal(s.ingest({ rate_limits: idle }, NOW + i * 60_000), false, `minute ${i}`);
+  assert.equal(s.get().windows.seven_day.usedPercentage, 9);
+  s.stop();
+});
+
+/*
+ * The reset comparison still outranks the percentage one, and must: the *next* window opens
+ * at 0% and would lose every time if a bigger number simply won.
+ */
+test('a later reset beats a higher percentage — a new window starts low', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 97, resets_at: 1788571200 } } }, NOW);
+  const next = { five_hour: { used_percentage: 0, resets_at: 1788571200 + 5 * 3600 } };
+  assert.equal(s.ingest({ rate_limits: next }, NOW + 1000), true);
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 0, resetsAt: 1788571200 + 5 * 3600 });
+  s.stop();
+});
+
+/* `null` is "nothing drawable", not zero, so it loses to a real number from either side. */
+test('an unreadable percentage never wins against a real one, in either direction', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { five_hour: { used_percentage: 43, resets_at: 1788571200 } } }, NOW);
+  s.ingest({ rate_limits: { five_hour: { used_percentage: null, resets_at: 1788571200 } } }, NOW + 1000);
+  assert.equal(s.get().windows.five_hour.usedPercentage, 43, 'a real reading is not replaced by nothing');
+
+  const t = new RateLimitStore(tmpStore());
+  t.ingest({ rate_limits: { five_hour: { used_percentage: null, resets_at: 1788571200 } } }, NOW);
+  t.ingest({ rate_limits: { five_hour: { used_percentage: 43, resets_at: 1788571200 } } }, NOW + 1000);
+  assert.equal(t.get().windows.five_hour.usedPercentage, 43, 'and nothing is replaced by a real reading');
+  s.stop();
+  t.stop();
 });
 
 /* Beyond comparison is not the same as stale: the incoming wins, as it did before. */

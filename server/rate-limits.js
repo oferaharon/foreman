@@ -38,7 +38,9 @@ const FILE = path.join(STATE_DIR, 'rate-limits.json');
  *   stale re-post and is ignored, and a window the payload simply did not mention is left
  *   alone. The one and only thing that removes a window is its own `resetsAt` passing —
  *   real expiry, measured against this machine's clock rather than inferred from somebody
- *   else's memory of it.
+ *   else's memory of it. And **within one window the higher percentage wins**, because a
+ *   long window (the weekly one) is still current in a sleeping session's copy, so its
+ *   reset matches and only the number tells the two readings apart — see `fresher`.
  * - **`used_percentage`, falling back to `utilization`.** The capture says
  *   `used_percentage`. The binary's string table puts `utilization` next to `five_hour`
  *   and every internal telemetry name is `priorFiveHourUtilization`, so one `??` is cheap
@@ -230,11 +232,27 @@ function mergeWindows(stored, incoming, now) {
 /**
  * Of two readings of one window, the one that is not a memory of the other.
  *
- * A later `resetsAt` is a later window, so it wins; an *earlier* one is a session re-posting
- * what it last saw and is dropped. Equal means the same window read twice and the incoming
- * value is taken as-is — within a window a percentage only climbs, but "only climbs" is an
- * assumption about a number this panel does not own, and a store that refused a reading for
- * disagreeing with its own model of it would be unfixable by the source of truth.
+ * Two comparisons, because the payload carries two independent orderings and neither one
+ * alone is enough.
+ *
+ * **Across windows, the reset.** A later `resetsAt` is a later window, so it wins; an
+ * *earlier* one is a session re-posting what it last saw and is dropped.
+ *
+ * **Within one window, the percentage.** Equal resets are the same window read twice, and
+ * usage inside a window only ever climbs — quota is spent, never returned, until the reset
+ * that ends the window and gives it a new `resetsAt`. So the **higher** reading is the
+ * later one and a lower one is the sleeper's older copy. Taking the incoming value as-is
+ * was the first version of this rule, and it left the weekly bar flapping 9% → 5% → 9% on
+ * the same idle re-post the five-hour half was already protected from: the weekly window is
+ * long enough that a session asleep for hours still holds the *current* one, so its reset
+ * matches exactly and the comparison above cannot separate them. It is the same bug one
+ * field across.
+ *
+ * The honest limit, since it is a real one: a genuine downward correction inside a window
+ * is now ignored. It is bounded rather than permanent — the next reset mints a new
+ * `resetsAt`, which the comparison above accepts unconditionally, so a wrong high reading
+ * cannot outlive its own window (five hours at the worst, a week for the weekly one).
+ * Weighed against a bar that visibly walks backwards every minute on a quiet machine.
  *
  * An unreadable `resetsAt` on either side puts the two beyond comparison, and there the
  * incoming wins — the pre-merge behaviour. It is the honest answer to "I cannot tell which
@@ -244,7 +262,23 @@ function fresher(stored, incoming) {
   if (!stored) return incoming;
   if (!incoming) return stored;
   if (stored.resetsAt === null || incoming.resetsAt === null) return incoming;
-  return incoming.resetsAt < stored.resetsAt ? stored : incoming;
+  if (incoming.resetsAt !== stored.resetsAt) return incoming.resetsAt < stored.resetsAt ? stored : incoming;
+  return higher(stored, incoming);
+}
+
+/**
+ * The larger of two percentages for one window, keeping the whole reading rather than the
+ * number — the two fields are one measurement and splicing them is how a store invents a
+ * value nobody took.
+ *
+ * `null` is "there is nothing drawable here", not zero, so it loses to any real number from
+ * either side; the comparison is spelled out rather than run through `??` and a sentinel,
+ * because a sentinel that ever entered the clamped 0–100 range would silently start winning.
+ */
+function higher(stored, incoming) {
+  if (incoming.usedPercentage === null) return stored.usedPercentage === null ? incoming : stored;
+  if (stored.usedPercentage === null) return incoming;
+  return incoming.usedPercentage < stored.usedPercentage ? stored : incoming;
 }
 
 /**
