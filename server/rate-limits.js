@@ -17,16 +17,30 @@ const FILE = path.join(STATE_DIR, 'rate-limits.json');
  * deliberately: issue #52 wants the per-session fields out of the same body, and drawing
  * the line here means it adds a second store rather than a second install step.
  *
- * Three rules the shape depends on, each measured rather than assumed:
+ * Four rules the shape depends on, each measured rather than assumed:
  *
- * - **Absent and empty are opposite facts.** A payload with no `rate_limits` key at all is
- *   ignored entirely — it is the launch render (measured: missing from the very first
- *   render of a session, present on every one after it), an API-key session, or a session
- *   before its first reply. A payload *with* the key replaces the stored windows
- *   wholesale, because Claude Code drops a window once its reset has passed, so a window
- *   missing from a present object has genuinely expired. Get it backwards and either a
- *   five-hour bar outlives its own reset for ever, or one API-key session wipes the
- *   gauges every few seconds.
+ * - **A payload is not evidence about the windows it does not mention.** A payload with no
+ *   `rate_limits` key at all is ignored entirely — it is the launch render (measured:
+ *   missing from the very first render of a session, present on every one after it), an
+ *   API-key session, or a session before its first reply; one such session posting every
+ *   few seconds must not wipe the gauges. And a payload *with* the key no longer replaces
+ *   the stored windows wholesale either. See the merge rule below: that was the first
+ *   reading of "Claude Code drops a window once its reset has passed", and it was wrong
+ *   about *whose* clock the drop happened on.
+ * - **The arrival is not the reading.** A status line re-renders on a timer
+ *   (`statusLine.refreshInterval`, 60s here), so a session that has been idle for hours
+ *   re-posts its **last-known** payload every minute: hours-old percentages, and no
+ *   `five_hour` at all, because that window's reset passed long ago and Claude Code dropped
+ *   it from the payload *that session was holding*. Latest-arrival-wins therefore let a
+ *   sleeping session blank a live five-hour bar every minute, which is exactly what it did
+ *   — the two readings alternated in `rate-limits.json` on one account. So the merge is
+ *   **per window**: the later `resetsAt` wins, an incoming window with an older one is a
+ *   stale re-post and is ignored, and a window the payload simply did not mention is left
+ *   alone. The one and only thing that removes a window is its own `resetsAt` passing —
+ *   real expiry, measured against this machine's clock rather than inferred from somebody
+ *   else's memory of it. And **within one window the higher percentage wins**, because a
+ *   long window (the weekly one) is still current in a sleeping session's copy, so its
+ *   reset matches and only the number tells the two readings apart — see `fresher`.
  * - **`used_percentage`, falling back to `utilization`.** The capture says
  *   `used_percentage`. The binary's string table puts `utilization` next to `five_hour`
  *   and every internal telemetry name is `priorFiveHourUtilization`, so one `??` is cheap
@@ -44,7 +58,12 @@ const FILE = path.join(STATE_DIR, 'rate-limits.json');
  * moved: the age is computed in the browser from `at`, and a server that re-broadcast to
  * keep it fresh would rebuild the rail on every render of every status line. The record is
  * still rewritten and still persisted, so the age on disk is the truth if the panel
- * restarts.
+ * restarts. Note what that costs now the merge is per window: a stale re-post that changed
+ * nothing still advances `at`, so "as of a minute ago" can be true of the arrival while the
+ * numbers under it are older. That is the right trade — `at` is what tells a reader the
+ * feed is alive at all, and the alternative is a store that looks dead every time the
+ * machine is quiet — but it is why `changed` is computed from the windows and never from
+ * `at`.
  *
  * On disk, in the shape of `pins.js` and `read-state.js`, so a panel restart doesn't blank
  * a gauge that was right a second ago — the feed is event-driven and can be quiet for
@@ -100,15 +119,17 @@ export class RateLimitStore {
    * Take a status-line payload.
    *
    * @param {any} payload the whole JSON body, unfiltered
-   * @param {number} [now] server clock; latest arrival wins, with no attempt to reconcile
-   *   two sessions posting in the same second — it is one account-wide number and they agree
+   * @param {number} [now] server clock, in **milliseconds** — both the record's `at` and the
+   *   expiry every window is measured against. Two sessions posting in the same second need
+   *   no reconciling: it is one account-wide number and they agree, and where they disagree
+   *   it is because one of them is asleep, which is what `mergeWindows` is for.
    * @returns {boolean} whether anything a reader would see changed
    */
   ingest(payload, now = Date.now()) {
     const raw = isPlainObject(payload) ? payload.rate_limits : null;
-    if (!isPlainObject(raw)) return false; // absent is not empty — see the header
+    if (!isPlainObject(raw)) return false; // a payload without the key says nothing — see the header
 
-    const windows = windowsFrom(raw, payloadWindow);
+    const windows = mergeWindows(this.record?.windows, windowsFrom(raw, payloadWindow), now);
     const changed = signature(windows) !== signature(this.record?.windows);
     this.record = { windows, at: now };
     this.dirty = true;
@@ -181,6 +202,101 @@ function windowsFrom(raw, read) {
     windows[key] = read(value);
   }
   return windows;
+}
+
+/**
+ * What is stored, updated by what just arrived, one window at a time.
+ *
+ * The union of both key sets, so a window only one side knows about survives either way,
+ * and every survivor is then held to its own reset. Two things it is deliberately not.
+ *
+ * It is not a *merge of fields*: a window is kept or replaced whole, because
+ * `usedPercentage` and `resetsAt` are one reading of one window and splicing a fresh
+ * percentage onto an old reset would invent a number nothing ever measured.
+ *
+ * And it is not a clock. Nothing here compares arrival times — two posts a minute apart can
+ * carry readings hours apart, which is the whole bug — so freshness is read off the data:
+ * a five-hour window that reset since the sleeping session last looked has a *later*
+ * `resetsAt` than the one that session remembers. That is the only ordering the payload
+ * actually carries.
+ */
+function mergeWindows(stored, incoming, now) {
+  const out = {};
+  for (const key of new Set([...Object.keys(stored ?? {}), ...Object.keys(incoming)])) {
+    const win = fresher(stored?.[key], incoming[key]);
+    if (win && !expired(win, now)) out[key] = win;
+  }
+  return out;
+}
+
+/**
+ * Of two readings of one window, the one that is not a memory of the other.
+ *
+ * Two comparisons, because the payload carries two independent orderings and neither one
+ * alone is enough.
+ *
+ * **Across windows, the reset.** A later `resetsAt` is a later window, so it wins; an
+ * *earlier* one is a session re-posting what it last saw and is dropped.
+ *
+ * **Within one window, the percentage.** Equal resets are the same window read twice, and
+ * usage inside a window only ever climbs — quota is spent, never returned, until the reset
+ * that ends the window and gives it a new `resetsAt`. So the **higher** reading is the
+ * later one and a lower one is the sleeper's older copy. Taking the incoming value as-is
+ * was the first version of this rule, and it left the weekly bar flapping 9% → 5% → 9% on
+ * the same idle re-post the five-hour half was already protected from: the weekly window is
+ * long enough that a session asleep for hours still holds the *current* one, so its reset
+ * matches exactly and the comparison above cannot separate them. It is the same bug one
+ * field across.
+ *
+ * The honest limit, since it is a real one: a genuine downward correction inside a window
+ * is now ignored. It is bounded rather than permanent — the next reset mints a new
+ * `resetsAt`, which the comparison above accepts unconditionally, so a wrong high reading
+ * cannot outlive its own window (five hours at the worst, a week for the weekly one).
+ * Weighed against a bar that visibly walks backwards every minute on a quiet machine.
+ *
+ * An unreadable `resetsAt` on either side puts the two beyond comparison, and there the
+ * incoming wins — the pre-merge behaviour. It is the honest answer to "I cannot tell which
+ * is newer", and it cannot strand a bad record: the next post replaces it.
+ */
+function fresher(stored, incoming) {
+  if (!stored) return incoming;
+  if (!incoming) return stored;
+  if (stored.resetsAt === null || incoming.resetsAt === null) return incoming;
+  if (incoming.resetsAt !== stored.resetsAt) return incoming.resetsAt < stored.resetsAt ? stored : incoming;
+  return higher(stored, incoming);
+}
+
+/**
+ * The larger of two percentages for one window, keeping the whole reading rather than the
+ * number — the two fields are one measurement and splicing them is how a store invents a
+ * value nobody took.
+ *
+ * `null` is "there is nothing drawable here", not zero, so it loses to any real number from
+ * either side; the comparison is spelled out rather than run through `??` and a sentinel,
+ * because a sentinel that ever entered the clamped 0–100 range would silently start winning.
+ */
+function higher(stored, incoming) {
+  if (incoming.usedPercentage === null) return stored.usedPercentage === null ? incoming : stored;
+  if (stored.usedPercentage === null) return incoming;
+  return incoming.usedPercentage < stored.usedPercentage ? stored : incoming;
+}
+
+/**
+ * Its own reset has passed — the one thing that removes a window.
+ *
+ * Belt to `windowsOf`'s brace in `web/quota.js`, which drops an expired window at render
+ * time and must keep doing so: nothing arrives while the machine is quiet, so a window that
+ * expires at 4am is still in the file at 9am and only the client is in a position to notice.
+ * What this adds is a file that does not accumulate windows nobody will ever draw, and a
+ * `changed` that fires on the expiry when a post does eventually land.
+ *
+ * `resetsAt` is Unix **seconds** and `now` is milliseconds; the `* 1000` is the whole of
+ * T17, and without it every window ever stored is expired (1788571200 < Date.now()).
+ * An unreadable `resetsAt` never expires — there is no instant to compare against, and
+ * `windowsOf` declines to draw it anyway.
+ */
+function expired(win, now) {
+  return win.resetsAt !== null && win.resetsAt * 1000 <= now;
 }
 
 /**
