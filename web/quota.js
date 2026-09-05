@@ -131,11 +131,13 @@ function formatHour12(date) {
   return minutes === 0 ? `${hour}${suffix}` : `${hour}:${String(minutes).padStart(2, '0')}${suffix}`;
 }
 
-/** `2h10m` within a day; beyond it, a weekday name plus the hour (`Mon 5PM`) — the 7-day bar's
- *  label, and the hour is what makes a reset two days out actionable rather than a shrug.
- *  `resetsAt` is Unix seconds, per the record shape above; a reset already in the past reads
- *  as `0m` rather than a negative number, since nothing upstream is expected to hand this an
- *  expired window on purpose. */
+/** `2h 53m` within a day (a space between the two parts — the maintainer's call, and it
+ *  applies only when there's an hours part to separate from); `45m` under an hour, no space,
+ *  nothing to separate; beyond a day, a weekday name plus the hour (`Mon 5PM`) — the 7-day
+ *  bar's label, and the hour is what makes a reset two days out actionable rather than a
+ *  shrug. `resetsAt` is Unix seconds, per the record shape above; a reset already in the past
+ *  reads as `0m` rather than a negative number, since nothing upstream is expected to hand
+ *  this an expired window on purpose. */
 export function formatReset(resetsAt, now = Date.now()) {
   const resetMs = Number(resetsAt) * 1000;
   if (!Number.isFinite(resetMs)) return '';
@@ -145,7 +147,7 @@ export function formatReset(resetsAt, now = Date.now()) {
     const totalMinutes = Math.max(0, Math.round(diff / 60000));
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
-    return hours > 0 ? `${hours}h${minutes}m` : `${minutes}m`;
+    return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
   }
   const date = new Date(resetMs);
   return `${WEEKDAYS[date.getDay()]} ${formatHour12(date)}`;

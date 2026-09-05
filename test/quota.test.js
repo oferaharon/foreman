@@ -168,9 +168,9 @@ function STALE_MINUTES(n) {
 
 /* ───────────────────────────────────────────────────────────── formatReset ─── */
 
-test('formatReset within a day reads as hours and minutes', () => {
+test('formatReset within a day reads as hours and minutes, space-separated', () => {
   const resetsAt = Math.round((NOW + 2 * 3600 * 1000 + 10 * 60 * 1000) / 1000);
-  assert.equal(formatReset(resetsAt, NOW), '2h10m');
+  assert.equal(formatReset(resetsAt, NOW), '2h 10m');
 });
 
 test('formatReset under an hour drops the hours entirely', () => {
