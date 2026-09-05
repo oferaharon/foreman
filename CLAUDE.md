@@ -665,6 +665,33 @@ grows to carry falls through unchanged, which is the right default for a shape n
 read. Unread never counted these — it counts `assistant` records with text — so nothing
 about the inbox moved.
 
+**One peer message, two records, and which one Claude Code writes depends on whether the
+recipient was busy — MEASURED on v2.1.257, both shapes captured minutes apart in one
+sandbox session.** A native `SendMessage` delivered to an **idle** session lands as
+`type: 'user'` with `origin.kind: 'peer'` at the top level. Delivered to one **mid tool
+call** it is queued and then absorbed into the turn already running, and lands as
+`type: 'attachment'` / `attachment.type: 'queued_command'` — the `queue-operation` beside
+it says `reason: 'absorbed_mid_turn'` — carrying the **identical `origin` object one level
+deeper**, at `rec.attachment.origin`. It has no top-level `message`, no top-level `origin`
+and no top-level `isMeta` (that rides inside `attachment` too), so every test the first
+shape passes, the second fails. `peerOrigin` in `normalize.js` is the one place either is
+recognised; everything downstream is written once.
+
+Three things about it. **The busy shape is the common case, not an edge** — a worker
+telling its lead "done" is by definition talking to a session that is working, and it is a
+worker→lead completion message that first proved this traffic exists. **It fires no
+`UserPromptSubmit` hook at all**, measured against a scratch hook that caught the idle
+delivery from the same sender in the same session seconds earlier and never saw the busy
+one, so a collector watching the hook sees nothing and the transcript is the only path to
+these. And **`attachment` stays in `DROP_TYPES`**: the carve-out asks the parser rather
+than the type (`if (DROP_TYPES.has(type) && !peer)`), so exactly one shape comes back out
+and `total_tokens_reminder`, `output_style` and the rest are dropped on the next line as
+before. Note the shape is not what you get by messaging a session that merely *looks*
+occupied — a probe fired at one busy generating prose arrived as the ordinary `user`
+record, because the turn ended first. It takes a tool call in flight.
+`test/fixtures/peer-message-busy.jsonl` is the capture and `test/normalize.test.js` pins
+both spellings against it.
+
 **A subscription dies with the socket, and nothing on screen says so.** The tailer holding
 a file offset is server state, so a dropped connection or a server restart ends it — while
 the roster keeps arriving, because that is broadcast to every client. The result is a rail
