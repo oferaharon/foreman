@@ -167,10 +167,12 @@ select {
 /*
  * One gauge. `--gauge` is the tone, set once here and read by the bar and by the label, so
  * a tone change cannot colour one and miss the other. The default is `--ink-faint` rather
- * than an accent: an ordinary reading should be furniture, and only 75 and 90 —
- * `web/quota.js`'s numbers, never restated here — should pull the eye. It is not
- * `--rule-strong`, which was the first try and is one step off the track colour it sits on:
- * furniture still has to be visible, or the bar reads as empty at every percentage.
+ * than an accent, for a tone `toneFor` never hands this in practice (every real percentage
+ * lands in one of the three bands below) — it stays as the guard for whatever `windowsOf`
+ * doesn't produce. 50 and 75 — `web/quota.js`'s numbers, never restated here — are what
+ * decide which of the three pulls the eye. It is not `--rule-strong`, which was the first
+ * try and is one step off the track colour it sits on: furniture still has to be visible,
+ * or the bar reads as empty at every percentage.
  */
 .m-quota-gauge {
   --gauge: var(--ink-faint);
@@ -180,6 +182,7 @@ select {
   min-width: 3.1rem;
 }
 
+.m-quota-gauge.is-ok { --gauge: var(--idle); }
 .m-quota-gauge.is-warn { --gauge: var(--working); }
 .m-quota-gauge.is-hot { --gauge: var(--decision); }
 
@@ -192,6 +195,7 @@ select {
   white-space: nowrap;
 }
 
+.m-quota-gauge.is-ok .m-quota-label,
 .m-quota-gauge.is-warn .m-quota-label,
 .m-quota-gauge.is-hot .m-quota-label {
   color: var(--gauge);

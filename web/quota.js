@@ -4,13 +4,12 @@
  * Pure functions over a `rateLimits` record, no DOM, no storage, no `Notification` — the
  * fourth file in `web/` both clients import, after `trust-gate.js`, `notify.js` and
  * `prefs.js`, and for the same reason each of those gives in its own header: two spellings
- * of a threshold is the `isLeadName` lesson in another costume. 75/90 and the percent→tone
- * map live here and nowhere else, so a desktop drawing amber at one number and a phone
- * drawing it at another can't happen.
+ * of a threshold is the `isLeadName` lesson in another costume.
  *
  * The record shape is `server/rate-limits.js`'s, not Claude Code's own payload — the server
  * already normalized `used_percentage`/`resets_at` into `usedPercentage`/`resetsAt` before
- * this module ever sees it:
+ * this module ever sees it. 50/75 and the percent→tone map live here and nowhere else, so a
+ * desktop drawing green at one number and a phone drawing it at another can't happen:
  *
  *   { windows: { five_hour: { usedPercentage, resetsAt }, seven_day: { ... } }, at }
  *
@@ -27,8 +26,11 @@
  * than broken outright.
  */
 
-/** The one pair of thresholds, for both windows. The maintainer's to adjust; nothing else may define its own. */
-export const THRESHOLDS = { warn: 75, hot: 90 };
+/** The one pair of thresholds, for both windows. The maintainer's to adjust; nothing else may
+ *  define its own. `warn` is the green→amber edge, `hot` the amber→red edge — below `warn` is
+ *  the green band, with no threshold of its own because it's everything that isn't the other
+ *  two. */
+export const THRESHOLDS = { warn: 50, hot: 75 };
 
 const STALE_MS = 15 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -48,14 +50,16 @@ function clampPct(value) {
   return Math.min(100, Math.max(0, n));
 }
 
-/** '' | 'warn' | 'hot', for a percentage that has already been through `clampPct` — but
- *  usable directly too, since a caller handed a raw value is exactly the case this guards. */
+/** '' | 'ok' | 'warn' | 'hot', for a percentage that has already been through `clampPct` — but
+ *  usable directly too, since a caller handed a raw value is exactly the case this guards.
+ *  '' is reserved for input that isn't a real number at all — every real percentage, 0
+ *  included, draws one of the three bands. */
 export function toneFor(pct) {
   const n = Number(pct);
   if (!Number.isFinite(n)) return '';
   if (n >= THRESHOLDS.hot) return 'hot';
   if (n >= THRESHOLDS.warn) return 'warn';
-  return '';
+  return 'ok';
 }
 
 /** One window, or `null` if there is nothing safe to draw. `resetsAt` unreadable and
@@ -117,9 +121,21 @@ export function staleness(record, now = Date.now()) {
   return ageOf(record, now) > STALE_MS ? 'dim' : 'live';
 }
 
-/** `2h10m` within a day, a weekday name (`Mon`) beyond it. `resetsAt` is Unix seconds, per
- *  the record shape above; a reset already in the past reads as `0m` rather than a negative
- *  number, since nothing upstream is expected to hand this an expired window on purpose. */
+/** `5PM` on the hour, `5:30PM` off it — the Claude app's own 12-hour style, no leading zero,
+ *  no space before the suffix. Local time: `resetsAt` reaches a person by clock, not by UTC
+ *  offset. */
+function formatHour12(date) {
+  const minutes = date.getMinutes();
+  const hour = date.getHours() % 12 || 12;
+  const suffix = date.getHours() < 12 ? 'AM' : 'PM';
+  return minutes === 0 ? `${hour}${suffix}` : `${hour}:${String(minutes).padStart(2, '0')}${suffix}`;
+}
+
+/** `2h10m` within a day; beyond it, a weekday name plus the hour (`Mon 5PM`) — the 7-day bar's
+ *  label, and the hour is what makes a reset two days out actionable rather than a shrug.
+ *  `resetsAt` is Unix seconds, per the record shape above; a reset already in the past reads
+ *  as `0m` rather than a negative number, since nothing upstream is expected to hand this an
+ *  expired window on purpose. */
 export function formatReset(resetsAt, now = Date.now()) {
   const resetMs = Number(resetsAt) * 1000;
   if (!Number.isFinite(resetMs)) return '';
@@ -131,5 +147,6 @@ export function formatReset(resetsAt, now = Date.now()) {
     const minutes = totalMinutes % 60;
     return hours > 0 ? `${hours}h${minutes}m` : `${minutes}m`;
   }
-  return WEEKDAYS[new Date(resetMs).getDay()];
+  const date = new Date(resetMs);
+  return `${WEEKDAYS[date.getDay()]} ${formatHour12(date)}`;
 }

@@ -22,23 +22,31 @@ const win = (usedPercentage, resetsInMs) => ({
 
 /* ───────────────────────────────────────────────────────────────── tone ─── */
 
-test('tone boundaries sit exactly at 75 and 90, not near them', () => {
-  assert.equal(toneFor(74), '');
-  assert.equal(toneFor(75), 'warn');
-  assert.equal(toneFor(89), 'warn');
-  assert.equal(toneFor(90), 'hot');
+test('tone boundaries sit exactly at 50 and 75, not near them', () => {
+  assert.equal(toneFor(49), 'ok');
+  assert.equal(toneFor(50), 'warn');
+  assert.equal(toneFor(74), 'warn');
+  assert.equal(toneFor(75), 'hot');
+});
+
+test('the green band is a real tone, not the absence of one', () => {
+  assert.equal(toneFor(0), 'ok');
+  assert.equal(toneFor(49), 'ok');
 });
 
 test('THRESHOLDS is what toneFor actually reads, not a separate copy', () => {
   assert.equal(toneFor(THRESHOLDS.warn), 'warn');
-  assert.equal(toneFor(THRESHOLDS.warn - 1), '');
+  assert.equal(toneFor(THRESHOLDS.warn - 1), 'ok');
   assert.equal(toneFor(THRESHOLDS.hot), 'hot');
 });
 
 test('a non-numeric tone input draws blank rather than throwing', () => {
   assert.equal(toneFor(undefined), '');
   assert.equal(toneFor('ninety'), '');
-  assert.equal(toneFor(null), '');
+});
+
+test('null coerces to zero, which is a real percentage — the green band, not blank', () => {
+  assert.equal(toneFor(null), 'ok');
 });
 
 /* ──────────────────────────────────────────────────────────── windowsOf ─── */
@@ -86,7 +94,7 @@ test('percentage and tone travel together per window', () => {
   assert.equal(fiveHour.pct, 92);
   assert.equal(fiveHour.tone, 'hot');
   assert.equal(sevenDay.pct, 10);
-  assert.equal(sevenDay.tone, '');
+  assert.equal(sevenDay.tone, 'ok');
 });
 
 test('a malformed record — string percentages, a missing resetsAt — answers something drawable, never throws', () => {
@@ -162,10 +170,22 @@ test('formatReset under an hour drops the hours entirely', () => {
   assert.equal(formatReset(resetsAt, NOW), '45m');
 });
 
-test('formatReset a day or more out reads as a weekday name', () => {
-  // 2026-09-04T12:00:00Z is a Friday; two days out lands on Sunday.
+test('formatReset a day or more out reads as a weekday name plus the hour', () => {
+  // 2026-09-04T12:00:00Z is a Friday; two days out lands on Sunday, on the hour.
   const resetsAt = Math.round((NOW + 2 * DAY_MS()) / 1000);
-  assert.equal(formatReset(resetsAt, NOW), WEEKDAY(resetsAt));
+  assert.equal(formatReset(resetsAt, NOW), `${WEEKDAY(resetsAt)} ${HOUR12(resetsAt)}`);
+});
+
+test('formatReset beyond a day, on the hour, has no minutes in the label', () => {
+  const resetsAt = Math.round((NOW + 2 * DAY_MS()) / 1000);
+  assert.equal(formatReset(resetsAt, NOW), `${WEEKDAY(resetsAt)} ${HOUR12(resetsAt)}`);
+  assert.doesNotMatch(formatReset(resetsAt, NOW), /:/);
+});
+
+test('formatReset beyond a day, half past the hour, keeps the minutes', () => {
+  const resetsAt = Math.round((NOW + 2 * DAY_MS() + 30 * 60 * 1000) / 1000);
+  assert.equal(formatReset(resetsAt, NOW), `${WEEKDAY(resetsAt)} ${HOUR12(resetsAt)}`);
+  assert.match(formatReset(resetsAt, NOW), /:30(AM|PM)$/);
 });
 
 test('formatReset on a record already past reads as 0m rather than a negative number', () => {
@@ -186,4 +206,19 @@ function DAY_MS() {
 function WEEKDAY(resetsAtSec) {
   const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return names[new Date(resetsAtSec * 1000).getDay()];
+}
+
+// Independent of `formatHour12` in the source — built off `Intl.DateTimeFormat` rather than
+// mirroring the same `getHours()`/`getMinutes()` arithmetic, so a bug shared by both would
+// still be caught. `2-digit` minutes so "00" is comparable by string equality.
+function HOUR12(resetsAtSec) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(new Date(resetsAtSec * 1000));
+  const hour = parts.find((p) => p.type === 'hour').value;
+  const minute = parts.find((p) => p.type === 'minute').value;
+  const period = parts.find((p) => p.type === 'dayPeriod').value.toUpperCase();
+  return minute === '00' ? `${hour}${period}` : `${hour}:${minute}${period}`;
 }

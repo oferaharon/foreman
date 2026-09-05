@@ -6,7 +6,7 @@ import { step, alertText } from './notify.js';
 // the same keys, and two spellings of one setting is a setting that appears to work — see
 // that file's header.
 import { ghostSend, hideFinished, isFinishedState } from './prefs.js';
-// The two subscription gauges' arithmetic: 75/90 and the percent→tone map, which windows
+// The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
 // the same two bars off the same record, and a desktop going amber at one number while a
@@ -3178,7 +3178,7 @@ function renderRail() {
  * whole of what the desktop does with it.
  *
  * **Every number-to-text and number-to-tone decision is `web/quota.js`'s**, not this
- * function's: which windows are worth drawing at all, 75 and 90, `2h10m` versus `Mon`, and
+ * function's: which windows are worth drawing at all, 50 and 75, `2h10m` versus `Mon 5PM`, and
  * where fifteen minutes makes a record old. The phone draws the same pair from the same
  * module, and the failure mode of a second spelling is that both halves look right in
  * isolation and disagree on screen.
