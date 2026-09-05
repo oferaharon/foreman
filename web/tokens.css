@@ -83,6 +83,37 @@
      the band taking a third of the rail before anybody has dragged anything. */
   --row-linked: color-mix(in srgb, var(--mode-edits) 16%, var(--surface));
   --conn-h: 13rem;
+
+  /* The shared room's speaker ring — `web/session-colour.js`'s `colourFor` picks a slot,
+     these are the slots. Seven, not the eight the plan started at: an eighth hue can still
+     clear 7:1 against `--ground` here, but only by landing within a small ΔE2000 of an
+     existing status colour, and a peer pill that reads as "idle" or "editing" is a worse
+     trade than one fewer hue in the ring. `--working`, `--decision` and `--accent` are
+     reserved outright (a session's name must never look like attention, trouble or the
+     maintainer's own authority); `--idle` and `--mode-edits` aren't reserved by the plan
+     but are avoided for the same reason — both mean something specific elsewhere in this
+     panel and a name pill borrowing that hue would be read as the wrong signal.
+
+     Measured (WCAG contrast against `--ground`, this theme; CIEDE2000 against every one of
+     the five status/accent colours above, both themes; CIEDE2000 pairwise within the ring,
+     both themes) — the link pills' own comment two files over is the precedent this
+     follows:
+
+       peer-1  7.03:1   peer-2  7.00:1   peer-3  7.01:1   peer-4  7.05:1
+       peer-5  7.06:1   peer-6  7.00:1   peer-7  7.01:1
+
+     Minimum pairwise ΔE2000 within the ring: **21.81** (light) / **22.22** (dark) — every
+     other pair measures higher. Minimum ΔE2000 from any ring member to any of
+     `--working` / `--decision` / `--accent` / `--idle` / `--mode-edits`: **12.79** (light)
+     / **12.08** (dark). Nothing in the ring is a near-miss for anything that already means
+     something in this panel. */
+  --peer-1: #9c2a00;
+  --peer-2: #625300;
+  --peer-3: #056200;
+  --peer-4: #005e57;
+  --peer-5: #005690;
+  --peer-6: #6b00e5;
+  --peer-7: #a80046;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -102,6 +133,23 @@
     --decision: #e8746e;
     --code-bg: #14151c;
     --mode-edits: #4fc3cf;
+
+    /* Same ring, dark values — measured against this theme's `--ground` (#111219) and
+       this theme's status/accent colours. See the light block above for how N=7 was
+       chosen and what the numbers mean.
+
+         peer-1  7.00:1   peer-2  7.01:1   peer-3  7.07:1   peer-4  7.02:1
+         peer-5  7.01:1   peer-6  7.03:1   peer-7  7.01:1
+
+       Minimum pairwise ΔE2000 within the ring: **22.22**. Minimum ΔE2000 to
+       `--working` / `--decision` / `--accent` / `--idle` / `--mode-edits`: **12.08**. */
+    --peer-1: #ff7542;
+    --peer-2: #b99d00;
+    --peer-3: #09b900;
+    --peer-4: #00b2a3;
+    --peer-5: #1da5ff;
+    --peer-6: #bd84ff;
+    --peer-7: #ff6aa8;
   }
 }
 
@@ -121,4 +169,15 @@
   --decision: #e8746e;
   --code-bg: #14151c;
   --mode-edits: #4fc3cf;
+
+  /* Same ring and same numbers as the `prefers-color-scheme` block above — this is the
+     explicit-choice mirror of it, so `data-theme="dark"` wins over the media query the
+     same way every other token here does. */
+  --peer-1: #ff7542;
+  --peer-2: #b99d00;
+  --peer-3: #09b900;
+  --peer-4: #00b2a3;
+  --peer-5: #1da5ff;
+  --peer-6: #bd84ff;
+  --peer-7: #ff6aa8;
 }
