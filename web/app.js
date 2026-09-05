@@ -4545,6 +4545,34 @@ function createPane(slot, host) {
     // merges two rooms whose seqs collide; there is only one room here.) Keyed on the
     // *record* rather than the node, because every child is replaced on every paint.
     sharedOpenKeys: new Set(),
+
+    /*
+     * Who the next line goes to, resolved to a roster row at the moment it was picked:
+     * `{id, name, project}`. One target per message and no default — a box that would send
+     * somewhere until you changed it is a box that sends somewhere you did not mean.
+     *
+     * The **id** is what travels; the name and folder are only what the chip says. Never
+     * the position in the picker and never the name: the endpoint takes a session id, two
+     * sessions can share a name (the `<repo>-<branch>` title collides by design), and a
+     * roster that moved between the pick and the press must not silently re-point the
+     * message at whatever now sits in that row.
+     */
+    sharedTarget: null,
+    // The picker's own state, all of it about one open popover. `at` is the index of the
+    // `@` that opened it, which is both what the choose rewrites away and — as `mutedAt` —
+    // how an Escape stays escaped until the reader types a *different* `@`.
+    sharedPick: { open: false, query: '', at: -1, index: 0, mutedAt: -1 },
+    /*
+     * The composer's standing refusal — the server's own sentence, held **in view state
+     * and never on the node that was pressed**. `linkErrors`' reason verbatim and it is
+     * sharper here: this box repaints whenever a message arrives in the room, so a 409
+     * painted onto the send button would be rendered into a detached tree the moment the
+     * next entry lands, and nobody would ever see why their press did nothing.
+     */
+    sharedError: null,
+    // A send in flight. Module scope is where a second pane gets caught, and `disabled` on
+    // the button is gone by the next arriving line — the rail's `duplicating` guard.
+    sharedBusy: false,
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -4555,6 +4583,10 @@ function createPane(slot, host) {
   // The thread's own small composer. Deliberately a second variable rather than a second
   // shape for `composerEl`: everything that reads that one assumes a session behind it.
   let linkComposerEl = null;
+  // …and the shared room's, for the same reason again: a third variable rather than a
+  // third shape for one, because everything that reads `composerEl` assumes a session
+  // behind it and everything that reads `linkComposerEl` assumes a link.
+  let sharedComposerEl = null;
 
   // The team room — and, since Wave E, the whole team panel: tasks and settings ride the
   // same aside. Lives in the factory because two leads can be open in two slots and must
@@ -4722,6 +4754,71 @@ function createPane(slot, host) {
     const text = linkComposerEl.ta.value;
     if (text.trim()) state.drafts[linkDraftKey(linkId)] = text;
     else delete state.drafts[linkDraftKey(linkId)];
+    persistDrafts();
+  }
+
+  /*
+   * The shared room's draft keys — the **same store**, a third namespace, `linkDraftKey`'s
+   * reasoning one shape along. `state.drafts` is keyed by session id and nothing stops a
+   * session id one day being the literal string `shared`, so both keys wear a prefix.
+   *
+   * There is exactly one room on the machine, so one key rather than one per anything. The
+   * *target* rides beside the text because the two are one half-written message: losing the
+   * chip on a pane switch would leave a message addressed to nobody, which is the state the
+   * composer refuses to send. It is stored as the id alone — a string, like every other
+   * value in this store — and re-checked against the live roster when it comes back, so a
+   * target that exited while the pane was showing something else is dropped rather than
+   * restored as a chip that lies.
+   */
+  const SHARED_DRAFT_KEY = 'shared:room';
+  const SHARED_TARGET_KEY = 'shared:target';
+
+  /** Hold on to the half-written message, and who it was for. */
+  function saveSharedDraft() {
+    if (!sharedComposerEl) return;
+    const text = sharedComposerEl.ta.value;
+    if (text.trim()) state.drafts[SHARED_DRAFT_KEY] = text;
+    else delete state.drafts[SHARED_DRAFT_KEY];
+    // The whole target rather than its id: a session id rotates (an unbound pane becomes
+    // its transcript's uuid, and `/clear` mints a new one), so the id alone is not enough to
+    // find the row again — `sharedLiveTarget` needs the pane and the name too. It is stored
+    // as JSON, which is still a string, which is all this store has ever held.
+    if (view.sharedTarget) state.drafts[SHARED_TARGET_KEY] = JSON.stringify(view.sharedTarget);
+    else delete state.drafts[SHARED_TARGET_KEY];
+    persistDrafts();
+  }
+
+  /**
+   * The saved target, **re-checked against the live roster** rather than believed.
+   *
+   * A session that exited while this pane was showing something else comes back as no chip
+   * at all — which is the state the composer refuses to send from, and better than a chip
+   * naming a pane that is gone. A session whose id merely rotated comes back pointed at the
+   * conversation that is there now, which is `sharedLiveTarget`'s whole job.
+   */
+  function restoredSharedTarget() {
+    const raw = state.drafts[SHARED_TARGET_KEY];
+    if (!raw) return null;
+    let saved = null;
+    try {
+      saved = JSON.parse(raw);
+    } catch {
+      return null; // hand-edited, or written by a version that stored something else
+    }
+    if (!saved?.name) return null;
+    const rows = sharedParticipants();
+    const row =
+      rows.find((s) => s.id === saved.id) ||
+      (saved.paneId
+        ? rows.find((s) => s.paneId === saved.paneId && sharedTargetName(s) === saved.name)
+        : null);
+    return row ? sharedTargetOf(row) : null;
+  }
+
+  /** …and drop it once it has actually been sent. */
+  function clearSharedDraft() {
+    delete state.drafts[SHARED_DRAFT_KEY];
+    delete state.drafts[SHARED_TARGET_KEY];
     persistDrafts();
   }
 
@@ -4926,8 +5023,18 @@ function createPane(slot, host) {
     clearShared();
   }
 
-  /** Everything the room leaves behind, dropped in one place so nothing half-clears. */
+  /**
+   * Everything the room leaves behind, dropped in one place so nothing half-clears.
+   *
+   * The draft is captured **first**, before anything below it is nulled — this is the one
+   * function every way out of the room goes through (`leaveShared` for a pane being given
+   * a session or a thread, `closeShared` for the way out, `close` for a slot going away),
+   * so putting the save anywhere else would mean finding all four and keeping them in step.
+   * It is a no-op when there is no composer, which is what lets `openShared` call it on the
+   * way *in* without writing anything.
+   */
   function clearShared() {
+    saveSharedDraft();
     view.shared = [];
     view.sharedCursor = 0;
     view.sharedFollow = true;
@@ -4938,6 +5045,14 @@ function createPane(slot, host) {
     view.sharedHeadEl = null;
     view.sharedFollowH = null;
     view.sharedOpenKeys.clear();
+    // The composer's own state. A held refusal belongs to the send that raised it and a
+    // press in flight belongs to the pane that started it — `clearThread`'s last two lines,
+    // for their reasons.
+    view.sharedTarget = null;
+    view.sharedPick = { open: false, query: '', at: -1, index: 0, mutedAt: -1 };
+    view.sharedError = null;
+    view.sharedBusy = false;
+    sharedComposerEl = null;
   }
 
   /**
@@ -4974,11 +5089,12 @@ function createPane(slot, host) {
    * `.main-head` above, a scrolling middle) so a slot holding the room reads as the same
    * kind of object as a slot holding a conversation.
    *
-   * It has no composer, and `buildComposer` is never called here. That function reads
-   * `s.prompt`, `s.plan`, `s.question`, `s.mode` and `s.model`, all null at once with no
-   * session behind the pane, and `shortModel(null)` throwing *inside* it once took a pane
-   * down after it had decided to draw a question card and left it unable to heal on any
-   * later frame. So this is a head and a list, and nothing else.
+   * The maintainer types here too, and `buildComposer` is still never called: that function
+   * reads `s.prompt`, `s.plan`, `s.question`, `s.mode` and `s.model`, all null at once with
+   * no session behind the pane, and `shortModel(null)` throwing *inside* it once took a
+   * pane down after it had decided to draw a question card and left it unable to heal on
+   * any later frame. `buildSharedComposer` is a sibling of `buildLinkComposer` instead —
+   * the same trade, made twice now for the same reason.
    */
   function renderSharedPane() {
     host.replaceChildren();
@@ -5045,7 +5161,22 @@ function createPane(slot, host) {
 
     view.sharedEl = { wrap, inner };
     host.append(body);
+
+    /*
+     * The composer goes **beside** `.shared-body`, not inside it, and that is a placement
+     * with a reason rather than a preference. `.shared-body` exists to be the positioned
+     * frame the `N new below` pill hangs off — `bottom: 1rem` against it — so a composer
+     * added as a third child of that frame would put the pill 1rem above the *composer's*
+     * bottom edge, floating over the textarea instead of over the words it is about. As a
+     * sibling under `.pane` (a flex column) it is `renderLinkPane`'s own shape: scroller
+     * takes the height, composer takes what it needs.
+     */
+    host.append(buildSharedComposer());
     renderShared();
+    // Sizing needs the textarea in the document — `scrollHeight` is 0 before that, so a
+    // restored multi-line draft would sit crammed into a two-row box. The link composer's
+    // own ordering, and its reason.
+    sharedComposerEl.autoGrow();
   }
 
   /** The room's own header: what it is, how much is in it, and the way out of the pane. */
@@ -5409,6 +5540,562 @@ function createPane(slot, host) {
 
     wrap.append(bubble);
     return wrap;
+  }
+
+
+  /* -------------------------------------------------- the @ composer --- */
+
+  /**
+   * Who can be `@`-addressed from here, off the **roster** — never `listPeers()`.
+   *
+   * Two sources for "who is here" is the `isLeadName` lesson, and this one has a second
+   * edge on it: the local peer registry (`~/.claude/sessions/`) is what `ListAgents` shows,
+   * and that list carries dozens of offline Remote Control rows with no pane on this Mac at
+   * all. It is the right thing for *resolving a pid the observer met* and the wrong thing
+   * for *enumerating who you can talk to*. The roster is the set of sessions this panel can
+   * actually type into, which is exactly the question the picker is asking.
+   *
+   * The filter is an **allow-list on role** — an ordinary session or a lead — and never
+   * "not a worker". `server/observe.js`'s `participant` in the same words, and
+   * `benchEntries`' recorded reasoning for the shape: task kinds have already grown once in
+   * this repo, and a negative test silently admits the next one. Workers are shown in the
+   * room and cannot be addressed; that split is the maintainer's own ruling.
+   *
+   * `interactive` is the second half and it is not decoration: a row with no live pane has
+   * nothing to type into, and the endpoint refuses it with a 409 that the picker should
+   * never have made reachable.
+   */
+  function sharedParticipants() {
+    return state.sessions.filter(
+      (s) => s.interactive && (s.team?.role == null || s.team.role === 'lead'),
+    );
+  }
+
+  /** What the picker and the chip call a session — the rail's own answer, so one row is
+   *  named the same thing in both places. */
+  const sharedTargetName = (s) => s.label || s.title || s.project || s.id;
+
+  /** One roster row, as a target: what the chip says and what the request will carry. */
+  const sharedTargetOf = (s) => ({
+    id: s.id,
+    paneId: s.paneId || null,
+    name: sharedTargetName(s),
+    project: s.project || null,
+  });
+
+  /**
+   * The chosen target's roster row **now**, re-pointed at the live id if it rotated.
+   *
+   * A session id is not stable and this cost a bench run to find: an unbound pane is in the
+   * roster as `pane-3` and becomes its transcript's own uuid the moment one binds, which is
+   * the moment its *first message* lands — so the chip you had just used went "that session
+   * is not in the panel any more" while the session it named was answering on screen. A
+   * `/clear` does the same thing later on, deliberately (the panel follows the rotation).
+   *
+   * So the fallback is the pane, and it is `adopt`'s own rule — *the id rotated while the
+   * tab was closed; same terminal, new conversation* — with **the name required to agree as
+   * well**, which `adopt` does not need and this does. A pane id can be reissued as `%0` by
+   * a fresh tmux server, and reopening a transcript on a wrong guess costs a reader one
+   * confusing screen while typing into one puts the maintainer's words, carrying the
+   * maintainer's authority, into a conversation they did not choose. Two witnesses, or no
+   * match.
+   */
+  function sharedLiveTarget() {
+    const target = view.sharedTarget;
+    if (!target) return null;
+    const rows = sharedParticipants();
+    const exact = rows.find((s) => s.id === target.id);
+    if (exact) return exact;
+    if (!target.paneId) return null;
+    const rotated = rows.find(
+      (s) => s.paneId === target.paneId && sharedTargetName(s) === target.name,
+    );
+    if (!rotated) return null;
+    // Follow the rotation, so the send addresses the conversation that is there rather than
+    // the one that was. The chip does not change: it never named the id.
+    view.sharedTarget = { ...target, id: rotated.id };
+    return rotated;
+  }
+
+  /**
+   * The maintainer's own composer for the shared room, and it is **not** `buildComposer`.
+   *
+   * `buildLinkComposer`'s trade, made a second time and for the same recorded reason: that
+   * function is about a session and reads five fields that are all null at once here, one
+   * of which (`shortModel(null)`) has already thrown inside it and taken a pane down. So
+   * this is a textarea, a send button and two lines of chrome — no attachments, no queue
+   * chip, no interrupt row, no ghost text, no permission bar, no mode control, and **no
+   * signature**: this composer is torn down only when the pane stops being the room.
+   *
+   * What is new here, and what the joint thread deliberately has none of, is a **target**.
+   * A link has exactly two ends and addressing one of them is what that lead's own
+   * conversation is for; the room has N sessions and no default worth having, so `@` picks
+   * one and the chip says which. One target per message.
+   *
+   * **`@` already means something else one pane over.** In the session composer it offers
+   * files from the working directory. This is a different box and may define it its own
+   * way, but a reader's hands know the other meaning — so the placeholder says what it does
+   * here, and the picker's rows are visibly sessions (a status dot, a name, a folder)
+   * rather than paths.
+   */
+  function buildSharedComposer() {
+    const wrap = document.createElement('div');
+    wrap.className = 'shared-composer';
+    const inner = document.createElement('div');
+    inner.className = 'shared-composer-inner';
+    wrap.append(inner);
+
+    // Who this reaches, said **before** anything is typed rather than only after it is
+    // sent — the link composer's rule. Repainted on the roster beat, because whether the
+    // chosen session is still live is a fact about the roster and moves without anybody
+    // touching this pane.
+    const note = document.createElement('div');
+    note.className = 'shared-reach';
+
+    // The standing refusal, painted from `view.sharedError` and never appended to whatever
+    // node was pressed — see the field's own note.
+    const err = document.createElement('div');
+    err.className = 'shared-composer-err';
+    err.hidden = true;
+
+    const ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.placeholder = '@session to pick who this goes to — Enter to send, Shift+Enter for a new line';
+
+    const autoGrow = () => {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 224)}px`;
+    };
+
+    ta.value = state.drafts[SHARED_DRAFT_KEY] || '';
+    ta.oninput = () => {
+      autoGrow();
+      syncSharedPicker();
+      saveSharedDraft();
+    };
+    ta.onkeydown = onSharedKeyDown;
+    /*
+     * Clicking away closes the picker, and this is why the rows are chosen on `click` after
+     * a `mousedown` that keeps the focus here: a row that took focus itself would fire this
+     * on the way to being pressed, and the popover would be gone before the click landed.
+     * `relatedTarget` is where focus went, and `null` — the window losing focus entirely —
+     * is deliberately treated as away.
+     */
+    wrap.addEventListener('focusout', (e) => {
+      if (wrap.contains(e.relatedTarget)) return;
+      closeSharedPicker();
+    });
+
+    const row = document.createElement('div');
+    row.className = 'shared-composer-row';
+
+    // What a line typed here *is*, in the panel's own voice — the same sentence the joint
+    // thread's composer carries, because the envelope this goes out in makes the same
+    // claim: these are the maintainer's own words and a session may act on them.
+    const hint = document.createElement('span');
+    hint.className = 'shared-composer-hint';
+    hint.textContent = 'your own words — the session may act on them';
+
+    const btn = document.createElement('button');
+    btn.className = 'send-btn';
+    btn.textContent = 'send';
+    btn.onclick = sendSharedMessage;
+
+    row.append(hint, btn);
+
+    // The popover, built once and shown or hidden — it is absolutely placed against the
+    // composer (which is why that carries the positioning), so it opens *over* the room
+    // rather than pushing the textarea down under whoever is typing into it.
+    const picker = document.createElement('div');
+    picker.className = 'shared-picker';
+    picker.hidden = true;
+
+    inner.append(note, err, ta, row);
+    wrap.append(picker);
+
+    sharedComposerEl = { wrap, ta, btn, note, err, picker, autoGrow };
+
+    // A draft's target, re-checked against the live roster rather than believed. A session
+    // that exited while this pane was showing something else comes back as no chip at all,
+    // which is the state the composer refuses to send from — better than a chip naming a
+    // pane that is gone.
+    view.sharedTarget = restoredSharedTarget();
+
+    renderSharedReach();
+    renderSharedError();
+    renderSharedPicker();
+    return wrap;
+  }
+
+  /**
+   * Who the next line reaches — and, when the session picked is no longer in the roster,
+   * that it will not reach anybody.
+   *
+   * Said before he presses rather than only after, for `renderLinkReach`'s reason: "that
+   * one is gone" is the single thing about this box that changes what he would do next.
+   * It is still not a *refusal* — the endpoint re-decides all of it server-side against a
+   * live pane read, so a stale roster costs a wrong sentence here and never a wrong
+   * delivery.
+   */
+  function renderSharedReach() {
+    const el = sharedComposerEl;
+    if (!el) return;
+    el.note.replaceChildren();
+
+    const target = view.sharedTarget;
+    if (!target) {
+      const ask = document.createElement('span');
+      ask.textContent = 'Type @ to pick the session this goes to.';
+      el.note.append(ask);
+      el.btn.disabled = true;
+      return;
+    }
+
+    // The chip. It carries the target's own hue from the same ring the room's name pills
+    // use, keyed on the same name, so the line you are about to write is already the colour
+    // it will be when it lands.
+    const chip = document.createElement('span');
+    chip.className = 'shared-chip';
+    chip.style.color = `var(--peer-${colourFor(target.name)})`;
+    chip.style.borderColor = 'currentColor';
+    const who = document.createElement('span');
+    who.textContent = `@${target.name}`;
+    chip.append(who);
+    const drop = document.createElement('button');
+    drop.className = 'shared-chip-x';
+    drop.type = 'button';
+    drop.textContent = '×';
+    drop.title = 'Send this somewhere else';
+    drop.onclick = () => {
+      view.sharedTarget = null;
+      renderSharedReach();
+      sharedComposerEl?.ta.focus();
+    };
+    chip.append(drop);
+    el.note.append(chip);
+
+    const live = sharedLiveTarget();
+    const reach = document.createElement('span');
+    reach.className = 'shared-reach-to';
+    reach.textContent = live ? ` goes to ${target.name}${live.project ? ` in ${live.project}` : ''}` : '';
+    el.note.append(reach);
+
+    if (!live) {
+      const miss = document.createElement('span');
+      miss.className = 'shared-reach-miss';
+      miss.textContent = ' — that session is not in the panel any more, so there is nothing to type into.';
+      el.note.append(miss);
+    }
+    // Left pressable either way. The roster is up to a poll stale and the endpoint reads
+    // the pane again before it types, so a button disabled from here would refuse sends the
+    // server would have accepted — and the refusal that matters is the server's own
+    // sentence, which is the one thing here that was decided against the live machine.
+    el.btn.disabled = false;
+  }
+
+  /** The composer's standing refusal, drawn from view state and never from a pressed node. */
+  function renderSharedError() {
+    const el = sharedComposerEl;
+    if (!el) return;
+    el.err.textContent = view.sharedError || '';
+    el.err.hidden = !view.sharedError;
+  }
+
+  /* ------------------------------------------------------ the picker --- */
+
+  /**
+   * The `@` token under the caret, or `null`.
+   *
+   * An `@` counts only at the start of the box or after whitespace — the session composer's
+   * own rule for its file picker, and the reason a reader's hands already know it. The token
+   * runs from that `@` to the caret and may not contain whitespace: a space is how you say
+   * you meant the character rather than the control, and it closes the picker rather than
+   * searching for a phrase.
+   */
+  function sharedAtToken(ta) {
+    const caret = ta.selectionStart ?? 0;
+    const upto = ta.value.slice(0, caret);
+    const at = upto.lastIndexOf('@');
+    if (at < 0) return null;
+    if (at > 0 && !/\s/.test(upto[at - 1])) return null;
+    const query = upto.slice(at + 1);
+    if (/\s/.test(query)) return null;
+    return { at, query };
+  }
+
+  /** The rows an open picker is showing, filtered by what has been typed after the `@`. */
+  function sharedPickerRows() {
+    const q = view.sharedPick.query.trim().toLowerCase();
+    const rows = sharedParticipants();
+    if (!q) return rows;
+    return rows.filter((s) =>
+      `${sharedTargetName(s)} ${s.project || ''}`.toLowerCase().includes(q),
+    );
+  }
+
+  /**
+   * Open, refresh or close the picker for whatever is under the caret now.
+   *
+   * `mutedAt` is what makes an Escape stick. Without it the very next keystroke re-detects
+   * the same `@` and reopens the popover the reader just dismissed — so an escape records
+   * *which* `@` was dismissed, and typing a different one anywhere else opens normally.
+   */
+  function syncSharedPicker() {
+    const el = sharedComposerEl;
+    if (!el) return;
+    const token = sharedAtToken(el.ta);
+    if (!token || token.at === view.sharedPick.mutedAt) {
+      if (view.sharedPick.open) closeSharedPicker();
+      return;
+    }
+    const reopened = !view.sharedPick.open || view.sharedPick.at !== token.at;
+    view.sharedPick.open = true;
+    view.sharedPick.at = token.at;
+    view.sharedPick.query = token.query;
+    // The highlight goes back to the top whenever the list it indexes into changes, or an
+    // arrow press would land on a row the filter has since moved.
+    if (reopened) view.sharedPick.index = 0;
+    else view.sharedPick.index = Math.min(view.sharedPick.index, Math.max(0, sharedPickerRows().length - 1));
+    renderSharedPicker();
+  }
+
+  function closeSharedPicker({ muted = false } = {}) {
+    if (muted) view.sharedPick.mutedAt = view.sharedPick.at;
+    view.sharedPick.open = false;
+    view.sharedPick.query = '';
+    view.sharedPick.at = -1;
+    view.sharedPick.index = 0;
+    renderSharedPicker();
+  }
+
+  /**
+   * Draw the popover.
+   *
+   * Rows are **sessions, visibly** — a status dot, the name, the folder — because `@` means
+   * files one pane over and the two lists must not be mistakable for each other at a
+   * glance. A row is a `<button>`, chosen on `click`; its `mousedown` is prevented so the
+   * focus never leaves the textarea, which is what keeps `focusout` free to mean "the
+   * reader clicked away" and nothing else.
+   */
+  function renderSharedPicker() {
+    const el = sharedComposerEl;
+    if (!el) return;
+    const open = view.sharedPick.open;
+    el.picker.hidden = !open;
+    el.picker.replaceChildren();
+    if (!open) return;
+
+    const rows = sharedPickerRows();
+    if (!rows.length) {
+      const none = document.createElement('div');
+      none.className = 'shared-picker-none';
+      none.textContent = view.sharedPick.query
+        ? `No session here matches “${view.sharedPick.query}”.`
+        : 'No session on this Mac can be addressed — workers are shown in the room but cannot be messaged.';
+      el.picker.append(none);
+      return;
+    }
+
+    rows.forEach((s, i) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `shared-picker-row${i === view.sharedPick.index ? ' is-on' : ''}`;
+      // The identifier travels on the node the way it travels in the request: the real
+      // session id, never the row's position. A roster frame can land between this paint
+      // and the click, and an index would then choose whoever moved into that slot.
+      btn.dataset.id = s.id;
+      btn.onmousedown = (e) => e.preventDefault();
+      btn.onclick = () => chooseSharedTarget(s.id);
+
+      const dot = document.createElement('span');
+      dot.className = `dot ${s.status}`;
+      btn.append(dot);
+
+      const name = document.createElement('span');
+      name.className = 'shared-picker-name';
+      name.textContent = sharedTargetName(s);
+      btn.append(name);
+
+      if (s.isLead) {
+        const role = document.createElement('span');
+        role.className = 'shared-picker-role';
+        role.textContent = 'lead';
+        btn.append(role);
+      }
+
+      const where = document.createElement('span');
+      where.className = 'shared-picker-where';
+      where.textContent = s.project || '';
+      where.title = s.paneCwd || s.cwd || '';
+      btn.append(where);
+
+      el.picker.append(btn);
+    });
+  }
+
+  /**
+   * Take one row as the target: the `@…` token comes out of the text and the chip goes up.
+   *
+   * Chosen **by id**, and the id is what the request will carry. The rest of the line is the
+   * message, so only the token itself is rewritten away — and the caret is put back where
+   * the token was, which is where the sentence continues.
+   */
+  function chooseSharedTarget(id) {
+    const el = sharedComposerEl;
+    const row = sharedParticipants().find((s) => s.id === id);
+    if (!el || !row) return;
+    const at = view.sharedPick.at;
+    if (at >= 0) {
+      const caret = el.ta.selectionStart ?? 0;
+      el.ta.value = el.ta.value.slice(0, at) + el.ta.value.slice(caret);
+      el.ta.selectionStart = el.ta.selectionEnd = at;
+    }
+    view.sharedTarget = sharedTargetOf(row);
+    // A target was just chosen, so whatever the last send was refused for is answered or
+    // moot; leaving the old sentence up would read as a refusal of the pick.
+    view.sharedError = null;
+    closeSharedPicker();
+    renderSharedReach();
+    renderSharedError();
+    el.autoGrow();
+    saveSharedDraft();
+    el.ta.focus();
+  }
+
+  /**
+   * The keys, and the picker takes them first while it is open.
+   *
+   * Enter with the popover up **chooses** and does not send: a reader who has just typed
+   * `@al` and pressed Enter meant the row under the highlight, and sending an unaddressed
+   * message there would be the one thing this box must never do. Tab does the same, because
+   * on every other completion popup it does.
+   */
+  function onSharedKeyDown(e) {
+    if (view.sharedPick.open) {
+      const rows = sharedPickerRows();
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (!rows.length) return;
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        view.sharedPick.index = (view.sharedPick.index + step + rows.length) % rows.length;
+        renderSharedPicker();
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        const pick = rows[view.sharedPick.index];
+        if (pick) chooseSharedTarget(pick.id);
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeSharedPicker({ muted: true });
+        return;
+      }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendSharedMessage();
+    }
+  }
+
+  /* --------------------------------------------------------- the send --- */
+
+  /**
+   * Send what is in the box to the one session that was picked.
+   *
+   * **The server's own sentence is what a refusal says**, never a paraphrase and never a
+   * generic "that didn't work". Three of the four refusals it can answer with are things
+   * only the server can know — the session went away between the pick and the press, the
+   * session is a worker, that pane's queue is full — and the fourth names the exact
+   * character in the body that made it unsendable. Such a character is *refused with the
+   * character named*, never stripped: a body that could make a quoted line draw as an
+   * unquoted one is a working forgery, and silently rewriting somebody's input hands them a
+   * way to have it rewritten into something else. Nothing here trims, escapes or normalises
+   * the value on the way out — the refusal belongs to the server, which is the only party
+   * that knows what its envelope cannot survive.
+   *
+   * One measured thing about that, because it is not guessable and it decides what a bench
+   * can prove: **a `<textarea>` folds `\r` to `\n` in its own value**, so a carriage return
+   * cannot reach this function from the box at all — measured, a body typed as `one\rtwo`
+   * arrives here as `one\ntwo` and is sent, correctly, as a two-line message. The CR refusal
+   * is real and is the endpoint's (a POST carrying one comes back 400 naming *a carriage
+   * return*, U+000D); what the composer *can* carry into it is every other refused
+   * character — U+2028, the bidi overrides, the C1 range — which paste puts in a textarea
+   * untouched, and which come back named the same way. Do not add a client-side check to
+   * close the gap: there is no gap, and a second copy of that rule is the second spelling
+   * this repo keeps learning not to have.
+   *
+   * **Nothing is drawn locally on success.** The endpoint records the entry and the store
+   * emits it, so the socket's `shared-append` brings it back to this very pane — appending
+   * it here as well would draw the maintainer's own message twice, with its delivery line,
+   * and the second copy would look exactly as real as the first.
+   */
+  async function sendSharedMessage() {
+    const el = sharedComposerEl;
+    if (!el || view.sharedBusy) return;
+    const text = el.ta.value;
+    if (!text.trim()) return;
+
+    if (!view.sharedTarget) {
+      // The one refusal this box makes on its own, and it is about the box rather than the
+      // message: there is no id to send to, so there is nothing to ask the server about.
+      view.sharedError = 'Pick who this goes to first — type @ to choose a session.';
+      renderSharedError();
+      el.ta.focus();
+      return;
+    }
+    /*
+     * Re-point at the live conversation **before** the id is read out: a session that has
+     * bound its transcript or been `/clear`ed since the pick carries a new id, and sending
+     * the old one would 404 against a session plainly on screen. It answers `null` for a
+     * target that has genuinely gone and the send goes out anyway — the roster is a poll
+     * stale, the endpoint reads the pane again, and the refusal worth showing is the
+     * server's own rather than this one's guess.
+     *
+     * `target` is read *after* it, because `sharedLiveTarget` replaces the object rather
+     * than editing it and a reference taken above this line would carry the stale id.
+     */
+    sharedLiveTarget();
+    const target = view.sharedTarget;
+
+    view.sharedBusy = true;
+    el.btn.disabled = true;
+    try {
+      const res = await fetch('/api/shared-room/message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        // The **id**, which is what the picker chose and what the endpoint looks up. Not
+        // the name (two sessions can share one) and not the row's position (the roster may
+        // have moved since the popover was painted).
+        body: JSON.stringify({ to: target.id, text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      // `data.error` is the server's own words. The fallback exists only for a response
+      // that carried no body at all — a proxy, a dropped socket — and is deliberately the
+      // only sentence in this function the panel wrote itself.
+      if (!res.ok) throw new Error(data.error || `That message was not sent (${res.status}).`);
+      view.sharedError = null;
+      // The pane may have been given a session, or a thread, while this was out.
+      if (view.kind === 'shared' && sharedComposerEl === el) {
+        el.ta.value = '';
+        el.autoGrow();
+      }
+      clearSharedDraft();
+    } catch (err) {
+      // Held, not appended: this pane repaints whenever a message arrives in the room, and
+      // a sentence painted onto a node a repaint has already replaced is a sentence nobody
+      // sees. The box keeps its text — a refused message is one the reader may want to
+      // re-address rather than retype.
+      view.sharedError = err.message;
+    } finally {
+      view.sharedBusy = false;
+      if (sharedComposerEl === el) el.btn.disabled = false;
+      renderSharedError();
+      // The refusal may have been "that one is gone", which is also a fact about the
+      // roster — repaint the line that says so rather than waiting for the next beat.
+      renderSharedReach();
+    }
   }
 
   /* -------------------------------------------------------------- main --- */
@@ -8725,8 +9412,18 @@ function createPane(slot, host) {
     // the thread refetches when, and only when, `lastAt` says there is something new.
     // The room's head says how much is in the log and from how many sessions — neither of
     // which is a fact about the roster, so it repaints with the list rather than on this
-    // beat. Nothing else on this pane moves when the roster does.
-    if (view.kind === 'shared') return;
+    // beat. The composer's reach line is the one thing on this pane that *is* a roster
+    // fact: whether the session in the chip is still here moves without anybody touching
+    // this pane, and a target `/exit`ing while the box is open has to change the line under
+    // it. The link composer's own rule, and nothing here measures anything.
+    if (view.kind === 'shared') {
+      renderSharedReach();
+      // The open popover is a live list of who can be addressed, so a session appearing or
+      // going away has to move it too — a row that has left the roster must not still be
+      // clickable, and `chooseSharedTarget` re-checks it for the same reason.
+      if (view.sharedPick.open) renderSharedPicker();
+      return;
+    }
 
     if (view.kind === 'link') {
       renderLinkHead();
@@ -11587,8 +12284,14 @@ function createPane(slot, host) {
     // A thread *does* have a draft to save now — the maintainer's own composer sits under
     // it — and it is keyed by the link rather than by `view.selected`, which is why it is
     // its own call rather than something `saveDraft` could be taught.
+    //
+    // …and so does the room, for the same reason again and keyed by neither: there is one
+    // room on the machine, so `saveSharedDraft` has one key of its own and holds the target
+    // beside the text, because a half-written message with nobody to send it to is a
+    // message this composer refuses.
     if (view.kind === 'link') saveLinkDraft();
-    else if (view.kind !== 'shared') saveDraft();
+    else if (view.kind === 'shared') saveSharedDraft();
+    else saveDraft();
     send({ type: 'unsubscribe', slot });
     // The room's subscription is server state like a tailer's, and a pane that stopped
     // drawing it while the server went on pushing entries into a dead slot is the
