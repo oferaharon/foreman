@@ -43,6 +43,17 @@ import { readRange } from './transcript.js';
  * written into the entry and never recomputed. `origin.name` is the durable half and is
  * kept beside it.
  *
+ * **One shape of delivery it cannot see, MEASURED on a scratch pair.** A peer message that
+ * arrives while the recipient is *mid-turn* does not land as a `type: 'user'` record at all.
+ * It lands as `type: 'attachment'` with `attachment.type: 'queued_command'`, carrying the
+ * same `origin` object one level deeper — and it fires **no `UserPromptSubmit` hook**, so
+ * neither channel here sees it: `DROP_TYPES` discards `attachment` above `normalizeRecord`'s
+ * peer branch, and there is no hook to nudge on. One of seven bench messages arrived this
+ * way and produced no entry, while the recipient's own reply to it did. Deliberately not
+ * worked around here: the fix belongs in the one parser that reads `origin`, and a second
+ * peer reader in this file is the `imageBlocks` mistake. When `normalize.js` learns the
+ * shape, both channels pick it up with no change on this side.
+ *
  * **`text` is `origin.body` and nothing else.** `message.content` is the same words wrapped
  * in Claude Code's peer-safety boilerplate — several hundred characters addressed to the
  * receiving session, not to anyone reading the panel. A bubble built from it would be the
@@ -260,7 +271,9 @@ export class Observer {
 
     // The message's own timestamp, not the moment the panel noticed it. The boot sweep can
     // meet a message hours after it landed, and a log that stamped it "now" would put it
-    // above traffic that genuinely came later.
+    // above traffic that genuinely came later. The consequence for a reader: `seq` is write
+    // order and `ts` is event order, and one sweep pass can write a reply before the message
+    // it answers because it met that transcript first. A view sorts on `ts`.
     const ts = stampOf(rec) ?? now;
 
     return this.store.post(
