@@ -6,6 +6,13 @@ import { step, alertText } from './notify.js';
 // the same keys, and two spellings of one setting is a setting that appears to work — see
 // that file's header.
 import { ghostSend, hideFinished, isFinishedState } from './prefs.js';
+// The two subscription gauges' arithmetic: 75/90 and the percent→tone map, which windows
+// are worth drawing, how old the record is, and how a reset time reads. The fourth shared
+// pure module in `web/`, for the reason each of the three above gives — the phone draws
+// the same two bars off the same record, and a desktop going amber at one number while a
+// phone goes amber at another is the `isLeadName` lesson in another costume. Nothing here
+// may define a threshold, a format or a staleness rule of its own.
+import { windowsOf, staleness, formatReset } from './quota.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -30,6 +37,16 @@ const state = {
   // a lead running right now is a question about the *roster*, which is in the same frame,
   // so it is derived here rather than asked for.
   links: [],
+  // The account's rate limits, exactly as `server/rate-limits.js` holds them, or `null`
+  // until some session's status line has posted one. A sibling of `sessions` on the roster
+  // frame like the groups and the links, and for a sharper version of the same reason: it
+  // is one account-wide number, so a copy of it on every session row would make the
+  // server's own `#diff` broadcast the whole roster every time it moved.
+  //
+  // `null` is an ordinary answer and not an error — a machine whose status line has not
+  // been wrapped, an API-key account, or simply a panel that has been up for less time
+  // than any session has taken a turn. It draws nothing.
+  rateLimits: null,
   // Shelving off: one recency-ordered list instead of groups and folder headings. Kept in
   // this browser rather than on the server, unlike a group's collapse state — that is a
   // fact about your filing and should follow you between windows, while this is a fact
@@ -150,6 +167,7 @@ const el = {
   settings: document.getElementById('settings'),
   snapshot: document.getElementById('snapshot'),
   flatRail: document.getElementById('flatRail'),
+  railQuota: document.getElementById('railQuota'),
   railList: document.getElementById('railList'),
   railFoot: document.querySelector('.rail-foot'),
   railRepo: document.getElementById('railRepo'),
@@ -887,11 +905,18 @@ function handle(msg) {
     // `Array.isArray`, not a truth test: an empty list is the ordinary answer — no links
     // open — and it has to be able to *clear* what the last closed link left behind.
     if (Array.isArray(msg.links)) state.links = msg.links;
+    // `in`, not a truth test, for the links' reason one line up and then one of its own:
+    // `null` is what the frame carries until a status line has posted anything, so a truth
+    // test would pin the last record on screen for ever once one had arrived. Keyed on the
+    // field being present at all so a frame from a panel that predates it leaves whatever
+    // we have alone rather than blanking it.
+    if ('rateLimits' in msg) state.rateLimits = msg.rateLimits;
     // Before the render, so a notification is never held up behind a rail repaint — and
     // before `adopt`, which can change what is on screen but never what happened.
     notifyRoster(msg.sessions);
     for (const pane of panes) pane.adopt();
     renderRail();
+    renderQuota();
     for (const pane of panes) pane.renderHead();
     return;
   }
@@ -3139,6 +3164,138 @@ function renderRail() {
   // group folding — is a place the column could otherwise go stale. It holds its own
   // signature, so a beat that changed nothing costs nothing.
   renderConnections();
+}
+
+/* ------------------------------------------------------------- quota --- */
+
+/**
+ * The account's two subscription gauges, in the rail's head.
+ *
+ * A Claude subscription has a five-hour window and a weekly one, and when either runs out
+ * every session on this machine stops. Claude Code already knows both numbers and hands
+ * them to whatever draws the status line; a wrapper posts a copy to `POST /status`, the
+ * server keeps the latest, and it rides the roster frame as `rateLimits`. This is the
+ * whole of what the desktop does with it.
+ *
+ * **Every number-to-text and number-to-tone decision is `web/quota.js`'s**, not this
+ * function's: which windows are worth drawing at all, 75 and 90, `2h10m` versus `Mon`, and
+ * where fifteen minutes makes a record old. The phone draws the same pair from the same
+ * module, and the failure mode of a second spelling is that both halves look right in
+ * isolation and disagree on screen.
+ *
+ * Two things this file does decide, and both are omissions. Only `five_hour` and
+ * `seven_day` are drawn — `windowsOf` carries an unrecognised third key through rather
+ * than throwing on it, so the day `spend_limit` turns up on somebody's account the panel
+ * is wrong by leaving it out rather than broken. And **no record draws nothing at all**:
+ * not a zero, not a grey placeholder. `null` here is ordinary — a status line that was
+ * never wrapped, an API-key account, a panel younger than the machine's last turn — and a
+ * bar at 0% is a claim about a quota nobody has measured.
+ */
+
+/**
+ * Half the finest bucket that can move, for `renderRoom`'s neighbour's reason on the
+ * phone: `agoText`'s smallest step is a minute, so the age on screen is never more than
+ * half a bucket behind, and ticking faster cannot change the string more often.
+ *
+ * `setInterval` rather than `requestAnimationFrame` — not merely because this is not an
+ * animation, but because an automated Chrome window reports `document.visibilityState:
+ * 'hidden'` and Chrome suspends rAF there, which makes a bench show a tick that never
+ * fires and a bug that is not in this file.
+ *
+ * Its own timer beside the rail's rather than a second line inside that one, because the
+ * two guard differently: `renderRail` repaints on every tick by design, and this must not
+ * — nothing about the roster has moved, and on most ticks nothing here has either.
+ */
+const QUOTA_TICK_MS = 30_000;
+
+let quotaSig = null;
+
+function renderQuota(now = Date.now()) {
+  const record = state.rateLimits;
+  const windows = windowsOf(record, now).filter((w) => DRAWN_WINDOWS.has(w.key));
+  const dim = staleness(record, now) === 'dim';
+  // The one string the tick exists for. In the signature whether it is on screen or in the
+  // tooltip, because a tooltip nobody repainted is a stale answer waiting under a cursor —
+  // which is the whole of what an "as of" line is for.
+  const age = agoText(record?.at);
+
+  // Ordinary punctuation for the join, and every field the face reads is in it: `mergeSig`
+  // once joined its rows with three literal control bytes that every editor drew as an
+  // empty string, and a field drawn but not signed is a block that stops repainting on a
+  // real change.
+  const sig = windows.length
+    ? [dim ? 'dim' : 'live', age, ...windows.map((w) => [w.key, w.pct, w.tone, formatReset(w.resetsAt, now)].join('|'))].join('~')
+    : 'none';
+  if (sig === quotaSig) return;
+  quotaSig = sig;
+
+  el.railQuota.classList.toggle('is-dim', dim && windows.length > 0);
+
+  if (!windows.length) {
+    // `:empty` is what hides the band, so emptying it is the whole of drawing nothing.
+    el.railQuota.replaceChildren();
+    el.railQuota.removeAttribute('title');
+    return;
+  }
+
+  // Live, the age is the tooltip's whole job. Dim, it is already on screen a line below,
+  // so the tooltip says the thing that is not visible instead: why a number can sit still
+  // for an hour without anything being wrong.
+  el.railQuota.title = dim
+    ? `The account's limits, as of ${age} — the numbers only arrive while a session is taking a turn.`
+    : `The account's limits, as of ${age}`;
+
+  const frag = document.createDocumentFragment();
+  for (const win of windows) frag.append(quotaRow(win, now));
+  if (dim) {
+    const line = document.createElement('div');
+    line.className = 'quota-age';
+    line.textContent = `as of ${age}`;
+    frag.append(line);
+  }
+  el.railQuota.replaceChildren(frag);
+}
+
+/** The two windows this panel has anything to draw for. See `renderQuota`'s header for
+ *  why an unrecognised third one is left out rather than guessed at. */
+const DRAWN_WINDOWS = new Set(['five_hour', 'seven_day']);
+
+/** `5h 42% · resets 2h10m`, over a hairline bar. The tone is set once on the row and read
+ *  as `currentColor` by both the percentage and the fill, so a row can never be amber in
+ *  its text and neutral in its bar. */
+function quotaRow(win, now) {
+  const row = document.createElement('div');
+  row.className = `quota-row${win.tone ? ` ${win.tone}` : ''}`;
+
+  const line = document.createElement('div');
+  line.className = 'quota-line';
+
+  const name = document.createElement('span');
+  name.className = 'quota-win';
+  name.textContent = win.label;
+
+  const pct = document.createElement('span');
+  pct.className = 'quota-pct';
+  // Rounded on the face and exact in the bar: the type is not promised — the captures were
+  // integers and the documentation shows `23.5` — and `42.7%` in a 0.62rem mono line is
+  // three characters of precision nobody can act on.
+  pct.textContent = `${Math.round(win.pct)}%`;
+
+  const reset = document.createElement('span');
+  reset.className = 'quota-reset';
+  reset.textContent = `· resets ${formatReset(win.resetsAt, now)}`;
+
+  line.append(name, pct, reset);
+
+  const bar = document.createElement('div');
+  bar.className = 'quota-bar';
+  const fill = document.createElement('div');
+  fill.className = 'quota-fill';
+  fill.style.width = `${win.pct}%`;
+  bar.append(fill);
+
+  row.append(line, bar);
+  return row;
 }
 
 function plainLabel(text, cls) {
@@ -10978,6 +11135,11 @@ paintFlatToggle();
 
 // Keep relative timestamps honest without a full re-render storm.
 setInterval(renderRail, 30_000);
+// The gauges' own beat. Nothing incoming moves the "as of" age, and the feed is
+// event-driven — measured at two renders in five and a half minutes on a quiet bench — so
+// without this a record could sit reading `just now` for an hour. Guarded on a signature at
+// the other end, so a tick that changed no string repaints nothing.
+setInterval(renderQuota, QUOTA_TICK_MS);
 
 fillRailFooter();
 

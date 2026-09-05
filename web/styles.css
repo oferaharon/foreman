@@ -711,6 +711,105 @@ body.row-dragging * { cursor: row-resize !important; }
   flex-wrap: wrap;
 }
 
+.rail-quota {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+}
+
+/* No record, or nothing left worth drawing: no bars, no zero, no grey placeholder. The
+   band collapses to nothing rather than being toggled by a class, so the single place that
+   decides is `renderQuota` appending or not appending — the gap above would otherwise
+   survive an empty block and leave a hole where the feature is switched off. */
+.rail-quota:empty { display: none; }
+
+/* The tone is set once, here, and read as `currentColor` by both the percentage and the
+   bar's fill — so a row cannot go amber in its text and stay neutral in its bar. Neutral
+   is `--ink-faint`, which is this stylesheet's own "present but not asking for anything"
+   (the grip mark says so in as many words further up): a bar you have not needed to look
+   at yet should not be competing with the session rows below it.
+
+   75 and 90 are `web/quota.js`'s and are nowhere in this file — `toneFor` puts the class
+   on the row and the stylesheet only says what a class looks like. */
+.quota-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  color: var(--ink-faint);
+}
+
+/* The amber and the red the rest of the panel already uses for exactly this: `--working`
+   is the status colour for something in progress, `--decision` the one for something that
+   wants a human. Both flip with the theme from `tokens.css`. */
+.quota-row.warn { color: var(--working); }
+.quota-row.hot { color: var(--decision); }
+
+.quota-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Which window, and when it comes back — both quiet at every tone. The number between
+   them is the only part that changes colour, so the row has one loud element and not
+   three. */
+.quota-win,
+.quota-reset {
+  color: var(--ink-faint);
+}
+
+/* At the rail's 14rem floor `5H 100% · RESETS 4H59M` is the longest line this can draw and
+   it still fits; the reset is the half that gives way first if a future format is longer,
+   because the percentage is the half you came here for. */
+.quota-reset {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quota-pct {
+  color: currentColor;
+  font-weight: 600;
+}
+
+.quota-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  overflow: hidden;
+}
+
+.quota-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: currentColor;
+}
+
+/* Past fifteen minutes (`staleness`, in `web/quota.js`) the record is old enough that
+   drawing it as a live one would be a claim nobody measured. The fill goes hollow — the
+   number is still there, still where it was, and plainly no longer being fed — and the age
+   comes out of the tooltip and onto the screen, because at that point it is the fact you
+   need rather than a detail you could go looking for. */
+.rail-quota.is-dim .quota-fill {
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+.quota-age {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
 .rail-list {
   overflow-y: auto;
   flex: 1;

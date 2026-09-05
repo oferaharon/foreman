@@ -44,6 +44,27 @@
             <span class="link" id="conn">●</span>
           </div>
           <div class="rail-stat" id="railStat"></div>
+
+          <!--
+            The account's two subscription gauges — the five-hour window and the seven-day
+            one — filled by `renderQuota`. Empty in the markup and empty on screen until a
+            status line has actually posted something: no record means no bars at all,
+            never a zero and never a grey placeholder.
+
+            In `.rail-head`, after the stats and before the buttons, and that placement is
+            the whole of what makes it cheap. The head takes its own content height in the
+            rail's column while `.rail-list` is `flex: 1` with `min-height: 0` and its own
+            `overflow-y`, so a band up here costs the list a row of height and nothing else
+            — the same trade the `.rail-actions` rule below already writes down for its own
+            second line of buttons. Inside the list it would have to
+            answer to two things that are measured against the rows around them: the sticky
+            `.folder-label.in-group { top: 2.5rem }` offset, and an open group's tint, which
+            is tiled from three full-width rows *in that flow*. That is the reason the
+            connections band and the footer further down are siblings of the list rather
+            than blocks inside it, and it is the reason for this one too.
+          -->
+          <div class="rail-quota" id="railQuota"></div>
+
           <div class="rail-actions">
             <button class="new-session" id="newSession" title="Start a new Claude session">+ new</button>
             <button class="new-session" id="snapshot" title="Save this set of sessions, or put it back">
