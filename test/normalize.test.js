@@ -481,3 +481,118 @@ test('an absent name or pid arrives as null, never as undefined', () => {
   assert.equal(msg.msgId, null);
   assert.equal(msg.text, 'hello from alpha');
 });
+
+/*
+ * The same peer message, delivered to a session that was busy.
+ *
+ * `test/fixtures/peer-message-busy.jsonl` is four consecutive lines from one scratch
+ * session in the sandbox (`alpha` → `beta`, Claude Code v2.1.257, on an isolated tmux
+ * socket): the enqueue, the removal, the message, and one perfectly ordinary attachment
+ * from the same run as the control. Only the home directory in the `cwd` paths and the
+ * two session names are rewritten; every other field is as Claude Code wrote it.
+ *
+ * How it was produced, because it is not the shape you get by sending a message to a
+ * session that merely *looks* occupied: the recipient has to be inside a tool call. A
+ * probe fired at a session that was busy generating prose was delivered as the ordinary
+ * `type: 'user'` record — the turn ended first. A probe fired while the same session sat
+ * in a long-running foreground `Bash` call queued for twenty seconds and came out as
+ * this: `type: 'attachment'`, `attachment.type: 'queued_command'`, and the removal
+ * record beside it naming the mechanism outright — `reason: 'absorbed_mid_turn'`.
+ *
+ * It is the case that matters most. A worker reporting to its lead is by definition
+ * talking to a session that is working, and this shape fires no `UserPromptSubmit` hook
+ * at all — measured with a scratch hook that caught the idle delivery from the same
+ * sender in the same session, seconds apart, and never once saw the busy one.
+ */
+
+const BUSY_FIXTURE = fs
+  .readFileSync(path.join(FIXTURES, 'peer-message-busy.jsonl'), 'utf8')
+  .trim()
+  .split('\n')
+  .map((line) => JSON.parse(line));
+
+const [BUSY_ENQUEUE, BUSY_REMOVE, BUSY_MESSAGE, PLAIN_ATTACHMENT] = BUSY_FIXTURE;
+
+test('a peer message delivered to a busy session is the same kind, off the same fields', () => {
+  // The fixture is the contract: `origin` one level deeper, and nothing else moved.
+  assert.equal(BUSY_MESSAGE.type, 'attachment');
+  assert.equal(BUSY_MESSAGE.attachment.type, 'queued_command');
+  assert.equal(BUSY_MESSAGE.origin, undefined, 'there is no top-level origin on this shape');
+  assert.equal(BUSY_MESSAGE.message, undefined, 'and no top-level message either');
+  assert.equal(BUSY_MESSAGE.isMeta, undefined, 'isMeta rides inside `attachment` here');
+
+  const [msg] = normalizeRecord(BUSY_MESSAGE);
+  const origin = BUSY_MESSAGE.attachment.origin;
+  assert.equal(msg.kind, 'peer_message', 'the same kind — a reader must not have to care');
+  assert.equal(msg.text, origin.body);
+  assert.equal(msg.from, 'scratch-alpha');
+  assert.equal(msg.fromPid, origin.verifiedPeerPid);
+  assert.equal(msg.msgId, origin.msg_id);
+  assert.equal(msg.reply, false);
+  assert.equal(msg.uuid, BUSY_MESSAGE.uuid);
+});
+
+test('the busy and idle shapes produce the same fields, not merely the same kind', () => {
+  // If these two ever drift, the shared room shows one thing for an idle recipient and
+  // another for a busy one — the bug this branch exists to close, in a new costume.
+  const [busy] = normalizeRecord(BUSY_MESSAGE);
+  const [idle] = normalizeRecord(PEER_MESSAGE);
+  assert.deepEqual(Object.keys(busy).sort(), Object.keys(idle).sort());
+});
+
+test('an ordinary attachment is still dropped — the carve-out is one shape wide', () => {
+  // `attachment` stays in DROP_TYPES. This one is real, from the same run.
+  assert.equal(PLAIN_ATTACHMENT.type, 'attachment');
+  assert.equal(PLAIN_ATTACHMENT.attachment.type, 'total_tokens_reminder');
+  assert.deepEqual(normalizeRecord(PLAIN_ATTACHMENT), []);
+
+  // And a `queued_command` that is not a peer message: the harness queues the human's own
+  // typed input this way too, and that is the composer's business, not the room's.
+  const typed = {
+    ...BUSY_MESSAGE,
+    attachment: { type: 'queued_command', prompt: 'run the tests', commandMode: 'prompt' },
+  };
+  assert.deepEqual(normalizeRecord(typed), []);
+
+  // A peer origin under some *other* attachment type is not this shape and is not read.
+  const wrongType = {
+    ...BUSY_MESSAGE,
+    attachment: { ...BUSY_MESSAGE.attachment, type: 'total_tokens_reminder' },
+  };
+  assert.deepEqual(normalizeRecord(wrongType), []);
+});
+
+test('the `queue-operation` records beside a busy delivery are still dropped', () => {
+  // Both carry the whole envelope in `content`, and the removal names the mechanism.
+  assert.ok(BUSY_ENQUEUE.content.includes('cross-session-message'));
+  assert.ok(BUSY_REMOVE.content.includes('cross-session-message'));
+  assert.equal(BUSY_REMOVE.reason, 'absorbed_mid_turn');
+  assert.deepEqual(normalizeRecord(BUSY_ENQUEUE), []);
+  assert.deepEqual(normalizeRecord(BUSY_REMOVE), []);
+});
+
+test('the busy shape reads `origin` and nothing else — not `attachment.prompt`', () => {
+  // `attachment.prompt` is the raw envelope. It is shorter than the idle shape's
+  // boilerplate and so a good deal more tempting, and it is still not the message.
+  const [msg] = normalizeRecord(BUSY_MESSAGE);
+  const out = JSON.stringify(msg);
+  assert.ok(BUSY_MESSAGE.attachment.prompt.includes('cross-session-message'));
+  assert.ok(!out.includes('cross-session-message'), 'no envelope tags');
+  assert.ok(!out.includes('from-name='), 'no envelope attributes');
+  assert.ok(!out.includes('uds:/tmp/cc-socks'), 'no socket path');
+  assert.ok(!out.includes('permission laundering'), 'and no safety copy, on either shape');
+});
+
+test('a busy delivery with an empty body is dropped, the same as an idle one', () => {
+  const blank = {
+    ...BUSY_MESSAGE,
+    attachment: { ...BUSY_MESSAGE.attachment, origin: { ...BUSY_MESSAGE.attachment.origin, body: '  ' } },
+  };
+  assert.deepEqual(normalizeRecord(blank), [], 'showing nothing beats showing an empty frame');
+
+  const notPeer = {
+    ...BUSY_MESSAGE,
+    attachment: { ...BUSY_MESSAGE.attachment, origin: { ...BUSY_MESSAGE.attachment.origin, kind: 'human' } },
+  };
+  assert.deepEqual(normalizeRecord(notPeer), []);
+});
