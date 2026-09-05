@@ -730,7 +730,7 @@ body.row-dragging * { cursor: row-resize !important; }
    (the grip mark says so in as many words further up): a bar you have not needed to look
    at yet should not be competing with the session rows below it.
 
-   75 and 90 are `web/quota.js`'s and are nowhere in this file — `toneFor` puts the class
+   50 and 75 are `web/quota.js`'s and are nowhere in this file — `toneFor` puts the class
    on the row and the stylesheet only says what a class looks like. */
 .quota-row {
   display: flex;
@@ -739,9 +739,11 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-faint);
 }
 
-/* The amber and the red the rest of the panel already uses for exactly this: `--working`
-   is the status colour for something in progress, `--decision` the one for something that
-   wants a human. Both flip with the theme from `tokens.css`. */
+/* Green, amber and red the rest of the panel already uses for exactly this: `--idle` is the
+   status colour for a session with nothing wrong, `--working` the one for something in
+   progress, `--decision` the one for something that wants a human. All three flip with the
+   theme from `tokens.css`. 50 and 75 are `web/quota.js`'s and are nowhere in this file. */
+.quota-row.ok { color: var(--idle); }
 .quota-row.warn { color: var(--working); }
 .quota-row.hot { color: var(--decision); }
 
@@ -757,12 +759,14 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 
-/* Which window, and when it comes back — both quiet at every tone. The number between
-   them is the only part that changes colour, so the row has one loud element and not
-   three. */
+/* Which window, and when it comes back. `--ink-faint` read as too faint against the dark
+   surface — the maintainer's own report — so this is `--ink`, the same token the rail's own
+   primary labels (`.session-title` and friends) fall back to by inheriting the body colour,
+   rather than a colour named here. The percentage is still the one element that changes with
+   the tone; this is a stronger neutral for the two around it, not a second loud element. */
 .quota-win,
 .quota-reset {
-  color: var(--ink-faint);
+  color: var(--ink);
 }
 
 /* At the rail's 14rem floor `5H 100% · RESETS 4H59M` is the longest line this can draw and

@@ -742,7 +742,7 @@ function quotaGauge(win, now, age) {
   const reset = formatReset(win.resetsAt, now);
 
   const gauge = document.createElement('span');
-  // `win.tone` is `toneFor`'s answer, computed inside `windowsOf`. 75 and 90 are spelled in
+  // `win.tone` is `toneFor`'s answer, computed inside `windowsOf`. 50 and 75 are spelled in
   // `web/quota.js` and nowhere else — a phone drawing amber at one number and a desktop at
   // another is the `isLeadName` lesson in a smaller costume.
   gauge.className = `m-quota-gauge${win.tone ? ` is-${win.tone}` : ''}`;
