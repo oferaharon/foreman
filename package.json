@@ -21,6 +21,8 @@
     "dev": "node --watch server/index.js",
     "install-hook": "node server/install-hook.js",
     "uninstall-hook": "node server/install-hook.js --remove",
+    "install-statusline": "node server/install-statusline.js",
+    "uninstall-statusline": "node server/install-statusline.js --remove",
     "install-agent": "node server/install-agent.js",
     "uninstall-agent": "node server/install-agent.js --remove",
     "restart-panel": "launchctl kickstart -k gui/$(id -u)/dev.foreman.panel",
