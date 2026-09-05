@@ -93,9 +93,15 @@ import {
   jointThread,
   linkLine,
   rulingBlock,
-  assertSendableBody,
   MAX_LINK_TEXT,
 } from './links.js';
+// The envelope primitives, from the module they were lifted into rather than from
+// `links.js`, which re-exports them and is on a path to deletion. The shared room's own
+// send goes through the same refusal a link message does — see `envelope.js`'s header for
+// why a carriage return is refused rather than stripped.
+import { assertClean, assertSendableBody, quoteBody, MAX_MESSAGE_TEXT } from './envelope.js';
+import { SharedRoomStore } from './shared-room.js';
+import { Observer, isPeerPrompt, participant } from './observe.js';
 import { readTail } from './transcript.js';
 import {
   attachTerminal,
@@ -128,6 +134,21 @@ const tasks = new TaskStore();
 const room = new RoomStore();
 const links = new LinkStore();
 
+/*
+ * The shared room: one machine-wide log of what the sessions on this Mac say to each
+ * other, and the observer that fills it.
+ *
+ * A sibling of `room` rather than a second copy of it — that one is per repo and belongs
+ * to a team, this one has no project at all. Constructed here with the other stores so the
+ * rotation it may do at boot happens once, before anything reads it.
+ *
+ * `setMaxListeners(0)` because a shared-room subscription is per **socket**, not per repo
+ * the way `room`'s is: every open panel tab holds one, and eleven tabs would otherwise
+ * print a listener-leak warning into a log nothing rotates.
+ */
+const sharedRoom = new SharedRoomStore();
+sharedRoom.setMaxListeners(0);
+
 // A worker whose tmux session vanished has crashed — the spec's failure table says mark
 // it `failed` and keep the worktree as evidence. Cheap: one `list-sessions` every 30s,
 // and only tasks holding a session name are ever eligible.
@@ -141,6 +162,21 @@ setInterval(async () => {
 }, 30_000).unref?.();
 
 const registry = new SessionRegistry(status, readState, queue, pins, tasks);
+
+/*
+ * The collector. After the registry, because it reads the roster and nothing else — the
+ * hook path and the sweep both join a message's two ends to rows, and a message whose
+ * sender joins to no row is refused rather than guessed at (`observe.js`'s `resolveSender`).
+ *
+ * It is handed `registry.list` rather than a snapshot: the sweep runs a minute apart and a
+ * roster captured at construction would be yesterday's.
+ */
+const observer = new Observer({ store: sharedRoom, roster: () => registry.list() });
+
+/** The observer's 60-second backstop, started in the boot block and stopped on SIGTERM.
+ *  Declared here so the shutdown handler — which is written above the boot block — names a
+ *  binding that exists however early the signal arrives. */
+let sharedSweep = null;
 
 // Transitions + nudge live in watch.js so they can be tested; index.js owns the timer.
 const watch = createTeamWatch({ registry, tasks, room, queue, readTeam });
@@ -239,7 +275,33 @@ app.post('/hook', (req, res) => {
     const payload = req.body || {};
     const event = payload.hook_event_name || req.get('X-Hook-Event') || '';
     const pane = req.get('X-Tmux-Pane') || null;
-    status.ingest(event, payload, pane && pane !== '' ? pane : null);
+    const paneId = pane && pane !== '' ? pane : null;
+    status.ingest(event, payload, paneId);
+
+    /*
+     * …and, additively, the shared room's fast path.
+     *
+     * **`status.ingest` above is untouched.** This is a second reader of the same payload,
+     * not a change to the first: `StatusEngine` is about status and pane<->session binding,
+     * and teaching it to read `payload.prompt` would put a second concern in the one module
+     * whose whole value is that it has exactly one.
+     *
+     * **The hook is a nudge, never a record.** Its payload carries the envelope but no
+     * `msg_id`, so an entry written from it would have no dedupe key and the transcript read
+     * of the same message would then write it a second time. All it says is *"read the tail
+     * of this file now"*; everything written comes from the transcript. The 60-second sweep
+     * is the backstop and `msgId` dedupe makes the overlap free, which is why nothing here
+     * waits on the read or cares whether it found anything.
+     */
+    if (event === 'UserPromptSubmit' && isPeerPrompt(payload.prompt)) {
+      observer
+        .onHookPrompt({
+          transcriptPath: payload.transcript_path || null,
+          sessionId: payload.session_id || payload.sessionId || null,
+          paneId,
+        })
+        .catch(() => {});
+    }
   } catch {
     /* never let a malformed hook take the server down */
   }
@@ -3455,6 +3517,200 @@ app.post('/api/team/links/:id/seen', (req, res) => {
   res.json({ ok: true, link });
 });
 
+
+/* -------------------------------------------------------- shared room --- */
+
+/*
+ * The machine-wide room: one log of what the sessions on this Mac say to each other, and
+ * one way for the maintainer to say something into any of them.
+ *
+ * Two halves that meet only in the store. The **observer** (wired at `/hook` above and on
+ * the sweep timer in the boot block) is pure observation — it writes down traffic that
+ * would have happened without the panel. The **endpoint below is not**, and it has to not
+ * be: a message the panel types lands in the recipient's transcript as an ordinary user
+ * record, with `origin.kind: 'human'` rather than `'peer'`, so the observer will never see
+ * it and nothing else would ever record it. That also means there is no double-count.
+ */
+
+/** The room, as a tail. `since` is a seq, and `read` caps from the end. */
+app.get('/api/shared-room', (req, res) => {
+  const since = Number.parseInt(String(req.query.since ?? ''), 10);
+  const limit = Number.parseInt(String(req.query.limit ?? ''), 10);
+  res.json(
+    sharedRoom.read({
+      since: Number.isFinite(since) && since > 0 ? since : 0,
+      ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+    }),
+  );
+});
+
+/**
+ * What a session is told it has been sent, and by whom.
+ *
+ * Deliberately **not** `linkLine`: that envelope names a link, a peer project and a link
+ * id, none of which exist here. What it shares is the part that matters — every line of
+ * the body carries the human prefix, so no body can begin a line at column 0 and therefore
+ * no body can forge the panel's own voice or the other speaker's. `envelope.js`'s header
+ * has the whole argument, carriage returns included.
+ *
+ * The sentence itself is the same one the joint thread's human envelope makes, for the
+ * same reason: this is the one message in the shared room that can *authorize* something,
+ * and a lead that could not tell it from a peer session's request would be one press away
+ * from treating another session's ask as a merge word.
+ */
+function sharedRoomLine(body, human) {
+  const who = String(human ?? '').trim() || 'the human';
+  assertClean(who, "The maintainer's name", { oneLine: true });
+  return [
+    `${who} sent this from the shared room in their panel — the one place they can see ` +
+      `every Claude session on this Mac at once. These are their own words, typed by them, ` +
+      `not another session's relayed to you. They carry their authority: a merge word, a ` +
+      `dispatch confirmation or a plan approval given here is given, exactly as if they had ` +
+      `typed it in this conversation. Everything below the line is what they wrote.`,
+    quoteBody(body, 'human'),
+  ].join('\n');
+}
+
+/**
+ * The maintainer's own message into one session's pane.
+ *
+ * Delivery is `registry.get` -> `sendOrQueue` -> `PaneLock#claim` -> `sendText` ->
+ * `assertNotBlocked`, **reused unmodified** and never `send-keys`: three live reads of the
+ * pane, each one there because something once got typed into the wrong place.
+ * `/api/trigger`'s own comment is the precedent and `POST /api/team/links/:id/message` is
+ * the working example. Note what it is *not* — the peer socket. A session's own
+ * `SendMessage` is a session speaking; this is the human speaking, and it goes in through
+ * the composer like everything else the panel types.
+ *
+ * The refusals, and the order is deliberate:
+ *
+ *   400  a body that is empty, over `MAX_MESSAGE_TEXT`, or carrying a character that can
+ *        make a quoted line draw as an unquoted one — checked **first**, because it is
+ *        true of the message whatever it is addressed to, and it is the only refusal the
+ *        caller can fix by editing what they typed
+ *   404  no session by that id
+ *   409  that session is not in the room — the participant allow-list, which is a
+ *        worker's whole exclusion
+ *   409  that session is not live any more — the race between picking a target and
+ *        pressing send. Nothing is written and nothing is launched (2026-08-27).
+ *   409  that session's queue is full
+ *   200  typed, or queued for when that pane can hear it
+ */
+app.post('/api/shared-room/message', async (req, res) => {
+  const text = String(req.body?.text ?? '');
+  try {
+    // Refused, never trimmed, escaped or shortened — `MAX_TRIGGER_TEXT`'s reasoning:
+    // silently rewriting a caller's input hands them a way to have it rewritten into
+    // something else. The error names the character it found, which is the only way a
+    // person can act on it.
+    assertSendableBody(text, 'A message in the shared room');
+  } catch (err) {
+    return res.status(400).json({ error: err.message, cap: MAX_MESSAGE_TEXT });
+  }
+
+  const to = String(req.body?.to ?? '').trim();
+  if (!to) return res.status(400).json({ error: 'A shared-room message needs `to`, a session id.' });
+
+  const target = registry.get(to);
+  if (!target) {
+    return res.status(404).json({
+      error: `No session ${to}. The panel is not watching one by that id — it may have exited.`,
+    });
+  }
+
+  const name = target.label || target.title || target.project || to;
+
+  /*
+   * The participant test, imported rather than restated. It is an **allow-list on role** —
+   * an ordinary session or a lead — never "not a worker", because task kinds have already
+   * grown once in this repo and a negative test silently admits the next one. Applied to
+   * both ends of the room: `observe.js` refuses a message *to* a non-participant, and this
+   * refuses a message *to* one for the same reason. A worker's traffic is its lead's
+   * business, and the room is not a second inbox for it.
+   */
+  if (!participant(target)) {
+    return res.status(409).json({
+      error:
+        `${name} is a worker, so it is not in the shared room — its messages are its lead's ` +
+        'business. Say it to the lead, or to the worker in its own session.',
+    });
+  }
+
+  /*
+   * Re-read the panes rather than trusting the roster row, which is up to one poll stale.
+   * The picker is built from the live roster, so this can only fire in the race between
+   * choosing a target and pressing send — which is real, and the alternative is a message
+   * queued against a pane id tmux has already handed to somebody else.
+   *
+   * A pane read that *throws* is not a refusal: tmux being briefly unavailable is not
+   * evidence that this session is gone, and `sendOrQueue`'s own three live reads are still
+   * in front of the keystroke. Only a successful read that does not contain the pane is.
+   */
+  let panes = null;
+  try {
+    panes = await listPanes();
+  } catch {
+    /* unreadable, not absent — fall through to the send, which reads the pane again */
+  }
+  if (!target.paneId || (panes && !panes.some((p) => p.paneId === target.paneId))) {
+    return res.status(409).json({
+      error:
+        `${name} is not live any more — its pane is gone, so there is nothing to type into. ` +
+        'Nothing was written and nothing was launched.',
+      to: target.id,
+      name,
+      delivered: false,
+    });
+  }
+
+  // Resolved for the folder that will read it: a brief, a link message and this must not
+  // call the maintainer three different things.
+  const human = humanName(target.paneCwd || target.cwd || null);
+
+  let queued;
+  try {
+    ({ queued } = await sendOrQueue(target, sharedRoomLine(text, human)));
+  } catch (err) {
+    // A full queue is the 409 here, exactly as it is for the panel's own send box. Nothing
+    // is recorded: the room is a log of messages that happened.
+    return res.status(err.status || 500).json({ error: err.message, to: target.id, name, delivered: false });
+  }
+
+  /*
+   * The entry. `kind: 'human'` and no `msgId` — there is nothing to dedupe against, because
+   * this is the one entry in the room with a single sighting by construction.
+   *
+   * `delivered` means **handed off**, not read: `queue.js` may hold this for hours and
+   * `queued` says whether it did. That is the trigger's and the link endpoint's own
+   * honesty, and two adjacent lines contradicting each other on the maintainer's scan
+   * surface is worse than the vaguer verb.
+   *
+   * `fromRole` / `toRole` / `fromSource` ride here as they do on an observed entry, so a
+   * reader (and any later tightening of who is in the room) sees one shape of record rather
+   * than two. `fromSource: 'panel'` is the honest third value beside `registry` and `name`:
+   * this end was not resolved from anything, it *is* the panel.
+   */
+  const entry = sharedRoom.post({
+    kind: 'human',
+    text,
+    from: { name: human, pid: null, tmuxSession: null, paneId: null, cwd: null, sessionId: null },
+    to: {
+      name,
+      tmuxSession: target.tmuxSession ?? null,
+      paneId: target.paneId ?? null,
+      cwd: target.cwd ?? null,
+      sessionId: target.id,
+    },
+    fromRole: null,
+    toRole: target.team?.role ?? null,
+    fromSource: 'panel',
+    delivered: true,
+    queued: Boolean(queued),
+  });
+
+  res.json({ ok: true, entry, delivered: !queued, queued: Boolean(queued) });
+});
+
 /* -------------------------------------------------------------- model --- */
 
 /*
@@ -4623,6 +4879,41 @@ function unsubscribeRoom(ws, repo) {
   }
 }
 
+/* ----------------------------------------------- shared-room subscriptions --- */
+
+/**
+ * The machine-wide room's frames, beside the per-team ones.
+ *
+ * **One per socket, not one per repo.** A team room is subscribed by name because there is
+ * one per repo; the shared room is the only one there is, so the registry is
+ * `ws -> listener` and a second `subscribe-shared` on the same socket supersedes the first
+ * rather than stacking a duplicate listener on the store — which is how the transcript
+ * tailer once ended up sending every message twice.
+ *
+ * **`ws.onopen` must re-subscribe this**, exactly as it re-subscribes every open pane. A
+ * subscription is server state and dies with the socket, while the roster keeps arriving
+ * because that is broadcast to every client — so a dropped connection leaves a rail that
+ * looks perfectly alive above a room that silently stopped minutes ago. That failure has
+ * been shipped once already, in the transcript pane, and it is invisible from inside the
+ * panel.
+ */
+const sharedSubs = new WeakMap(); // ws -> listener
+
+function subscribeShared(ws, slot) {
+  unsubscribeShared(ws);
+  const listener = (entry) => send(ws, 'shared-append', { entry, slot });
+  sharedRoom.on('post', listener);
+  sharedSubs.set(ws, listener);
+  send(ws, 'shared', { ...sharedRoom.read(), slot });
+}
+
+function unsubscribeShared(ws) {
+  const listener = sharedSubs.get(ws);
+  if (!listener) return;
+  sharedRoom.off('post', listener);
+  sharedSubs.delete(ws);
+}
+
 wss.on('connection', (ws) => {
   send(ws, 'sessions', rosterFrame());
 
@@ -4644,6 +4935,16 @@ wss.on('connection', (ws) => {
       if (typeof msg.repo === 'string' && msg.repo) subscribeRoom(ws, msg.repo, slot);
     } else if (msg.type === 'unsubscribe-room') {
       unsubscribeRoom(ws, typeof msg.repo === 'string' ? msg.repo : undefined);
+    } else if (msg.type === 'subscribe-shared') {
+      subscribeShared(ws, slot);
+    } else if (msg.type === 'unsubscribe-shared') {
+      unsubscribeShared(ws);
+    } else if (msg.type === 'markSharedRead') {
+      // The quiet counter on the rail footer, and it is deliberately not an inbox: the
+      // room is a log of messages that have already been answered by the session they were
+      // sent to, so nothing here reads as "needs you". Server-side and account-wide, the
+      // same shape `markRead` already has for transcripts.
+      markSharedRead();
     } else if (msg.type === 'markRead') {
       // The client only sends this when the transcript is actually scrolled to the
       // bottom — reading history shouldn't clear the badge.
@@ -4664,10 +4965,12 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     unsubscribe(ws);
     unsubscribeRoom(ws);
+    unsubscribeShared(ws);
   });
   ws.on('error', () => {
     unsubscribe(ws);
     unsubscribeRoom(ws);
+    unsubscribeShared(ws);
   });
 });
 
@@ -4749,6 +5052,46 @@ registry.on('tick', (sessions) => {
  * would make `sessions.js`'s `#diff` broadcast the whole roster every time it moved, for a
  * value that already has its own change signal.
  */
+/*
+ * The shared room's place in that frame is a **summary and nothing else** — a count and a
+ * timestamp, never the entries.
+ *
+ * The rail's footer row has to repaint on the roster beat like everything else on the rail,
+ * and this is a machine-wide log with a 4 MB ceiling: putting it on the frame would put it
+ * on every roster broadcast, for a pane that is usually not even open. The log itself
+ * arrives once on `subscribe-shared` and then one entry at a time.
+ *
+ * `lastAt` and `seen` are held in memory rather than read off the file, for the same
+ * reason: `rosterFrame` runs every couple of seconds and a file read there would be a file
+ * read every couple of seconds, forever, to answer a question the store already knows.
+ *
+ * `unseen` counts what has arrived since somebody last looked, and the mark starts at
+ * whatever the log already held at boot — the room is a **log, not an inbox**. Its entries
+ * were answered by the sessions they were sent to before the panel ever saw them, so a
+ * counter that started at "everything ever said on this Mac" would be a badge asking for
+ * attention nobody owes it.
+ */
+let sharedSeen = sharedRoom.seq;
+let sharedLastAt = sharedRoom.read({ limit: 1 }).entries[0]?.ts ?? null;
+
+function markSharedRead() {
+  if (sharedSeen === sharedRoom.seq) return;
+  sharedSeen = sharedRoom.seq;
+  broadcastRoster();
+}
+
+/* One line in, one line out: the summary moves, so the rail is told. Traffic is a handful
+   of messages a day, so a broadcast per entry is nothing — and without it the footer would
+   sit still until something unrelated moved the roster, which reads as a broken feature. */
+sharedRoom.on('post', (entry) => {
+  sharedLastAt = entry.ts;
+  broadcastRoster();
+});
+
+function sharedSummary() {
+  return { unseen: Math.max(0, sharedRoom.seq - sharedSeen), lastAt: sharedLastAt };
+}
+
 function rosterFrame(sessions = registry.list()) {
   return {
     sessions,
@@ -4756,6 +5099,7 @@ function rosterFrame(sessions = registry.list()) {
     snapshot: snapshotSummary(sessions),
     links: links.list({ open: true }),
     rateLimits: rateLimits.get(),
+    sharedRoom: sharedSummary(),
   };
 }
 
@@ -4931,6 +5275,11 @@ const configSeed = seedConfigFile(CONFIG_FILE, { bindHost: HOST, sessionPrefix: 
  * throws must not stop the four after it.
  */
 process.on('SIGTERM', () => {
+  // The shared room has nothing to flush — every append is synchronous, which is what makes
+  // its rotation a `rename` rather than a rewrite — so what it has to stop is its sweep. A
+  // sweep firing into a process that is on its way out would read transcripts nobody is
+  // going to be told about.
+  clearInterval(sharedSweep);
   for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, links]) {
     try {
       store.flush();
@@ -4947,6 +5296,21 @@ if (!tmuxOk) {
 }
 
 registry.start();
+
+/*
+ * The shared room's backstop: the first roster poll, then every 60 seconds.
+ *
+ * `once('tick')` rather than a call right here, because `registry.start()` has not read
+ * tmux yet — a sweep on this line would be handed an empty roster, join nothing, and write
+ * nothing. `tick` fires on **every** poll rather than only on a change, which is what makes
+ * it the right first beat: the boot sweep's whole job is to catch messages that landed
+ * while the panel was down or restarting, and nothing about the roster has to have changed
+ * for that to be true. The interval is unreffed so a scratch panel still exits on its own.
+ */
+registry.once('tick', (sessions) => observer.sweep(sessions).catch(() => {}));
+sharedSweep = setInterval(() => observer.sweep().catch(() => {}), 60_000);
+sharedSweep.unref?.();
+
 pruneImages(Date.now()).catch(() => {});
 // Worktree housekeeping, boot-only by design: prune stale bookkeeping everywhere the
 // task store knows, then sweep failed worktrees old enough to stop being evidence —
