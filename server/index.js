@@ -114,6 +114,7 @@ import {
   slugFor,
   uniqueSessionName,
 } from './launch.js';
+import { standaloneArgs, writeSessionFiles, SESSION_BRIEF_FILE, SESSION_MCP_FILE } from './session-launch.js';
 import { saveUpload, resolveImage, pruneImages } from './uploads.js';
 import { rotateLogs, rotationLines, LOG_OUT, LOG_ERR } from './logs.js';
 import { FORMULA, panelIsHomebrew } from './homebrew.js';
@@ -1090,6 +1091,10 @@ async function launchLead(folder, { terminal, resume = null }) {
     ),
   );
 
+  // standalone-args: exempt — a lead is not a standalone. Its brief, its `foreman` tools and
+  // its permission stance are the four flags below, generated per repo under this team's own
+  // directory; `standaloneArgs()` would append a second `--mcp-config` and a second brief,
+  // and `--strict-mcp-config` here means the last one would be the only one that counted.
   const created = await createSession({
     folder,
     label: 'lead',
@@ -1148,6 +1153,7 @@ app.post('/api/launch', async (req, res) => {
       // Absent means yes, the same shape `/api/snapshot/restore` uses — a client that
       // predates the checkbox keeps getting a window, which is what it was built expecting.
       terminal: req.body?.terminal !== false,
+      extraArgs: await standaloneArgs(),
     });
     // The pane exists now; the roster is up to two seconds behind it.
     await registry.refresh().catch(() => {});
@@ -1264,6 +1270,9 @@ app.post('/api/sessions/:id/duplicate', async (req, res) => {
       folder: session.paneCwd,
       label: slugFor(session.tmuxSession, session.paneCwd),
       skipPermissions: Boolean(session.bypass),
+      // A copy that behaved differently from its original would be worse than no button —
+      // which is the reasoning above about bypass, and it holds for the rooms brief too.
+      extraArgs: await standaloneArgs(),
     });
     await registry.refresh().catch(() => {});
     const made = created.paneId ? registry.byPane(created.paneId) : null;
@@ -1547,6 +1556,9 @@ app.post('/api/team/dispatch', async (req, res) => {
       ),
     );
 
+    // standalone-args: exempt — a worker is not a standalone. It gets its own brief, its own
+    // two-tool MCP config and `--strict-mcp-config`, all scoped to its task; the group tools
+    // are deliberately not in `WORKER_TOOLS` and a worker is not an @-addressable peer.
     const created = await createSession({
       folder: wt.dir,
       label,
@@ -4928,7 +4940,10 @@ app.post('/api/snapshot/restore', async (req, res) => {
   try {
     results = await restoreSessions(snap.sessions, {
       liveNames: await liveSessionNames(),
-      startSession: (opts) => createSession({ ...opts, terminal }),
+      // The same flags `/api/launch` gives a session opened by hand, for the same reason a
+      // lead goes through `launchLead` below: a restored session must be *this* panel's
+      // session, not a replay of what one looked like before the feature existed.
+      startSession: async (opts) => createSession({ ...opts, terminal, extraArgs: await standaloneArgs() }),
       // A lead is not `createSession` with a different label. The brief, the `foreman` tools
       // and the permission stance are launch flags and files under `teams/`, so a saved
       // lead started the ordinary way comes back as an ordinary session that happens to be
@@ -5131,7 +5146,10 @@ app.post('/api/relaunch', async (req, res) => {
     /* ---- restore, the same loop the snapshot uses ---- */
     results = await restoreSessions(entries, {
       liveNames: await liveSessionNames(),
-      startSession: (opts) => createSession({ ...opts, terminal }),
+      // Relaunch-all is the control for "I updated Claude Code", so it is also the control
+      // that hands every bench session today's brief — the flags are regenerated here, not
+      // replayed from whatever the session was launched with an hour ago.
+      startSession: async (opts) => createSession({ ...opts, terminal, extraArgs: await standaloneArgs() }),
       startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume })).created,
       onStep: (done, entry) => {
         if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
@@ -5802,6 +5820,25 @@ const { rotated: rotatedLogs, notes: logNotes } = rotateLogs();
 const configSeed = seedConfigFile(CONFIG_FILE, { bindHost: HOST, sessionPrefix: SESSION_PREFIX });
 
 /*
+ * Write the standalone brief and MCP config, so `<STATE_DIR>` holds today's pair from the
+ * moment the panel is up rather than from the first launch after it.
+ *
+ * Best-effort here and never a refusal to boot: `standaloneArgs()` rewrites both files
+ * before every launch anyway, so the only thing a failure here costs is the two files being
+ * absent until somebody starts a session — and a panel that would not start because it could
+ * not write a brief would be a worse trade than one that says so and carries on. It is also
+ * **after the stand-down probe**, like the rotation and the config seed above and for the
+ * same reason: a panel about to decline to start does not write into the running panel's
+ * state dir.
+ *
+ * Collected now, printed with the boot lines below where somebody is looking.
+ */
+const sessionFiles = await writeSessionFiles().then(
+  () => ({ ok: true, error: null }),
+  (error) => ({ ok: false, error }),
+);
+
+/*
  * Flush every store, then go.
  *
  * Each store is a Map behind a 2-second debounced write, so any stop loses up to two
@@ -5913,6 +5950,19 @@ server.listen(PORT, HOST, () => {
     console.log(
       `Config: ${CONFIG_FILE} (bindHost ${HOST}${from}, sessionPrefix ${SESSION_PREFIX}${prefixFrom})`,
     );
+  }
+
+  // The two files every ordinary session is launched with. Named on every boot for the
+  // reason the state dir above is: they are appended to the system prompt of every session
+  // the panel opens, and a reader who wants to know what their sessions were told should not
+  // have to find out from this file. A failure is a warning, never a refusal to boot —
+  // `standaloneArgs()` rewrites both before each launch and will say so there instead.
+  if (sessionFiles.ok) {
+    console.log(`Sessions: ${SESSION_BRIEF_FILE}`);
+    console.log(`          ${SESSION_MCP_FILE}`);
+  } else {
+    const err = sessionFiles.error;
+    console.warn(`Sessions: could not write ${SESSION_BRIEF_FILE} (${err?.code || err?.message}) — the next launch will try again.`);
   }
 
   // Whatever the token read had to say — a file that exists but can't be read, one that's
