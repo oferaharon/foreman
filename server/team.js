@@ -347,6 +347,14 @@ export function mergeRule(forge) {
  *
  * `forge` is the detected pair (`forge.js`), not a setting. With no forge the toggle can
  * be on and still add nothing, because there is nothing to merge.
+ *
+ * `Bash(gh release create:*)` is unconditional, unlike `leadMerges` — a **plain allow rule**,
+ * not a toggle. A release can only follow a version bump the maintainer already merged by
+ * hand, so the decision it would gate was already made one step earlier; a merge has no
+ * such earlier checkpoint, which is why that one stays a toggle. It silences the harness
+ * prompt on that one verb; it does not touch the `git push` deny above (`gh release create
+ * --target <sha>` tags on the forge without a push) and grants nothing else `gh release` can
+ * do — not delete, not edit, no other `gh` or `git` surface.
  */
 export function leadSettings({ repo, dir, leadMerges = false, forge = null }) {
   const rule = leadMerges ? mergeRule(forge) : null;
@@ -360,6 +368,12 @@ export function leadSettings({ repo, dir, leadMerges = false, forge = null }) {
       allow: [
         pathRule('Edit', dir),
         ...(rule ? [rule] : []),
+        // `gh release create --target <sha>` mints the tag on the forge without a push, so
+        // this needs no toggle the way leadMerges does: a release can only follow a version
+        // bump the maintainer already merged by hand, so the decision was made one step
+        // earlier. Publishes a release and its tag; does NOT lift the git push deny above,
+        // and grants nothing else `gh release` can do — not delete, not edit.
+        'Bash(gh release create:*)',
       ],
     },
   };

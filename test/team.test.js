@@ -169,17 +169,22 @@ test('the merge rule is the forge\'s own, and there is no general one', () => {
   assert.ok(allowFor({ forge: 'gitea', via: 'mcp' }).includes('mcp__gitea__pull_request_write'));
 
   // GitHub through `gh`: a Bash prefix, and genuinely narrow — `gh pr merge` cannot open
-  // a PR, so this rule does not carry Gitea's trade at all.
-  assert.deepEqual(allowFor({ forge: 'github', via: 'gh' }).filter((r) => r.startsWith('Bash')), ['Bash(gh pr merge:*)']);
+  // a PR, so this rule does not carry Gitea's trade at all. `gh release create` rides on
+  // every lead regardless of leadMerges, so it's expected here too.
+  assert.deepEqual(
+    allowFor({ forge: 'github', via: 'gh' }).filter((r) => r.startsWith('Bash')).sort(),
+    ['Bash(gh pr merge:*)', 'Bash(gh release create:*)'].sort(),
+  );
 
-  // GitHub through an MCP server: nothing. Nobody here has run that server, so its tool
-  // name is unverified — and an unverified name in an allow rule is a rule that silently
-  // does nothing, which is worse than a prompt the lead can answer. The panel's copy says
-  // so rather than the settings pretending.
-  assert.equal(allowFor({ forge: 'github', via: 'mcp' }).length, 1, 'the team dir write, and nothing else');
+  // GitHub through an MCP server: nothing beyond the unconditional release rule. Nobody
+  // here has run that server, so its tool name is unverified — and an unverified name in
+  // an allow rule is a rule that silently does nothing, which is worse than a prompt the
+  // lead can answer. The panel's copy says so rather than the settings pretending.
+  assert.equal(allowFor({ forge: 'github', via: 'mcp' }).length, 2, 'the team dir write, the release rule, and nothing else');
 
-  // No forge: the toggle can be on and grants nothing, because there is nothing to merge.
-  assert.equal(allowFor(null).length, 1);
+  // No forge: the merge toggle can be on and grants nothing, because there is nothing to
+  // merge — the release rule still rides along.
+  assert.equal(allowFor(null).length, 2);
   assert.equal(mergeRule(null), null);
   assert.equal(mergeRule({ forge: null, via: null }), null);
 });
@@ -208,6 +213,28 @@ test('leadMerges gains and loses the gitea allow rule', () => {
     assert.ok(settings.permissions.deny.includes('Bash(git push:*)'));
     assert.ok(settings.permissions.allow.includes(pathRule('Edit', dir)));
     assert.ok(!settings.permissions.deny.some((r) => r.startsWith('Write(')), 'Write rules are dead — Edit only');
+  }
+});
+
+test('the lead may publish a release, unconditionally and only that verb', () => {
+  const repo = '/Users/x/Code/Api';
+  const dir = '/Users/x/state/teams/key';
+
+  for (const leadMerges of [false, true]) {
+    const { allow, deny } = leadSettings({ repo, dir, leadMerges }).permissions;
+    assert.ok(allow.includes('Bash(gh release create:*)'), 'present regardless of leadMerges — not a toggle');
+
+    // The narrow verb, never a prefix that would also reach delete/edit/repo/api.
+    assert.ok(!allow.includes('Bash(gh release:*)'), 'must not widen to the bare subcommand');
+    assert.ok(!allow.some((r) => r.startsWith('Bash(gh release delete')));
+    assert.ok(!allow.some((r) => r.startsWith('Bash(gh release edit')));
+    assert.ok(!allow.some((r) => r.startsWith('Bash(gh repo')));
+    assert.ok(!allow.some((r) => r.startsWith('Bash(gh api')));
+
+    // git push stays denied — a release tags on the forge, it does not lift the wall.
+    assert.ok(deny.includes('Bash(git push:*)'), 'the git push deny is untouched');
+    assert.ok(deny.includes('Bash(git commit:*)'));
+    assert.ok(deny.includes(pathRule('Edit', repo)), 'the lead still never writes code');
   }
 });
 
