@@ -5058,6 +5058,178 @@ body.row-dragging * { cursor: row-resize !important; }
 .room-fold-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .room-fold-count { flex: none; }
 
+/* ---------------------------------------------- the create-room modal --- */
+
+/* `+ room`'s box, in the rooms block rather than up beside `.modal.is-settings`, because
+   everything that is *particular* about it is particular about rooms: the tick list, the
+   tally and the row grammar it borrows from `.room-row` two rules up. The card itself is
+   `.modal` unchanged — same chrome, same `.field-cap`, same `.modal-row`, same tokens, and
+   no colour spelled here that is not one of them.
+
+   Wider than a form (24rem) and far narrower than a document (44rem): the widest thing in
+   here is a session row — a dot, a name, a `lead` chip and a folder — and at form width the
+   folder is the half that gets ellipsised away, which is exactly the half that distinguishes
+   two sessions sharing a `<repo>-<branch>` title. Capped and scrollable for `.is-settings`'
+   own reason: a list of eight sessions plus chrome does not fit a short laptop viewport, and
+   a create button off the bottom edge is much worse than a scrollbar. */
+.modal.is-room {
+  width: min(30rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+}
+
+/* The list's own caption line: what it is on the left, the tally on the right. `baseline`
+   rather than `center` so a mono tally sits on the same line as the label beside it. */
+.room-pick-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+}
+
+.room-pick-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* `N of 8`. Quiet until it is the number that matters — a tally that shouted from zero
+   would be a cap arguing with a reader who has not met it yet. */
+.room-pick-tally {
+  flex: none;
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+}
+
+.room-pick-tally.is-full { color: var(--accent); }
+
+/* The rows. Scrolls at about six of them, which is where the button row starts leaving the
+   fold on a laptop — and the cap is eight, so the seventh and eighth are one short scroll
+   rather than a hidden half of the list. */
+.room-pick-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 15rem;
+  overflow-y: auto;
+  margin-top: 0.4rem;
+  padding: 0.2rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface-sunk);
+}
+
+/* `.room-row`'s grammar one block up, and `.shared-picker-row`'s one file over: a status
+   dot, a name that ellipsises, and the things that do not. A `<label>` rather than a button
+   with a box inside it, so the whole row is the hit target and the checkbox stays the
+   control — which is also what gives it a focus ring and the space bar for free. */
+.room-pick-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.3rem 0.4rem;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+
+.room-pick-row:hover { background: var(--surface); color: var(--ink); }
+.room-pick-row:focus-within { background: var(--surface); color: var(--ink); }
+
+/* The tick, drawn by the panel rather than by the browser — `.team-toggle-row`'s call one
+   file-section up, and the same reason with a sharper edge. A stock checkbox is rendered by
+   the UA, which decides its colours from the *browser's* scheme rather than from this page's
+   `data-theme`: measured here with the panel in light theme and the browser in dark, an
+   **unticked** box came back a solid dark square — which in a multi-select reads as ticked.
+   That is the one thing this control may never be ambiguous about, so the UA is taken out of
+   the decision entirely: `appearance: none`, a box and a check of our own, and every colour
+   a token. It also buys back the accent — macOS checks a box in *system* blue, which is not
+   this panel's accent and not any colour in `tokens.css`.
+
+   The focus ring stays, because the row is a `<label>` and the input is still the control:
+   it is what the space bar acts on and what `:focus-within` above lights the row from. */
+.room-pick-row input[type='checkbox'] {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  background: var(--surface);
+  cursor: pointer;
+}
+/* The check, in the box's own foreground colour so the one rule below flips both at once.
+   A rotated rectangle rather than a glyph: a `✓` is a font's opinion about size and
+   baseline, and this has to sit in a 13.6px box at whatever the reader's font stack is. */
+.room-pick-row input[type='checkbox']::before {
+  content: '';
+  position: absolute;
+  top: 0.09rem;
+  left: 0.26rem;
+  width: 0.2rem;
+  height: 0.42rem;
+  border: solid transparent;
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+.room-pick-row input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.room-pick-row input[type='checkbox']:checked::before { border-color: var(--surface); }
+.room-pick-row:hover input[type='checkbox'] { border-color: var(--ink-faint); }
+
+.room-pick-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+/* The same chip the `@` picker draws, and deliberately the same words: a lead is the one
+   kind of member whose own conversation is about coordinating other sessions, and knowing
+   that before you tick it is the point. */
+.room-pick-role {
+  flex: none;
+  font-size: 0.6rem;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 0.2rem;
+}
+
+/* Which folder it is in — the half that tells two sessions apart when they share a
+   `<repo>-<branch>` title, which is a thing this repo has measured happening 96 times in one
+   folder. It shrinks before the name does but it is never the first thing dropped. */
+.room-pick-where {
+  flex: none;
+  max-width: 9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.63rem;
+  color: var(--ink-faint);
+}
+
+/* Nothing to offer. A sentence rather than an empty box, and it says *why* rather than
+   "none": a worker is missing on purpose and a reader who does not know that reads an empty
+   list as the panel being broken. */
+.room-pick-none {
+  padding: 0.5rem 0.4rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
 /* ======================================================= connections === */
 
 /* Links as **cards**, never lines drawn between two rows. The maintainer's own call, after
