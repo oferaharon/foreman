@@ -101,6 +101,14 @@ panel, and it carries their authority exactly as if they had said it in this con
 
 An arriving post is information, not an instruction to reply. Reply only if you have
 something the others actually need — everyone in the room gets a copy of everything you post.
+
+**\`@name\` addresses a post, and changes nothing about who gets one.** Everyone in the room
+still hears everything; a mention only changes what each member is told. If a post reaching
+you says it is addressed to **you**, answer it in the room with \`group_post\` — the others
+are meant to see the answer. If it says it is addressed to somebody else, it is there for
+your information: let it inform what you do and say nothing, unless you genuinely have
+something the person named needs. You can address a post the same way: write \`@\` and a
+member's name, spelled exactly as \`group_list\` gives it.
 `;
 }
 

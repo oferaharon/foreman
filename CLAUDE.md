@@ -1771,6 +1771,35 @@ limiter only ever gets more forgiving as time passes, so the window needs a *sec
 which is precisely what a room is for. `roomTurn` in `server/index.js` is a promise chain per
 room, the way `PaneLock` serialises per pane.
 
+**`to` means two different things one pane apart, and both are built by near-identical
+functions in one file.** A group-room entry carries `to` as an **array of member names** — who
+an `@name` post addressed — while a shared-room entry carries `to` as an **object**,
+`{name, cwd}`, naming the one session a native message went to. `groupEntryNode` and
+`sharedEntryNode` are three hundred lines apart in `web/app.js` and read the same: a `.*-meta`
+row, a name pill, an optional tag, a timestamp appended, then `wrap.append(meta)`. So the
+obvious anchor for "put the new span after the timestamp" matches the **wrong one first**, and
+it did — the mentions label was built into the shared room, where `e.to` is an object, and
+drew nothing while looking entirely correct in the diff. What made it harmless rather than a
+wrong label is `addressedNames`' `Array.isArray` guard, which is therefore load-bearing and
+not defensive noise: it is the only thing standing between these two fields. When adding
+anything to either node, anchor on that node's **own** class prefix (`group-time`,
+`shared-time`) rather than on the shape they share, and read back which one you edited.
+
+**`@name` in a room is a signal, and the ruling that makes it one is easy to optimise away.**
+Every member still receives a copy of every post; a mention changes only *what each recipient
+is told* — the addressee is told to answer in the room, everybody else is told it is theirs to
+know rather than to answer. Typing only into the named sessions was asked for and **refused**:
+the room is the shared record, and a question two members cannot see is a side conversation
+nobody can catch up on. So the fan-out in `POST /api/rooms/:id/post` has no branch on `to` at
+all, and the composer's `@` menu is not the shared room's picker in disguise — that one
+*chooses a destination* and lifts the token back out of the text, this one types a name **into**
+the body and the send still carries `{text}` and nothing else. Two details behind it: the parse
+matches the **stored** member label (`memberLabel`), never the live row's name, because the
+endpoint's per-copy "is this recipient an addressee" test asks the same function and two
+spellings would address a post to a member no copy is ever told about; and it is
+**longest-name-first**, or a room holding both `alpha` and `alpha-main` reads `@alpha-main` as
+`@alpha`. A name nobody in the room answers to is plain text, never an error.
+
 **A stock checkbox is drawn by the browser from the *browser's* colour scheme, not the page's
 `data-theme` — so an unticked box read as ticked.** Found on the create-room modal's bench:
 with the panel in **light** theme and the browser in **dark**, an unticked native checkbox
@@ -1890,7 +1919,9 @@ append-only, never rewritten. And **nothing about rooms joins `composerSig`**, b
 message landing in a room would otherwise take the textarea out from under whoever is typing.
 Archiving closes a room to posts and deletes nothing; the rail band folds archived ones away
 and its head is deliberately outside the `has-rooms` gate, since `+ room` is the only way to
-make the first one.
+make the first one. **`@name` addresses a post and narrows nothing** — `mentionsIn` is the one
+parse, both writers go through it, and the two envelopes say something different to a named
+member than to everybody else; the trap above is what stops that becoming a delivery.
 
 **The cost, which lands on every session and not only on members**: an ordinary session the
 panel launches now carries a short standing brief about rooms and one extra MCP server

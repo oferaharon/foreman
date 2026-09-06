@@ -5205,6 +5205,20 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .group-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
 
+/* Who a post named, when it named anybody. The maintainer's condition on every quiet mark in
+   this pane applies here too: muted ink, no accent, no motion — a mention is a signal about
+   what each member was told, not an alarm. It sits in the meta line beside the timestamp
+   rather than in the bubble, so a post that named nobody draws byte-identically to before. */
+.group-to {
+  color: var(--ink-faint);
+  font-size: 0.64rem;
+  font-family: var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 16rem;
+}
+
 .group-bubble {
   border: 1px solid var(--rule);
   border-radius: 8px;
@@ -5310,12 +5324,59 @@ body.row-dragging * { cursor: row-resize !important; }
    above the *textarea* instead of above the words it is about. As a sibling under `.pane` — a
    flex column — it takes the height it needs and the scroller keeps the rest.
 
-   No `position: relative` here, unlike the shared room's: that one carries it to anchor an
-   `@` popover, and a room has one destination and therefore no picker at all. */
+   `position: relative` here for the same reason the shared room's carries it — to anchor the
+   `@name` menu — and note the two popovers are not the same control. The shared room's `@`
+   *chooses who a message is sent to* and lifts the token back out of the text; this one only
+   helps spell a member's name into the body. A room still has one destination: every member,
+   always. */
 .group-composer {
   flex: none;
+  position: relative;
   border-top: 1px solid var(--rule);
   background: var(--surface);
+}
+
+/* The `@name` menu. Anchored to the composer's bottom edge so it opens **upward** over the
+   room rather than pushing the textarea down under whoever is typing into it — the same
+   placement `.shared-picker` uses, and its reason. */
+.group-mention {
+  position: absolute;
+  left: 1.6rem;
+  bottom: calc(100% - 0.4rem);
+  z-index: 5;
+  min-width: 12rem;
+  max-width: 22rem;
+  max-height: 13rem;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.22);
+  padding: 0.2rem;
+}
+
+.app.split .group-mention { left: 1rem; }
+
+.group-mention-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  padding: 0.25rem 0.45rem;
+  border-radius: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-mention-row:hover,
+.group-mention-row.is-on {
+  background: var(--surface-sunk);
+  color: var(--ink);
 }
 
 .group-composer-inner {

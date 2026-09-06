@@ -50,12 +50,16 @@ import {
 import {
   addableSessions,
   addReason,
+  addressedText,
   entryKey,
   handedText,
   handedWaiting,
+  insertMention,
   memberKey,
   memberName,
   memberRow,
+  mentionMatches,
+  mentionQuery,
   roomOrdered,
 } from './rooms-pane.js';
 
@@ -7606,6 +7610,33 @@ function createPane(slot, host) {
       t.title = d.toLocaleString();
       meta.append(t);
     }
+
+    /*
+     * Who this post named, when it named anybody — muted, beside the timestamp, no accent
+     * and no motion, because it is a fact to read rather than something to act on.
+     *
+     * Read off the entry's own `to`, never by re-scanning `e.text` for `@` tokens: the parse
+     * lives in `server/rooms-line.js` and running a second one here is the one thing
+     * `web/rooms-pane.js`'s header refuses. An entry written before mentions existed carries
+     * no `to`, draws no line, and is right not to — the log is append-only and nothing goes
+     * back to fill it in.
+     *
+     * Note the field name is **taken** one pane over: an entry in the machine-wide room
+     * carries its own `to`, an object `{name, cwd}` naming the one session a native message
+     * went to. `addressedNames` answers `[]` for anything that is not an array, which is what
+     * keeps these two nodes — near-identical to read, and both in this file — from drawing
+     * each other's field.
+     */
+    const addressed = addressedText(e);
+    if (addressed) {
+      const el = document.createElement('span');
+      el.className = 'group-to';
+      el.textContent = addressed;
+      el.title =
+        'Addressed with @name. Every member still got a copy — a mention changes what each ' +
+        'one was told, not who was told.';
+      meta.append(el);
+    }
     wrap.append(meta);
 
     const bubble = document.createElement('div');
@@ -7645,8 +7676,15 @@ function createPane(slot, host) {
 
   /**
    * The maintainer's own box — and it is **simpler than the shared room's**, because a room
-   * has one destination. No `@`, no target, no chip, no picker: a line typed here goes to
-   * every member, which is exactly what the standing sentence under it says.
+   * has one destination. No target, no chip, no picker: a line typed here goes to every
+   * member, which is exactly what the standing sentence under it says.
+   *
+   * `@name` does not change that and is not a picker in disguise. The shared room's `@`
+   * *chooses who a message is sent to* and lifts the token out of the text; this one types
+   * a name **into** the body and nothing else — the send still carries `{text}` and nothing
+   * more, the endpoint still fans out to every member, and the menu below is an aid to
+   * spelling a name correctly. A mention changes what each recipient is told, never who is
+   * told: the maintainer's own ruling, and `server/rooms-line.js`'s header carries it.
    *
    * `buildComposer` is still never called, for the reason `renderGroupPane` records: that
    * function reads five session fields that are all null here and one of them
@@ -7670,22 +7708,122 @@ function createPane(slot, host) {
 
     const ta = document.createElement('textarea');
     ta.rows = 2;
-    ta.placeholder = 'Say it once — Enter to send, Shift+Enter for a new line';
+    ta.placeholder = 'Say it once — Enter to send, Shift+Enter for a new line, @ to name someone';
 
     const autoGrow = () => {
       ta.style.height = 'auto';
       ta.style.height = `${Math.min(ta.scrollHeight, 224)}px`;
     };
 
+    /*
+     * The `@name` menu, built once and shown or hidden. Absolutely placed against
+     * `.group-composer`, so it opens *over* the room rather than pushing the textarea down
+     * under whoever is typing into it — the shared room's popover, and its reason.
+     *
+     * Its state is a closure and not a `view.` field on purpose: this composer is torn down
+     * only when the pane stops holding this room (it is deliberately outside `composerSig`
+     * and outside every repaint the socket causes), so there is nothing for a half-typed
+     * `@alp` to survive. A `view.` field would be state that outlives the box it belongs to.
+     */
+    const menu = document.createElement('div');
+    menu.className = 'group-mention';
+    menu.hidden = true;
+    // `mutedAt` is what makes Escape stick: without it the very next keystroke re-detects
+    // the same `@` and reopens the menu the reader just dismissed. `syncSharedPicker`'s scar.
+    let open = null; // {start, names, index} while the menu is up
+    let mutedAt = -1;
+
+    const closeMention = ({ muted = false } = {}) => {
+      if (muted && open) mutedAt = open.start;
+      open = null;
+      menu.hidden = true;
+      menu.replaceChildren();
+    };
+
+    /** Take one name: the half-typed token is replaced and the caret lands after it. */
+    const chooseMention = (name) => {
+      const q = mentionQuery(ta.value, ta.selectionStart ?? 0);
+      if (!q) return void closeMention();
+      const next = insertMention(ta.value, q.start, ta.selectionStart ?? 0, name);
+      ta.value = next.value;
+      ta.selectionStart = next.caret;
+      ta.selectionEnd = next.caret;
+      closeMention();
+      autoGrow();
+      saveGroupDraft();
+      ta.focus();
+    };
+
+    const paintMention = () => {
+      menu.replaceChildren();
+      if (!open) return void (menu.hidden = true);
+      menu.hidden = false;
+      open.names.forEach((name, i) => {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = `group-mention-row${i === open.index ? ' is-on' : ''}`;
+        row.textContent = name;
+        // The name travels on the node, never the index: the room's membership can change
+        // between this paint and the click, and a position would then choose whoever moved
+        // into that slot. `mousedown` is prevented so focus never leaves the textarea.
+        row.dataset.name = name;
+        row.onmousedown = (e) => e.preventDefault();
+        row.onclick = () => chooseMention(name);
+        menu.append(row);
+      });
+    };
+
+    /** Open, refresh or close the menu for whatever the caret is sitting in now. */
+    const syncMention = () => {
+      const q = mentionQuery(ta.value, ta.selectionStart ?? 0);
+      if (!q || q.start === mutedAt) return void closeMention();
+      const names = mentionMatches(q.query, view.groupRoom);
+      // Nothing matches: no menu rather than an empty box saying so. A room's membership is
+      // eight names at most, and a mention naming nobody is plain text rather than an error.
+      if (!names.length) return void closeMention();
+      const moved = !open || open.start !== q.start;
+      open = { start: q.start, names, index: moved ? 0 : Math.min(open.index, names.length - 1) };
+      paintMention();
+    };
+
     ta.value = state.drafts[groupDraftKey(view.groupRoom?.id)] || '';
     ta.oninput = () => {
       autoGrow();
       saveGroupDraft();
+      syncMention();
     };
+    // A click or an arrow key moves the caret without changing the text, so the menu has to
+    // be re-asked there too — otherwise it stays open over a token the caret has left.
+    ta.onclick = syncMention;
+    ta.onblur = () => closeMention();
     ta.onkeydown = (e) => {
+      if (open) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          return void closeMention({ muted: true });
+        }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          const step = e.key === 'ArrowDown' ? 1 : -1;
+          open.index = (open.index + step + open.names.length) % open.names.length;
+          return void paintMention();
+        }
+        // Enter and Tab both take the highlighted name. Enter is stolen from the send on
+        // purpose: a menu is up because a name is half-typed, and sending `@alp` to everybody
+        // is never what that keystroke meant.
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          return void chooseMention(open.names[open.index]);
+        }
+      }
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         sendGroupMessage();
+      }
+      // The caret has moved by the time the browser has handled the key, so the menu is
+      // re-asked after it rather than before.
+      if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') {
+        setTimeout(syncMention, 0);
       }
     };
 
@@ -7713,8 +7851,11 @@ function createPane(slot, host) {
 
     row.append(hint, btn);
     inner.append(err, ta, row);
+    // Beside the inner column rather than in it, so the menu is placed against the composer
+    // and does not sit in the flex flow that lays the textarea out.
+    wrap.append(menu);
 
-    groupComposerEl = { wrap, ta, btn, err, autoGrow };
+    groupComposerEl = { wrap, ta, btn, err, menu, autoGrow, closeMention };
     renderGroupError();
     return wrap;
   }
@@ -7775,6 +7916,9 @@ function createPane(slot, host) {
       if (view.kind === 'group-room' && view.groupRoom?.id === id && groupComposerEl === el) {
         el.ta.value = '';
         el.autoGrow();
+        // The box is empty, so any `@name` menu still up is over a token that no longer
+        // exists. Enter-to-send keeps the focus, so a blur will not do this for us.
+        el.closeMention();
         clearGroupDraft();
       }
     } catch (err) {
