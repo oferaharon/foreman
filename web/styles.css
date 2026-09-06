@@ -5139,7 +5139,50 @@ body.row-dragging * { cursor: row-resize !important; }
 .room-pick-row:hover { background: var(--surface); color: var(--ink); }
 .room-pick-row:focus-within { background: var(--surface); color: var(--ink); }
 
-.room-pick-row input[type='checkbox'] { flex: none; margin: 0; accent-color: var(--accent); }
+/* The tick, drawn by the panel rather than by the browser — `.team-toggle-row`'s call one
+   file-section up, and the same reason with a sharper edge. A stock checkbox is rendered by
+   the UA, which decides its colours from the *browser's* scheme rather than from this page's
+   `data-theme`: measured here with the panel in light theme and the browser in dark, an
+   **unticked** box came back a solid dark square — which in a multi-select reads as ticked.
+   That is the one thing this control may never be ambiguous about, so the UA is taken out of
+   the decision entirely: `appearance: none`, a box and a check of our own, and every colour
+   a token. It also buys back the accent — macOS checks a box in *system* blue, which is not
+   this panel's accent and not any colour in `tokens.css`.
+
+   The focus ring stays, because the row is a `<label>` and the input is still the control:
+   it is what the space bar acts on and what `:focus-within` above lights the row from. */
+.room-pick-row input[type='checkbox'] {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 0.85rem;
+  height: 0.85rem;
+  margin: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  background: var(--surface);
+  cursor: pointer;
+}
+/* The check, in the box's own foreground colour so the one rule below flips both at once.
+   A rotated rectangle rather than a glyph: a `✓` is a font's opinion about size and
+   baseline, and this has to sit in a 13.6px box at whatever the reader's font stack is. */
+.room-pick-row input[type='checkbox']::before {
+  content: '';
+  position: absolute;
+  top: 0.09rem;
+  left: 0.26rem;
+  width: 0.2rem;
+  height: 0.42rem;
+  border: solid transparent;
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+.room-pick-row input[type='checkbox']:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.room-pick-row input[type='checkbox']:checked::before { border-color: var(--surface); }
+.room-pick-row:hover input[type='checkbox'] { border-color: var(--ink-faint); }
 
 .room-pick-name {
   flex: 1;

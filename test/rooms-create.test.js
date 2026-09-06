@@ -642,3 +642,23 @@ test('the modal wears the repo’s own modal chrome and spells no colour of its 
     assert.match(css, new RegExp(`\\.${cls}\\b`), `\`${cls}\` must be styled`);
   }
 });
+
+test('the tick is drawn by the panel, never by the browser', () => {
+  // Measured on the bench, and it is the reason this rule exists rather than a preference:
+  // a stock checkbox is rendered by the UA, which takes its colours from the *browser's*
+  // scheme rather than from this page's `data-theme`. With the panel in light theme and the
+  // browser in dark, an **unticked** box came back a solid dark square — which in a
+  // multi-select reads as ticked. `appearance: none` takes the UA out of the decision.
+  const block = styles.slice(styles.indexOf('the create-room modal'));
+  const end = block.indexOf('/* ======');
+  const css = end > 0 ? block.slice(0, end) : block;
+  const box = css.match(/\.room-pick-row input\[type='checkbox'\]\s*\{[^}]*\}/);
+  assert.ok(box, 'the tick must carry rules of its own');
+  assert.match(box[0], /appearance:\s*none/);
+  assert.match(css, /input\[type='checkbox'\]:checked\s*\{[^}]*var\(--accent\)/);
+  // And it stays a real checkbox: the row is a `<label>`, so the input is what the space
+  // bar acts on and what `:focus-within` lights the row from.
+  assert.match(css, /\.room-pick-row:focus-within/);
+  const rowFn = app.slice(app.indexOf('function openCreateRoom()'));
+  assert.match(rowFn.slice(0, rowFn.indexOf('\n}')), /tick\.type = 'checkbox'/);
+});
