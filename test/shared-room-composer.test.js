@@ -42,11 +42,14 @@ const styles = text('web/styles.css');
  * whole-line `//` comments come out; nothing else does, and every positive assertion still
  * runs against the file as written.
  */
-const code = app
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .split('\n')
-  .filter((l) => !/^\s*(\/\/|\*)/.test(l))
-  .join('\n');
+const strip = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+    .join('\n');
+
+const code = strip(app);
 
 const fn = (name) => {
   const m = app.match(new RegExp(`\\n  (?:async )?function ${name}\\([\\s\\S]*?\\n  \\}`));
@@ -58,7 +61,11 @@ const fn = (name) => {
 
 test('the picker is built from the roster, never from a peer list', () => {
   const rows = fn('sharedParticipants');
-  assert.match(rows, /state\.sessions\.filter/);
+  // The filter itself moved to `web/rooms-create.js` when the create modal needed the same
+  // list — one allow-list, asked twice, rather than two that are free to disagree in the
+  // direction of offering a worker. What is pinned here is unchanged: the **source** is the
+  // roster, and it is the whole roster that goes in.
+  assert.match(rows, /roomParticipants\(state\.sessions\)/);
   // `listPeers` is the local registry directory — the thing `ListAgents` prints, which on
   // this Mac carries dozens of offline Remote Control rows with no pane here at all. It is
   // for resolving a pid the observer met, never for enumerating who can be addressed.
@@ -68,16 +75,20 @@ test('the picker is built from the roster, never from a peer list', () => {
 });
 
 test('the participant test is an allow-list on role, in the server’s own words', () => {
-  const rows = fn('sharedParticipants');
-  assert.match(rows, /s\.team\?\.role == null \|\| s\.team\.role === 'lead'/);
+  // The one spelling on this side of the wire, wherever it lives. It moved out of this
+  // function into `web/rooms-create.js` for the create modal; what may never move is the
+  // shape of it.
+  const pick = strip(text('web/rooms-create.js'));
+  assert.match(pick, /s\.team\?\.role == null \|\| s\.team\.role === 'lead'/);
   // The same shape as `server/observe.js`'s `participant`, which is the other end of the
   // room. Written as "not a worker" it would silently admit the next task kind — kinds have
   // already grown once in this repo (`plan` joined `build`).
   assert.ok(!/role !== 'worker'/.test(code), 'never a negative test on role');
+  assert.ok(!/role !== 'worker'/.test(pick), 'never a negative test on role');
   const observe = text('server/observe.js');
   assert.match(observe, /role == null \|\| row\.team\.role === 'lead'/);
   // A row with no live pane has nothing to type into, and the endpoint would refuse it.
-  assert.match(rows, /s\.interactive/);
+  assert.match(pick, /s\.interactive/);
 });
 
 /* ----------------------------------------------------------- the target --- */

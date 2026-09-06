@@ -26,6 +26,22 @@ import { colourFor } from './session-colour.js';
 // neither. `patchBand` reaches for `document` the way `buildTrustNotice` does, and is
 // driven by the same kind of stub in its own test.
 import { patchBand, bandSig } from './rooms-band.js';
+// The create modal's arithmetic: who may be in a room, in what order they are offered, and
+// what stops the button being pressable. The seventh, for the band's own reason one line up
+// — and `roomParticipants` here is the *only* spelling of the allow-list on this side of
+// the wire: `sharedParticipants` below calls it rather than repeating it.
+import {
+  canCreate,
+  capRefusal,
+  countLine,
+  createReason,
+  MAX_MEMBERS,
+  MAX_ROOM_NAME,
+  orderForHere,
+  roomParticipants,
+  rowFolder,
+  rowName,
+} from './rooms-create.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -2975,12 +2991,273 @@ function openGroupRoom(id) {
 }
 
 /**
- * Make a room — **item 8**, the create modal: a name field and a multi-select over
- * `sharedParticipants()`. The same kind of hook as `openGroupRoom` above, for the same
- * reason.
+ * Make a room — **item 8**: a name, and a tick against every session that is to be in it.
+ *
+ * A modal on its own beat, in module scope, for `openNewSession`'s own two reasons: a room
+ * is not a fact about any one pane (`createPane`'s factory holds everything that is), and
+ * nothing here is joined to `composerSig` or repainted on the roster beat. **Nothing about
+ * rooms may ever join that signature** — it tears the whole composer down when it changes,
+ * and a message landing in a room would take the textarea out from under whoever is typing.
+ * `renderRoomsBand` says it for the band, `renderSharedRow` for the row above it.
+ *
+ * The list is **built once, from the roster as it stands when the box opens**, and is not
+ * repainted afterwards. That is deliberate and it is the same call the settings modal makes:
+ * the roster broadcasts every couple of seconds, and a list that re-sorted itself under a
+ * cursor — or worse, removed the row about to be ticked because a session went quiet — would
+ * lose a choice that had already been made. What a stale row costs is one 404 with the
+ * server's own sentence on it, which is exactly the trade `POST /api/rooms` is written for:
+ * *"it may have exited"*.
+ *
+ * **Genuinely new UI, and deliberately not the shared room's `@` picker.** That is a
+ * single-target popover over a textarea; this is a multi-select over the same *source*.
+ * `sharedParticipants` and this both ask `roomParticipants` — one allow-list, asked twice —
+ * and the widget is new because the question is.
+ *
+ * **Here first, then everywhere else, and it is a sort.** The sessions in the folder you are
+ * looking at come first, because that is what a room usually is; a session in another project
+ * is one scroll down rather than unreachable. Filtering would make a cross-project room
+ * impossible to build from the panel at all, which is half of what rooms are for.
+ *
+ * **The cap is the server's.** `GET /api/rooms` answers `maxMembers` and that answer wins the
+ * moment it lands; `MAX_MEMBERS` is only what the first frame draws with. The client refuses
+ * the tick past it with its own sentence *and* shows the server's 400 verbatim if one gets
+ * through — two rungs, because a refusal a person can see before they press is worth more
+ * than one they see after, and neither is allowed to be the only one.
  */
 function openCreateRoom() {
-  console.info('[foreman] the create-room modal is not built yet (item 8)');
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+
+  const box = document.createElement('div');
+  box.className = 'modal is-room';
+
+  const h = document.createElement('h2');
+  h.textContent = 'New room';
+  box.append(h);
+
+  const nameCap = document.createElement('label');
+  nameCap.className = 'field-cap';
+  nameCap.textContent = 'Name';
+  const name = document.createElement('input');
+  name.type = 'text';
+  name.placeholder = 'e.g. the checkout flow';
+  // A courtesy, not the authority: `server/rooms.js` refuses an over-long name rather than
+  // shortening it, and that refusal is what gets shown if one arrives by paste or by a
+  // browser that ignores this.
+  name.maxLength = MAX_ROOM_NAME;
+  nameCap.append(name);
+  box.append(nameCap);
+
+  const hint = document.createElement('p');
+  hint.className = 'field-hint';
+  hint.textContent =
+    'What the room is called, in the rail and in the line every member’s terminal receives.';
+  box.append(hint);
+
+  /* ------------------------------------------------------------ the list --- */
+
+  const listCap = document.createElement('div');
+  listCap.className = 'room-pick-cap';
+  const listTitle = document.createElement('span');
+  listTitle.className = 'room-pick-title';
+  listTitle.textContent = 'Who is in it';
+  const tally = document.createElement('span');
+  tally.className = 'room-pick-tally';
+  listCap.append(listTitle, tally);
+  box.append(listCap);
+
+  const list = document.createElement('div');
+  list.className = 'room-pick-list';
+  box.append(list);
+
+  const note = document.createElement('p');
+  note.className = 'modal-note';
+  box.append(note);
+
+  const row = document.createElement('div');
+  row.className = 'modal-row';
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost-btn';
+  cancel.textContent = 'cancel';
+  const create = document.createElement('button');
+  create.className = 'ghost-btn primary';
+  create.textContent = 'Make the room';
+  row.append(cancel, create);
+  box.append(row);
+
+  /* ------------------------------------------------------------- state --- */
+
+  // The chosen sessions, **by id and in the order they were ticked**, which is the order
+  // `POST /api/rooms` will receive them in and therefore the order the room lists its
+  // members in. A `Set` keeps both facts in one place; the ids are what travel, never a
+  // row's position — a roster frame between the paint and the press would otherwise choose
+  // whoever moved into that slot. (`renderSharedPicker` records the same reasoning.)
+  const picked = new Set();
+  let maxMembers = MAX_MEMBERS;
+
+  // The folder in front of you: whichever session is open in a pane. Read once, with the
+  // list, for the reason the list is read once. Nothing open is `null`, and then there is no
+  // "here" and the roster's own order stands.
+  const openId = panes.map((p) => p.selected()).find(Boolean) || null;
+  const here = rowFolder(state.sessions.find((s) => s.id === openId));
+
+  const rows = orderForHere(roomParticipants(state.sessions), here);
+
+  const say = (text, cls = '') => {
+    note.className = `modal-note ${cls}`;
+    note.textContent = text;
+  };
+
+  /** The tally, the button and the standing line, from one place — so the Enter key and the
+   *  button can never disagree about whether the press is allowed. */
+  const sync = () => {
+    tally.textContent = countLine(picked.size, maxMembers);
+    tally.classList.toggle('is-full', picked.size >= maxMembers);
+    create.disabled = !canCreate(name.value, picked.size);
+  };
+
+  if (!rows.length) {
+    const none = document.createElement('p');
+    none.className = 'room-pick-none';
+    none.textContent =
+      'No session on this Mac can be put in a room. Workers are not members — a worker’s ' +
+      'channel is its lead — and a session with no live pane has nothing to type into.';
+    list.append(none);
+  }
+
+  for (const s of rows) {
+    const item = document.createElement('label');
+    item.className = 'room-pick-row';
+
+    const tick = document.createElement('input');
+    tick.type = 'checkbox';
+    // The id travels on the node the way it travels in the request — never the row's index.
+    tick.dataset.id = s.id;
+    item.append(tick);
+
+    const dot = document.createElement('span');
+    dot.className = `dot ${s.status}`;
+    item.append(dot);
+
+    const label = document.createElement('span');
+    label.className = 'room-pick-name';
+    label.textContent = rowName(s);
+    item.append(label);
+
+    if (s.isLead) {
+      const role = document.createElement('span');
+      role.className = 'room-pick-role';
+      role.textContent = 'lead';
+      item.append(role);
+    }
+
+    const where = document.createElement('span');
+    where.className = 'room-pick-where';
+    where.textContent = s.project || '';
+    where.title = s.paneCwd || s.cwd || '';
+    item.append(where);
+
+    tick.onchange = () => {
+      if (tick.checked) {
+        // Refused before the server has to refuse it. The tick goes back off rather than
+        // being left on over a sentence that says it did not count — a control that lies
+        // about its own state is worse than one that says no.
+        if (picked.size >= maxMembers) {
+          tick.checked = false;
+          say(capRefusal(maxMembers), 'err');
+          return;
+        }
+        picked.add(s.id);
+      } else {
+        picked.delete(s.id);
+      }
+      // Whatever the last refusal was about is answered or moot the moment the list moves.
+      if (note.textContent) say('');
+      sync();
+    };
+
+    list.append(item);
+  }
+
+  name.oninput = () => {
+    if (note.textContent) say('');
+    sync();
+  };
+
+  sync();
+
+  /* ------------------------------------------------------------- close --- */
+
+  const close = () => {
+    back.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+  cancel.onclick = close;
+  back.onmousedown = (e) => {
+    if (e.target === back) close();
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  // Enter in the name field is a shortcut for the button and is held to the button's own
+  // rule — `canCreate`, the same function — so it cannot make a room the press would have
+  // refused. With nothing ticked it says why instead of submitting, which is the one
+  // keystroke a person is most likely to try on a card whose second half they have not
+  // noticed yet.
+  name.onkeydown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    if (canCreate(name.value, picked.size)) return void submit();
+    say(createReason(name.value, picked.size), 'err');
+  };
+
+  /* ------------------------------------------------------------ the press --- */
+
+  async function submit() {
+    create.disabled = true;
+    say('Making the room…');
+    try {
+      const made = await postJSON('/api/rooms', {
+        name: name.value.trim(),
+        members: [...picked],
+      });
+      close();
+      // Items 9/10's hook. The room exists on disk and in the next roster frame either way;
+      // opening it is what makes the press feel finished.
+      if (made.room?.id) openGroupRoom(made.room.id);
+    } catch (err) {
+      // The server's own sentence, **verbatim**. Every one of them names the thing that is
+      // wrong — the character, the count, the session that has exited — and a paraphrase
+      // here would be the panel's guess at a refusal it did not make.
+      say(err.message, 'err');
+      sync();
+    }
+  }
+  create.onclick = submit;
+
+  back.append(box);
+  document.body.append(back);
+  name.focus();
+
+  // The cap, from the server that enforces it. Asked after the box is on screen rather than
+  // before, so the list is never held behind a round trip; the constant above is what the
+  // first frame draws with and what a failed call keeps. A cap that came back *lower* than
+  // what has already been ticked is not unpicked — nothing is taken away from a reader
+  // mid-choice — and the press is then refused by the 400, verbatim, which is the rung that
+  // exists for exactly this.
+  fetch('/api/rooms')
+    .then((r) => (r.ok ? r.json() : null))
+    .then((data) => {
+      const cap = Number(data?.maxMembers);
+      if (!cap || cap === maxMembers || !back.isConnected) return;
+      maxMembers = cap;
+      sync();
+    })
+    .catch(() => {
+      /* the fallback stands, and the server refuses anything past its own cap anyway */
+    });
 }
 
 /**
@@ -5698,14 +5975,20 @@ function createPane(slot, host) {
    * never have made reachable.
    */
   function sharedParticipants() {
-    return state.sessions.filter(
-      (s) => s.interactive && (s.team?.role == null || s.team.role === 'lead'),
-    );
+    // Delegated to `web/rooms-create.js` rather than spelled again: the create modal asks
+    // exactly this question one band up, and two spellings of "who is addressable" is the
+    // `isLeadName` lesson in new clothes — the disagreement would be in the direction of
+    // offering a worker. The filter's own reasoning moved with it; the paragraph above is
+    // why this function exists at all.
+    return roomParticipants(state.sessions);
   }
 
   /** What the picker and the chip call a session — the rail's own answer, so one row is
-   *  named the same thing in both places. */
-  const sharedTargetName = (s) => s.label || s.title || s.project || s.id;
+   *  named the same thing in both places. `rowName` is that answer, and it is the same one
+   *  `server/rooms-line.js` writes into a member record, so a session is called one thing
+   *  in the chip, in the create modal, on a room's chips and in the line its terminal
+   *  receives. */
+  const sharedTargetName = rowName;
 
   /** One roster row, as a target: what the chip says and what the request will carry. */
   const sharedTargetOf = (s) => ({
