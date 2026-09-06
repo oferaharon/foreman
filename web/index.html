@@ -100,6 +100,49 @@
         </button>
 
         <!--
+          The rooms band: one row per open room, and the archived ones folded away.
+
+          A **sibling** of `.rail-list`, never a block inside it — the third band in the
+          rail's own flex column, after the shared-room row above and before the connections
+          below. The reason is the one both of those already give in their own words: an open
+          group's tint in that list is tiled from three full-width rows *in that flow*, so
+          anything joining it has to answer to it, and `.folder-label.in-group`'s sticky
+          `top` is a hand-measured offset against the row heights in there. Out here the band
+          is one more item in the column and neither of those has anything to know about it.
+          It carries no vertical margin for the same reason.
+
+          On screen only while at least one room exists — `.app.has-rooms`, exactly the
+          show/hide trade `.app.has-links` makes for the connections and `.app.split .main`
+          makes for the second pane. That is the opposite call to the shared-room row above,
+          which is persistent, and the difference is real: there is exactly one shared room
+          and it always has something to say, while a panel with no rooms in it should be the
+          panel it was before this feature.
+
+          **The gap that leaves, said plainly rather than discovered later:** `+ room` is in
+          this band's head, so while there are no rooms it is not on screen either, and the
+          *first* room cannot be made from here. The plan asks for both halves and they do
+          not compose; this is built as specified and the gap is escalated rather than
+          quietly closed, because which way it closes is a design call. Two ways it can:
+          drop `.rooms-head` out of the `.app.has-rooms` gate so the head and its control are
+          always here and only the list comes and goes, or give the create control a second
+          home outside this band. Either is a one-rule change from here — the head is already
+          a sibling of the list rather than a wrapper around it, for exactly that reason.
+
+          The rows are filled by `renderRoomsBand` from the roster frame's `rooms` array, and
+          they are **patched in place, never rebuilt**: `renderSharedRow`'s reason one band
+          up, `connSig`'s reason one band down. The log itself never rides that frame.
+        -->
+        <div class="rail-rooms" id="railRooms">
+          <div class="rooms-head">
+            <span class="rooms-title">rooms</span>
+            <button class="rooms-add" id="roomsAdd" type="button" title="Make a room and choose which sessions are in it">
+              + room
+            </button>
+          </div>
+          <div class="rooms-list" id="roomsList"></div>
+        </div>
+
+        <!--
           The connections: one card per open link, at the bottom of the rail under the
           session list. It was a column of its own for one day; the maintainer moved it
           here — same content, new home.

@@ -19,6 +19,13 @@ import { windowsOf, staleness, formatReset } from './quota.js';
 // stable across restarts and provable in a test, and a hash inlined into a render function
 // is neither.
 import { colourFor } from './session-colour.js';
+// The rail's rooms band: which rooms it draws, in what order, what its signature is made of
+// and how a row is patched rather than rebuilt. The sixth shared pure module in `web/`, for
+// the reason each of the five above it gives — the shape of the list and the punctuation of
+// the signature are things a node test can hold, and a render function inlined here is
+// neither. `patchBand` reaches for `document` the way `buildTrustNotice` does, and is
+// driven by the same kind of stub in its own test.
+import { patchBand, bandSig } from './rooms-band.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -63,6 +70,26 @@ const state = {
   // this log was answered by the session it was sent to before the panel ever saw it. The
   // count says the room moved, which is all it may say.
   sharedRoom: { unseen: 0, lastAt: null },
+  // Every group room on this machine — open and archived both — exactly as
+  // `GroupRoomStore#list` hands them over: `{id, name, members, memberCount, unseen, lastAt,
+  // lastFrom, archivedAt}` and nothing else. A sibling of `sessions` on the roster frame like
+  // the groups, the links, the rate limits and the shared room, and computed from memory at
+  // the other end for the sharpest version of that reason: a file read in `rosterFrame` is a
+  // file read every two seconds, forever.
+  //
+  // Archived ones ride along because the band folds them into `archived (N)` and needs the
+  // count. The entries never do — those arrive on `subscribe-group-room` and one at a time
+  // after that, the way the shared room's do.
+  //
+  // An empty array is the ordinary answer: most of the time there are no rooms. That is what
+  // makes `'rooms' in msg` the test and a truth test the bug — see the roster handler.
+  rooms: [],
+  // Whether the band's `archived (N)` fold is shut. This browser's, not the server's, and
+  // deliberately: a group's collapse is a fact about your filing and should follow you
+  // between windows, while this is a fact about the window you are looking at — the same
+  // call `foreman.flatRail` makes one field down. Shut to begin with, because an archived
+  // room is by definition the one you stopped needing.
+  roomsArchivedShut: !loadFlag('foreman.roomsArchivedOpen'),
   // Shelving off: one recency-ordered list instead of groups and folder headings. Kept in
   // this browser rather than on the server, unlike a group's collapse state — that is a
   // fact about your filing and should follow you between windows, while this is a fact
@@ -209,6 +236,9 @@ const el = {
   railGrip: document.getElementById('railGrip'),
   railShared: document.getElementById('railShared'),
   railSharedUnseen: document.getElementById('railSharedUnseen'),
+  railRooms: document.getElementById('railRooms'),
+  roomsAdd: document.getElementById('roomsAdd'),
+  roomsList: document.getElementById('roomsList'),
   connCol: document.getElementById('connCol'),
   connGrip: document.getElementById('connGrip'),
   connList: document.getElementById('connList'),
@@ -953,6 +983,13 @@ function handle(msg) {
     // whatever was on screen last. Keyed on presence so a frame from a panel that predates
     // the field leaves what we have alone rather than blanking it.
     if ('sharedRoom' in msg) state.sharedRoom = msg.sharedRoom || { unseen: 0, lastAt: null };
+    // `in`, not a truth test, for `sharedRoom`'s reason one line up and then the sharpest
+    // version of it: **an empty array is the ordinary answer here**, because most of the
+    // time there are no rooms at all, and a truth test would read that as "the frame did not
+    // mention it" and pin whatever the band last drew — including rows for rooms that have
+    // since been deleted. `rateLimits` learned this the expensive way. `Array.isArray` inside
+    // the guard so a malformed frame draws an empty band rather than throwing in `renderRail`.
+    if ('rooms' in msg) state.rooms = Array.isArray(msg.rooms) ? msg.rooms : [];
     // Before the render, so a notification is never held up behind a rail repaint — and
     // before `adopt`, which can change what is on screen but never what happened.
     notifyRoster(msg.sessions);
@@ -2858,6 +2895,94 @@ function renderSharedRow() {
 }
 
 /**
+ * What the rooms band last drew, so a roster beat that changed nothing repaints nothing.
+ *
+ * `connSig`'s reason, and joined the same way: `|` inside a row and `~` between rows, real
+ * punctuation rather than what reads in an editor as an empty string. The string itself is
+ * built in `web/rooms-band.js` so a test can hold what is in it — a field the face reads and
+ * the signature does not is a band that stops repainting on a real change.
+ */
+let roomsSig = '';
+
+/**
+ * The rail's rooms band: one row per open room, the archived ones folded away, and the
+ * control that makes a new one.
+ *
+ * Called from the end of `renderRail`, which is every place the panel already redraws for —
+ * the roster beat, a pane opening, a group folding — exactly as `renderConnections` is one
+ * band down.
+ *
+ * It is deliberately **not** on `composerSig` and nothing about rooms may ever join it: that
+ * signature tears the whole composer down when it changes, and a message landing in a room
+ * would take the textarea out from under whoever is typing. `renderSharedRow` says it for
+ * the band above, the merge block says it one pane over, and it is pinned by a test.
+ *
+ * **Patched, never rebuilt.** `patchBand` reuses every row node it already has, so the row a
+ * cursor is on its way to press is the same node it was two frames ago. The signature above
+ * is the cheaper half of the same guard, not a substitute for it.
+ */
+function renderRoomsBand() {
+  const rooms = state.rooms;
+
+  // The band exists only while there is something in it — the same show/hide trade
+  // `.app.has-links` makes for the connections and `.app.split .main` makes for the second
+  // pane, and what keeps a panel with no rooms the panel it was before this feature. The
+  // class is on `.app` rather than on the rail because it is one fact about the whole
+  // window. See the markup for the gap this leaves around `+ room`, which is escalated
+  // rather than closed here.
+  el.app.classList.toggle('has-rooms', rooms.length > 0);
+  if (!el.roomsList) return;
+
+  // Which rooms are on screen right now. `groupRoomId` is the pane-side hook items 9/10
+  // fill in; until then no pane answers it, the set is empty, and nothing wears the open
+  // tint — which is the correct drawing of a panel that cannot yet open a room.
+  const openIds = panes.map((p) => p.groupRoomId?.()).filter(Boolean);
+
+  const archivedCollapsed = state.roomsArchivedShut;
+  const sig = bandSig(rooms, { openIds, archivedCollapsed });
+  if (sig === roomsSig) return;
+  roomsSig = sig;
+
+  patchBand(el.roomsList, rooms, {
+    openIds,
+    archivedCollapsed,
+    onOpen: openGroupRoom,
+    onToggleArchived: toggleArchivedRooms,
+  });
+}
+
+/** The archived fold, opened or shut. Kept in this browser — see `state.roomsArchivedShut`. */
+function toggleArchivedRooms() {
+  state.roomsArchivedShut = !state.roomsArchivedShut;
+  try {
+    localStorage.setItem('foreman.roomsArchivedOpen', state.roomsArchivedShut ? '0' : '1');
+  } catch {
+    /* quota or private mode — this window still behaves, it just won't survive a reload */
+  }
+  renderRoomsBand();
+}
+
+/**
+ * Open a room in a pane — **items 9 and 10**, dispatched as one worker.
+ *
+ * A named hook and nothing else, so the band's rows have somewhere real to point today and
+ * that worker has one place to change. It says so rather than failing silently, because a
+ * row that swallowed its own click would read as a broken band rather than an unbuilt one.
+ */
+function openGroupRoom(id) {
+  console.info(`[foreman] the room pane is not built yet (item 9/10) — room ${id}`);
+}
+
+/**
+ * Make a room — **item 8**, the create modal: a name field and a multi-select over
+ * `sharedParticipants()`. The same kind of hook as `openGroupRoom` above, for the same
+ * reason.
+ */
+function openCreateRoom() {
+  console.info('[foreman] the create-room modal is not built yet (item 8)');
+}
+
+/**
  * The connections band at the foot of the rail: one card per open link, and nothing at all
  * when there are none.
  *
@@ -3194,6 +3319,7 @@ function renderRail() {
     for (const s of rest) frag.append(...rowsFor(s));
     el.railList.replaceChildren(frag);
     renderSharedRow();
+    renderRoomsBand();
     renderConnections();
     return;
   }
@@ -3243,6 +3369,11 @@ function renderRail() {
 
   el.railList.replaceChildren(frag);
   renderSharedRow();
+  // A sibling band drawn from the same frame on the same beat, for the reason the line
+  // below gives about the connections: every place that already redraws the rail is a place
+  // this could otherwise go stale. It holds its own signature, so a beat that changed
+  // nothing costs nothing.
+  renderRoomsBand();
   // The column is a sibling of the rail and is drawn from the same frame, so it is drawn on
   // the same beat: every place that already redraws the rail — the roster, a pane opening, a
   // group folding — is a place the column could otherwise go stale. It holds its own
@@ -12643,6 +12774,11 @@ el.snapshot.onclick = openSnapshot;
 // The one way into the shared room. Bound once, at boot, because the row is markup rather
 // than something a repaint rebuilds — see `renderSharedRow` for why it is patched in place.
 if (el.railShared) el.railShared.onclick = openSharedRoom;
+// The rooms band's own control, bound once at boot for the same reason: the head is markup
+// rather than something a repaint rebuilds. The rows inside the list are the other way round
+// — they are built on demand and their handlers are re-bound on every patch, because a
+// handler closing over a stale room record is exactly what reuse would otherwise invite.
+if (el.roomsAdd) el.roomsAdd.onclick = openCreateRoom;
 
 function paintFlatToggle() {
   el.flatRail.setAttribute('aria-pressed', String(state.flatRail));

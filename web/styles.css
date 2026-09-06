@@ -4868,6 +4868,186 @@ body.row-dragging * { cursor: row-resize !important; }
   padding: 0 0.35rem;
 }
 
+/* ============================================================= rooms === */
+
+/* The rooms band: one row per open room, the archived ones folded away, and the control
+   that makes a new one.
+
+   A **sibling** of `.rail-list`, never a block inside it, for the reason the shared row
+   above and the connections below both give in their own words: an open group's tint in
+   that list is tiled from three full-width rows *in that flow*, and `.folder-label.in-group`
+   carries a hand-measured sticky offset against the row heights in there. Out here this is
+   one more item in the rail's flex column. **No vertical margin**, deliberately — a gap
+   anywhere in that flow is what cuts a tint apart, and the band's own top rule is what
+   separates it from the row above.
+
+   `flex: none` and content height, so `.rail-list` above keeps `flex: 1` and takes what is
+   left. The list inside has its own ceiling rather than the band having one: a person with
+   nine rooms should scroll the rooms, not lose the sessions.
+
+   Hidden until there is a room — `.app.has-rooms`, the same trade `.app.has-links` makes
+   one band down. The class goes on `.app` rather than on the rail because it is one fact
+   about the whole window, exactly as `has-links` is. */
+.rail-rooms {
+  display: none;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.app.has-rooms .rail-rooms { display: flex; }
+
+/* The rail's own headings scale, not the lead aside's — `.conn-head`'s call, and the same
+   numbers, because two bands in one column reading at two sizes is the thing a person
+   notices without being able to say what is wrong. The `+ room` control sits on the same
+   line rather than under it: the head is one row tall and this band is meant to cost the
+   rail as little as it can. */
+.rooms-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.7rem 1.1rem 0.4rem;
+}
+
+.rooms-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Quiet by default and only the accent on hover: this is the third control in a 20rem
+   column that already has `+ new`, and a second bright button beside the session list would
+   argue with it. It never shrinks — `flex: none` — so a long band title ellipsises and the
+   way in stays whole. */
+.rooms-add {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+  padding: 0 0.15rem;
+  border-radius: 3px;
+}
+
+.rooms-add:hover { color: var(--accent); background: var(--surface-sunk); }
+
+.rooms-list {
+  flex: none;
+  min-height: 0;
+  max-height: 11rem;
+  overflow-y: auto;
+  padding: 0 0.35rem 0.55rem;
+  display: flex;
+  flex-direction: column;
+}
+
+/* One room. The same row grammar as `.rail-shared` above — a mark, a name that ellipsises,
+   and numbers that do not — because they are two ways into the same kind of thing and a
+   reader should not have to learn a second shape three rows down. */
+.room-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.32rem 0.75rem;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+  text-align: left;
+}
+
+.room-row:hover { background: var(--surface-sunk); color: var(--ink); }
+
+/* The room whose pane is open. `--row-open` rather than a tint of its own, borrowed from
+   the rail's selected row exactly as `.rail-shared.is-open` borrows it: a second colour a
+   couple of points off the surface is what made the rail's own open row invisible before
+   that token existed, and this row has to read over three backgrounds too. */
+.room-row.is-open {
+  background: var(--row-open);
+  color: var(--ink);
+}
+
+/* Archived, and read-only. Dimmer rather than struck through or hidden: the log is still
+   worth opening, it is only that nothing more is typed into anyone from it. */
+.room-row.is-archived { color: var(--ink-faint); }
+
+.room-mark { flex: none; }
+
+/* The rail is 20rem, so this is the half that gives. Every other span in the row is
+   `flex: none` — a member count that shrank to `…` would be a number that lies. */
+.room-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* How many sessions are in it. Quiet, and always drawn — unlike the unseen count beside it,
+   this is a fact about the room rather than a claim on anybody's attention, and a room with
+   nobody in it is exactly the one worth being able to see. */
+.room-count {
+  flex: none;
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+}
+
+/* What has arrived since anybody last opened it. Zero draws nothing — a `· 0` is furniture,
+   the same reason an empty group heading is not drawn — and it is the shared row's quiet
+   outline rather than the connections' accent pill, for that row's reason: a room is a log,
+   not an inbox. Every message in it was typed into its members' terminals before the panel
+   saw it, so a count that asked for attention would be asking for something nobody owes. */
+.room-unseen {
+  flex: none;
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0 0.35rem;
+}
+
+/* The archived fold: the rail's group heading in miniature, down to the caret, because it
+   does the one thing that heading does. A sibling of the rows it opens rather than a box
+   around them — see `bandEntries` — so nothing has to be taken apart to be patched. */
+.room-fold {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  padding: 0.3rem 0.75rem;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+  cursor: pointer;
+  text-align: left;
+}
+
+.room-fold:hover { background: var(--surface-sunk); color: var(--ink-muted); }
+
+.room-fold-caret { flex: none; width: 0.7rem; }
+.room-fold-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.room-fold-count { flex: none; }
+
 /* ======================================================= connections === */
 
 /* Links as **cards**, never lines drawn between two rows. The maintainer's own call, after
