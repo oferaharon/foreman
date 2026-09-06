@@ -4,16 +4,21 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { resolveMember } from '../server/rooms-line.js';
+import { mentionsIn, resolveMember } from '../server/rooms-line.js';
 import {
   addableSessions,
   addReason,
+  addressedNames,
+  addressedText,
   entryKey,
   handedText,
   handedWaiting,
+  insertMention,
   memberKey,
   memberName,
   memberRow,
+  mentionMatches,
+  mentionQuery,
   roomOrdered,
 } from '../web/rooms-pane.js';
 
@@ -499,9 +504,16 @@ test('the composer never goes through `buildComposer`', () => {
   assert.match(fn('renderMain'), /if \(view\.kind === 'group-room'\) return renderGroupPane\(\);/);
 });
 
-test('the composer has one destination — no `@`, no target, no chip, no picker', () => {
+test('the composer has one destination — no target, no chip, no picker', () => {
+  /*
+   * `@name` arrived after this test did, and it did **not** make the composer a picker. The
+   * shared room's `@` chooses who a message is *sent* to and lifts the token back out of the
+   * text; this one types a name into the body and changes nothing about delivery. So the
+   * things forbidden here are the ones that would mean a second destination, and the menu is
+   * not among them — the send below is what actually pins it.
+   */
   const build = strip(fn('buildGroupComposer'));
-  for (const gone of ['sharedPick', 'groupTarget', 'picker', '@session']) {
+  for (const gone of ['sharedPick', 'groupTarget', 'sharedTarget', 'chooseSharedTarget']) {
     assert.ok(!build.includes(gone), `a room has one destination, so there is no ${gone}`);
   }
   const send = strip(fn('sendGroupMessage'));
@@ -763,4 +775,160 @@ test('a member with no live pane draws a hollow dot rather than a colour', () =>
   const rule = styles.match(/\n\.dot\.gone \{[\s\S]*?\}/)[0];
   assert.match(rule, /background: transparent;/);
   assert.match(rule, /border: 1px solid/);
+});
+
+/* ------------------------------------------------------------ mentions --- */
+
+/*
+ * `@name` on this side is an affordance and a label, and nothing here decides who a post is
+ * addressed to — `mentionsIn` in `server/rooms-line.js` is the one parse, and the entry's own
+ * `to` is what a bubble reads. These tests hold that split: the two orders are driven against
+ * each other, and the render is driven off the field rather than off the text.
+ */
+
+test('who a post named is read off the entry, never by re-reading its text', () => {
+  const named = entry({ text: '@beta-main is the total off?', to: ['beta-main'] });
+  assert.deepEqual(addressedNames(named), ['beta-main']);
+  assert.equal(addressedText(named), 'to beta-main');
+  assert.equal(addressedText(entry({ to: ['beta-main', 'gamma-master'] })), 'to beta-main and gamma-master');
+  assert.equal(
+    addressedText(entry({ to: ['alpha-main', 'beta-main', 'gamma-master'] })),
+    'to alpha-main, beta-main and gamma-master',
+  );
+
+  // An entry written before mentions existed carries no `to` and draws no line — the log is
+  // append-only and nothing goes back to fill one in. A body full of `@` changes nothing.
+  assert.equal(addressedText(entry({ text: '@beta-main and @gamma-master' })), null);
+  assert.equal(addressedText(entry({ to: [] })), null);
+  assert.equal(addressedText(null), null);
+});
+
+test('the label is drawn off `to` in the meta line, quiet, and never from the body', () => {
+  const node = fn('groupEntryNode');
+  assert.match(node, /const addressed = addressedText\(e\);/);
+  assert.match(node, /el\.className = 'group-to';/);
+  assert.match(node, /meta\.append\(el\);/, 'the label belongs beside the timestamp, not in the bubble');
+  // The one thing this side must never do: parse the text a second time.
+  assert.ok(!/mentionsIn/.test(node), 'the pane re-parses the body for mentions');
+  assert.ok(!/e\.text\.match|split\('@'\)/.test(node));
+
+  // Quiet, on the maintainer's standing condition for every mark in this pane: muted ink,
+  // no accent, no motion.
+  const rule = styles.match(/\.group-to \{[^}]*\}/);
+  assert.ok(rule, '`.group-to` must be styled');
+  assert.match(rule[0], /color: var\(--ink-faint\)/);
+  assert.ok(!/--accent/.test(rule[0]), 'the addressed label must not take the accent');
+  assert.ok(!/animation|transition/.test(rule[0]), 'the addressed label must not move');
+});
+
+test('the `@` token under the caret is found the same way the server finds a mention', () => {
+  assert.deepEqual(mentionQuery('hey @be', 7), { start: 4, query: 'be' });
+  assert.deepEqual(mentionQuery('@', 1), { start: 0, query: '' });
+  assert.deepEqual(mentionQuery('line one\n@be', 12), { start: 9, query: 'be' });
+  // A space between the caret and the nearest `@` means there is no token here.
+  assert.equal(mentionQuery('hey @be more', 12), null);
+  assert.equal(mentionQuery('nothing at all', 14), null);
+  // The server's own boundary rule, mirrored for opening a menu and nothing else: an address
+  // is not a mention, and neither is a doubled `@`.
+  assert.equal(mentionQuery('me@be', 5), null);
+  assert.equal(mentionQuery('@@be', 4), null);
+  // Total, and clamped: a caret past the end must not read off the string.
+  assert.equal(mentionQuery(null, 3), null);
+  assert.deepEqual(mentionQuery('@be', 99), { start: 0, query: 'be' });
+});
+
+test('the two boundary rules agree — a menu never offers a name the parse would not match', () => {
+  /*
+   * The one rule this side shares with `server/rooms-line.js`, driven against it rather than
+   * asserted about: for every place a menu would open, completing it has to produce a body
+   * the server reads as that mention. A disagreement here is a suggestion that inserts a
+   * token nobody is addressed by.
+   */
+  const room = { members: [member(), member({ name: 'beta-main' }), member({ name: 'gamma-master' })] };
+  for (const [value, caret] of [
+    ['@', 1],
+    ['@be', 3],
+    ['tell @gam', 9],
+    ['one\n@alp', 8],
+    ['(@bet', 5],
+  ]) {
+    const q = mentionQuery(value, caret);
+    assert.ok(q, `no token found in ${JSON.stringify(value)}`);
+    const [name] = mentionMatches(q.query, room);
+    assert.ok(name, `nothing offered for ${JSON.stringify(q.query)}`);
+    const { value: next } = insertMention(value, q.start, caret, name);
+    assert.deepEqual(mentionsIn(next, room.members), [name], `the server does not read ${JSON.stringify(next)}`);
+  }
+});
+
+test('the menu offers the room’s own members, prefix-matched, and never an unmentionable one', () => {
+  const room = { members: [member(), member({ name: 'beta-main' }), member({ name: 'gamma-master' })] };
+  assert.deepEqual(mentionMatches('', room), ['alpha-main', 'beta-main', 'gamma-master']);
+  assert.deepEqual(mentionMatches('be', room), ['beta-main']);
+  assert.deepEqual(mentionMatches('BE', room), ['beta-main'], 'the menu is forgiving; the parse is not');
+  assert.deepEqual(mentionMatches('zz', room), []);
+  assert.deepEqual(mentionMatches('', null), []);
+  assert.deepEqual(mentionMatches('', room, 2), ['alpha-main', 'beta-main']);
+
+  // `memberName` falls back to the words `a session` for a member holding no id at all —
+  // a label for a chip, and a token the parse could never match. The menu must not offer it.
+  const nameless = { members: [{ addedAt: 1 }] };
+  assert.equal(memberName(nameless.members[0]), 'a session');
+  assert.deepEqual(mentionMatches('', nameless), []);
+});
+
+test('choosing a name replaces the half-typed token and leaves one space behind it', () => {
+  assert.deepEqual(insertMention('hey @be', 4, 7, 'beta-main'), {
+    value: 'hey @beta-main ',
+    caret: 15,
+  });
+  // Chosen in the middle of a line already written: the space that was there is swallowed
+  // rather than doubled, and the caret lands where the sentence continues.
+  assert.deepEqual(insertMention('hey @be rest', 4, 7, 'beta-main'), {
+    value: 'hey @beta-main rest',
+    caret: 15,
+  });
+  assert.deepEqual(insertMention('@', 0, 1, 'alpha-main').value, '@alpha-main ');
+});
+
+test('the menu inserts into the body and never sets a destination', () => {
+  /*
+   * The whole of why this is not the shared room's picker. That one lifts the `@…` token back
+   * out of the text and puts a chip up — the message then goes to one session. This one puts
+   * the name *in*, the send still carries `{text}` and nothing else, and the endpoint still
+   * fans out to every member. A mention changes what each member is told, never who is told.
+   */
+  const build = fn('buildGroupComposer');
+  assert.match(build, /insertMention\(ta\.value, q\.start, ta\.selectionStart \?\? 0, name\)/);
+  assert.match(build, /ta\.value = next\.value;/);
+  const send = fn('sendGroupMessage');
+  assert.match(send, /body: JSON\.stringify\(\{ text \}\)/, 'the send carries the body and nothing else');
+});
+
+test('the menu is keyboard-driven, Escape sticks, and Enter never sends a half-typed name', () => {
+  const build = strip(fn('buildGroupComposer'));
+  assert.match(build, /e\.key === 'Escape'/);
+  assert.match(build, /mutedAt/, 'without it the next keystroke reopens the menu Escape dismissed');
+  assert.match(build, /e\.key === 'ArrowDown' \|\| e\.key === 'ArrowUp'/);
+  assert.match(build, /e\.key === 'Enter' \|\| e\.key === 'Tab'/);
+  // …and that branch returns, so the send below it is unreachable while a menu is up.
+  const order = build.indexOf("e.key === 'Enter' || e.key === 'Tab'");
+  const sendAt = build.indexOf('sendGroupMessage();');
+  assert.ok(order > -1 && sendAt > order, 'the menu must take Enter before the send does');
+  // A row is chosen by the name it carries, never by its position: the membership can change
+  // between the paint and the click.
+  assert.match(build, /row\.dataset\.name = name;/);
+  assert.match(build, /row\.onmousedown = \(e\) => e\.preventDefault\(\);/);
+});
+
+test('the menu opens over the room rather than pushing the textarea down', () => {
+  const rule = styles.match(/\.group-mention \{[^}]*\}/);
+  assert.ok(rule, '`.group-mention` must be styled');
+  assert.match(rule[0], /position: absolute/);
+  assert.match(rule[0], /bottom:/, 'anchored to the composer’s top edge, so it opens upward');
+  // Absolute needs a positioned ancestor, and the composer is it — the same placement the
+  // shared room's popover uses. Without this the menu anchors to the window.
+  const composer = styles.match(/\.group-composer \{[^}]*\}/);
+  assert.match(composer[0], /position: relative/);
+  assert.match(fn('buildGroupComposer'), /wrap\.append\(menu\);/);
 });

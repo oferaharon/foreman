@@ -102,7 +102,15 @@ import {
 import { assertClean, assertSendableBody, quoteBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
 import { GroupRoomStore, memberMatches, MAX_MEMBERS } from './rooms.js';
-import { memberFor, resolveMembers, roomHumanLine, roomPeerLine, rowName } from './rooms-line.js';
+import {
+  memberFor,
+  memberLabel,
+  mentionsIn,
+  resolveMembers,
+  roomHumanLine,
+  roomPeerLine,
+  rowName,
+} from './rooms-line.js';
 import { Observer, isPeerPrompt, participant } from './observe.js';
 import { readTail } from './transcript.js';
 import {
@@ -4040,6 +4048,13 @@ app.get('/api/rooms/:id', (req, res) => {
  * entry says who missed it. And the word on the entry is `handed`, never *delivered*: a
  * queued copy may sit for hours and `queue.prune` may drop it silently, so the log records
  * a handoff and nothing about it is a promise that anybody read anything.
+ *
+ * **`@name` is parsed here and changes nothing about who gets a copy.** `mentionsIn` reads
+ * the body against the room's own membership and the two envelope functions say something
+ * different to a named member than to everybody else — that is the whole of the feature.
+ * The loop below is untouched by it: no branch on `to`, no member skipped, no second
+ * destination. Anyone tempted to make a mention *deliver* should read the maintainer's
+ * ruling in `rooms-line.js`'s header first; it was asked for and refused.
  */
 app.post('/api/rooms/:id/post', async (req, res) => {
   const { id } = req.params;
@@ -4082,6 +4097,19 @@ app.post('/api/rooms/:id/post', async (req, res) => {
        * between them, and would let two members resolve against two different rosters —
        * which is how a member ends up recorded against a row that had already gone.
        */
+      /*
+       * Who the post named, parsed **once, here** — not in the browser and not in the MCP
+       * process, so the maintainer typing `@beta-main` into the room pane and a session
+       * posting the same words through `group_post` get identical treatment. The browser's
+       * autocomplete only helps somebody type it.
+       *
+       * A **signal and nothing else**: nothing below this line reads `to` to decide who
+       * gets a copy. That is the maintainer's ruling — every member still hears everything,
+       * because the room is the shared record and a question two members cannot see is a
+       * side conversation nobody can catch up on.
+       */
+      const to = mentionsIn(text, room.members);
+
       const sessions = registry.list();
       const resolved = resolveMembers(room.members, sessions);
       const mine = by === null ? -1 : resolved.findIndex((r) => memberMatches(r.member, by));
@@ -4096,8 +4124,10 @@ app.post('/api/rooms/:id/post', async (req, res) => {
        * shared: the body, the sender and the room.
        */
       try {
-        if (by === null) roomHumanLine({ room, body: text });
-        else roomPeerLine({ room, from, body: text });
+        // `you` is deliberately omitted: that composes the *unaddressed* variant, which
+        // names every addressee and is therefore the one that would find a bad name in `to`.
+        if (by === null) roomHumanLine({ room, body: text, to });
+        else roomPeerLine({ room, from, body: text, to });
       } catch (err) {
         return res.status(400).json({ error: err.message });
       }
@@ -4131,10 +4161,17 @@ app.post('/api/rooms/:id/post', async (req, res) => {
         let line;
         try {
           const human = humanName(entry.row.paneCwd || entry.row.cwd || null);
+          /*
+           * `memberLabel` and never `memberName` — the second prefers the *live* row's name
+           * and this test has to agree with the parse, which read the stored membership.
+           * One name asked twice; two would address a post to a member whose own copy is
+           * then told it was for somebody else.
+           */
+          const you = memberLabel(entry.member);
           line =
             by === null
-              ? roomHumanLine({ room, body: text, human })
-              : roomPeerLine({ room, from, body: text, human });
+              ? roomHumanLine({ room, body: text, human, to, you })
+              : roomPeerLine({ room, from, body: text, human, to, you });
         } catch {
           // Only the per-folder name can differ from the composition above, so this is one
           // member's miss and not the post's refusal.
@@ -4164,7 +4201,13 @@ app.post('/api/rooms/:id/post', async (req, res) => {
        */
       let entry;
       try {
-        entry = rooms.post(id, { from, kind: by === null ? 'human' : 'peer', text, handed }, { by });
+        entry = rooms.post(
+          id,
+          // `to` only when there is one: an old entry carries none, and a new entry naming
+          // nobody should be spelled the same way rather than carrying an empty list.
+          { from, kind: by === null ? 'human' : 'peer', text, ...(to.length ? { to } : {}), handed },
+          { by },
+        );
       } catch (err) {
         return roomFault(res, err);
       }
