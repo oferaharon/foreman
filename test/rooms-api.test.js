@@ -336,6 +336,37 @@ test('a room is created, named, and reads back with its members', async (t) => {
   assert.ok(index.body.rooms.some((r) => r.id === room.id));
 });
 
+test('?paneId= answers only the rooms that pane is in — the filter group_list reads', async (t) => {
+  if (!bench) return t.skip('no scratch tmux bench on this machine');
+  const mine = await makeRoom('mine and beta’s', ['alpha-main', 'beta-main']);
+  const theirs = await makeRoom('not mine at all', ['beta-main', 'gamma-master']);
+
+  const res = await api('GET', `/api/rooms?paneId=${encodeURIComponent(panes.get('alpha-main'))}`);
+  assert.equal(res.status, 200);
+  const ids_ = res.body.rooms.map((r) => r.id);
+  assert.ok(ids_.includes(mine.id), 'a room this pane is in');
+  assert.ok(!ids_.includes(theirs.id), 'and never one it is not');
+
+  // The whole reason this is a query rather than a filter in `mcp/foreman.js`: it is
+  // `roomsFor`, which is the same `memberMatches` the post endpoint decides a poster by.
+  // A second spelling would be free to list a room the next post is refused from.
+  const post = await api('POST', `/api/rooms/${theirs.id}/post`, {
+    text: 'PROBE-FILTER', paneId: panes.get('alpha-main'),
+  });
+  assert.equal(post.status, 409);
+  assert.equal(post.body.code, 'not-a-member');
+
+  // A pane in no room at all is an empty list, not a 404: the question was "which rooms
+  // am I in", and none is an answer to it.
+  const nobody = await api('GET', '/api/rooms?paneId=%999');
+  assert.equal(nobody.status, 200);
+  assert.deepEqual(nobody.body.rooms, []);
+
+  // And an omitted one is still every room — the panel's own index is unchanged.
+  const all = await api('GET', '/api/rooms');
+  assert.ok(all.body.rooms.length >= 2);
+});
+
 test('the index and the log live under the state directory and nowhere else', async (t) => {
   if (!bench) return t.skip('no scratch tmux bench on this machine');
   const room = await makeRoom('on disk', ['alpha-main', 'beta-main']);

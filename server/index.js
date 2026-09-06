@@ -3828,10 +3828,30 @@ const BAD_ENVELOPE = 'bad-envelope';
 const memberName = (member, row) =>
   rowName(row) || member?.name || member?.tmuxSession || member?.paneId || 'a session';
 
-/** Every room, with `unseen` and `lastAt` folded in. `list()` reads no file. */
+/**
+ * Every room, with `unseen` and `lastAt` folded in. `list()` reads no file.
+ *
+ * `?paneId=` narrows it to the rooms one member is in, and it exists for exactly one
+ * caller: `group_list` in `mcp/foreman.js`, where a session asks which rooms it is in and
+ * the only id it holds about itself is its own `TMUX_PANE` (the plan's §5.1).
+ *
+ * The filter is `roomsFor`, which is `isMember` over the whole index — **the same
+ * `memberMatches` `POST /api/rooms/:id/post` decides a poster by**, and that is the whole
+ * reason it is a query here rather than a filter in the MCP process. A second spelling of
+ * "is this pane a member" would be free to disagree with the first, and the shape of the
+ * disagreement is a session shown a room its next post is refused from, or refused a room
+ * it was never shown. One matcher, asked twice.
+ *
+ * A pane that is in no room answers `[]`, which is the ordinary case and not a 404: the
+ * question was "which rooms am I in", and none is an answer to it.
+ */
 app.get('/api/rooms', (req, res) => {
   const open = req.query.open === '1' || req.query.open === 'true';
-  res.json({ rooms: rooms.list({ open }), maxMembers: MAX_MEMBERS });
+  const paneId = String(req.query.paneId ?? '').trim();
+  res.json({
+    rooms: paneId ? rooms.roomsFor(paneId, { open }) : rooms.list({ open }),
+    maxMembers: MAX_MEMBERS,
+  });
 });
 
 /**

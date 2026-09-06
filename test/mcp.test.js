@@ -45,6 +45,56 @@ const THREAD_ENTRIES = Array.from({ length: 25 }, (_, i) => ({
   sender: i % 2 ? PEER : REPO, text: `link entry ${i + 1}`,
 }));
 
+/*
+ * Group rooms, from the session's side of the wire.
+ *
+ * The panes are the three sandbox projects, and the pane id is the whole identity: an MCP
+ * stdio child inherits `TMUX_PANE` from tmux (measured, the plan's §5.1), so `%11` here is
+ * what a real `group_post` would carry. `gamma` is on `master`, which is why its label
+ * reads that way and not `-main`.
+ */
+const ALPHA_PANE = '%11';
+const BETA_PANE = '%12';
+const GAMMA_PANE = '%13';
+
+const ALPHA = { tmuxSession: 'foreman-alpha-main', name: 'alpha-main', paneId: ALPHA_PANE, addedAt: 1 };
+const BETA = { tmuxSession: 'foreman-beta-main', name: 'beta-main', paneId: BETA_PANE, addedAt: 1 };
+const GAMMA = { tmuxSession: 'foreman-gamma-master', name: 'gamma-master', paneId: GAMMA_PANE, addedAt: 1 };
+
+/*
+ * Three rooms, and each one is a case. `rm-1` holds all three sessions and is what a post
+ * and a read run against; `rm-2` holds beta and gamma only, which is what proves
+ * `group_list`'s filter is a filter and `group_read`'s scoping is a scoping; `rm-3` is
+ * archived, which `group_list` must leave out and `group_read` must still answer — a room
+ * archived an hour ago still has a conversation this session was part of.
+ */
+const ROOMS = [
+  {
+    id: 'rm-1', name: 'the parser split', members: [ALPHA, BETA, GAMMA], memberCount: 3,
+    createdAt: 1, archivedAt: null, lastAt: 25, lastFrom: 'beta-main',
+    // The panel's own badge — the maintainer's seen mark, never a session's.
+    seq: 25, unseen: 3, seenAt: 12,
+  },
+  {
+    id: 'rm-2', name: 'beta and gamma', members: [BETA, GAMMA], memberCount: 2,
+    createdAt: 1, archivedAt: null, lastAt: 9, lastFrom: 'gamma-master', seq: 9, unseen: 0, seenAt: 9,
+  },
+  {
+    id: 'rm-3', name: 'an archived one', members: [ALPHA, BETA], memberCount: 2,
+    createdAt: 1, archivedAt: 40, lastAt: 4, lastFrom: 'alpha-main', seq: 4, unseen: 0, seenAt: 4,
+  },
+];
+
+// 25 entries in `rm-1`, seq 1..25 — the same shape as ROOM_ENTRIES above and for the same
+// reason: enough to exercise the tail cap (20) against a cursor that is not bounded by it.
+const GROUP_ENTRIES = Array.from({ length: 25 }, (_, i) => ({
+  seq: i + 1, ts: i + 1, from: 'beta-main', kind: 'peer', text: `group entry ${i + 1}`, handed: [],
+}));
+
+/** The store's own `memberMatches`, mirrored — the stub is the contract here, the way it
+ *  mirrors the room endpoint's 200 cap above. */
+const memberMatches = (m, key) => m.tmuxSession === key || m.paneId === key || m.name === key;
+
 let stub;
 let port;
 const stubState = {
@@ -54,11 +104,29 @@ const stubState = {
   dispatches: [],
   added: [],
   linkMessages: [],
+  groupPosts: [],
+  groupReads: [],
 };
 
 function makeChild(env) {
   const child = spawn(process.execPath, [SERVER], {
-    env: { ...process.env, FOREMAN_PORT: String(port), FOREMAN_REPO: REPO, ...env },
+    /*
+     * `TMUX_PANE` is set explicitly rather than inherited: a test run that happens to be
+     * inside tmux would otherwise hand every child the *runner's* pane, and one that is
+     * not would hand it none — the same file passing or failing on where it was started.
+     * A key given `undefined` is deleted, which is how a child gets no repo or no pane.
+     */
+    env: (() => {
+      const merged = {
+        ...process.env,
+        FOREMAN_PORT: String(port),
+        FOREMAN_REPO: REPO,
+        TMUX_PANE: ALPHA_PANE,
+        ...env,
+      };
+      for (const [k, v] of Object.entries(merged)) if (v === undefined) delete merged[k];
+      return merged;
+    })(),
     stdio: ['pipe', 'pipe', 'inherit'],
   });
   const lineQueue = [];
@@ -87,6 +155,7 @@ function makeChild(env) {
 
 let lead;
 let worker;
+let session;
 
 test.before(async () => {
   stub = http.createServer((req, res) => {
@@ -188,6 +257,61 @@ test.before(async () => {
         res.end(JSON.stringify({ ok: true, task: { id: 'w-task', state: parsed.state } }));
       } else if (req.url === '/api/team/tasks/one' && req.method === 'PATCH') {
         res.end(JSON.stringify({ ok: true, task: { id: 'one', pr: parsed.pr } }));
+      } else if (req.url.startsWith('/api/rooms/') && req.url.endsWith('/post') && req.method === 'POST') {
+        const id = req.url.slice('/api/rooms/'.length, -'/post'.length);
+        stubState.groupPosts.push({ id, body: parsed });
+        const room = ROOMS.find((r) => r.id === id);
+        if (!room) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: `There is no room ${id}.`, code: 'no-room' }));
+        } else if (room.archivedAt) {
+          // The endpoint's own sentence, verbatim — what is under test is that the tool
+          // hands it back untouched rather than restating it in its own words.
+          res.statusCode = 409;
+          res.end(JSON.stringify({
+            error: `"${room.name}" is archived. It is still readable; nothing more can be posted to it.`,
+            code: 'archived',
+          }));
+        } else if (!room.members.some((m) => memberMatches(m, parsed.paneId))) {
+          res.statusCode = 409;
+          res.end(JSON.stringify({ error: `${parsed.paneId} is not in "${room.name}".`, code: 'not-a-member' }));
+        } else {
+          const handed = room.members
+            .filter((m) => !memberMatches(m, parsed.paneId))
+            .map((m) => ({ name: m.name, tmuxSession: m.tmuxSession, state: 'typed', reason: null }));
+          res.end(JSON.stringify({ ok: true, entry: { seq: 26, from: 'alpha-main', text: parsed.text, handed }, handed }));
+        }
+      } else if (req.url.startsWith('/api/rooms/') && req.method === 'GET') {
+        const url = new URL(req.url, 'http://x');
+        const id = url.pathname.slice('/api/rooms/'.length);
+        stubState.groupReads.push(id);
+        const room = ROOMS.find((r) => r.id === id);
+        if (!room) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: `There is no room ${id}.`, code: 'no-room' }));
+        } else {
+          const since = Number(url.searchParams.get('since')) || 0;
+          const all = id === 'rm-1' ? GROUP_ENTRIES : [];
+          const after = since > 0 ? all.filter((e) => e.seq > since) : all;
+          const LIMIT = 200; // the store's own default cap, mirrored
+          res.end(JSON.stringify({
+            room,
+            entries: after.slice(-LIMIT),
+            cursor: all.length ? all.at(-1).seq : 0,
+            truncated: after.length > LIMIT,
+          }));
+        }
+      } else if (req.url.startsWith('/api/rooms') && req.method === 'GET') {
+        // `roomsFor` when a pane is named, `list` when one is not — the real route's own
+        // split, so a tool that forgot to name itself would read as "every room on the
+        // machine" here exactly as it would against the panel.
+        const q = new URL(req.url, 'http://x').searchParams;
+        const key = q.get('paneId') || '';
+        const open = q.get('open') === '1';
+        const rows = ROOMS.filter(
+          (r) => (!open || !r.archivedAt) && (!key || r.members.some((m) => memberMatches(m, key))),
+        );
+        res.end(JSON.stringify({ rooms: rows, maxMembers: 8 }));
       } else {
         res.statusCode = 404;
         res.end(JSON.stringify({ error: `stub has no ${req.method} ${req.url}` }));
@@ -198,12 +322,18 @@ test.before(async () => {
   port = stub.address().port;
 
   lead = makeChild({ FOREMAN_ROLE: 'lead' });
+  // A worker with a perfectly good pane, on purpose: what keeps the group tools off a
+  // worker is its *role*, not a missing id, and a worker without one would prove nothing.
   worker = makeChild({ FOREMAN_ROLE: 'worker', FOREMAN_TASK: 'w-task' });
+  // A standalone, launched the way item 5 launches one: a role, a port and a pane, and no
+  // FOREMAN_REPO at all — rooms are machine-wide.
+  session = makeChild({ FOREMAN_ROLE: 'session', FOREMAN_REPO: undefined });
 });
 
 test.after(() => {
   lead?.child.kill();
   worker?.child.kill();
+  session?.child.kill();
   stub?.close();
 });
 
@@ -212,6 +342,7 @@ test('the lead surface: dispatch, status, read, send, close, the room, and the g
   assert.deepEqual(
     res.result.tools.map((t) => t.name).sort(),
     [
+      'group_list', 'group_post', 'group_read',
       'link_list', 'link_read', 'link_send',
       'plan_read', 'room_post', 'room_read', 'task_add', 'task_close', 'task_dispatch',
       'task_merge_check', 'task_set_pr', 'task_start', 'team_status',
@@ -586,9 +717,10 @@ test('a worker still cannot read plans — the surface is two tools', async () =
 // The fail-closed guard: an absent or unrecognised FOREMAN_ROLE must refuse to serve, never
 // fall back to the more powerful surface. Both spawn the real process with no stub
 // interaction — the refusal happens before the server would ever read a request.
-function spawnWithEnv(role) {
+function spawnWithEnv(role, { pane = ALPHA_PANE } = {}) {
   return new Promise((resolve) => {
-    const env = { ...process.env, FOREMAN_PORT: String(port), FOREMAN_REPO: REPO };
+    const env = { ...process.env, FOREMAN_PORT: String(port), FOREMAN_REPO: REPO, TMUX_PANE: pane };
+    if (pane === null) delete env.TMUX_PANE;
     if (role === undefined) delete env.FOREMAN_ROLE;
     else env.FOREMAN_ROLE = role;
     const child = spawn(process.execPath, [SERVER], { env, stdio: ['pipe', 'pipe', 'pipe'] });
@@ -609,7 +741,7 @@ test('an unrecognised FOREMAN_ROLE refuses to start, naming the value and the va
   const { code, stderr } = await spawnWithEnv('banana');
   assert.notEqual(code, 0, 'must not exit clean');
   assert.match(stderr, /"banana"/);
-  assert.match(stderr, /lead, worker/);
+  assert.match(stderr, /lead, worker, session/, 'and the third role is offered, not hidden');
 });
 
 /* ------------------------------------------ whose team is this, in the tools --- */
@@ -788,5 +920,232 @@ test('a repo with a user.name puts that name in the descriptions instead', async
   } finally {
     named.child.kill();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+/* ------------------------------------------------------------ group rooms --- */
+
+/*
+ * Three tools on two roles and never on the third. What is under test here is mostly the
+ * *shape* of the surface rather than any one call: which role sees what, that the pane a
+ * post carries is this process's own and not the caller's, and that a refusal reaches the
+ * model in the panel's words rather than in the tool's.
+ */
+
+const toolsOf = async (child, id) => {
+  const res = await child.rpc({ jsonrpc: '2.0', id, method: 'tools/list' });
+  return res.result.tools;
+};
+
+const call = (child, id, name, args = {}) =>
+  child.rpc({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } });
+
+const out = (res) => JSON.parse(res.result.content[0].text);
+
+test('the session surface is exactly the three room tools', async () => {
+  const names = (await toolsOf(session, 100)).map((t) => t.name).sort();
+  assert.deepEqual(names, ['group_list', 'group_post', 'group_read']);
+});
+
+test('a worker has no room tools at all — not in its list, and not callable', async () => {
+  const names = (await toolsOf(worker, 101)).map((t) => t.name).sort();
+  assert.deepEqual(names, ['room_post', 'task_report'], 'still exactly two');
+  for (const name of ['group_list', 'group_post', 'group_read']) {
+    // The lock that matters: refused at the protocol layer because the tool does not
+    // exist for this role, not by a check inside a handler that could be reordered away.
+    // A worker's channel is its lead; the panel refusing it by role is the second lock.
+    const res = await call(worker, 102, name, { id: 'rm-1', text: 'let me in' });
+    assert.ok(res.error, `${name} must not exist for a worker`);
+  }
+  assert.equal(stubState.groupPosts.length, 0, 'and nothing reached the panel');
+});
+
+test('a lead is in rooms as a peer: the same three tools, not a second copy of them', async () => {
+  const leadTools = (await toolsOf(lead, 103)).filter((t) => t.name.startsWith('group_'));
+  const sessionTools = await toolsOf(session, 104);
+  const byName = (list) => Object.fromEntries(list.map((t) => [t.name, t]));
+  // Identical, field for field — one array registered on two roles. Two definitions would
+  // be free to drift, and the drift is a lead and a standalone in one room reading two
+  // descriptions of one tool.
+  assert.deepEqual(byName(leadTools), byName(sessionTools));
+});
+
+test('no role can create a room, join one, or add anyone — and the tool says who can', async () => {
+  for (const [child, id] of [[lead, 105], [session, 106]]) {
+    const names = (await toolsOf(child, id)).map((t) => t.name);
+    for (const absent of ['group_create', 'group_new', 'group_join', 'group_add', 'group_invite', 'group_archive']) {
+      assert.ok(!names.includes(absent), `${absent} must not exist — only the maintainer sets membership`);
+    }
+  }
+  const list = (await toolsOf(session, 107)).find((t) => t.name === 'group_list');
+  assert.match(list.description, /cannot create a room, join one, or add anyone/i);
+  assert.match(list.description, /ask them in conversation/i, 'with what to do instead');
+});
+
+test('no room tool takes a pane, a speaker, or anything else', async () => {
+  for (const tool of await toolsOf(session, 108)) {
+    const props = Object.keys(tool.inputSchema.properties || {});
+    for (const forbidden of ['paneId', 'pane', 'from', 'speaker', 'member', 'tmuxSession']) {
+      // A pane id a caller could type is a caller that can post to a room as somebody
+      // else — `link_send`'s missing `speaker`, one channel over.
+      assert.ok(!props.includes(forbidden), `${tool.name} must not take \`${forbidden}\``);
+    }
+    assert.equal(tool.inputSchema.additionalProperties, false, `${tool.name} takes nothing else either`);
+  }
+});
+
+test('group_list answers the rooms this pane is in, and leaves archived ones out', async () => {
+  const res = await call(session, 110, 'group_list');
+  assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
+  const body = out(res);
+  assert.deepEqual(body.rooms.map((r) => r.id), ['rm-1'], 'rm-2 is not this pane’s; rm-3 is archived');
+  assert.equal(body.you, ALPHA_PANE, 'and the pane comes back, so a member can tell which one is itself');
+  assert.equal(body.rooms[0].memberCount, 3);
+  assert.deepEqual(body.rooms[0].members.map((m) => m.name), ['alpha-main', 'beta-main', 'gamma-master']);
+});
+
+test('group_list drops the maintainer’s seen mark, which is not a session’s to read', async () => {
+  const [room] = out(await call(session, 111, 'group_list')).rooms;
+  // `unseen` is the badge on the rail, moved by a person opening the room in a browser. A
+  // session reading it would be reading a number about somebody else's attention.
+  assert.equal(room.unseen, undefined);
+  assert.equal(room.seenAt, undefined);
+  assert.ok(room.lastAt, 'what a session does read: when the room last carried something');
+});
+
+test('a session in no rooms gets an empty list, which is the ordinary answer', async () => {
+  const lonely = makeChild({ FOREMAN_ROLE: 'session', FOREMAN_REPO: undefined, TMUX_PANE: '%99' });
+  try {
+    const res = await call(lonely, 112, 'group_list');
+    assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
+    assert.deepEqual(out(res).rooms, [], 'no rooms is not a failure to find them');
+  } finally {
+    lonely.child.kill();
+  }
+});
+
+test('group_post carries this session’s own pane, and drops anything the caller named', async () => {
+  const before = stubState.groupPosts.length;
+  const res = await call(session, 113, 'group_post', {
+    id: 'rm-1',
+    text: 'parser lands on my branch, not yours',
+    // The two arguments a caller would reach for: who is speaking, and as what. Neither
+    // is plumbed — the schema refuses them and the handler reads only `id` and `text`.
+    paneId: GAMMA_PANE,
+    speaker: 'human',
+  });
+  assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
+  const sent = stubState.groupPosts.at(-1);
+  assert.equal(stubState.groupPosts.length, before + 1);
+  assert.equal(sent.id, 'rm-1');
+  assert.deepEqual(Object.keys(sent.body).sort(), ['paneId', 'text'], 'exactly two fields reach the panel');
+  assert.equal(sent.body.paneId, ALPHA_PANE, 'this process’s TMUX_PANE, never one the caller typed');
+  assert.equal(sent.body.speaker, undefined);
+  // The handoff comes back named, and it never includes the author.
+  const body = out(res);
+  assert.deepEqual(body.handed.map((h) => h.name), ['beta-main', 'gamma-master']);
+});
+
+test('group_post says handed, not delivered, and says a queue is not a read', async () => {
+  const tool = (await toolsOf(session, 114)).find((t) => t.name === 'group_post');
+  assert.match(tool.description, /handed/i);
+  assert.match(tool.description, /never that anybody read it/i);
+  assert.doesNotMatch(tool.description, /delivered/i, 'the word the log deliberately does not use');
+});
+
+test('a refusal comes back in the panel’s own words, not the tool’s', async () => {
+  // Archived: the endpoint's sentence, verbatim. Restating it here would be a second copy
+  // that stops agreeing with the first the day one is reworded.
+  const archived = await call(session, 115, 'group_post', { id: 'rm-3', text: 'anyone still here?' });
+  assert.equal(archived.result.isError, true);
+  assert.equal(
+    archived.result.content[0].text,
+    'Error: "an archived one" is archived. It is still readable; nothing more can be posted to it.',
+  );
+
+  // Not a member: the pane the panel refused is named in the sentence, which is only
+  // possible because the tool sent the pane rather than asserting membership itself.
+  const outsider = await call(session, 116, 'group_post', { id: 'rm-2', text: 'hello?' });
+  assert.equal(outsider.result.isError, true);
+  assert.equal(outsider.result.content[0].text, `Error: ${ALPHA_PANE} is not in "beta and gamma".`);
+});
+
+test('group_read with no cursor returns a tail, not the whole room', async () => {
+  const body = out(await call(session, 117, 'group_read', { id: 'rm-1' }));
+  assert.equal(body.entries.length, 20, 'the tail, not all 25');
+  assert.equal(body.entries[0].text, 'group entry 6', 'the newest 20, not the oldest 20');
+  assert.equal(body.entries.at(-1).text, 'group entry 25');
+  assert.equal(body.cursor, 25, 'the cursor is still the room’s newest seq');
+  assert.equal(body.truncated, true, 'entries were left out');
+  assert.equal(body.room.name, 'the parser split', 'and the record rides along');
+});
+
+test('group_read with a cursor returns everything after it, unbounded by the tail', async () => {
+  const body = out(await call(session, 118, 'group_read', { id: 'rm-1', since: 10 }));
+  assert.equal(body.entries.length, 15, 'all 15 after seq 10, not clipped to 20 or fewer');
+  assert.equal(body.entries[0].text, 'group entry 11');
+  assert.equal(body.cursor, 25);
+  assert.equal(body.truncated, false);
+});
+
+test('group_read with an explicit since:0 is a real cursor, not "no cursor"', async () => {
+  // `room_read`'s scar, copied verbatim: `args.since || 0` collapses the two, which is how
+  // an omitted cursor once read a whole log into a lead's context.
+  const body = out(await call(session, 119, 'group_read', { id: 'rm-1', since: 0 }));
+  assert.equal(body.entries.length, 25, 'the whole room, not trimmed to the tail');
+  assert.equal(body.cursor, 25);
+  assert.equal(body.truncated, false);
+});
+
+test('group_read refuses a room this session is not in, and reads nothing', async () => {
+  const before = stubState.groupReads.filter((id) => id === 'rm-2').length;
+  const res = await call(session, 120, 'group_read', { id: 'rm-2' });
+  assert.equal(res.result.isError, true);
+  // One sentence for "no such room" and for "not yours to read": told apart, the refusal
+  // tells a session that a room it is not in exists.
+  assert.match(res.result.content[0].text, /No room rm-2 that you are in/);
+  assert.equal(stubState.groupReads.filter((id) => id === 'rm-2').length, before, 'the log was never fetched');
+
+  const missing = await call(session, 121, 'group_read', { id: 'rm-nope' });
+  assert.equal(missing.result.isError, true);
+  assert.match(missing.result.content[0].text, /No room rm-nope that you are in/);
+});
+
+test('group_read still answers on an archived room — the conversation was this session’s too', async () => {
+  const res = await call(session, 122, 'group_read', { id: 'rm-3' });
+  assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
+  assert.equal(out(res).room.name, 'an archived one');
+});
+
+test('a session with no TMUX_PANE refuses to start, rather than serving three tools it cannot use', async () => {
+  const { code, stderr } = await spawnWithEnv('session', { pane: null });
+  assert.notEqual(code, 0, 'must not exit clean — it did not start serving');
+  assert.match(stderr, /TMUX_PANE is not set/);
+  assert.match(stderr, /a room member is a pane/i, 'and the reason is named, not just the variable');
+});
+
+test('a lead with no TMUX_PANE keeps its other tools and refuses per call, naming the same reason', async () => {
+  // The asymmetry is deliberate: a session is *nothing but* the room tools, so a missing
+  // pane is a refusal to start; a lead has eighteen that never touch a pane, and the same
+  // fact must not take task_dispatch down with it.
+  const blind = makeChild({ FOREMAN_ROLE: 'lead', TMUX_PANE: undefined });
+  try {
+    const names = (await toolsOf(blind, 123)).map((t) => t.name);
+    assert.ok(names.includes('task_dispatch'), 'the lead surface is intact');
+    assert.ok(names.includes('group_post'), 'the room tools are still listed');
+
+    const refused = await call(blind, 124, 'group_list');
+    assert.equal(refused.result.isError, true);
+    assert.match(refused.result.content[0].text, /TMUX_PANE is not set/);
+
+    const before = stubState.groupPosts.length;
+    const post = await call(blind, 125, 'group_post', { id: 'rm-1', text: 'from nowhere' });
+    assert.equal(post.result.isError, true);
+    assert.equal(stubState.groupPosts.length, before, 'an unidentified caller never reaches the panel');
+
+    const still = await call(blind, 126, 'team_status');
+    assert.notEqual(still.result.isError, true, 'and the rest of the surface still works');
+  } finally {
+    blind.child.kill();
   }
 });
