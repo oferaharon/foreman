@@ -57,7 +57,8 @@ There is no API. Everything is assembled from three places:
 
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
-`effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
+`effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
+`rooms-line.js`, `session-launch.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
 `team.js`, `room.js`, `worktree.js`, `setup-detect.js`, `forge.js`, `base-branch.js`, `watch.js`, `conflicts.js`,
 `gc.js` and `launch.js`. Run them before touching any of them, and note that `test/fixtures/` holds
 real `capture-pane` output, not reconstructions — and that the git wrappers are tested
@@ -1667,6 +1668,132 @@ windows and nothing else: no cost, no session id, no model. Ruling of 2026-09-04
 enforced by what the store's `ingest` reads out of the body, not by a filter on the route —
 the endpoint hands the whole payload through unfiltered on purpose, for issue #52.
 
+**`room_post` and `room_read` were already taken, and so were `room-append` and
+`markRoomRead` — so group rooms are `group_*` in every spelling they have.**
+`mcp/foreman.js` registers `room_post` / `room_read` for the **team** room (and `room_post`
+on `WORKER_TOOLS` as well), and one MCP server cannot register two tools under one name; the
+socket already spells `subscribe-room` / `room` / `room-append`, keyed by `repo`, and
+`web/app.js` switches on the frame's `type` and *then* filters on `msg.repo` — so a
+group-room frame arriving under `room-append` with a `roomId` and no `repo` is silently
+swallowed today, and breaks the **team** room the day somebody adds a group handler under
+that name. Renaming the team-room tools was never an option: every lead and worker brief
+names them and `test/brief.test.js` pins them.
+
+So: tools `group_list` / `group_post` / `group_read`, frames `group-room` /
+`group-room-append`, messages `subscribe-group-room` / `unsubscribe-group-room` /
+`markGroupRoomRead`, store class `GroupRoomStore` beside `room.js`'s `RoomStore`, and the
+pane kind `group-room` because `room` is the team room's word. **What is refused is a
+*sibling* name, not the word "room"** — `rooms_post` beside `room_post`, or `RoomsStore`
+beside `RoomStore`, is one letter between two things that do different things, which is a
+wrong call waiting to happen and is the `isLeadName` lesson in yet another costume. The HTTP
+routes are allowed to be `/api/rooms` precisely because no team-room route is spelled that
+way. And note the split it deliberately refuses: giving standalones `room_*` and leads
+`group_*` would mean a lead and a standalone in one room reading their own briefs and
+disagreeing about what the tool is called.
+
+**An MCP stdio child inherits `TMUX_PANE`, which is why one static config serves every
+session — and why `--strict-mcp-config` must never be copied onto it.** Both measured on
+Claude Code v2.1.257, in a scratch tmux session in the sandbox's `alpha`, against a stub
+stdio MCP server that dumped its own environment.
+
+The stub's environment carried `TMUX_PANE=%213` and
+`TMUX=/private/tmp/tmux-501/default,65729,213`, and `%213` was exactly the pane tmux
+reported for that session; it also carried `CLAUDE_CODE_SESSION_ID` and
+`CLAUDE_PROJECT_DIR`. So the identity is readable at **run time** and nothing about who a
+session is has to be baked in at launch: `server/session-launch.js` writes **one**
+`session-brief.md` and **one** `session-mcp.json` under `STATE_DIR` for the whole machine —
+no per-session artefact, nothing to garbage-collect, nothing that goes stale across a
+`/clear` (the pane does not change), and a live MCP process can never name a *stale* pane
+because it cannot outlive its own. Benched through the real launcher: `group_list` from a
+freshly launched session answered `{"you":"%0","rooms":[]}`, and the duplicate of it
+answered `{"you":"%1","rooms":[]}` — one file, two identities. `mcp/foreman.js` fails closed
+when `TMUX_PANE` is absent, twice over: a `session` with no pane refuses to start at all
+(those three tools are its whole surface) and a lead refuses per call and keeps its other
+eighteen tools.
+
+The second half is the expensive one. **`--mcp-config` merges; `--strict-mcp-config` makes
+it a replacement.** `launchLead` passes the strict flag and is right to — a lead should hold
+`foreman` and its forge and nothing else — but copying that line into the standalone path
+would silently strip every connector the user has registered off **every ordinary session
+the panel launches**, with nothing on screen saying so. Measured twice and both answers were
+**11 servers** with the merge: the planner's stub run and the launch bench. The two
+enumerations of that 11 differ by one connector — the bench listed the user's `gitea`, seven
+`claude.ai` connectors, `claude-in-chrome`, `computer-use` and `foreman`, the earlier run
+listed eight connectors — so the **count** is the measurement and the breakdown is not.
+`standaloneArgs()` is the one helper, it passes `--append-system-prompt-file` and
+`--mcp-config` and never `--strict-mcp-config`, and there are **four** call sites, not three:
+`/api/launch`'s non-lead branch, the duplicate endpoint, and `restoreSessions`' `startSession`
+in *both* snapshot restore and relaunch-all. `test/session-launch.test.js` reads
+`server/index.js`, balances parens round every `createSession(` and refuses one that carries
+neither the helper nor a named exemption — proven non-vacuous by deleting the flags from one
+site and watching it name the line.
+
+**A room member is resolved `tmuxSession` first, and the recorded decision said the
+opposite.** The ruling said "by pane + name", and pane id is the *weakest* of the three ids
+here: a session id rotates on `/clear` (so the store keeps none), a **pane id survives
+`/clear` and not a relaunch** — relaunch-all can take the tmux server down and pane ids then
+restart at `%0`, which `queue.js` already prunes on `paneCreatedMs` for — and a tmux session
+name survives all of it, being minted before the pane exists and put back under the same
+name by relaunch-all. So a stored `%12` can be **live and belong to somebody else**, which
+is a post typed into a stranger.
+
+`resolveMember` (`server/rooms-line.js`) is therefore `tmuxSession` → `paneId` **and** `name`
+together → nothing, and two edges are pinned by name. One tmux session can hold more than one
+Claude pane (a user split), and then `tmuxSession` names two rows — settled only by an exact
+`paneId`, because `label` is *derived from the tmux session name* and both rows carry the
+same label, title and project by construction, so no name witness can ever break that tie; a
+set it cannot settle falls through and resolves to nothing. And the fallback needs **both**
+witnesses, never one, because a session relaunched under a name a different session has since
+taken is exactly what one witness would match. `participant()` is applied **after** the
+resolution and never as a filter in front of it: filtering first would let a member whose row
+has become a worker fall through and match some *other* row. `web/rooms-pane.js`'s `memberRow`
+mirrors the same order for its status dot and cannot import the real one (that pulls in
+`server/observe.js`), so `test/rooms-pane.test.js` drives both against one set of fixtures and
+asserts they agree — held together by a test rather than by a comment.
+
+**`handed` is not `delivered`, and the window between checking and writing it down had to be
+closed by hand.** `sendOrQueue` types or queues; a queued copy waits for a pane to go idle,
+which may be hours and may be never, and `queue.prune` silently drops everything for a pane
+that has gone away or come back with a different birthday. Nothing writes back to an
+append-only log, so **an entry that says `queued` says it forever** — that is the state, not a
+bug, and `/api/shared-room/message`'s own comment made the call first. Every surface says
+`handed`: the log entry's key, the room pane's line under a bubble, the tool description, and
+`test/rooms-pane.test.js` greps for the word. Making a dropped copy visible (a `dropped` event
+out of `queue.prune`, a `system` line in the room) was costed and deliberately left unbuilt,
+so that it stays a decision rather than a side effect.
+
+The machinery beside it is the part the plan did not ask for. The refusals must gate the
+typing — `rateFault` is public for exactly that — but the handoff marks ride on the entry, so
+the order is forced: **check → fan out → append**. That leaves a window where two posts to one
+room both pass `rateFault`, both type into every pane, and the second is then refused by
+`post()` with the copies already delivered and nothing written down. For a single poster the
+limiter only ever gets more forgiving as time passes, so the window needs a *second* poster —
+which is precisely what a room is for. `roomTurn` in `server/index.js` is a promise chain per
+room, the way `PaneLock` serialises per pane.
+
+**A stock checkbox is drawn by the browser from the *browser's* colour scheme, not the page's
+`data-theme` — so an unticked box read as ticked.** Found on the create-room modal's bench:
+with the panel in **light** theme and the browser in **dark**, an unticked native checkbox
+came back a solid dark square, which in a multi-select list is exactly what "chosen" looks
+like. Nothing about the page was wrong and no test would have caught it; the UA paints that
+control and `data-theme` is not a signal it reads. The room picker's boxes are now drawn by
+the panel — `appearance: none`, a box and a rotated-rectangle check, every colour a token —
+which is `.team-toggle-row`'s own precedent. **The same exposure is still live on
+`.field-check`**, the bare native checkbox in the `+ new` and settings modals; it was flagged
+rather than fixed because it was out of that task's scope, and it is the next person's to
+take.
+
+**`$TMUX` is set inside a worker, and it defeats `TMUX_TMPDIR`.** A worker session runs
+*inside* tmux, so `$TMUX` is already in its environment — and tmux prefers it, ignoring the
+`TMUX_TMPDIR` a bench sets to get its own server. One worker's first bench attempt therefore
+minted its "isolated" scratch session on the **real** tmux server, where every session on this
+Mac lives; it was killed and everything re-run under `env -u TMUX` on a scratch socket. So a
+scratch tmux server is `env -u TMUX` **plus** `TMUX_TMPDIR`, never `TMUX_TMPDIR` alone, and
+the check afterwards is that the real server still holds what it held before. Note the second
+habit that made that recoverable: seeding the scratch config with this Mac's own
+`sessionPrefix` means the server-global pbcopy rewrite writes a byte-identical binding, so the
+launch changes nothing and the check afterwards is a one-line "unchanged".
+
 ---
 
 ## What exists, and what deliberately doesn't
@@ -1743,6 +1870,41 @@ else in the room is machinery and stays `system`.
 one behind a confirmation, a folder icon opens the project in Finder, and `recent` drops the
 filing for one recency-ordered list.
 
+**Rooms** (`server/rooms.js` the store, `server/rooms-line.js` the resolution and the
+envelope, the `group rooms` block in `server/index.js` the only part that touches a pane,
+`web/rooms-band.js` / `rooms-create.js` / `rooms-pane.js` the three pure modules the browser
+side is built out of) are named places where up to **8** peer sessions coordinate: a member
+posts once, the panel appends one entry and types a copy into every *other* member's terminal
+through `sendOrQueue` → `PaneLock` → `assertNotBlocked`, the same guarded path as everything
+else it types. Six things hold it together and none of them bends. **Only a human makes a
+room or changes its membership** — there is no create, join or add tool, deliberately, the
+same call as "there is no tool to open a link". **Workers are never in one**, by an
+allow-list on role (`participant` in `observe.js`, an allow-list because kinds have already
+grown once here) and again by the panel refusing them at the endpoint. **Two prefixes, never
+a third**: `> ` is *not the maintainer* — now widened to mean another **session**, not only
+another project's lead — and `| ` is the maintainer's own word, which authorizes. **The word
+is `handed`**, never *delivered* and never *read*. **State is under `STATE_DIR`**, resolved:
+`rooms.json` rewritten wholesale from memory (so unknown keys are carried through, or a
+rollback past this feature deletes rooms — `TaskStore`'s erasure) and `rooms/<id>.jsonl`
+append-only, never rewritten. And **nothing about rooms joins `composerSig`**, because a
+message landing in a room would otherwise take the textarea out from under whoever is typing.
+Archiving closes a room to posts and deletes nothing; the rail band folds archived ones away
+and its head is deliberately outside the `has-rooms` gate, since `+ room` is the only way to
+make the first one.
+
+**The cost, which lands on every session and not only on members**: an ordinary session the
+panel launches now carries a short standing brief about rooms and one extra MCP server
+(`server/session-launch.js`, two static files under `STATE_DIR`, four launch sites). It is
+small, it names no repo and no person, and it is unavoidable — a session cannot be told about
+rooms by a message, because it forgets — but it is a change to every session opened from the
+panel, not only the ones put in a room.
+
+They sit beside two things they are not. The **team room** is one lead and its workers,
+vertical, untouched by any of this. The **shared room** (`server/shared-room.js` plus the
+`observe.js` collector) is an observation log of native peer traffic with no writer and no
+reader on the session side — a room is where sessions write *into*, the shared room is where
+the panel *reads from*. `docs/panel.md` documents both.
+
 **The team** has a `pending` task state — a task recorded with its brief and nothing else,
 the middle rung between an issue on a tracker and a dispatched worker: added via `task_add`,
 promoted only on a second, explicit yes via `task_start`. Every task row opens a read-only
@@ -1753,7 +1915,12 @@ its own room.
 
 **A known gap: there is no "refresh brief" control.** A brief change needs a panel restart
 *and* a lead relaunch to take effect. `plannerBrief` reaches a planner at its next dispatch,
-so a restart is enough there; the lead's own brief only ever reaches the *next* lead.
+so a restart is enough there; the lead's own brief only ever reaches the *next* lead. **The
+standalone brief is in the same gap** — `server/session-launch.js` rewrites
+`session-brief.md` and `session-mcp.json` at boot and before every launch, so a change to
+either needs the restart *and* a relaunch of each session, and a session already running has
+neither the rooms instruction nor the `foreman` tool server. `relaunch all…` is the control
+that exists; a refresh is the one that does not.
 
 **The panel runs under launchd** — `npm run install-agent` writes and bootstraps the plist,
 `npm run restart-panel` is the day-to-day restart. Its two log files are trimmed once at
@@ -1891,8 +2058,9 @@ human saying so: see the five rules under *The team*.
   the CLI had happened to start on a row where the first press scrolled the window.
 - **The panel is probably already running.** Check `lsof -iTCP:48770` before starting
   one, use `FOREMAN_PORT` for a second, and never `pkill -f "node server/index.js"` — that
-  pattern matches the one the user is using; kill by port (`lsof -tiTCP:<port>`). Give the
-  second one `FOREMAN_STATE_DIR` too, and that is not just tidiness. Two servers must not
+  pattern matches the one the user is using; kill by port, with `-sTCP:LISTEN` on it (see
+  the bullet below — without that flag the same command kills the browser). Give the second
+  one `FOREMAN_STATE_DIR` too, and that is not just tidiness. Two servers must not
   run the queue at once (they share
   `~/.foreman/queue.json` and would both flush the same message), a test run would
   otherwise be saving snapshots over the bench you actually rely on, and **a second
@@ -1900,6 +2068,13 @@ human saying so: see the five rules under *The team*.
   worktrees and branches belonging to real failed tasks, post the receipt into a real
   team's room, and be entirely within its rights. Scratch state dir, scratch port, every
   time.
+- **`kill $(lsof -tiTCP:<port>)` kills the browser too, and this line used to recommend it.**
+  `lsof -tiTCP:<port>` matches every socket on that port, **ESTABLISHED client connections
+  included** — so the pid list holds whatever browser has the panel open, and the `kill`
+  sends it SIGTERM along with the server. It took Chrome's tab group down twice on one
+  bench, on a scratch port; against 48770 it would take the panel the user is reading with
+  it, mid-session, and nothing about the command says so. The safe form is
+  `lsof -tiTCP:<port> -sTCP:LISTEN`, which is the listening socket and nothing else.
 - **Prefer showing nothing over showing something wrong.** A blank transcript that
   explains itself beats a plausible one belonging to another session.
 - Claude Code re-reads hook config **while running** — measured, not assumed: a session
