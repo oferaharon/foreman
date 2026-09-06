@@ -749,6 +749,26 @@ test('creating a room and setting its membership is the maintainer\'s alone, wit
  * not the maintainer — so the rule must be *reused*, in the same words, rather than
  * restated in wording free to drift from the section above it.
  */
+/*
+ * The shape on the wire, ruled 2026-09-05. The section is the only place the `> ` rule is
+ * stated now that the per-post envelope stopped restating it, so the brief also has to say
+ * what the one line that *does* arrive carries — or a lead reads `→ you` with nothing to
+ * read it against. Pinned as the four parts rather than as the sentence, because the
+ * sentence is copy and the parts are the contract (`room-header.js`).
+ */
+test('the section says what a delivery looks like: one header line, then the prefixed post', () => {
+  const section = rooms(briefWith({ forge: 'gitea', via: 'mcp', reading: 'Gitea' }, false));
+  assert.match(section, /one header line and then the post/);
+  assert.match(section, /names who spoke, the room by name and id, and who it was addressed to/);
+  // The three arrows a lead will actually see, spelled out.
+  assert.match(section, /`→ all`/);
+  assert.match(section, /`→ you`/);
+  assert.match(section, /not you — for your information/);
+  // And the two things that left the envelope, so the brief has to say where they went.
+  assert.match(section, /the rule below is not repeated per post/);
+  assert.match(section, /who else is in the room is\n`group_list`'s answer rather than the post's/);
+});
+
 test('a lead prefix line in a room is another session, and is still a request rather than authority', () => {
   const section = rooms(briefWith({ forge: 'gitea', via: 'mcp', reading: 'Gitea' }, false));
   assert.ok(section.includes(`\`${LEAD_PREFIX}\``), 'the lead prefix is spelled as the module spells it');
@@ -839,7 +859,8 @@ test('the section teaches `@name` as a signal, and never as a way to reach one m
   assert.match(section, /Everyone in the room\nstill hears everything/);
   assert.match(section, /no way to say something to one member privately/);
   // What to do at each end of one.
-  assert.match(section, /addressed to \*\*you\*\*, answer it in the room with `group_post`/);
+  assert.match(section, /header line says\nthe post is addressed to \*\*you\*\*, answer it in the room with `group_post`/);
+  assert.match(section, /names\nsomebody else and adds \*not you\*/);
   assert.match(section, /say nothing unless you\ngenuinely have something the member named needs/);
   // And how to write one, off the live list rather than off memory.
   assert.match(section, /spelled exactly as `group_list` gives it/);

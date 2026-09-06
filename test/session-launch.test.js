@@ -107,9 +107,33 @@ test('the brief names the three tools and both line prefixes, and names nobody',
   // else's, or staying quiet on one addressed to it.
   assert.ok(brief.includes('`@name` addresses a post'), 'the brief never mentions `@name`');
   assert.ok(brief.includes('Everyone in the room\nstill hears everything'), 'the brief must say a mention narrows nothing');
-  assert.ok(brief.includes('addressed to **you**'), 'the brief does not say what to do when named');
-  assert.ok(brief.includes('addressed to somebody else'), 'the brief does not say what to do when not named');
+  assert.ok(
+    brief.includes('If the header line\nsays the post is addressed to **you**'),
+    'the brief does not say what to do when named',
+  );
+  assert.ok(brief.includes('If it names somebody else and adds *not you*'), 'the brief does not say what to do when not named');
   assert.ok(brief.includes('spelled exactly as `group_list` gives it'), 'the brief must point at the live list');
+
+  /*
+   * The shape on the wire, ruled 2026-09-05. The per-post envelope stopped restating the
+   * `> ` rule, so this brief is now the only place a session learns it — and it therefore
+   * also has to describe the one line that *does* arrive, or `→ you` reaches a session with
+   * nothing to read it against. The parts, not the sentence: they are the contract
+   * (`room-header.js`) and the sentence is copy.
+   */
+  assert.ok(brief.includes('one header line, then the post itself'), 'the brief does not describe a delivery');
+  assert.ok(
+    brief.includes('says who spoke, which room by name and id, and who it\nwas addressed to'),
+    'the brief does not say what the header line carries',
+  );
+  for (const arrow of ['`→ all`', '`→ you`', 'not you — for your information']) {
+    assert.ok(brief.includes(arrow), `the brief does not spell the arrow ${arrow}`);
+  }
+  assert.ok(brief.includes('nothing is explained again per post'), 'the brief does not say the rule is not repeated');
+  assert.ok(
+    brief.includes("Who else is in the room is `group_list`'s answer, not the\npost's"),
+    'the brief does not say where the roster went',
+  );
 
   // One file for the whole machine, which is only sound while it names no repo and no
   // person. `humanName` is what a *lead's* brief uses; a standalone brief has no repo to

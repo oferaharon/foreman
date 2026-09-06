@@ -693,6 +693,32 @@ record, because the turn ended first. It takes a tool call in flight.
 `test/fixtures/peer-message-busy.jsonl` is the capture and `test/normalize.test.js` pins
 both spellings against it.
 
+**A room delivery leaves the same record a typed message leaves, so the only witnesses are
+in the text — MEASURED on v2.1.257, on a real delivery in the sandbox.** Every other message
+the panel types into a pane can be recognised off the record: a nudge and a link message
+carry a mark, a task notification carries `origin.kind`, a peer message carries
+`origin.kind: 'peer'`. A room copy carries **`type: 'user'`, `origin: {kind: 'human'}`,
+`promptSource: 'typed'`, `entrypoint: 'cli'`** — byte-for-byte what the maintainer typing at
+the keyboard leaves behind, because that is exactly what it is: text typed into a composer.
+So `readRoomDelivery` (`server/room-header.js`) is **two witnesses that both come out of the
+text**, and one of them being the sentence is unavoidable here in a way it never was for the
+notice: the first line must match the anchored header shape — a `room-<n>` id the store could
+have minted, ending in one of two *frozen* note clauses — **and** every remaining line must
+carry that speaker's prefix, with at least one line. Somebody quoting a delivery inside a
+message of their own breaks the second (their words are a line at column 0) or the first (the
+header is no longer first), and stays a bubble; `test/fixtures/room-delivery.jsonl` is a real
+capture of exactly that pair, side by side, which is why it is a capture and not a
+reconstruction. A verbatim paste of a whole delivery and nothing else does read as one, and
+that is accepted rather than defended against — it is indistinguishable by construction.
+
+**…and the module is a leaf because the obvious import is a cycle.** `normalize.js` has to
+read what `rooms-line.js` writes, and `rooms-line.js` → `observe.js` → `normalize.js` closes
+the loop. ESM would resolve it today — neither module touches the other's bindings at
+evaluation time — and that is the "it'll be fine" this file is a list of. `room-header.js`
+holds the writer and the reader together, imports only `envelope.js`, and is the reason the
+two spellings cannot drift; a test holding them apart was the alternative and is strictly
+weaker when an import is available.
+
 **A subscription dies with the socket, and nothing on screen says so.** The tailer holding
 a file offset is server state, so a dropped connection or a server restart ends it — while
 the roster keeps arriving, because that is broadcast to every client. The result is a rail
@@ -1921,7 +1947,13 @@ Archiving closes a room to posts and deletes nothing; the rail band folds archiv
 and its head is deliberately outside the `has-rooms` gate, since `+ room` is the only way to
 make the first one. **`@name` addresses a post and narrows nothing** — `mentionsIn` is the one
 parse, both writers go through it, and the two envelopes say something different to a named
-member than to everybody else; the trap above is what stops that becoming a delivery.
+member than to everybody else; the trap above is what stops that becoming a delivery. **A
+delivery is one line and a body** (`server/room-header.js`): the header names who spoke, the
+room by name *and* id, who it was addressed to relative to this reader, and which of the two
+speakers it is — and nothing else, because the roster is `group_list`'s answer and the rule is
+the standing brief's, and repeating either per post cost a reader a paragraph a turn. In the
+recipient's own transcript it draws as a folded chip, the notice chip's register; how it is
+recognised there is the trap above, and it is sharper than it looks.
 
 **The cost, which lands on every session and not only on members**: an ordinary session the
 panel launches now carries a short standing brief about rooms and one extra MCP server

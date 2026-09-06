@@ -8,6 +8,7 @@
 
 import { NUDGE_MARK } from './watch.js';
 import { LINK_MARK } from './links.js';
+import { readRoomDelivery } from './room-header.js';
 
 const DROP_TYPES = new Set([
   'attachment',
@@ -500,6 +501,32 @@ export function normalizeRecord(rec) {
     // wear a user bubble.
     const notice = parseTaskNotice(rec, text);
     if (notice) return [{ ...base, kind: 'task_notification', ...notice }];
+
+    /*
+     * A group-room delivery: a post another member made, typed into this pane by the
+     * panel. Same family as the nudge and the link message above — nobody here typed it —
+     * and the same reason it must not wear a user bubble, sharpened by the fact that a
+     * room delivery is often several paragraphs and lands once a turn.
+     *
+     * **It is the only one of the four with nothing on the record to key on.** The nudge
+     * and the link message carry a mark; a task notification carries `origin.kind`. A room
+     * copy is *typed into a composer*, so the record it leaves is a record of somebody
+     * typing — measured on a real delivery in the sandbox, v2.1.257: `type: 'user'`,
+     * `origin: {kind: 'human'}`, `promptSource: 'typed'`, `entrypoint: 'cli'`, which is
+     * byte-for-byte what a message the maintainer actually typed leaves behind. So both
+     * witnesses have to come out of the text, and `readRoomDelivery` is where they live —
+     * in `room-header.js` beside the composer, so the reader and the writer cannot drift.
+     * Its header is the long version, including why it is a leaf module and not two more
+     * functions in `rooms-line.js`.
+     *
+     * What comes back is the *parts* rather than a blob, because the chip's line is built
+     * from them (`web/app.js`) — but `raw` is the delivery exactly as it arrived, and it is
+     * what the chip opens on: the `> ` / `| ` prefixes are the whole of the trust model,
+     * and a client that redrew the body without them would be quietly restating the one
+     * distinction the panel refuses to restate.
+     */
+    const room = readRoomDelivery(text);
+    if (room) return [{ ...base, kind: 'group_message', ...room, raw: text }];
 
     return [withImages({ ...base, kind: 'user', text }, pasted)];
   }

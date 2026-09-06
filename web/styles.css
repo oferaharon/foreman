@@ -2466,6 +2466,15 @@ body.row-dragging * { cursor: row-resize !important; }
   font-variant-numeric: tabular-nums;
 }
 
+/* A fact on the chip's line that is not part of its summary — a room delivery's
+   `to you`. `flex: none` so the summary is the half that ellipsises, and faint ink so the
+   line still reads as one quiet row rather than two competing halves. */
+.chip-mark {
+  flex: none;
+  font-size: 0.9em;
+  color: var(--ink-faint);
+}
+
 .chip-flag { flex: none; font-size: 0.9em; }
 .chip-flag.err { color: var(--decision); }
 .chip-flag.ok { color: var(--ink-faint); }
