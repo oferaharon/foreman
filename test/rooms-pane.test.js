@@ -709,9 +709,9 @@ test('a reconnect re-subscribes the open room, like every other open subscriptio
 });
 
 test('every way out of a room gives the subscription back', () => {
-  // Given a session, a thread, the shared room or another room…
+  // Given a session, the shared room or another room…
   assert.match(fn('leaveGroup'), /send\(\{ type: 'unsubscribe-group-room', slot \}\)/);
-  for (const name of ['open', 'openLink', 'openShared']) {
+  for (const name of ['open', 'openShared']) {
     assert.match(fn(name), /leaveGroup\(\);/, `\`${name}\` must give it back`);
   }
   // …closed on purpose…

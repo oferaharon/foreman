@@ -710,8 +710,8 @@ test('the roster frame carries `rooms`, and an empty array is the ordinary answe
   // case, and a truth test reads an empty list as "the frame did not mention it".
   assert.ok('rooms' in frame, 'the key is present whether or not there are any rooms');
   assert.ok(Array.isArray(frame.rooms));
-  // It is a sibling of `sessions`, beside `links` and `sharedRoom`, never a field on a row.
-  assert.ok('links' in frame && 'sharedRoom' in frame);
+  // It is a sibling of `sessions`, beside `sharedRoom`, never a field on a row.
+  assert.ok('sharedRoom' in frame);
 });
 
 test('a room subscription is one at a time, supersedes, and appends under its own name', async (t) => {

@@ -77,18 +77,9 @@ const state = {
   // groups do — the drift dot is drawn from it, and a dot that lagged the rail by a poll
   // would be pointing at a state nobody is in any more.
   snapshot: { savedAt: null, count: 0, drift: { missing: [], extra: [] } },
-  // Open cross-project links, verbatim as the store holds them — the same records the
-  // lead's `link_list` gets, from the same call. They ride the roster frame beside the
-  // groups because everything drawn from a link is drawn in or beside the rail and moves
-  // with it, and half a frame is a pane naming a link nothing else knows about.
-  //
-  // The record carries no per-side lead liveness (item 2's note): whether either end has
-  // a lead running right now is a question about the *roster*, which is in the same frame,
-  // so it is derived here rather than asked for.
-  links: [],
   // The account's rate limits, exactly as `server/rate-limits.js` holds them, or `null`
   // until some session's status line has posted one. A sibling of `sessions` on the roster
-  // frame like the groups and the links, and for a sharper version of the same reason: it
+  // frame like the groups, and for a sharper version of the same reason: it
   // is one account-wide number, so a copy of it on every session row would make the
   // server's own `#diff` broadcast the whole roster every time it moved.
   //
@@ -97,8 +88,8 @@ const state = {
   // than any session has taken a turn. It draws nothing.
   rateLimits: null,
   // The shared room, **as a summary and nothing else**: `{unseen, lastAt}`, or nulls until
-  // a frame has carried one. A sibling of `sessions` like the groups, the links and the
-  // rate limits, and for the sharpest version of that reason — this one summarises a
+  // a frame has carried one. A sibling of `sessions` like the groups and the rate limits,
+  // and for the sharpest version of that reason — this one summarises a
   // machine-wide log with a 4 MB ceiling, so the entries deliberately never ride the roster
   // frame at all. They arrive once on `subscribe-shared` and one at a time after that.
   //
@@ -109,7 +100,7 @@ const state = {
   // Every group room on this machine — open and archived both — exactly as
   // `GroupRoomStore#list` hands them over: `{id, name, members, memberCount, unseen, lastAt,
   // lastFrom, archivedAt}` and nothing else. A sibling of `sessions` on the roster frame like
-  // the groups, the links, the rate limits and the shared room, and computed from memory at
+  // the groups, the rate limits and the shared room, and computed from memory at
   // the other end for the sharpest version of that reason: a file read in `rosterFrame` is a
   // file read every two seconds, forever.
   //
@@ -203,31 +194,10 @@ function rememberOpen(slot, sessionId) {
 }
 
 /**
- * The third shape a slot can be remembered in: a joint thread rather than a session.
- *
- * A pane can hold something that is not a session, so the memory has to be able to say so.
- * Without this a reload finds `{id, paneId}`-shaped memory for a slot that was holding a
- * thread, misses on both keys, and drops whatever session sorts first into the slot — the
- * thread silently replaced by a conversation nobody opened. `kind` is what `adopt` reads
- * to tell the two apart; a session entry has never carried one and does not start now.
- *
- * `autoSplit` rides along because closing a thread asks a question a reloaded window would
- * otherwise answer differently from the one it replaced: whether this pane exists *because*
- * of the thread, and so whether closing it should take the panel back to one pane. See
- * `threadSplit`. An entry written before this field says `undefined`, which reads as false —
- * the conservative half, since it keeps a pane rather than taking one away.
- */
-function rememberOpenLink(slot, linkId, autoSplit = false) {
-  if (linkId) state.opened[slot] = { kind: 'link', link: linkId, autoSplit: Boolean(autoSplit) };
-  else delete state.opened[slot];
-  persistOpen();
-}
-
-/**
  * The fourth shape a slot can be remembered in: the shared room.
  *
  * It carries no id, because there is one room on the machine — which is exactly why it
- * needs its own `kind` rather than a `link` entry with a reserved id. `adopt` reads `kind`
+ * needs its own `kind` rather than a session entry with a reserved id. `adopt` reads `kind`
  * to tell the shapes apart, and a slot remembering something it cannot name would fall
  * through both session keys and be replaced by whatever session sorts first.
  *
@@ -245,7 +215,7 @@ function rememberOpenShared(slot, on, autoSplit = false) {
  * The fifth shape a slot can be remembered in: one group room, by id.
  *
  * By id where the shared room needs none, because there are many of them — and with its own
- * `kind` rather than a `link` entry carrying a room id, for `rememberOpenShared`'s reason:
+ * `kind` rather than the shared room's shape carrying a room id, for its reason:
  * `adopt` reads `kind` to tell the shapes apart, and a slot remembering something under
  * somebody else's word would be restored as the wrong thing rather than as nothing.
  *
@@ -293,9 +263,6 @@ const el = {
   railRooms: document.getElementById('railRooms'),
   roomsAdd: document.getElementById('roomsAdd'),
   roomsList: document.getElementById('roomsList'),
-  connCol: document.getElementById('connCol'),
-  connGrip: document.getElementById('connGrip'),
-  connList: document.getElementById('connList'),
   main: document.getElementById('main'),
   splitGrip: document.getElementById('splitGrip'),
 };
@@ -303,7 +270,7 @@ const el = {
 /* ----------------------------------------------------------- resizers --- */
 
 /**
- * One draggable divider, five of them on screen.
+ * One draggable divider, four of them on screen.
  *
  * The rail's right edge shipped first (#4) and this is that code generalised, not a
  * second copy of it: the rail, the connections band, the lead's aside, the Tasks/Room
@@ -530,57 +497,14 @@ resizer({
   onMove: applyResizers,
 });
 
-/* -------------------------------------------- the connections band --- */
-
-/**
- * How much of the rail the connections take, dragged from the band's top edge.
- *
- * The fourth divider and the third mechanism it deliberately is not: same `resizer`, same
- * rem-in-`localStorage`, same double-click-to-forget, same "the preference and the applied
- * size are two numbers" — the band is the Tasks/Room split turned to face the rail, and
- * `--conn-h` is the room's `--room-h` with a default, because there is no five-row cut here
- * to stand in for one.
- */
-
-/** rem. `CONN_MAX` also bounds what a stored value may say; the live ceiling is below. */
-const CONN_MIN = 4;
-const CONN_MAX = 30;
-/** rem. What the session list keeps whatever the band asks for — a rail whose sessions had
- *  been squeezed to nothing would be a rail that stopped being one. */
-const RAIL_LIST_MIN = 6;
-
-resizer({
-  handle: el.connGrip,
-  axis: 'y',
-  storageKey: 'foreman.connHeight',
-  min: CONN_MIN,
-  max: CONN_MAX,
-  // Everything between the top of the session list and the bottom of the band, less the
-  // floor the list keeps. Measured off the page rather than declared: the rail's head and
-  // footer are whatever the type scale says today, and the window resizes.
-  ceiling: () => {
-    const top = el.railList?.getBoundingClientRect().top ?? 0;
-    const bottom = el.connCol?.getBoundingClientRect().bottom ?? 0;
-    // Before the rail is laid out — or while the band is hidden, which is every panel with
-    // no links — every rect is zero. The preference's own `max` is a better answer than a
-    // negative one.
-    if (bottom <= top) return CONN_MAX;
-    return (bottom - top) / remPx() - RAIL_LIST_MIN;
-  },
-  // The band's bottom is pinned by the footer under it, so it grows upward and the pointer's
-  // distance back from that edge *is* the height being asked for.
-  measure: (e) => (el.connCol?.getBoundingClientRect().bottom ?? window.innerHeight) - e.clientY,
-  apply: (rem) => setRootVar('--conn-h', rem),
-});
-
 /* ------------------------------------------------ the split's boundary --- */
 
 /**
  * How split view divides, dragged from the line the two panes meet at.
  *
- * The fifth divider, and the first with no edge of its own to hang off: the rail, the
- * aside and the connections band each overhang a border something else already draws,
- * while these two panes simply abut at a line the grid computes. So the grip is *placed*
+ * The fourth divider, and the first with no edge of its own to hang off: the rail and the
+ * aside each overhang a border something else already draws, while these two panes simply
+ * abut at a line the grid computes. So the grip is *placed*
  * from the same `--pane-a` that sizes the first track — one number, two readers, no way
  * for the handle and the boundary to disagree. Everything else is the shared `resizer`:
  * rem in `localStorage`, a floor, a live ceiling, double-click to forget.
@@ -1022,10 +946,7 @@ function handle(msg) {
     state.sessions = msg.sessions;
     if (msg.groups) state.groups = msg.groups;
     if (msg.snapshot) state.snapshot = msg.snapshot;
-    // `Array.isArray`, not a truth test: an empty list is the ordinary answer — no links
-    // open — and it has to be able to *clear* what the last closed link left behind.
-    if (Array.isArray(msg.links)) state.links = msg.links;
-    // `in`, not a truth test, for the links' reason one line up and then one of its own:
+    // `in`, not a truth test, and for a reason of its own:
     // `null` is what the frame carries until a status line has posted anything, so a truth
     // test would pin the last record on screen for ever once one had arrived. Keyed on the
     // field being present at all so a frame from a panel that predates it leaves whatever
@@ -1177,13 +1098,14 @@ function formatElapsedFull(totalSeconds) {
  * reasoning that the next broadcast overwrites the local flip either way — true, and
  * exactly the problem now that there is something to refuse: a rejected un-pin flipped the
  * star and then flipped it back a second later with nothing on screen saying why. "Just
- * not working" is precisely what a refusal must not look like. A connected lead stays
- * pinned, and the 409 carries `pinned: true` so the star goes back to the state the server
- * is holding rather than to the one we optimistically wrote.
+ * not working" is precisely what a refusal must not look like. The 409 carries the state
+ * the server is holding, so the star goes back to that rather than to the one we
+ * optimistically wrote, and the server's own sentence says why.
  *
- * The button is drawn disabled for a connected lead, so this path is only reachable by
- * racing a link being made against a click. It still has to explain itself — that is the
- * one thing a disabled control cannot do.
+ * Nothing in the panel draws a pin refused in advance today — the one thing that ever did
+ * was a link holding a lead's star, retired on 2026-09-05, and the server-side refusal is
+ * item 4's to remove. The reading stays either way: a refusal this client cannot anticipate
+ * is exactly the case it has to be able to show.
  */
 async function togglePin(s) {
   const was = Boolean(s.pinned);
@@ -1265,72 +1187,14 @@ function toast(text) {
   toastState = { node, timer: setTimeout(dismiss, TOAST_MS) };
 }
 
-/* -------------------------------------------------------- connections --- */
-
-/*
- * Cross-project links, on the client side.
- *
- * A link joins two *projects*, not two sessions, so everything here reads paths and never
- * ids: a link outlives every session at either end, which is the whole of why the
- * maintainer never has to reconnect anything.
- *
- * `state.links` is the one list, and nothing derives from it a fact something else derives
- * differently. In particular the card summary — the last message and the unseen count —
- * is read off the record and never computed from the thread. The server writes it at post
- * time for the reason its own comment gives (deriving it would read two `room.jsonl` files
- * per link per roster beat, against logs that grow forever), and a client recomputing it
- * would be that cost moved rather than avoided, plus a second answer to what a card says.
- *
- * And nothing here measures anything: not a rect, not a height. Nothing in this design may
- * measure a row's position — that is the locked ruling behind drawing cards instead of
- * lines between rows, and it is `renderRoom`'s own 66px-per-line lesson.
- */
-
-/** `/abs/path/to/alpha` → `alpha`. Every face shows this; every record stores the path. */
-const projectName = (p) => String(p || '').split('/').filter(Boolean).at(-1) || String(p || '');
-
-/** The other end of a link, given one end. */
-const linkPeerOf = (link, repo) => (link.a === repo ? link.b : link.a);
-
-/** How a link names itself in a sentence — the panel's spelling of the server's `linkNamed`. */
-const linkNamedFor = (link) => (link.label ? `${link.id}, “${link.label}”` : link.id);
-
-/** One open link by id, or null. Closed links are not in the roster frame at all. */
-const linkById = (id) => state.links.find((l) => l.id === id) || null;
-
-/*
- * `RELAUNCH_NOTE` used to live here — "both leads need one relaunch before they can send
- * on it" — spelled once and rendered twice, in the connect form's fine print and in the
- * toast after the press. Both are gone, along with the server's own copy of the sentence;
- * `server/index.js`'s link-create endpoint carries the whole reasoning.
- *
- * The short version, so nobody reintroduces it here: it was only true of a lead launched
- * before the link tools shipped. A lead started now has them from birth and resolves a
- * link when it uses one, so it can be connected an hour later and just work. And it could
- * not be made conditional — the panel cannot tell what a running lead was launched with,
- * and the approved plan refused to build a detector for exactly that reason.
- */
-
-/** Every open link this session's project is an endpoint of. Not a lead: not linked. */
-function linksForSession(s) {
-  if (!s?.isLead || !s.paneCwd) return [];
-  return state.links.filter((l) => l.a === s.paneCwd || l.b === s.paneCwd);
-}
-
 /**
- * The link that holds this session's pin, or null.
+ * `/abs/path/to/alpha` → `alpha`. Every face shows this; every record stores the path.
  *
- * The client half of the server's own `linkHolding`, and deliberately only *drawing*
- * decides from it: `POST /api/sessions/:id/pin` re-decides the same thing server-side, so
- * the refusal is a property of the panel rather than a habit of its front end and a LAN
- * peer holding curl gets the same answer. The exposure modal's shape exactly.
+ * Its one live caller is `roomLinkPill`, which names the project a historical
+ * `kind: 'link'` room entry came from — see its own comment for why those entries are
+ * still drawn long after the feature that wrote them was retired.
  */
-const linkHolding = (s) => linksForSession(s)[0] || null;
-
-/** Why the star will not move — the sentence that saves you needing the 409's. */
-const pinHeldTitle = (link, s) =>
-  `Connected to ${projectName(linkPeerOf(link, s.paneCwd))} on link ${linkNamedFor(link)} — ` +
-  'a connected lead stays pinned. Close the link to unpin it.';
+const projectName = (p) => String(p || '').split('/').filter(Boolean).at(-1) || String(p || '');
 
 /* ------------------------------------------------------- new session --- */
 
@@ -2719,13 +2583,7 @@ function paintPinBtn(btn, s) {
   if (!btn) return;
   btn.textContent = s.pinned ? '★ pinned' : 'pin';
   btn.setAttribute('aria-pressed', String(Boolean(s.pinned)));
-  const held = linkHolding(s);
-  btn.disabled = Boolean(held);
-  btn.title = held
-    ? pinHeldTitle(held, s)
-    : s.pinned
-      ? 'Unpin — let this session sort with the rest'
-      : 'Keep this session at the top of the rail';
+  btn.title = s.pinned ? 'Unpin — let this session sort with the rest' : 'Keep this session at the top of the rail';
 }
 
 /**
@@ -2895,27 +2753,13 @@ function bindingMark(s) {
 }
 
 /**
- * What the column last drew, so a roster beat that changed nothing repaints nothing.
- *
- * Not an optimisation — a correctness guard. The close control arms into a `yes / no`
- * question that lives four seconds (`armConfirm`), the roster broadcasts every couple of
- * them, and a column that rebuilt on every beat would take that question away from under
- * the cursor about to answer it. The merge block holds the same line for the same reason.
- *
- * Joined with real punctuation, which is the other half of `mergeSig`'s lesson: its first
- * version joined with what read in every editor as an empty string and was in fact three
- * literal control bytes, so two different queues could spell one signature.
- */
-let connSig = '';
-
-/**
  * The rail's shared-room row: one persistent line, and the count of what has arrived since
  * anybody last looked.
  *
  * **Patched in place, never rebuilt.** The row is one node with three spans and it is
  * repainted on the roster beat — rebuilding it would take the button out from under a
- * cursor that is on its way to press it, which is the same correctness argument `connSig`
- * makes for the cards below and `renderMergeQueue` makes one pane over. There is nothing
+ * cursor that is on its way to press it, which is the same correctness argument `roomsSig`
+ * makes for the band below and `renderMergeQueue` makes one pane over. There is nothing
  * here worth a signature: three `textContent` writes cost less than the comparison would.
  *
  * It is deliberately **not** on `composerSig`, and nothing about the shared room may ever
@@ -2951,7 +2795,8 @@ function renderSharedRow() {
 /**
  * What the rooms band last drew, so a roster beat that changed nothing repaints nothing.
  *
- * `connSig`'s reason, and joined the same way: `|` inside a row and `~` between rows, real
+ * `renderSharedRow`'s reason one row up, and joined with real punctuation: `|` inside a row
+ * and `~` between rows, never
  * punctuation rather than what reads in an editor as an empty string. The string itself is
  * built in `web/rooms-band.js` so a test can hold what is in it — a field the face reads and
  * the signature does not is a band that stops repainting on a real change.
@@ -2963,8 +2808,8 @@ let roomsSig = '';
  * control that makes a new one.
  *
  * Called from the end of `renderRail`, which is every place the panel already redraws for —
- * the roster beat, a pane opening, a group folding — exactly as `renderConnections` is one
- * band down.
+ * the roster beat, a pane opening, a group folding — exactly as `renderSharedRow` is one
+ * band up.
  *
  * It is deliberately **not** on `composerSig` and nothing about rooms may ever join it: that
  * signature tears the whole composer down when it changes, and a message landing in a room
@@ -2980,11 +2825,10 @@ function renderRoomsBand() {
 
   // The **rows** exist only while there is something in them — `.app.has-rooms` gates
   // `.rooms-list` and nothing else, so the head and its `+ room` are always in the rail.
-  // That is deliberately not the whole-band trade `.app.has-links` makes one band down:
-  // `+ room` is the only way into the create modal, and a control that appears only once
-  // traffic exists is a control nobody discovers — the shared row above says it in its own
-  // markup. The class is on `.app` rather than on the rail because it is one fact about the
-  // whole window, exactly as `has-links` is.
+  // The band never hides whole: `+ room` is the only way into the create modal, and a
+  // control that appears only once traffic exists is a control nobody discovers — the shared
+  // row above says it in its own markup. The class is on `.app` rather than on the rail
+  // because it is one fact about the whole window.
   el.app.classList.toggle('has-rooms', rooms.length > 0);
   if (!el.roomsList) return;
 
@@ -3330,207 +3174,7 @@ function openCreateRoom() {
     });
 }
 
-/**
- * The connections band at the foot of the rail: one card per open link, and nothing at all
- * when there are none.
- *
- * Called from the end of `renderRail`, which is every place the panel already redraws for
- * — the roster beat, a pane opening, a group folding. It is deliberately **not** on
- * `composerSig` and must never join it: that signature tears the whole composer down when
- * it changes, and a link arriving would take the textarea out from under whoever was
- * typing. The merge block's lesson, one column over.
- */
-function renderConnections() {
-  const links = state.links;
-  const openHere = new Set(panes.map((p) => p.linkId()).filter(Boolean));
-
-  // The band exists only while there is something in it — the same show/hide trade
-  // `.app.split .main` already makes, and what keeps a panel with no links the panel it was
-  // before this feature. The class stays on `.app` rather than on the rail: it is one fact
-  // about the whole window, and the band's grip is a sibling of the band, not a child.
-  el.app.classList.toggle('has-links', links.length > 0);
-
-  const sig = links
-    .map((l) =>
-      // `lastSpeaker` is in here because the card draws from it — `you:` rather than a
-      // project name — and a field the face reads but the signature does not is a card
-      // that stops repainting on a real change. Ordinary punctuation for the join, for
-      // `mergeSig`'s reason: three invisible control bytes once sat inside what every
-      // editor drew as an empty string.
-      [l.id, l.a, l.b, l.label, l.lastAt, l.lastText, l.lastFrom, l.lastSpeaker, l.unseen, openHere.has(l.id)].join('|'),
-    )
-    .join('~');
-  if (sig === connSig) return;
-  connSig = sig;
-
-  // Anything armed in here is answering for a card this repaint is about to replace.
-  disarmConfirm(el.connList);
-
-  const frag = document.createDocumentFragment();
-  for (const link of links) frag.append(connCard(link, openHere.has(link.id)));
-  el.connList.replaceChildren(frag);
-}
-
-/**
- * One link, as the object the locked UX made it: a card, never a line drawn between two
- * rows. It survives scrolling, sorting and a collapsed group, because it is not drawn
- * against either row — and nothing about it measures where a row is.
- *
- * Basenames on the face and **absolute paths in the tooltip**, which is not tidiness:
- * `sessionName` mints a lead's tmux name from `basename(folder)` alone, so two projects
- * called `api` in different trees can never both have a live lead — but they can perfectly
- * well both be in a link, and the card would then be two identical words with no other way
- * to tell them apart.
- */
-function connCard(link, isOpen) {
-  const card = document.createElement('div');
-  card.className = `conn-card${isOpen ? ' is-open' : ''}`;
-  card.title = link.label
-    ? `${link.label}\n${link.a}\n${link.b}\nlink ${link.id}`
-    : `${link.a}\n${link.b}\nlink ${link.id}`;
-
-  const open = document.createElement('button');
-  open.className = 'conn-open';
-  open.type = 'button';
-  open.title = `Open the joint thread for link ${linkNamedFor(link)}`;
-  open.onclick = () => openLinkThread(link.id);
-
-  const pair = document.createElement('div');
-  pair.className = 'conn-pair';
-  for (const [i, repo] of [link.a, link.b].entries()) {
-    if (i) {
-      const tie = document.createElement('span');
-      tie.className = 'conn-tie';
-      tie.textContent = '⇄';
-      pair.append(tie);
-    }
-    const name = document.createElement('span');
-    name.className = 'conn-proj';
-    name.textContent = projectName(repo);
-    pair.append(name);
-  }
-  // What has arrived since this thread was last opened. Zero draws nothing — a `· 0` is
-  // furniture, the same reason an empty group draws no heading. It counts the *leads'*
-  // messages only, decided server-side, so a line the maintainer types into the thread he
-  // is looking at can never mark its own card unread.
-  if (link.unseen > 0) {
-    const badge = document.createElement('span');
-    badge.className = 'conn-unseen';
-    badge.textContent = link.unseen > 99 ? '99+' : String(link.unseen);
-    badge.title = `${link.unseen} new message${link.unseen === 1 ? '' : 's'} since you last opened this thread`;
-    pair.append(badge);
-  }
-  open.append(pair);
-
-  // Why the link exists, in the maintainer's own words. Optional at link time, so most
-  // cards will not have one and nothing in the layout depends on it.
-  if (link.label) {
-    const label = document.createElement('div');
-    label.className = 'conn-label';
-    label.textContent = link.label;
-    open.append(label);
-  }
-
-  const last = document.createElement('div');
-  if (link.lastAt) {
-    last.className = 'conn-last';
-    const from = document.createElement('span');
-    from.className = 'conn-last-from';
-    // `lastSpeaker`, never `lastFrom`: the maintainer's own message has no sending project
-    // at all, so there is no basename to take and the card would read `:` with nothing in
-    // front of it. Same field, same reason, as the thread's own pill.
-    from.textContent =
-      link.lastSpeaker === 'human' ? 'you:' : `${projectName(link.lastFrom || '')}:`;
-    const text = document.createElement('span');
-    text.className = 'conn-last-text';
-    // One line, cut by CSS. Nothing here is measured: a repaint that measures stops holding
-    // the reader's place, and this one runs on the roster beat.
-    text.textContent = link.lastText || '';
-    last.append(from, text);
-  } else {
-    last.className = 'conn-last is-quiet';
-    last.textContent = 'Nothing said yet.';
-  }
-  open.append(last);
-  card.append(open);
-
-  const foot = document.createElement('div');
-  foot.className = 'conn-foot';
-  const when = document.createElement('span');
-  when.className = 'conn-when';
-  when.textContent = relativeTime(link.lastAt || link.createdAt);
-  when.title = link.lastAt
-    ? `Last message ${new Date(link.lastAt).toLocaleString()}`
-    : `Opened ${new Date(link.createdAt).toLocaleString()}`;
-  foot.append(when);
-
-  // Closing writes into **two** projects' `decisions.md` and cannot be undone from here —
-  // re-linking the same pair later mints a new link with a new id and a new thread. So it
-  // is the one control on this card that asks first.
-  const close = document.createElement('button');
-  close.className = 'conn-close';
-  close.type = 'button';
-  close.textContent = 'close';
-  close.title =
-    'Close this connection. Both projects get a note in decisions.md and neither lead can ' +
-    'send on it again. What was said stays in both rooms.';
-  close.onclick = () =>
-    armConfirm(close, `close the link with ${projectName(link.b)}?`, () => closeLink(link, close));
-  foot.append(close);
-  card.append(foot);
-
-  return card;
-}
-
-/** Close a link, and say so if anything about it refused. The card leaves on the next frame. */
-async function closeLink(link, btn) {
-  btn.disabled = true;
-  try {
-    const res = await fetch(`/api/team/links/${link.id}/close`, { method: 'POST' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'That link could not be closed.');
-    // Two files, two independent appends, and never a rollback — so a partial write is
-    // reported rather than hidden. The endpoint answers with what each one actually did.
-    const missed = (data.decisions || []).filter((d) => d && d.ok === false);
-    if (missed.length) {
-      toast(
-        `Link ${link.id} is closed, but its note could not be written to ` +
-          `${missed.map((d) => projectName(d.repo)).join(' and ')}: ${missed[0].error}`,
-      );
-    }
-  } catch (err) {
-    btn.disabled = false;
-    toast(err.message);
-  }
-}
-
-/**
- * The repos at both ends of a link whose either end is open in a pane.
- *
- * Module scope because `sessionRow` is, and recomputing it per row would walk every link
- * for every row in the rail — the same shape `duplicating` has, and a parameter is no use
- * because `sessionRow` is called from four places.
- *
- * It is a **data comparison**, never a rect. Nothing in this design may measure a row's
- * position: that is the locked ruling behind drawing cards instead of lines, and it is
- * `renderRoom`'s own 66px-per-line lesson said about the rail.
- */
-let linkedNow = new Set();
-
 function renderRail() {
-  // Which leads are on screen right now, and so which links are live to the eye. Read off
-  // the panes rather than a selection variable, because split view means two of them and
-  // either one counts.
-  const openIds = new Set(panes.map((p) => p.selected()).filter(Boolean));
-  linkedNow = new Set();
-  for (const s of state.sessions) {
-    if (!s.isLead || !s.paneCwd || !openIds.has(s.id)) continue;
-    for (const l of state.links) {
-      if (l.a !== s.paneCwd && l.b !== s.paneCwd) continue;
-      linkedNow.add(l.a);
-      linkedNow.add(l.b);
-    }
-  }
 
   const live = state.sessions.length;
   const busy = state.sessions.filter((s) => s.status === 'working').length;
@@ -3668,7 +3312,6 @@ function renderRail() {
     el.railList.replaceChildren(frag);
     renderSharedRow();
     renderRoomsBand();
-    renderConnections();
     return;
   }
 
@@ -3722,11 +3365,6 @@ function renderRail() {
   // this could otherwise go stale. It holds its own signature, so a beat that changed
   // nothing costs nothing.
   renderRoomsBand();
-  // The column is a sibling of the rail and is drawn from the same frame, so it is drawn on
-  // the same beat: every place that already redraws the rail — the roster, a pane opening, a
-  // group folding — is a place the column could otherwise go stale. It holds its own
-  // signature, so a beat that changed nothing costs nothing.
-  renderConnections();
 }
 
 /* ------------------------------------------------------------- quota --- */
@@ -3962,14 +3600,7 @@ function sessionRow(s) {
   // hence the wrapper, which also carries the hover and selected states so they cover
   // the pin as well.
   const row = document.createElement('div');
-  // `is-linked` marks *both* ends of a link whenever either one is open — see `linkedNow`,
-  // and note it is a class from a data comparison, never a measured position. It is
-  // deliberately weaker than `.is-open` and loses to it in the stylesheet: the row you
-  // selected already says it is selected, and a second strong band on it would be two
-  // answers to "which one am I in".
-  const linked = s.isLead && s.paneCwd && linkedNow.has(s.paneCwd);
-  row.className =
-    `session-row${s.pinned ? ' is-pinned' : ''}${s.isLead ? ' is-lead' : ''}${linked ? ' is-linked' : ''}`;
+  row.className = `session-row${s.pinned ? ' is-pinned' : ''}${s.isLead ? ' is-lead' : ''}`;
 
   const btn = document.createElement('button');
   btn.className = `session${s.unread > 0 ? ' has-unread' : ''}`;
@@ -4090,17 +3721,7 @@ function sessionRow(s) {
   pin.className = 'pin-btn';
   pin.textContent = s.pinned ? '★' : '☆';
   pin.setAttribute('aria-pressed', String(Boolean(s.pinned)));
-  // A connected lead stays pinned (the ruling), so the control that would release it is
-  // drawn refusing rather than left to fail. `launchLead` already pins a lead from birth
-  // and link-create pins one that was not, so this is only ever about the un-pin — there is
-  // no mechanism here re-asserting a pin the panel already sets.
-  const heldBy = linkHolding(s);
-  pin.disabled = Boolean(heldBy);
-  pin.title = heldBy
-    ? pinHeldTitle(heldBy, s)
-    : s.pinned
-      ? 'Unpin — let this session sort with the rest'
-      : 'Pin to the top of the rail';
+  pin.title = s.pinned ? 'Unpin — let this session sort with the rest' : 'Pin to the top of the rail';
   pin.onclick = (e) => {
     e.stopPropagation(); // the wrapper is not clickable, but the row beside it is
     togglePin(s);
@@ -4138,33 +3759,6 @@ function teamLine(team, s) {
   chip.className = `role-chip is-${team.role}`;
   chip.textContent = team.role;
   line.append(chip);
-
-  // Every open link this lead is an endpoint of, beside the role chip and on the line that
-  // already exists. **A team row is three lines and every other row is two** — that trade is
-  // what bought the third, and a fourth would undo it. Like the role chip it never shrinks:
-  // the fact is the only half allowed to ellipsise.
-  //
-  // A `<span>`, not a `<button>`, and that is forced rather than lazy — this line lives
-  // inside the row's own `<button>` and a button cannot contain one. A span with a click
-  // handler is not interactive content, so the markup stays valid and the row's own keyboard
-  // behaviour is untouched; the keyboard path to the same thread is the card in the column,
-  // which *is* a real button.
-  for (const link of linksForSession(s)) {
-    const peer = linkPeerOf(link, s.paneCwd);
-    const conn = document.createElement('span');
-    conn.className = 'link-chip';
-    conn.textContent = `⇄ ${projectName(peer)}`;
-    conn.title =
-      `Joint thread with ${peer} — link ${linkNamedFor(link)}. ` +
-      'Click to open it beside this conversation.';
-    conn.onclick = (e) => {
-      // The row is a button and this sits inside it: without this the press would open the
-      // session as well as the thread.
-      e.stopPropagation();
-      openLinkThread(link.id);
-    };
-    line.append(conn);
-  }
 
   const fact = document.createElement('span');
   fact.className = 'team-fact';
@@ -4932,57 +4526,16 @@ function createPane(slot, host) {
     // this is the field that stops it being *only* that, and it is checked before every
     // piece of machinery that assumes there is a session behind `selected`.
     //
-    // `'link'` means the pane holds a joint thread: a view over two projects' rooms,
-    // belonging to neither, with no transcript, no composer, no model and no pane to type
-    // into. Every one of the five things that used to assume otherwise has its own guard,
-    // and each guard is there for its own reason rather than as a copy of the one above.
+    // Anything that is not `'session'` — peer messages, one group room — has no transcript,
+    // no composer, no model and no pane to type into. Every piece of machinery that used to
+    // assume otherwise has its own guard, and each guard is there for its own reason rather
+    // than as a copy of the one above.
     kind: 'session',
     selected: null,
     messages: [],
     hasEarlier: false,
     error: null,
     lastMarked: null, // newest timestamp we have reported as read
-    // The joint thread, when `kind === 'link'`. `link` is the record as the roster last
-    // described it — the pane redraws its own head from it, so a label edited elsewhere
-    // arrives on the next beat.
-    link: null,
-    thread: [],
-    threadSig: '',
-    threadAt: 0,
-    threadBusy: false,
-    threadError: null,
-    // Is the thread pinned to its newest line? An *intention*, flipped only by a real
-    // scroll — the room's rule, and for the room's reason: this box repaints in full when
-    // a message arrives, and being yanked to the bottom mid-read is worse than scrolling
-    // down for the new line yourself.
-    threadFollow: true,
-    threadEl: null,
-    // Which entries the reader has opened out of their ten-line clamp.
-    //
-    // Keyed by **repo and seq together**, never `seq` alone: a joint thread is two rooms
-    // merged and `seq` is per repo (`server/room.js`), so the two sides collide on it
-    // constantly — one `seq` would open somebody else's message every time. `repo` rides
-    // on every entry because `jointThread` stamps it there for exactly this class of
-    // question. And it is keyed on the *record* rather than on the node, for the room's
-    // own reason: every child is replaced on every paint, so a node's identity is gone by
-    // the next arriving line and anything keyed to it would silently re-clamp.
-    threadOpen: new Set(),
-    /*
-     * Refusals the thread owes the reader, held **in view state and never on the node that
-     * was pressed**. `roomView.mergeErrors` is the precedent and the reason is on the
-     * record: a 409 painted onto a pressed node came back on a node a concurrent repaint
-     * had already replaced — `isConnected: false`, rendered into a detached tree, and
-     * nobody ever saw why their press did nothing. Every child of the thread is replaced
-     * on every paint, so that is not a hypothetical here.
-     *
-     * Keyed by `'send'` for the composer's own refusal and by `msgId` for one entry's
-     * record control.
-     */
-    linkErrors: new Map(),
-    // Presses in flight, by the same keys. `linkEntryNode` builds fresh nodes on every
-    // paint, so `disabled` on a button is gone by the next arriving line and the flag has
-    // to outlive it — the `duplicating` guard on the rail's ⧉, one screen over.
-    linkBusy: new Set(),
 
     /* ------------------------------------------------- the shared room --- */
 
@@ -5022,9 +4575,8 @@ function createPane(slot, host) {
     sharedFollowH: null,
     // Which entries the reader has opened out of their ten-line clamp. Keyed by the
     // entry's own `seq`, which is unique in this log by construction — one file, one
-    // counter, monotonic across a rotation. (The joint thread needs `repo:seq` because it
-    // merges two rooms whose seqs collide; there is only one room here.) Keyed on the
-    // *record* rather than the node, because every child is replaced on every paint.
+    // counter, monotonic across a rotation. Keyed on the *record* rather than the node,
+    // because every child is replaced on every paint.
     sharedOpenKeys: new Set(),
 
     /* --------------------------------------------- one group room --- */
@@ -5087,7 +4639,7 @@ function createPane(slot, host) {
     groupAddOpen: false,
     /*
      * The header's own refusal — the server's sentence for a rename, an add, a remove or an
-     * archive — held **in view state and never on the node that was pressed**. `linkErrors`'
+     * archive — held **in view state and never on the node that was pressed**. `mergeErrors`'
      * reason, and it is sharper here: the strip repaints on the roster beat, so a 409 painted
      * onto a chip's ✕ would be in a detached tree within two seconds and nobody would ever
      * see why their press did nothing.
@@ -5113,13 +4665,10 @@ function createPane(slot, host) {
 
   let streamEl = null;
   let composerEl = null;
-  // The thread's own small composer. Deliberately a second variable rather than a second
-  // shape for `composerEl`: everything that reads that one assumes a session behind it.
-  let linkComposerEl = null;
-  // …and a group room's. A third variable for the second time the same reason has been
-  // given: everything that reads one of the two above it assumes what that one is behind.
-  // (There was a fourth, `sharedComposerEl`, until peer messages stopped being a box you
-  // could type into.)
+  // …and a group room's. A second variable for the reason the one above it has: everything
+  // that reads `composerEl` assumes a session behind it. (There were two more — the joint
+  // thread's and `sharedComposerEl` — until links and the peer-message composer were
+  // retired.)
   let groupComposerEl = null;
 
   // The team room — and, since Wave E, the whole team panel: tasks and settings ride the
@@ -5194,28 +4743,6 @@ function createPane(slot, host) {
     // cannot live on a node the paint throws away. Keyed by task id, `'*'` for the batch.
     mergeErrors: new Map(), // id | '*' -> {text, at}
 
-    /*
-     * The `connect` block — the one control that makes a link, and everything it holds.
-     *
-     * All of it lives here rather than on the nodes, and it is all cleared in `syncRoom`,
-     * for the reason the settings block above learned first: a half-filled form is *this
-     * project's* half-filled form, and a select still holding another lead's peer when you
-     * switch panes is a control that lies about what it is about to do. It is also what
-     * makes the block redrawable — `renderConnect` replaces its children, so anything kept
-     * only in the DOM would be thrown away by the fetch that lands a beat after the fold
-     * opens (`expanded`'s lesson, one block up).
-     */
-    connectOpen: false, // is the fold open? closed on arrival — the room is what you came to read
-    connectTeams: null, // `GET /api/teams`' last answer; null means "not asked yet"
-    connectListBusy: false, // that GET, in flight
-    connectBusy: false, // the POST, in flight
-    connectSel: '', // the chosen peer's **repo path**, never its name — two can share a name
-    connectLabel: '', // the optional why, capped at 80 by the field and refused by the server
-    connectErr: '', // the last refusal, rendered in the block that was pressed
-    connectFoldEl: null,
-    connectFormEl: null,
-    connectAddEl: null,
-    connectPinTimer: null,
   };
 
   /** How long a locally-pressed row stays locked before the server's answer is the only one. */
@@ -5245,21 +4772,6 @@ function createPane(slot, host) {
     roomView.mergeAt = 0;
     roomView.mergeSent.clear(); // another team's task ids mean nothing here either
     roomView.mergeErrors.clear();
-    // The connect form is per project in every field it has: the peer, the reason, and the
-    // refusal that named one of them. Carried across, it would offer to link the project
-    // you just left.
-    roomView.connectOpen = false;
-    roomView.connectTeams = null;
-    roomView.connectSel = '';
-    roomView.connectLabel = '';
-    roomView.connectErr = '';
-    // The two in-flight flags go too, and it is the busy one that matters: a POST fired for
-    // the project you just left would otherwise leave the *next* project's form disabled
-    // and saying `connecting…` about a link that has nothing to do with it. Both requests
-    // already check `roomView.repo` against the project that asked before writing anything
-    // back, so letting them land after this is safe — they simply find nobody waiting.
-    roomView.connectBusy = false;
-    roomView.connectListBusy = false;
     disarmMerge();
     if (repo) send({ type: 'subscribe-room', repo, slot });
   }
@@ -5273,34 +4785,15 @@ function createPane(slot, host) {
     persistDrafts();
   }
 
-  /**
-   * A thread's draft key — the **same store**, a different namespace.
-   *
-   * `state.drafts` is keyed by session id, and a link id is a short string of the panel's
-   * own minting. Nothing stops `lnk-5` being a session id one day, and a collision there
-   * would have one draft silently clobber the other. `link:` in front is the whole fix.
-   */
-  const linkDraftKey = (id) => `link:${id}`;
-
-  /** Hold on to what was being typed in the thread we're leaving. */
-  function saveLinkDraft(linkId = view.link?.id) {
-    if (!linkId || !linkComposerEl) return;
-    const text = linkComposerEl.ta.value;
-    if (text.trim()) state.drafts[linkDraftKey(linkId)] = text;
-    else delete state.drafts[linkDraftKey(linkId)];
-    persistDrafts();
-  }
 
   function open(id) {
     if (view.kind === 'session' && view.selected === id) return;
-    saveLinkDraft(); // …and the same for a thread, if that is what this pane was showing
     saveDraft(); // hold on to what was being typed in the session we're leaving
     leaveShared(); // …and the room's subscription, if that is what this pane was holding
     leaveGroup(); // …or a group room's, which is the server's to stop for the same reason
-    // Coming back from a thread: the pane stops being a link before anything else, or the
-    // guards below would keep refusing on its behalf.
+    // Coming back from a room: the pane stops being one before anything else, or the guards
+    // below would keep refusing on its behalf.
     view.kind = 'session';
-    clearThread();
     view.selected = id;
     rememberOpen(slot, id);
     view.messages = [];
@@ -5311,129 +4804,6 @@ function createPane(slot, host) {
     send({ type: 'subscribe', sessionId: id, slot });
     renderRail();
     renderMain();
-  }
-
-  /* -------------------------------------------------------------- link --- */
-
-  /** Everything a thread leaves behind, dropped in one place so nothing half-clears. */
-  function clearThread() {
-    view.link = null;
-    view.thread = [];
-    view.threadSig = '';
-    view.threadAt = 0;
-    view.threadError = null;
-    view.threadFollow = true;
-    view.threadEl = null;
-    view.threadClosedAsked = false;
-    // A different link's entries can share `repo:seq` with this one's, so an unfolded set
-    // carried across would open messages nobody touched.
-    view.threadOpen.clear();
-    // Same reasoning one shape along: a held refusal belongs to the message it was about,
-    // and a press in flight belongs to the thread that started it.
-    view.linkErrors.clear();
-    view.linkBusy.clear();
-    linkComposerEl = null;
-  }
-
-  /**
-   * Put the joint thread for one link in this pane.
-   *
-   * The transcript subscription goes first and the room's with it — both are *server*
-   * state, and a pane that stopped drawing a session while the server went on tailing its
-   * file would be the "subscription that outlives its slot" trap from the other end.
-   *
-   * Opening zeroes the card's unseen count, which is the only thing that ever does.
-   */
-  function openLink(id) {
-    const link = linkById(id);
-    if (!link) return;
-    if (view.kind === 'link' && view.link?.id === id) return;
-    saveLinkDraft(); // this pane may already be holding another thread
-    saveDraft();
-    leaveShared(); // …or the shared room, whose subscription is the server's to stop
-    leaveGroup(); // …or a group room's, for every word of the same reason
-    send({ type: 'unsubscribe', slot });
-    syncRoom(null);
-    view.kind = 'link';
-    view.selected = null;
-    view.messages = [];
-    view.hasEarlier = false;
-    view.error = null;
-    view.lastMarked = null;
-    chipNodes.clear();
-    clearThread();
-    view.link = link;
-    // `threadSplit` is already settled by the caller — `openLinkThread` sets it before it
-    // gets here, and `adopt` restores it off the stored entry before it calls this.
-    rememberOpenLink(slot, id, threadSplit);
-    renderRail();
-    renderMain();
-    refreshThread(true);
-    // Nothing on this card is new any more. Fire and forget: a failed `seen` costs a badge
-    // that stays up for one more beat, and the next open clears it.
-    fetch(`/api/team/links/${id}/seen`, { method: 'POST' }).catch(() => {});
-  }
-
-  /**
-   * Fetch the thread, but only when there is a reason to.
-   *
-   * The signal is the link record's own `lastAt`, which the roster already carries and the
-   * server already writes at post time — so a thread on screen refreshes when a message
-   * lands and at no other time. Polling the endpoint on the roster beat instead would read
-   * two `room.jsonl` files every couple of seconds for as long as the pane is open, which
-   * is the exact cost the written card summary exists to avoid.
-   *
-   * The floor underneath is for the burst case (two messages inside a beat) and for the
-   * roster frames that arrive while a fetch is already out.
-   */
-  async function refreshThread(force = false) {
-    if (view.kind !== 'link' || !view.link || view.threadBusy) return;
-    const live = linkById(view.link.id);
-    // The record moves under the pane — a label edited, `lastAt` advancing. Keep the last
-    // description when it is gone: a closed link leaves the roster, and the pane keeps what
-    // it had, which is what lets it go on rendering its history rather than blanking.
-    if (live) view.link = live;
-
-    /*
-     * The link left the open list while this pane was holding it — it was closed, from this
-     * column or from another browser. That is the *only* notice of it there is: `closedAt`
-     * lives on the record, and the record the roster carries is the open ones. So the
-     * transition is read from the disappearance and answered with one fetch, which comes
-     * back with the closed record because a closed link's thread is deliberately readable.
-     *
-     * Asked once. A pane that re-asked on every roster beat because the fetch failed would
-     * be a poll nobody started, on a box that will never answer differently.
-     */
-    if (!live && !view.link.closedAt && !view.threadClosedAsked) {
-      view.threadClosedAsked = true;
-      force = true;
-    }
-
-    const stamp = `${view.link.lastAt || 0}`;
-    if (!force && stamp === view.threadSig) return;
-    if (!force && Date.now() - view.threadAt < 1500) return;
-    view.threadBusy = true;
-    view.threadAt = Date.now();
-    try {
-      const res = await fetch(`/api/team/links/${view.link.id}/thread`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'That thread could not be read.');
-      // The pane may have been given a session, or another link, while this was in flight.
-      if (view.kind !== 'link' || view.link?.id !== data.link?.id) return;
-      view.threadSig = stamp;
-      view.thread = data.entries || [];
-      view.threadError = null;
-      // The record the endpoint answered with is authoritative for a link the roster has
-      // stopped carrying — a closed one — so the head keeps naming both projects.
-      if (data.link) view.link = { ...view.link, ...data.link };
-      renderThread();
-      renderLinkHead();
-    } catch (err) {
-      view.threadError = err.message;
-      renderThread();
-    } finally {
-      view.threadBusy = false;
-    }
   }
 
   /* ------------------------------------------------------------ shared --- */
@@ -5451,7 +4821,6 @@ function createPane(slot, host) {
    */
   function openShared() {
     if (view.kind === 'shared') return;
-    saveLinkDraft(); // this pane may have been holding a thread
     saveDraft();
     leaveGroup(); // …or a group room, whose subscription is the server's to stop
     send({ type: 'unsubscribe', slot });
@@ -5463,7 +4832,6 @@ function createPane(slot, host) {
     view.error = null;
     view.lastMarked = null;
     chipNodes.clear();
-    clearThread();
     clearShared();
     // `threadSplit` is already settled by the caller — `openSharedRoom` sets it before it
     // gets here, and `adopt` restores it off the stored entry before it calls this.
@@ -5520,7 +4888,7 @@ function createPane(slot, host) {
   /**
    * Leave the room, and put the panel back where it came from.
    *
-   * `closeThread`'s reasoning verbatim, and it is the same two places: a reader who was in
+   * "Back" is two different places: a reader who was in
    * one pane and pressed the rail row gets one pane back, a reader who was already in split
    * keeps both and this slot goes back to a session. `threadSplit` is the only thing that
    * can tell those apart — a pane looking at itself sees the same thing either way.
@@ -5856,9 +5224,8 @@ function createPane(slot, host) {
   /**
    * One entry in the peer-message log.
    *
-   * **One lane, all left-aligned.** A link has exactly two ends and lanes them left and
-   * right; this log has N sessions and there is no second side to lane against. The name
-   * pill carries the identity instead.
+   * **One lane, all left-aligned.** This log has N sessions and there is no second side to
+   * lane against. The name pill carries the identity instead.
    *
    * **`from-human` is a live path over dead-ended data, and it stays.** Nothing writes a
    * `kind: 'human'` entry any more — the `@` composer that did was retired on 2026-09-05 —
@@ -6010,7 +5377,8 @@ function createPane(slot, host) {
    * What is **not** shared is the CSS or the functions: `.shared-*` belongs to a feature
    * whose future is explicitly deferred (the plan's Q5), and a view quietly depending on its
    * rules would come apart on the day that is answered, in a stylesheet nobody was looking
-   * at. That is the same trade `.shared-*` itself made against `.link-*`, and it is worth
+   * at. That is the same trade `.shared-*` itself made against the retired `.link-*`, and
+   * it is worth
    * paying a second time.
    *
    * Two things here have no analogue one pane over. A room has a **header that acts** —
@@ -6051,7 +5419,7 @@ function createPane(slot, host) {
    * a member added from another browser arrives on the next beat with nobody touching this
    * pane. The held record is the fallback for the beat between a press and the frame that
    * confirms it, and for a room the roster has somehow stopped carrying — the pane keeps
-   * what it had rather than blanking, which is `refreshThread`'s own rule for a closed link.
+   * what it had rather than blanking.
    */
   function groupLive() {
     const id = view.groupRoom?.id;
@@ -6073,7 +5441,6 @@ function createPane(slot, host) {
   function openGroup(id) {
     if (!id) return;
     if (view.kind === 'group-room' && view.groupRoom?.id === id) return;
-    saveLinkDraft(); // this pane may have been holding a thread
     saveDraft();
     leaveShared(); // …or the shared room, whose subscription is the server's to stop
     leaveGroup(); // …or another room, whose subscription is one per socket and supersedes
@@ -6086,7 +5453,6 @@ function createPane(slot, host) {
     view.error = null;
     view.lastMarked = null;
     chipNodes.clear();
-    clearThread();
     clearGroup();
     // The record we have now, so the head has a name to draw before the first frame lands.
     // The frame carries the authoritative one a moment later.
@@ -6147,7 +5513,7 @@ function createPane(slot, host) {
     view.groupAddOpen = false;
     view.groupArchivedDrawn = null;
     // A held refusal belongs to the press that raised it and a press in flight belongs to the
-    // pane that started it — `clearThread`'s last two lines, for their reasons.
+    // pane that started it — `roomView.mergeErrors`' lesson, for its reasons.
     view.groupHeadError = null;
     view.groupError = null;
     view.groupBusy = false;
@@ -6184,13 +5550,13 @@ function createPane(slot, host) {
   /**
    * The room, in a pane.
    *
-   * `buildComposer` is never called, for the reason the joint thread and the retired
+   * `buildComposer` is never called, for the reason the retired joint thread and the retired
    * peer-message composer both recorded: it reads `s.prompt`, `s.plan`, `s.question`,
    * `s.mode` and `s.model`, all null at once with no session behind the pane, and
    * `shortModel(null)` throwing *inside* it once took a pane down after it had decided to
    * draw a question card and left it unable to heal on any later frame.
-   * `buildGroupComposer` is a sibling of `buildLinkComposer` instead — the same trade, made
-   * three times now for one reason.
+   * `buildGroupComposer` is its own small composer instead — the same trade, made three
+   * times now for one reason.
    *
    * **An archived room draws no composer at all**, and that is the shape of the pane rather
    * than a disabled button: the endpoint refuses a post to it with a 409, and a box that
@@ -6289,8 +5655,8 @@ function createPane(slot, host) {
 
     renderGroup();
     // Sizing needs the textarea in the document — `scrollHeight` is 0 before that, so a
-    // restored multi-line draft would sit crammed into a two-row box. The link composer's own
-    // ordering, and its reason.
+    // restored multi-line draft would sit crammed into a two-row box. The session composer's
+    // own ordering, and its reason.
     groupComposerEl?.autoGrow();
   }
 
@@ -6417,7 +5783,7 @@ function createPane(slot, host) {
      * The archive control, beside `close`.
      *
      * The **node** is replaced only when the word on it changes, so an armed confirmation is
-     * never taken away by an unrelated roster beat — `connSig`'s rule, and the strip one line
+     * never taken away by an unrelated roster beat — `roomsSig`'s rule, and the strip one line
      * down follows it too. The **handler** is re-bound on every call regardless, which is
      * `patchBand`'s own recorded reason one column over: a handler closing over a stale room
      * record is exactly the class of bug the reuse is otherwise inviting. Found on the bench —
@@ -6491,7 +5857,7 @@ function createPane(slot, host) {
   }
 
   /** What the strip last drew, so a roster beat that changed nothing rebuilds nothing.
-   *  `connSig`'s reason, and the sharper one here: these chips carry `armConfirm` questions
+   *  `roomsSig`'s reason, and the sharper one here: these chips carry `armConfirm` questions
    *  that live four seconds, and a rebuild would take one away from under the cursor about to
    *  answer it. Status is deliberately *out* of it — a dot is patched in place below. */
   let groupStripSig = '';
@@ -6502,7 +5868,7 @@ function createPane(slot, host) {
    *
    * **Rebuilt only when the membership changes; the dots are patched.** A status moves every
    * couple of seconds and a rebuild on that beat would be the "question taken away from under
-   * the cursor" bug the whole `connSig` idiom exists to stop — and here it would be taking
+   * the cursor" bug the whole signature idiom exists to stop — and here it would be taking
    * away a *confirmation to remove somebody*. So the structure has a signature and the dots
    * do not.
    *
@@ -6885,8 +6251,8 @@ function createPane(slot, host) {
   /**
    * One message in the room.
    *
-   * **One lane, all left-aligned.** A link has exactly two ends and lanes them left and right;
-   * a room has up to eight speakers and there is no second side to lane against. The name pill
+   * **One lane, all left-aligned.** A room has up to eight speakers and there is no second
+   * side to lane against. The name pill
    * carries the identity instead, and the maintainer's own lines take the `from-human` shape —
    * full width with an accent left edge — because that shape already means *this one can
    * authorize*, and it is the one thing in here that has to be structurally distinguishable
@@ -7266,20 +6632,16 @@ function createPane(slot, host) {
   /* -------------------------------------------------------------- main --- */
 
   function renderMain() {
-    // A link pane has no session and nothing below this line applies to it: no head to
-    // patch, no room to follow, no stream, and — the one that has already cost this repo a
-    // pane that never healed — no composer. `buildComposer` reads `s.prompt`, `s.plan`,
-    // `s.question`, `s.mode` and `s.model`, all of which are null at once here, and
-    // `shortModel(null)` threw inside it once already and unwound the whole build. So the
-    // thread gets its own small pane rather than teaching that one to cope with having no
-    // session.
-    if (view.kind === 'link') return renderLinkPane();
-    // …and the machine-wide room, for every word of the same reason. It has no session
-    // either, and `buildComposer` must not be taught to cope with having none.
+    // The machine-wide room has no session and nothing below this line applies to it: no
+    // head to patch, no room to follow, no stream, and — the one that has already cost this
+    // repo a pane that never healed — no composer. `buildComposer` reads `s.prompt`,
+    // `s.plan`, `s.question`, `s.mode` and `s.model`, all of which are null at once here,
+    // and `shortModel(null)` threw inside it once already and unwound the whole build. So it
+    // gets its own small pane rather than teaching that one to cope with having no session.
     if (view.kind === 'shared') return renderSharedPane();
-    // …and one group room, for the same reason a third time. Three panes now that have no
-    // session behind them, and not one of them has been allowed to teach `buildComposer` to
-    // cope with that — see `renderGroupPane`.
+    // …and one group room, for every word of the same reason. Two panes now that have no
+    // session behind them, and neither has been allowed to teach `buildComposer` to cope
+    // with that — see `renderGroupPane`.
     if (view.kind === 'group-room') return renderGroupPane();
 
     const s = current();
@@ -7321,7 +6683,6 @@ function createPane(slot, host) {
       // entries in room.jsonl, none on screen, hours since the last post.
       renderRoom();
       renderTasks();
-      renderConnect();
     }
 
     const stream = document.createElement('div');
@@ -7347,729 +6708,6 @@ function createPane(slot, host) {
     scrollToBottom();
     // The initial paint lands after a frame; catch up once it has.
     requestAnimationFrame(() => setTimeout(markReadIfCaughtUp, 60));
-  }
-
-  /**
-   * The joint thread, in a pane: what the two leads have said to each other, in order,
-   * over both projects' rooms.
-   *
-   * It reuses **split view** rather than taking a column of its own — the locked ruling:
-   * four columns (rail, connections, conversation, lead aside) do not fit a laptop, and
-   * this is another thing shown in a slot that already exists. The connections themselves
-   * have since stopped being a column too; they are a band at the foot of the rail.
-   *
-   * The maintainer types here too, and that is the one thing on this channel that carries
-   * authority — see `buildLinkComposer`, which is deliberately **not** `buildComposer`.
-   */
-  function renderLinkPane() {
-    host.replaceChildren();
-    host.append(buildLinkHead());
-
-    const wrap = document.createElement('div');
-    wrap.className = 'link-thread';
-    const inner = document.createElement('div');
-    inner.className = 'link-thread-inner';
-    wrap.append(inner);
-    // Following is an intention, flipped only by a real scroll — never a geometry test at
-    // paint time. The room learned this the expensive way: its own box is resized from
-    // above by two fetches that land after it mounts, and a paint-time check read that as
-    // "the reader scrolled up" and stopped following forever.
-    wrap.addEventListener('scroll', () => {
-      view.threadFollow = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 40;
-    });
-    view.threadEl = { wrap, inner };
-    host.append(wrap);
-
-    host.append(buildLinkComposer());
-    renderThread();
-    // Sizing needs the textarea in the document — `scrollHeight` is 0 before that, so a
-    // restored multi-line draft would sit crammed into a two-row box. Same order as the
-    // session composer's own `autoGrow` call, and for the same reason.
-    linkComposerEl.autoGrow();
-  }
-
-  /**
-   * The maintainer's own composer, and it is **not** `buildComposer`.
-   *
-   * That function is about a session: it reads `s.prompt`, `s.plan`, `s.question`,
-   * `s.mode` and `s.model`, draws the permission bar, the queue chip, the ghost-text row
-   * and the interrupt row, and is rebuilt off `composerSig`. A link pane has no session,
-   * so every one of those is null at once — and `shortModel(null)` throwing *inside*
-   * `buildComposer` is a recorded trap here that took a pane down after it had decided to
-   * draw a question card, and left it unable to heal on any later roster frame. So this is
-   * a textarea, a send button and two lines of chrome, and nothing else: no attachments,
-   * no queue, no interrupt, no ghost text, no permission bar, no mode control, and no
-   * signature — a thread's composer is torn down only when the pane stops being a thread.
-   *
-   * What it does reuse is the textarea's auto-grow and its send keys, because those are
-   * the two things a reader's hands already know.
-   */
-  function buildLinkComposer() {
-    const wrap = document.createElement('div');
-    wrap.className = 'link-composer';
-    const inner = document.createElement('div');
-    inner.className = 'link-composer-inner';
-    wrap.append(inner);
-
-    const closed = Boolean(view.link?.closedAt);
-
-    // Who this reaches, said **before** anything is typed rather than only after it is
-    // sent. Repainted on the roster beat, because whether a side has a live lead is a fact
-    // about the roster and moves without anybody touching this pane.
-    const note = document.createElement('div');
-    note.className = 'link-reach';
-
-    // The standing refusal, painted from `view.linkErrors` rather than appended to
-    // whatever node was pressed — see the field's own note.
-    const err = document.createElement('div');
-    err.className = 'link-composer-err';
-    err.hidden = true;
-
-    const ta = document.createElement('textarea');
-    ta.rows = 2;
-    ta.disabled = closed;
-    ta.placeholder = closed
-      ? 'This connection is closed — nothing more can be sent on it.'
-      : 'Say it to both leads at once — Enter to send, Shift+Enter for a new line';
-
-    const autoGrow = () => {
-      ta.style.height = 'auto';
-      ta.style.height = `${Math.min(ta.scrollHeight, 224)}px`;
-    };
-
-    ta.value = state.drafts[linkDraftKey(view.link?.id)] || '';
-    ta.oninput = () => {
-      autoGrow();
-      saveLinkDraft();
-    };
-    ta.onkeydown = (e) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendLinkMessage();
-      }
-    };
-
-    const row = document.createElement('div');
-    row.className = 'link-composer-row';
-
-    // What a line typed here *is*, in the panel's own voice. It is the only box in this
-    // app whose words reach two conversations at once, and the only one whose words a lead
-    // is told it may act on as an instruction — so it says both, quietly, every time.
-    const hint = document.createElement('span');
-    hint.className = 'link-composer-hint';
-    hint.textContent = 'your own words — a lead may act on them';
-
-    const btn = document.createElement('button');
-    btn.className = 'send-btn';
-    btn.textContent = 'send';
-    btn.disabled = closed;
-    btn.onclick = sendLinkMessage;
-
-    row.append(hint, btn);
-    inner.append(note, err, ta, row);
-
-    linkComposerEl = { wrap, ta, btn, note, err, autoGrow };
-    renderLinkReach();
-    renderLinkError();
-    return wrap;
-  }
-
-  /**
-   * A live lead in one project, or null — the client's half of the server's `findLead`,
-   * and deliberately only for *saying* what will happen.
-   *
-   * The same three tests: it is a lead, it has a pane to type into, and its launch folder
-   * is this project. More than one match is null rather than a pick, for `findLead`'s own
-   * reason — the panel does not get to guess which of two leads speaks for a project. The
-   * endpoint re-decides all of it server-side, so a stale roster costs a wrong sentence
-   * here and never a wrong delivery.
-   */
-  function liveLeadIn(repo) {
-    const found = state.sessions.filter((s) => s.isLead && s.interactive && s.paneCwd === repo);
-    return found.length === 1 ? found[0] : null;
-  }
-
-  /**
-   * Who a line typed here reaches — and, when a side has no live lead, that it will not be
-   * delivered there.
-   *
-   * Said before he types rather than only after he sends, because "nobody was listening"
-   * is the one thing about this box that changes what he would write. It is still not a
-   * reason to withhold the message: the endpoint records it either way, and `record as a
-   * ruling` is what gets it to the lead that was not there.
-   */
-  function renderLinkReach() {
-    const el = linkComposerEl;
-    const link = view.link;
-    if (!el || !link) return;
-    el.note.replaceChildren();
-    if (link.closedAt) {
-      el.note.textContent =
-        'This connection is closed. Its history stays readable; nothing more goes down it.';
-      return;
-    }
-    const names = [projectName(link.a), projectName(link.b)];
-    const dark = [link.a, link.b].filter((repo) => !liveLeadIn(repo)).map(projectName);
-    const reach = document.createElement('span');
-    reach.textContent = `goes to the leads of ${names[0]} and ${names[1]}`;
-    el.note.append(reach);
-    if (dark.length) {
-      const miss = document.createElement('span');
-      miss.className = 'link-reach-miss';
-      miss.textContent =
-        dark.length === 2
-          ? ' — neither lead is running, so nobody will hear it. It is still recorded here.'
-          : ` — no lead is running in ${dark[0]}, so it will not be delivered there.`;
-      el.note.append(miss);
-    }
-  }
-
-  /** The composer's standing refusal, drawn from view state and never from a pressed node. */
-  function renderLinkError() {
-    const el = linkComposerEl;
-    if (!el) return;
-    const held = view.linkErrors.get('send');
-    el.err.textContent = held || '';
-    el.err.hidden = !held;
-  }
-
-  /**
-   * Send what is in the box to **both** leads.
-   *
-   * There is no recipient picker and there must not be one: addressing one lead is what
-   * that lead's own conversation already does, and it is one click away in the rail. A
-   * control whose right answer is "both" every time is worse than no control.
-   *
-   * A half-landed send is a **success** here, not a failure — the endpoint records it, the
-   * thread shows it once with a delivery line naming each side, and both rooms carry an
-   * alert. So the box is only kept full when the message was refused outright.
-   */
-  async function sendLinkMessage() {
-    const el = linkComposerEl;
-    const link = view.link;
-    if (!el || !link || link.closedAt || view.linkBusy.has('send')) return;
-    const text = el.ta.value;
-    if (!text.trim()) return;
-
-    view.linkBusy.add('send');
-    el.btn.disabled = true;
-    try {
-      const res = await fetch(`/api/team/links/${link.id}/human-message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `That message was not sent (${res.status}).`);
-      view.linkErrors.delete('send');
-      // The pane may have been given a session, or another thread, while this was out.
-      if (view.kind === 'link' && view.link?.id === link.id && linkComposerEl === el) {
-        el.ta.value = '';
-        el.autoGrow();
-      }
-      delete state.drafts[linkDraftKey(link.id)];
-      persistDrafts();
-      refreshThread(true);
-    } catch (err) {
-      // Held, not appended: this pane repaints whenever a message arrives, and a sentence
-      // painted onto a node that a repaint has already replaced is a sentence nobody sees.
-      view.linkErrors.set('send', err.message);
-    } finally {
-      view.linkBusy.delete('send');
-      if (linkComposerEl === el && !view.link?.closedAt) el.btn.disabled = false;
-      renderLinkError();
-    }
-  }
-
-  /** The thread's own header: both projects, the label, and the way out of the pane. */
-  function buildLinkHead() {
-    const head = document.createElement('div');
-    head.className = 'main-head is-link';
-
-    const mark = document.createElement('span');
-    mark.className = 'link-mark';
-    mark.textContent = '⇄';
-    mark.title = 'A joint thread — one conversation over two projects’ rooms';
-    head.append(mark);
-
-    const h1 = document.createElement('h1');
-    head.append(h1);
-
-    const meta = document.createElement('div');
-    meta.className = 'head-meta';
-    const stat = document.createElement('span');
-    stat.className = 'head-status link-status';
-    meta.append(stat);
-
-    // A thread never offers to split — it is already the second thing on screen, and a
-    // panel showing two threads and no conversation is not a state worth being able to
-    // reach. What `close` *does* is decided when it is pressed and never here: this head is
-    // drawn once, and the other pane can be opened or closed under it afterwards.
-    const close = document.createElement('button');
-    close.className = 'ghost-btn';
-    close.textContent = 'close';
-    close.title = 'Close the thread';
-    close.onclick = closeThread;
-    meta.append(close);
-    head.append(meta);
-    renderLinkHead(head);
-    return head;
-  }
-
-  /**
-   * Leave the thread, and put the panel back where it came from — which is two different
-   * places, and telling them apart is the whole of this function.
-   *
-   * A reader who was in **one pane** and pressed the chip gets one pane back: somebody who
-   * never asked for split view must not be left holding it, and the split only ever existed
-   * to carry the thread. A reader who was **already in split** keeps both panes and this
-   * slot goes back to a session, because taking their second pane away would be answering a
-   * question they did not ask. `threadSplit` is the only thing that can distinguish them —
-   * a pane looking at itself sees the same thing in both cases.
-   */
-  function closeThread() {
-    saveLinkDraft();
-    if (panes.length > 1 && threadSplit) {
-      closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
-      return;
-    }
-    rememberOpenLink(slot, null);
-    view.kind = 'session';
-    clearThread();
-    adopt();
-    // `adopt` repaints by opening something. With nothing to open — no sessions at all —
-    // it returns silently, and the pane would still be showing the thread it was just
-    // told to close. Repaint into the empty state instead.
-    if (!view.selected) renderMain();
-    renderRail();
-  }
-
-  /** Repaint the head's words from whatever the record now says. */
-  function renderLinkHead(head = host.querySelector('.main-head.is-link')) {
-    if (!head || view.kind !== 'link' || !view.link) return;
-    const link = view.link;
-    const a = projectName(link.a);
-    const b = projectName(link.b);
-    const h1 = head.querySelector('h1');
-    h1.textContent = `${a} ⇄ ${b}`;
-    // Two projects can share a basename, and two projects in one link certainly can — the
-    // face shows the short names and the hover shows which folders they actually are.
-    h1.title = `${link.a}\n${link.b}\nlink ${link.id}`;
-    const stat = head.querySelector('.link-status');
-    stat.replaceChildren();
-    if (link.label) {
-      const label = document.createElement('span');
-      label.className = 'link-head-label';
-      label.textContent = link.label;
-      stat.append(label);
-    }
-    // A link closed while its thread is open: the pane **stays** and goes on rendering its
-    // history. Never blank a pane — this repo's worst failure mode by its own account.
-    if (link.closedAt) {
-      const closed = document.createElement('span');
-      closed.className = 'link-head-closed';
-      closed.textContent = 'closed';
-      closed.title = `Closed ${new Date(link.closedAt).toLocaleString()} — nothing more can be sent on it.`;
-      stat.append(closed);
-    }
-  }
-
-  /**
-   * Paint the thread. Held scroll, one batched measurement.
-   *
-   * `scrollTop` is read **before** the swap, and that is not superstition: reading it after
-   * `replaceChildren` is a forced layout on an emptied box, which clamps the answer to zero
-   * before you have read it — the room's own bug, which put the reader at the top of the
-   * list on every arriving line.
-   *
-   * This paint now *does* measure, and the room's second lesson comes with the first. Every
-   * clamp candidate is read before anything is written to any of them: measuring and
-   * settling one at a time interleaves a layout read with a class write per entry, which is
-   * a reflow per entry on a box that repaints whenever a message arrives. Two passes is one
-   * layout. And the restore below lands after the whole clamp pass, so the heights above the
-   * reader are already final when their offset goes back.
-   */
-  function renderThread() {
-    const el = view.threadEl;
-    if (!el || !el.inner.isConnected) return;
-    const held = el.wrap.scrollTop;
-    const follow = view.threadFollow !== false;
-
-    const frag = document.createDocumentFragment();
-    const clamps = [];
-    if (view.threadError) {
-      const err = document.createElement('div');
-      err.className = 'link-quiet is-error';
-      err.textContent = view.threadError;
-      frag.append(err);
-    } else if (!view.thread.length) {
-      const quiet = document.createElement('div');
-      quiet.className = 'link-quiet';
-      quiet.textContent =
-        'Nothing on this link yet. What either lead sends with link_send lands here, and in both projects’ rooms.';
-      frag.append(quiet);
-    } else {
-      for (const e of view.thread) frag.append(linkEntryNode(e, clamps));
-    }
-
-    // A link closed under an open thread: the pane **stays** and says so at the end, rather
-    // than blanking or quietly going on looking live. Never blank a pane — this repo's
-    // worst failure mode by its own account — and never leave a shut channel looking open.
-    if (view.link?.closedAt) {
-      const end = document.createElement('div');
-      end.className = 'link-closed-line';
-      end.textContent =
-        `This connection was closed ${new Date(view.link.closedAt).toLocaleString()}. ` +
-        'Nothing more can be sent on it, and what was said stays in both projects’ rooms.';
-      frag.append(end);
-    }
-    el.inner.replaceChildren(frag);
-
-    // One read pass over the whole batch, then one write pass. Never interleaved.
-    for (const c of clamps) c.overflows = c.el.scrollHeight > c.el.clientHeight + 1;
-    for (const c of clamps) applyThreadClamp(c);
-
-    if (follow) el.wrap.scrollTop = el.wrap.scrollHeight;
-    else el.wrap.scrollTop = held;
-  }
-
-  /**
-   * Clamp one long message to **ten** lines behind a quiet "view more".
-   *
-   * Ten rather than the room's five, and the difference is the content: the room logs
-   * events, one line each, where five is generous — this is two leads writing to each other
-   * in whole paragraphs, and folding one of those at five lines hides the message rather
-   * than trimming it.
-   *
-   * Nothing is decided here and nothing is drawn here. The element goes out clamped and
-   * registered; `renderThread` measures the whole batch at once and `applyThreadClamp` is
-   * what puts a control on screen — a message that fits must not grow a "view more" that
-   * does nothing when clicked, and whether it fits is a measurement rather than a guess
-   * about length.
-   */
-  function threadClampable(el, e, pending) {
-    el.classList.add('link-clamp');
-    pending.push({ key: threadKey(e), el, btn: null, overflows: false });
-  }
-
-  /** One entry's identity across paints: `seq` is per repo, so both halves are the key. */
-  const threadKey = (e) => `${e.repo || ''}:${e.seq ?? ''}`;
-
-  /**
-   * Settle one measured candidate: no overflow, no control; otherwise draw its state.
-   *
-   * The button is built here rather than during the paint and **only where it is needed**.
-   * The room's first draft made one per candidate and removed the ones that turned out to
-   * fit, and every removal above the reader shrank the list under them — 66px of silent
-   * creep per incoming line, with no scroll event to notice it by. This is the half that
-   * stops causing it; `renderThread` holding the offset is the half that covers the rest.
-   */
-  function applyThreadClamp(c) {
-    if (!c.overflows) {
-      c.el.classList.remove('link-clamp');
-      return;
-    }
-    const open = view.threadOpen.has(c.key);
-    c.el.classList.toggle('link-clamp', !open);
-    if (!c.btn) {
-      c.btn = document.createElement('button');
-      c.btn.className = 'link-more';
-      c.btn.type = 'button';
-      c.btn.onclick = () => toggleThreadEntry(c);
-      c.el.after(c.btn); // directly under the words it cut off, inside the bubble
-    }
-    c.btn.textContent = open ? 'view less' : 'view more';
-    c.btn.title = open ? 'Fold this message back to ten lines.' : 'Show the whole message.';
-  }
-
-  /**
-   * Open or fold one message, keeping it where the reader is looking.
-   *
-   * `threadFollow` is deliberately untouched and nothing is pinned. Expanding changes the
-   * box's height and that must never read as the reader having scrolled away — following is
-   * an intention and only the scroll handler flips it — and a message you have just opened
-   * is one you are about to read, so snapping to the newest line is exactly the yank the
-   * rule exists to stop.
-   *
-   * Growing a node never moves its own top, so the anchor holds for free on the way open.
-   * Folding is the case that needs the arithmetic: collapse one near the end and the browser
-   * clamps `scrollTop` to the new maximum, which does move it. Measure either side and put
-   * it back.
-   */
-  function toggleThreadEntry(c) {
-    if (view.threadOpen.has(c.key)) view.threadOpen.delete(c.key);
-    else view.threadOpen.add(c.key);
-    const wrap = view.threadEl?.wrap;
-    // The message's own frame, found from the text rather than remembered: the record is
-    // built before the bubble that will hold it exists, and a stored reference would be one
-    // more thing to keep true through the next restyle.
-    const node = c.el.closest('.link-msg');
-    if (!wrap || !node || !node.isConnected) {
-      applyThreadClamp(c);
-      return;
-    }
-    const was = node.getBoundingClientRect().top;
-    applyThreadClamp(c);
-    const now = node.getBoundingClientRect().top;
-    if (now !== was) wrap.scrollTop += now - was;
-  }
-
-  /**
-   * One message on the link.
-   *
-   * **Laned by which end said it**, `a` left and `b` right — not by "the room's own repo",
-   * which the room's bubbles use and which this view does not have: a joint thread belongs
-   * to neither project. `a` and `b` are stored sorted, so the sides are stable between
-   * paints and between panes.
-   *
-   * **The speaker is read from the entry's own `speaker` field and never worked out from
-   * the paths.** That field is the one thing in this design that says whether a line is
-   * another project's lead (a request) or the maintainer (their word, which can authorize),
-   * and it is set server-side by *which endpoint composed the message*. A client that
-   * derived it from `sender` would be a second answer to the only question the whole
-   * feature turns on.
-   */
-  function linkEntryNode(e, pending = []) {
-    const link = view.link;
-    const human = e.speaker === 'human';
-    /*
-     * `from-a` / `from-b` is the lane, and since this change it is also the **colour** —
-     * green for `a`, blue for `b`, on the name pill above the message and nowhere else.
-     * The bubble is untouched: two tinted bubble bodies would be two competing page
-     * backgrounds, and the maintainer's own correction of an earlier "coloured bubbles"
-     * suggestion was to the header alone.
-     *
-     * **Which project is which is stable by construction, with nothing stored to keep it
-     * so.** `links.open` sorts the two paths and writes them as `a` and `b`
-     * (`server/links.js`), once, and an opened link is never rewritten — so `a` is the
-     * lexicographically-lower project path for the life of the record, whoever made the
-     * link, whoever spoke first and whichever lead happens to be live. Reopening the
-     * thread, restarting the panel and relaunching either lead all land on the same
-     * answer, because they all read the same immutable pair. Even re-linking the same two
-     * projects — which mints a new id and a new thread — sorts to the same sides.
-     *
-     * "First speaker is green" was the alternative and is exactly what this avoids: it
-     * would repaint the whole thread's colours the day a truncated tail no longer contains
-     * the first message.
-     */
-    const side = human ? 'from-human' : e.sender === link?.a ? 'from-a' : 'from-b';
-    const wrap = document.createElement('div');
-    wrap.className = `link-msg ${side}`;
-
-    const meta = document.createElement('div');
-    meta.className = 'link-meta';
-    const who = document.createElement('span');
-    who.className = `link-pill${human ? ' is-human' : ''}`;
-    // A human entry's `sender` is not a repo at all, so there is no basename to take.
-    who.textContent = human ? 'you' : projectName(e.sender);
-    who.title = human ? 'The maintainer, in the joint thread' : `${e.sender} — this project’s team lead`;
-    meta.append(who);
-    if (e.ts) {
-      const t = document.createElement('span');
-      t.className = 'link-time';
-      const d = new Date(e.ts);
-      t.textContent = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-      t.title = d.toLocaleString();
-      meta.append(t);
-    }
-    wrap.append(meta);
-
-    const bubble = document.createElement('div');
-    bubble.className = 'link-bubble';
-    const text = document.createElement('div');
-    text.className = 'link-text';
-    text.textContent = e.text || '';
-    bubble.append(text);
-    // The control lands under the words it cut off and above the delivery lines below —
-    // those are short machinery, and a clamp must never swallow them.
-    threadClampable(text, e, pending);
-
-    /*
-     * The maintainer's own line has **two** recipients, so its delivery is a per-side list
-     * rather than one verb, and it is drawn from that list rather than from `delivered`
-     * — the two lead-shaped lines below would say "not delivered" over a message half of
-     * which landed. Quiet register, the same as the `room-ready` line under a report
-     * bubble: a message that reached one lead and not the other is a fact to read, not an
-     * error card.
-     *
-     * Everything here is drawn from data on the entry. Nothing measures a row, a rect or a
-     * height — locked ruling, and the room's five-line clamp is what it cost to learn.
-     */
-    if (human) {
-      if (Array.isArray(e.delivery) && e.delivery.length) bubble.append(deliveryLine(e.delivery));
-      const record = recordControl(e);
-      if (record) bubble.append(record);
-      wrap.append(bubble);
-      return wrap;
-    }
-
-    // A message that did not land exists only in the sender's room, which is exactly right
-    // — and it has to *say* so, or the thread reads as though it arrived. The reason is the
-    // server's own sentence; nothing here rewords it.
-    if (e.delivered === false) {
-      wrap.classList.add('is-undelivered');
-      const miss = document.createElement('div');
-      miss.className = 'link-undelivered';
-      miss.textContent = e.reason ? `not delivered — ${e.reason}` : 'not delivered';
-      bubble.append(miss);
-    } else if (e.queued) {
-      // Handed off, not read: `queue.js` may hold it for hours. The vaguer verb is
-      // deliberate, and it is the trigger's own hard-won honesty.
-      const held = document.createElement('div');
-      held.className = 'link-queued';
-      held.textContent = 'waiting for that lead’s pane to be free';
-      bubble.append(held);
-    }
-    wrap.append(bubble);
-    return wrap;
-  }
-
-  /**
-   * What each end actually did with one of his messages: `delivered to alpha · queued for
-   * beta`, `delivered to alpha · not delivered to beta — no lead running`.
-   *
-   * **Queued reads as delivered**, because it is: `queue.js` is holding it and it goes into
-   * the pane the moment that pane is free. Saying "not delivered" there would be the
-   * opposite of the trigger's hard-won honesty, and saying nothing would hide the wait —
-   * so it has its own word.
-   *
-   * Named per side and never summarised into "partly delivered": which lead heard him is
-   * the whole of what he needs from this line.
-   */
-  function deliveryLine(delivery) {
-    const line = document.createElement('div');
-    line.className = 'link-delivery';
-    if (delivery.every((d) => !d.ok)) line.classList.add('is-dark');
-    else if (delivery.some((d) => !d.ok)) line.classList.add('is-partial');
-    line.textContent = delivery
-      .map((d) => {
-        if (!d.ok) return `not delivered to ${d.name}${d.reason ? ` — ${d.reason}` : ''}`;
-        return d.queued ? `queued for ${d.name}` : `delivered to ${d.name}`;
-      })
-      .join(' · ');
-    return line;
-  }
-
-  /**
-   * `record as a ruling`, or what recording it did — one node either way.
-   *
-   * **Post-hoc, and only on his own lines.** A pre-send checkbox has to be decided before
-   * the sentence exists: one that persists records things he did not mean, one that resets
-   * is a thing to remember every time. This stays pressable an hour later, which is also
-   * how `decisions.md` is actually written — the ruling is appended after the decision.
-   *
-   * **The control survives a partial write and a retry writes only the missing side**, so
-   * pressing twice cannot double-append to the file that already took it — the endpoint's
-   * ledger is what makes that arithmetic rather than a guard. Once both sides are in there
-   * is nothing left to press and the line says so.
-   *
-   * A message from before this shipped has no `msgId` and gets no control, which is right:
-   * there is nothing durable to record it against.
-   */
-  function recordControl(e) {
-    if (!e.msgId) return null;
-    const held = e.recorded || null;
-    const link = view.link;
-    const nameOf = (side) => projectName(side === 'a' ? link?.a : link?.b);
-    const done = held && held.a && held.b;
-
-    const box = document.createElement('div');
-    box.className = 'link-record';
-
-    if (done) {
-      box.classList.add('is-done');
-      box.textContent = 'recorded in both';
-      box.title =
-        `Appended to ${nameOf('a')}’s and ${nameOf('b')}’s decisions.md — the standing record ` +
-        'each lead reads before its first reply, including after a /clear.';
-      return box;
-    }
-
-    if (held && (held.a || held.b)) {
-      // Half in. The honest report, and the control stays: appending to markdown has no
-      // transaction and there is no rollback here — the missing side is simply still
-      // missing, and pressing again writes only that one.
-      const said = document.createElement('div');
-      said.className = 'link-record-state';
-      said.textContent = ['a', 'b']
-        .map((side) => {
-          if (held[side]) return `recorded in ${nameOf(side)}`;
-          const why = held[side === 'a' ? 'aError' : 'bError'];
-          return `not recorded in ${nameOf(side)}${why ? ` — ${why}` : ''}`;
-        })
-        .join(' · ');
-      box.append(said);
-    }
-
-    const busy = view.linkBusy.has(e.msgId);
-    const btn = document.createElement('button');
-    btn.className = 'link-record-btn';
-    btn.type = 'button';
-    btn.disabled = busy;
-    btn.textContent = busy
-      ? 'recording…'
-      : held && (held.a || held.b)
-        ? 'record in the other project'
-        : 'record as a ruling';
-    btn.title =
-      'Append these words, verbatim, to both projects’ decisions.md — the file each lead ' +
-      'reads before its first reply, including after a /clear.';
-    btn.onclick = () => recordRuling(e);
-    box.append(btn);
-
-    const refused = view.linkErrors.get(e.msgId);
-    if (refused) {
-      const err = document.createElement('div');
-      err.className = 'link-record-err';
-      err.textContent = refused;
-      box.append(err);
-    }
-    return box;
-  }
-
-  /**
-   * Make one message standing, in both projects.
-   *
-   * The words are not sent: the endpoint reads them back out of the thread, so what is
-   * appended is what he actually said and not what a caller claims he said. All this
-   * carries is which message.
-   *
-   * The answer is applied to the entry in place rather than waiting for a refetch, because
-   * the thread only refetches when `lastAt` moves and recording a ruling is not a message.
-   */
-  async function recordRuling(e) {
-    const link = view.link;
-    if (!link || !e.msgId || view.linkBusy.has(e.msgId)) return;
-    view.linkBusy.add(e.msgId);
-    view.linkErrors.delete(e.msgId);
-    renderThread();
-    try {
-      const res = await fetch(`/api/team/links/${link.id}/ruling`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ msgId: e.msgId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `That ruling was not recorded (${res.status}).`);
-      // Best-effort per side, never a rollback — so a 200 can still carry a side that did
-      // not take it, and the entry has to say which.
-      const live = view.thread.find((x) => x.msgId === e.msgId);
-      if (live) live.recorded = data.recorded || live.recorded;
-      const missed = (data.results || []).filter((r) => r && r.ok === false);
-      if (missed.length) {
-        view.linkErrors.set(
-          e.msgId,
-          `${missed.map((r) => projectName(r.repo)).join(' and ')}: ${missed[0].error}`,
-        );
-      }
-    } catch (err) {
-      // Held on the entry, never on the button: every child of this box is replaced on the
-      // next paint, and a sentence in a detached tree is a press that did nothing.
-      view.linkErrors.set(e.msgId, err.message);
-    } finally {
-      view.linkBusy.delete(e.msgId);
-      renderThread();
-    }
   }
 
   function emptyState(title, body) {
@@ -9055,357 +7693,6 @@ function createPane(slot, host) {
     roomView.tasksBusy = false;
   }
 
-  /* ---------------------------------------------------------- connect --- */
-
-  /*
-   * The control that MAKES a link.
-   *
-   * Where it is, and why it is not somewhere more obvious: a link joins two *projects*,
-   * only a lead can be linked, and this aside is the only per-project surface that already
-   * exists — so this is where you are standing when you decide to link the thing you are
-   * looking at (plan decision 1). The rejected alternative was a fifth button in the rail
-   * head, which `web/index.html`'s own comment already warns against.
-   *
-   * **Only the maintainer opens a link** (plan decision 2). There is no `foreman` tool for
-   * it and there must not be one — a lead opening a link would be a lead granting itself a
-   * standing channel, the same shape as "the lead never approves a plan". Nothing in this
-   * block is reachable by a lead: it is a form in a browser, and the endpoint behind it is
-   * the only door.
-   *
-   * Two things it deliberately does **not** do:
-   *
-   * - **It does not list links.** The band at the foot of the rail is that surface, and it is one
-   *   card per open link with the close control on it. A second list here would be two
-   *   places that can disagree about what a link is — and it would have to repaint on the
-   *   roster beat, which is how a form comes to be rebuilt under the cursor typing into it.
-   *   This block repaints only when *you* do something to it, and never on a broadcast.
-   * - **It does not insert a card on success.** `POST /api/team/links` calls
-   *   `broadcastRoster()` before it answers, so the record is on the very next roster
-   *   frame and `renderConnections` draws it — measured with the browser open and no
-   *   reload. Building a card here would be a second writer for one card.
-   */
-
-  /** How long the connect fold takes, so the room can be re-pinned once it has settled. */
-  const CONNECT_FOLD_MS = 200;
-
-  function buildConnectHead() {
-    const head = document.createElement('div');
-    head.className = 'room-head is-foldable';
-    head.title = 'Link this project to another one, so their two leads can talk.';
-
-    const label = document.createElement('span');
-    label.className = 'room-head-label';
-    label.textContent = 'connect';
-
-    // A plus rather than a gear, because this opens a form rather than a panel of dials —
-    // and it turns 45° into a cross when the form is open, which is the same "this control
-    // is the way back out" the gear's own rotation means.
-    const add = document.createElement('button');
-    add.className = 'room-head-gear conn-add';
-    add.type = 'button';
-    add.setAttribute('aria-label', 'Connect this project to another');
-    add.textContent = '+';
-    add.onclick = (e) => {
-      e.stopPropagation(); // or the header behind it toggles straight back
-      toggleConnect();
-    };
-    roomView.connectAddEl = add;
-
-    head.append(label, add);
-    head.onclick = () => toggleConnect();
-    return head;
-  }
-
-  /**
-   * Draw the fold. Same mechanism as SETTINGS one block up, and for the same reasons —
-   * `grid-template-rows` between `0fr` and `1fr` so nothing measures the form's height,
-   * `inert` so a folded form cannot be tabbed into, and the room re-pinned at both ends of
-   * the transition because the box the reader is scrolled inside is changing height for
-   * 200ms after the click.
-   */
-  function applyConnectOpen() {
-    const open = roomView.connectOpen === true;
-    const fold = roomView.connectFoldEl;
-    if (fold) {
-      fold.classList.toggle('is-open', open);
-      fold.inert = !open;
-    }
-    const add = roomView.connectAddEl;
-    if (add) {
-      add.setAttribute('aria-expanded', String(open));
-      add.title = open ? 'Close this form' : 'Connect this project to another';
-      add.classList.toggle('is-open', open);
-    }
-    pinRoom();
-    clearTimeout(roomView.connectPinTimer);
-    roomView.connectPinTimer = setTimeout(pinRoom, CONNECT_FOLD_MS + 60);
-  }
-
-  /**
-   * Open or shut the form.
-   *
-   * Unlike SETTINGS this is **not** remembered in `team.json`. Folding the dials away is a
-   * preference about a panel you read; this is a form you fill in once and are then done
-   * with, and a create form that came back open every time you opened the lead would be
-   * one more thing to close. It starts shut on every pane, every time.
-   */
-  function toggleConnect() {
-    roomView.connectOpen = !roomView.connectOpen;
-    if (roomView.connectOpen) {
-      roomView.connectErr = ''; // last time's refusal is not this time's
-      refreshTeams();
-    }
-    applyConnectOpen();
-    renderConnect();
-  }
-
-  /**
-   * Every project on this Mac with a team, from the panel's own list.
-   *
-   * Asked each time the form opens rather than once: a project gets a team the moment you
-   * tick **Team lead** in `+ new`, and a picker that had cached the list before that would
-   * be missing the one you just made. It is a read of a handful of small files.
-   *
-   * `repo` is the key and the name is only a face: `teamKey` maps every `/` to `-` and is
-   * not invertible, so the directory name cannot be turned back into a path — and two
-   * projects in different trees can perfectly well share a basename.
-   */
-  async function refreshTeams() {
-    if (roomView.connectListBusy) return;
-    roomView.connectListBusy = true;
-    const asked = roomView.repo; // the answer belongs to the project that asked for it
-    try {
-      const res = await fetch('/api/teams');
-      const data = await res.json();
-      if (roomView.repo !== asked) return; // another lead is in this pane now
-      roomView.connectTeams = Array.isArray(data.teams) ? data.teams : [];
-    } catch {
-      if (roomView.repo === asked) roomView.connectTeams = [];
-    } finally {
-      roomView.connectListBusy = false;
-    }
-    renderConnect();
-  }
-
-  /**
-   * The form, from `roomView` and nothing else.
-   *
-   * It replaces its own children, so every value it shows has to be state — see the
-   * `connect*` fields' own comment. It is called from `renderMain` (after the aside is
-   * mounted, never from `buildRoomPanel`, whose isConnected guards would skip silently),
-   * from the fold toggle, from the teams fetch, and from the press. Not from `renderRail`:
-   * a form rebuilt on the roster beat is a form rebuilt under the cursor.
-   */
-  function renderConnect() {
-    const form = roomView.connectFormEl;
-    if (!form || !form.isConnected) return;
-    form.replaceChildren();
-
-    const teams = roomView.connectTeams;
-    if (!teams) {
-      const wait = document.createElement('div');
-      wait.className = 'conn-form-note';
-      wait.textContent = 'Reading the projects on this Mac…';
-      form.append(wait);
-      pinRoom();
-      return;
-    }
-
-    const others = teams.filter((t) => t.repo && t.repo !== roomView.repo);
-    if (!others.length) {
-      // A control nobody can answer correctly should not be a control (the maintainer,
-      // 2026-08-26). With nothing to link to there is no press to make, so the block says
-      // what would have to be true first instead of offering an empty picker.
-      const none = document.createElement('div');
-      none.className = 'conn-form-note';
-      none.textContent =
-        'No other project on this Mac has a team yet. Give one a team lead first — tick ' +
-        '“Team lead” in + new — and it appears here.';
-      form.append(none);
-      pinRoom();
-      return;
-    }
-
-    // Which of them this project is already linked to. Read off the roster's own list, so
-    // it is as fresh as anything else on screen — and the 409 still stands behind it for
-    // the one case this cannot cover, a link made from somewhere else while the form is
-    // open. Nothing here refuses on its own reading; it only stops offering the press.
-    const linked = new Map();
-    for (const l of state.links) {
-      if (l.a === roomView.repo) linked.set(l.b, l);
-      else if (l.b === roomView.repo) linked.set(l.a, l);
-    }
-
-    // Two projects can share a basename, and then a picker showing basenames offers the
-    // same word twice. The parent folder is what tells them apart, and it is only added
-    // where it is actually needed — a list where every entry carried its whole path would
-    // be a list of paths, which is the thing the maintainer must never have to read.
-    const seen = new Map();
-    for (const t of others) seen.set(t.name, (seen.get(t.name) || 0) + 1);
-    const faceOf = (t) => {
-      if ((seen.get(t.name) || 0) < 2) return t.name;
-      const parent = projectName(String(t.repo).slice(0, -t.name.length - 1));
-      return parent ? `${t.name} · in ${parent}` : t.name;
-    };
-
-    const pickRow = document.createElement('div');
-    pickRow.className = 'conn-form-row';
-    const pickCap = document.createElement('label');
-    pickCap.className = 'conn-form-cap';
-    pickCap.textContent = 'connect to';
-    pickCap.htmlFor = 'connPick';
-
-    const wrap = document.createElement('span');
-    wrap.className = 'team-select conn-pick';
-    const select = document.createElement('select');
-    select.id = 'connPick';
-    select.disabled = roomView.connectBusy;
-
-    const blank = document.createElement('option');
-    blank.value = '';
-    blank.textContent = 'choose a project…';
-    select.append(blank);
-    for (const t of others) {
-      const opt = document.createElement('option');
-      opt.value = t.repo;
-      const existing = linked.get(t.repo);
-      opt.textContent = existing ? `${faceOf(t)} · already linked` : faceOf(t);
-      // Offered but not pressable, rather than absent: a project missing from the list
-      // reads as a project with no team, which is a different problem with a different
-      // fix. The card for it is in the column, one panel over.
-      opt.disabled = Boolean(existing);
-      select.append(opt);
-    }
-    select.value = roomView.connectSel;
-    if (select.value !== roomView.connectSel) roomView.connectSel = ''; // it went away
-    select.onchange = () => {
-      roomView.connectSel = select.value;
-      roomView.connectErr = '';
-      renderConnect();
-    };
-    wrap.append(select);
-    pickRow.append(pickCap, wrap);
-    form.append(pickRow);
-
-    // The whole path, on the page rather than on a hover. An `<option>`'s `title` is not
-    // drawn at all in a native macOS dropdown, and this is the one fact that separates two
-    // projects with one name — so it is a line you can read, under the picker that chose
-    // it. It wraps rather than truncating; the stylesheet says what truncating cost.
-    const path = document.createElement('div');
-    path.className = 'conn-form-path';
-    path.textContent = roomView.connectSel || ' ';
-    path.title = roomView.connectSel;
-    if (!roomView.connectSel) path.classList.add('is-quiet');
-    form.append(path);
-
-    const labelRow = document.createElement('div');
-    labelRow.className = 'conn-form-row';
-    const labelCap = document.createElement('label');
-    labelCap.className = 'conn-form-cap';
-    labelCap.textContent = 'why';
-    labelCap.htmlFor = 'connLabel';
-    const label = document.createElement('input');
-    label.id = 'connLabel';
-    label.type = 'text';
-    label.className = 'conn-form-input';
-    label.placeholder = 'optional';
-    // The cap the server enforces, on the field as well — it is **refused** rather than
-    // shortened over there (`assertSendableLabel`), so a field that let you type 200
-    // characters would be a field that throws your sentence away on the press. The 400 is
-    // still rendered below: this stops the ordinary path reaching it, it does not replace
-    // it.
-    label.maxLength = 80;
-    label.value = roomView.connectLabel;
-    label.disabled = roomView.connectBusy;
-    label.oninput = () => {
-      roomView.connectLabel = label.value;
-    };
-    labelRow.append(labelCap, label);
-    form.append(labelRow);
-
-    const foot = document.createElement('div');
-    foot.className = 'conn-form-foot';
-    const go = document.createElement('button');
-    go.className = 'conn-form-go';
-    go.type = 'button';
-    go.textContent = roomView.connectBusy ? 'connecting…' : 'connect';
-    go.disabled = roomView.connectBusy || !roomView.connectSel;
-    go.title = roomView.connectSel
-      ? `Link this project to ${projectName(roomView.connectSel)}`
-      : 'Choose a project first';
-    go.onclick = () => submitLink();
-    foot.append(go);
-    form.append(foot);
-
-    // The relaunch note used to sit here, under the button. The node is *removed* rather
-    // than emptied — a `.conn-form-note` with no text still takes its line-height, and a
-    // gap under the button is a thing a reader looks for a reason for.
-
-    if (roomView.connectErr) {
-      const err = document.createElement('div');
-      err.className = 'team-err';
-      err.textContent = roomView.connectErr;
-      form.append(err);
-    }
-
-    pinRoom(); // the block just changed height under the room
-  }
-
-  /**
-   * Press `connect`.
-   *
-   * The success path is **await, then close** — and nothing else. The card comes from the
-   * roster frame the endpoint broadcasts before it answers.
-   *
-   * Every refusal is rendered where the press happened. They are the endpoint's own
-   * sentences, which already say what to do about each one; the only thing added is a
-   * pointer to the card for the 409, since that one is answered by looking at a panel
-   * rather than by changing the form.
-   */
-  async function submitLink() {
-    if (roomView.connectBusy || !roomView.connectSel) return;
-    const a = roomView.repo;
-    const b = roomView.connectSel;
-    if (!a) return;
-    roomView.connectBusy = true;
-    roomView.connectErr = '';
-    renderConnect();
-    try {
-      const res = await fetch('/api/team/links', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ a, b, label: roomView.connectLabel }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (roomView.repo !== a) return; // another lead is in this pane; its form is not this answer's
-      if (!res.ok) {
-        roomView.connectErr = data.error || `That link could not be opened (${res.status}).`;
-        if (data.link) roomView.connectErr += ' Its card is at the foot of the rail.';
-        return;
-      }
-      // Two `decisions.md` appends and two room posts, best-effort and never rolled back —
-      // so a partial write is reported rather than hidden. Read exactly the way `closeLink`
-      // reads the same shape, because it is the same shape.
-      const missed = (data.decisions || []).filter((d) => d && d.ok === false);
-      const name = projectName(b);
-      toast(
-        missed.length
-          ? `Linked to ${name}, but the note could not be written to ` +
-              `${missed.map((d) => projectName(d.repo)).join(' and ')}: ${missed[0].error}`
-          : `Linked to ${name}.`,
-      );
-      roomView.connectSel = '';
-      roomView.connectLabel = '';
-      roomView.connectOpen = false;
-      applyConnectOpen();
-    } catch (err) {
-      roomView.connectErr = err.message || 'That link could not be opened.';
-    } finally {
-      roomView.connectBusy = false;
-      renderConnect();
-    }
-  }
-
   /**
    * The team panel — settings, tasks, and the room, stacked in the lead pane's right
    * aside. The room stays view-only by design: you talk to the lead, the lead talks
@@ -9427,7 +7714,7 @@ function createPane(slot, host) {
     const panel = document.createElement('aside');
     panel.className = 'room-panel';
     /*
-     * The one plain heading left in this column — `settings`, `tasks` and `connect` all
+     * The one plain heading left in this column — `settings` and `tasks` both
      * carry controls and are built by hand. It is banded (`is-band`) because it is the
      * heading the tasks list runs straight into: everything here sits on `--shelf`, and a
      * head with a rule under it and nothing above read as one more line of the list above
@@ -9485,30 +7772,6 @@ function createPane(slot, host) {
     tasksList.className = 'team-tasks';
     roomView.tasksEl = tasksList;
     refreshTasks(true);
-
-    // The connect form, folded away. Built here, painted from renderMain like everything
-    // else in this aside — and the same three-element fold the settings block uses, whose
-    // middle element carries nothing for the reason its own comment gives (a grid item
-    // cannot be shorter than its own padding and border, so a padded block as the item
-    // never closes).
-    const connectHead = buildConnectHead();
-    const connectFold = document.createElement('div');
-    connectFold.className = 'team-settings-fold conn-fold';
-    const connectClip = document.createElement('div');
-    connectClip.className = 'team-settings-clip';
-    const connectForm = document.createElement('div');
-    connectForm.className = 'conn-form';
-    connectClip.append(connectForm);
-    connectFold.append(connectClip);
-    roomView.connectFoldEl = connectFold;
-    roomView.connectFormEl = connectForm;
-    // Wired once, here, for the reason the settings fold's own listener is: `applyConnectOpen`
-    // runs on every flip and a listener added there would stack. The property guard matters —
-    // a control inside the form finishing its own transition bubbles up to this node.
-    connectFold.addEventListener('transitionend', (e) => {
-      if (e.target === connectFold && e.propertyName === 'grid-template-rows') pinRoom();
-    });
-    applyConnectOpen();
 
     const list = document.createElement('div');
     list.className = 'room-list';
@@ -9662,22 +7925,18 @@ function createPane(slot, host) {
       onMove: pinRoom,
     });
 
-    // Settings on top (folded, so it is one line), then the two things actually read.
-    // CONNECT joins it up there, folded, for the same reason and the same cost: a header
-    // line at the top is free, and this aside's own rule is that the control panel does not
-    // sit *between* the task list and the room. It is also why it is not between the tasks
-    // grip and the room heading — that grip's ceiling is measured from the tasks list down
-    // to the panel's bottom, and a block growing inside that span would let a drag squeeze
-    // the room below its own floor.
-    // Both of the blocks above the room still call `pinRoom` when their own fetch lands
-    // — reordering them does not change *which* boxes resize the room, only where they
-    // sit, and the room still opens on its newest line rather than 454px short of it.
+    // Settings on top (folded, so it is one line), then the two things actually read. This
+    // aside's own rule is that the control panel does not sit *between* the task list and
+    // the room, and a folded header line at the top costs nothing. Anything added up there
+    // must stay out of the span between the tasks grip and the room heading — that grip's
+    // ceiling is measured from the tasks list down to the panel's bottom, and a block
+    // growing inside it would let a drag squeeze the room below its own floor.
+    // The block above the room still calls `pinRoom` when its own fetch lands, so the room
+    // still opens on its newest line rather than 454px short of it.
     // The aside's own grip goes last so it paints over everything it overhangs.
     panel.append(
       settingsHead,
       settingsFold,
-      connectHead,
-      connectFold,
       tasksHead,
       tasksList,
       tasksGrip,
@@ -9872,13 +8131,12 @@ function createPane(slot, host) {
   /**
    * Who spoke, on a link entry: the **project**, not the generic `lead`.
    *
-   * A linked project's room carries both halves of the conversation — that duplication is
-   * the feature, not a bug, because the joint thread is a *view* over the two rooms and
-   * that is what makes it survive either lead being cleared or relaunched. The cost is
-   * that this room shows two different leads talking, and `from: 'lead'` on both of them
-   * drew one identical pill over each: with two projects in the log you could not tell
-   * which one said what. The thread one pane over attributed correctly all along; only
-   * the room did not.
+   * **Links were retired on 2026-09-05 and these entries were not.** A linked project's
+   * room carries both halves of the conversation, so this room shows two different leads
+   * talking, and `from: 'lead'` on both of them drew one identical pill over each: with two
+   * projects in the log you could not tell which one said what. Nothing writes a
+   * `kind: 'link'` entry any more; two dozen of them are on disk across four team rooms,
+   * and without this branch every one of them goes back to reading as an anonymous `lead`.
    *
    * **Derived here, not written by the server, and that is the point.** The entry already
    * carries `sender` (an absolute repo path), so a `senderName` field would be a second
@@ -9889,16 +8147,16 @@ function createPane(slot, host) {
    * readers of one entry cannot disagree about who spoke.
    *
    * `speaker` decides the shape, never the path: a human entry's `sender` is not a repo at
-   * all and has no basename to take. That is the field's whole reason for existing, and
-   * this branch mirrors `linkEntryNode`'s exactly.
+   * all and has no basename to take. That is the field's whole reason for existing, and it
+   * is why this branch reads the field rather than working the answer out from the paths.
    */
   function roomLinkPill(e) {
     const human = e.speaker === 'human';
     const p = document.createElement('span');
     p.className = `room-pill is-project${human ? ' is-human' : ''}`;
     p.textContent = human ? 'you' : projectName(e.sender);
-    // Two projects can share a basename — which is why the connections card carries full
-    // paths in its own tooltip — so the face is short and the folder rides the hover.
+    // Two projects can share a basename, so the face is short and the folder rides the
+    // hover.
     p.title = human ? 'The maintainer, in the joint thread' : String(e.sender || '');
     return p;
   }
@@ -10249,14 +8507,13 @@ function createPane(slot, host) {
    * and the survivor's header went on reading `close`, calling `closePane` on the only pane
    * there is, which returns immediately: a dead control, silently, with nothing to say so.
    *
-   * Pre-existing and reachable with no link anywhere near it — split from a session's own
-   * header, close the second pane, and the button is dead — but the thread put it on the
-   * path most likely to be walked, since "close the thread" is exactly a two-panes-to-one
-   * transition. Measured before the fix: `['pin','thinking','images','close']` with one pane
-   * on screen.
+   * Pre-existing and reachable on its own — split from a session's own header, close the
+   * second pane, and the button is dead — but a non-session pane put it on the path most
+   * likely to be walked, since "close the room" is exactly a two-panes-to-one transition.
+   * Measured before the fix: `['pin','thinking','images','close']` with one pane on screen.
    *
    * So the answer is re-asked wherever the count can have moved — `openSplit`, `closePane`
-   * and `openLinkThread` all already call `renderHead` on every pane for this kind of reason.
+   * and `openSharedRoom` all already call `renderHead` on every pane for this kind of reason.
    */
   function syncSplitBtn(btn = host.querySelector('.split-toggle'), s = current()) {
     if (!btn) return;
@@ -10611,16 +8868,6 @@ function createPane(slot, host) {
     if (view.kind === 'group-room') {
       renderGroupHead();
       renderGroupStrip();
-      return;
-    }
-
-    if (view.kind === 'link') {
-      renderLinkHead();
-      // Whether a side has a live lead is a fact about the roster, so it moves without
-      // anybody touching this pane — a lead `/exit`ing while the box is open has to change
-      // the line under it. Nothing here measures anything; it is a comparison of paths.
-      renderLinkReach();
-      refreshThread();
       return;
     }
 
@@ -13498,34 +11745,10 @@ function createPane(slot, host) {
     const last = state.opened[slot];
 
     /*
-     * A reload of a window that had a thread open. `state.opened[slot]` is the third shape
-     * (`rememberOpenLink`), which matches neither key below — so without this the slot
-     * takes a session and the thread is gone, silently, on every refresh.
-     *
-     * A link that is no longer *open* is forgotten rather than restored: it has left the
-     * column, and putting a pane back onto a thread with no card to close it from would be
-     * a state with no way out. A closed link's pane survives for as long as it is open,
-     * which is what the ruling promises; it does not survive a reload.
-     */
-    if (last?.kind === 'link') {
-      if (linkById(last.link)) {
-        // Restore the fact that decides what *closing* this thread does, before `openLink`
-        // writes the memory back out. A window reloaded with a thread on screen has to
-        // answer that question the way the window it replaced would have — otherwise one
-        // reload silently turns "close the thread and go back to one pane" into "close the
-        // thread and keep a split nobody asked for".
-        threadSplit = Boolean(last.autoSplit);
-        return openLink(last.link);
-      }
-      rememberOpenLink(slot, null);
-    }
-
-    /*
-     * A reload of a window that had the shared room open. The fourth shape
-     * (`rememberOpenShared`), and unlike a link it is restored unconditionally: there is no
-     * record behind it that could have been closed, and there always is a room. Same
-     * `threadSplit` restore for the same reason — a window reloaded with the room on screen
-     * has to answer "what does closing this do" the way the window it replaced would have.
+     * A reload of a window that had the shared room open. Restored unconditionally: there
+     * is no record behind it that could have been deleted, and there always is a room. The
+     * `threadSplit` restore is what makes a reloaded window answer "what does closing this
+     * do" the way the window it replaced would have.
      */
     if (last?.kind === 'shared') {
       threadSplit = Boolean(last.autoSplit);
@@ -13533,12 +11756,11 @@ function createPane(slot, host) {
     }
 
     /*
-     * A reload of a window that had a group room open. The fifth shape
-     * (`rememberOpenGroup`), and it is restored **only if the room is still there** — the
-     * link's rule rather than the shared room's, because a room is a record that can be gone
-     * from the index by hand and a pane put back onto one would draw a name with nothing
-     * behind it. Archived is not gone: the roster carries every room, so an archived room
-     * comes back read-only, which is what it is.
+     * A reload of a window that had a group room open. Restored **only if the room is still
+     * there**, unlike the shared room above, because a room is a record that can be gone from
+     * the index by hand and a pane put back onto one would draw a name with nothing behind
+     * it. Archived is not gone: the roster carries every room, so an archived room comes
+     * back read-only, which is what it is.
      */
     if (last?.kind === 'group-room') {
       if (state.rooms.some((r) => r?.id === last.room)) {
@@ -13557,20 +11779,15 @@ function createPane(slot, host) {
   }
 
   function close() {
-    // A thread has no draft to save — `saveDraft` keys by `view.selected`, which is null
-    // here, so it would write nothing; saying so is cheaper than relying on that. The
-    // unsubscribe goes out either way: this slot may have been showing a session a moment
-    // ago, and an unsubscribe for a slot with nothing on it costs the server nothing.
+    // Peer messages has no draft to save: it is a log to read, not a box to type in — and
+    // `saveDraft` keys by `view.selected`, which is null there anyway. The unsubscribe goes
+    // out either way: this slot may have been showing a session a moment ago, and an
+    // unsubscribe for a slot with nothing on it costs the server nothing.
     //
-    // A thread *does* have a draft to save now — the maintainer's own composer sits under
-    // it — and it is keyed by the link rather than by `view.selected`, which is why it is
-    // its own call rather than something `saveDraft` could be taught.
-    //
-    // Peer messages has no draft to save: it is a log to read, not a box to type in.
-    if (view.kind === 'link') saveLinkDraft();
-    // …and a group room's, keyed by the room rather than by `view.selected` or by nothing:
-    // there are many rooms and a draft written for one must never be restored into another.
-    else if (view.kind === 'group-room') saveGroupDraft();
+    // A group room's draft is keyed by the room rather than by `view.selected`: there are
+    // many rooms and a draft written for one must never be restored into another, which is
+    // why it is its own call rather than something `saveDraft` could be taught.
+    if (view.kind === 'group-room') saveGroupDraft();
     else saveDraft();
     send({ type: 'unsubscribe', slot });
     // The room's subscription is server state like a tailer's, and a pane that stopped
@@ -13585,15 +11802,6 @@ function createPane(slot, host) {
 
   /** Ask for this pane's transcript again, after a reconnect. */
   function resubscribe() {
-    /*
-     * A thread has no subscription to restore — it is fetched over HTTP, not tailed. But
-     * it went stale for exactly as long as the socket was down, and nothing is coming to
-     * say so: the refresh is driven by `lastAt` on the roster frame, and the frame that
-     * would have carried the change was one nobody received. So a reconnect refetches,
-     * which is this pane's half of the "silently stopped transcript" trap.
-     */
-    if (view.kind === 'link') return void refreshThread(true);
-
     /*
      * The room *is* a subscription, so it is re-taken exactly as a transcript's is — and it
      * is the one this trap was written about. A subscription is server state and dies with
@@ -13625,7 +11833,6 @@ function createPane(slot, host) {
     slot,
     host,
     open,
-    openLink,
     openShared,
     close,
     adopt,
@@ -13642,36 +11849,33 @@ function createPane(slot, host) {
      * lives outside every pane. See `renderTaskLists`. */
     renderTasks,
     /*
-     * The session this pane is showing, and **null while it is showing a thread** — said
-     * explicitly rather than leaning on `view.selected` happening to be null. Three things
-     * read this and every one of them means "which session is on screen": the rail's open
-     * marker, `adopt`'s don't-take-what-the-other-pane-has list, and ⇧⇥. A thread is none
-     * of their business, and a pane that answered with the session it held *before* the
-     * thread would mark a row open that nobody is looking at.
+     * The session this pane is showing, and **null while it is showing anything else** —
+     * said explicitly rather than leaning on `view.selected` happening to be null. Three
+     * things read this and every one of them means "which session is on screen": the rail's
+     * open marker, `adopt`'s don't-take-what-the-other-pane-has list, and ⇧⇥. A room is none
+     * of their business, and a pane that answered with the session it held *before* the room
+     * would mark a row open that nobody is looking at.
      *
-     * Written as "only when it *is* a session" rather than as "not a link", because there are
-     * four kinds now and a negative test silently admits the next one — `benchEntries`'
-     * recorded reasoning, and the same shape `roomParticipants` is written in.
+     * Written as "only when it *is* a session" rather than as a negative, because kinds have
+     * already grown twice here and a negative test silently admits the next one —
+     * `benchEntries`' recorded reasoning, and the same shape `roomParticipants` is written in.
      */
     selected: () => (view.kind === 'session' ? view.selected : null),
-    /** The link this pane is holding, or null — the same question from the other side. */
-    linkId: () => (view.kind === 'link' ? view.link?.id ?? null : null),
     /*
-     * What this pane is holding, as a word. Added when the shared room became the third
-     * answer, and it is what every routing decision outside the factory now asks — because
-     * the two that used to ask `linkId()` were really asking "can this pane hold a
-     * session", and a shared pane answers `null` to `linkId()` while emphatically not being
-     * one. That mismatch is exactly the shape of the navigation regression #36: a rail
-     * click resolving to a pane that was showing something else, taking it away.
+     * What this pane is holding, as a word, and what every routing decision outside the
+     * factory asks. The question they are all really asking is "can this pane hold a
+     * session", and asking any *one* view's id instead answers `null` for a pane that is
+     * emphatically not a session — the mismatch that was the navigation regression #36: a
+     * rail click resolving to a pane that was showing something else, and taking it away.
      */
     kind: () => view.kind,
     /** Is the shared room in this pane? The rail row reads it to mark itself open. */
     sharedOpen: () => view.kind === 'shared',
     /** Put one group room in this pane. `openGroupRoom` is the only caller — it decides
-     *  *which* pane, the way `openSharedRoom` and `openLinkThread` do. */
+     *  *which* pane, the way `openSharedRoom` does. */
     openGroup,
-    /** The group room this pane is holding, or null — the same question from the other side
-     *  as `linkId()`, and what the rail's band reads to mark a row open. */
+    /** The group room this pane is holding, or null — the same question `sharedOpen` asks
+     *  from the other side, and what the rail's band reads to mark a row open. */
     groupRoomId: () => (view.kind === 'group-room' ? view.groupRoom?.id ?? null : null),
   };
   return api;
@@ -13690,11 +11894,11 @@ const panes = [];
 let focusedSlot = 'a';
 
 /**
- * Whether the second pane exists **because a thread was opened**, rather than because
+ * Whether the second pane exists **because a room was opened**, rather than because
  * somebody asked for split view.
  *
- * Closing a thread has to put the panel back where it came from, and "back" is two
- * different places: a reader who was in one pane and pressed the chip gets one pane back,
+ * Closing a room has to put the panel back where it came from, and "back" is two
+ * different places: a reader who was in one pane and pressed the row gets one pane back,
  * a reader who was already in split keeps both and that slot goes back to a session. The
  * pane cannot tell those apart by looking at itself — this is the one fact that separates
  * them, so it is written down when the split is made rather than guessed at afterwards.
@@ -13707,15 +11911,15 @@ const focused = () => panes.find((p) => p.slot === focusedSlot) || panes[0];
  * The pane a session opens into — and the fix for the navigation regression in #36.
  *
  * "The rail drives the focused pane" was true and sufficient right up until a pane could
- * hold something that is not a session. Opening a joint thread focused the pane it went
- * into, so the very next rail click resolved to the *thread's* slot: `open()` turned that
- * pane back into a session, the thread was gone, and the split the panel had opened for
- * itself stayed — after which every click filled the second slot instead of replacing the
- * first, which is navigation having stopped behaving like navigation.
+ * hold something that is not a session. Opening one focused the pane it went into, so the
+ * very next rail click resolved to *that* slot: `open()` turned the pane back into a
+ * session, what it was holding was gone, and the split the panel had opened for itself
+ * stayed — after which every click filled the second slot instead of replacing the first,
+ * which is navigation having stopped behaving like navigation.
  *
- * Measured before the fix, on a scratch panel: one pane showing `alpha-lead`, press the
- * chip, click `alpha-lead` in the rail — it is drawn **twice**, each with its own aside,
- * the thread gone and the split permanent.
+ * Measured before the fix, on a scratch panel: one pane showing `alpha-lead`, open a
+ * non-session view, click `alpha-lead` in the rail — it is drawn **twice**, each with its
+ * own aside, the view gone and the split permanent.
  *
  * So a session resolves to a pane that can hold one: the focused pane when it is showing a
  * session, otherwise the other one. A thread is a thing you consult *beside* what you were
@@ -13745,8 +11949,8 @@ function sessionPane() {
 function openSession(id) {
   const pane = sessionPane();
   if (!pane) return;
-  // The only way here lands on a thread or the room is the last-pane fallback above, and it
-  // is about to stop being one — so the split is nobody's any more.
+  // The only way here lands on a room is the last-pane fallback above, and it is about to
+  // stop being one — so the split is nobody's any more.
   if (pane.kind() !== 'session') threadSplit = false;
   setFocus(pane.slot);
   pane.open(id);
@@ -13796,8 +12000,8 @@ function paintFocus() {
 function openSplit({ adopt = true, focus = true } = {}) {
   if (panes.length > 1) return panes.find((p) => p.slot === 'b');
   const pane = addPane('b');
-  // A split is somebody's split until a thread says otherwise; `openLinkThread` sets the
-  // flag back after this returns, which is the only caller that ever does.
+  // A split is somebody's split until a room says otherwise; `openSharedRoom` and
+  // `openGroupRoom` set the flag back after this returns, which are the only callers that do.
   threadSplit = false;
   paintFocus();
   if (adopt) pane.adopt();
@@ -13808,51 +12012,7 @@ function openSplit({ adopt = true, focus = true } = {}) {
 }
 
 /**
- * Put a link's joint thread on screen — the one action the chip and the card share.
- *
- * Where it lands, and why it is never the pane you are in: **one pane open** → split, and
- * the thread takes the new slot, so the conversation you were reading stays where it is.
- * **Two open** → it replaces the pane you are *not* focused in, for the same reason. The
- * thread is a thing you consult beside what you were doing; taking that away to show it
- * would defeat the point of putting it in a slot at all.
- *
- * And it never opens on selection — the maintainer selects a lead constantly, and a pane
- * that appeared every time would be noise. It opens when you press for it, and once open
- * it stays until it is closed. Both are locked rulings.
- *
- * Two things it must not do, both learned from the regression this fixes (#36). It never
- * leaves **focus** on the thread — see `sessionPane` for what that cost. And it never puts a
- * second thread on screen: a pane already holding one is what it replaces, ahead of any
- * session, which is also what guarantees `sessionPane` always has somewhere to send a click.
- */
-function openLinkThread(id) {
-  // Already on screen. Doing nothing is the whole answer: taking focus to it is the bug
-  // above, and there is nothing else a second press could reveal.
-  if (panes.some((p) => p.linkId() === id)) return;
-
-  // A pane already holding something that is not a session is what this replaces, ahead of
-  // any session — the shared room included. Two non-session panes and no conversation is
-  // not a state worth being able to reach, and it is also what guarantees `sessionPane`
-  // always has somewhere to send a click.
-  const holder = panes.find((p) => p.kind() !== 'session');
-  const madeSplit = !holder && panes.length < 2;
-  const target =
-    holder ||
-    (panes.length > 1
-      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
-      : openSplit({ adopt: false, focus: false }));
-  if (!target) return;
-  if (madeSplit) threadSplit = true;
-  target.openLink(id);
-  // Put focus where a click will land, which after this is never the thread.
-  const keep = sessionPane();
-  if (keep) setFocus(keep.slot);
-  for (const p of panes) p.renderHead();
-  renderRail();
-}
-
-/**
- * Put the shared room on screen — `openLinkThread`'s shape, and deliberately so.
+ * Put the shared room on screen.
  *
  * Where it lands, and why it is never the pane you are in: **one pane open** → split, and
  * the room takes the new slot, so the conversation you were reading stays where it is.
@@ -13862,8 +12022,8 @@ function openLinkThread(id) {
  *
  * It never leaves **focus** on the room, for the reason `sessionPane` records: focus means
  * "the pane the rail and the keyboard drive", and a read-only view is never that — handing
- * it focus is precisely how a rail click came to eat a thread (#36). And it never puts a
- * second one on screen: a pane already holding the room, or a thread, is what it replaces.
+ * it focus is precisely how a rail click came to eat one (#36). And it never puts a second
+ * one on screen: a pane already holding a room of either kind is what it replaces.
  */
 function openSharedRoom() {
   // Already on screen. Doing nothing is the whole answer — taking focus to it is the bug
@@ -13894,7 +12054,7 @@ function closePane(slot) {
   panes[at].close();
   panes.splice(at, 1);
   rememberOpen(slot, null); // closed on purpose — don't reopen it on the next load
-  // One pane left, so there is no split for a thread to have opened.
+  // One pane left, so there is no split for a room to have opened.
   threadSplit = false;
   focusedSlot = panes[0].slot;
   paintFocus();

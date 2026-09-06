@@ -484,11 +484,11 @@ test('the band is a sibling of `.rail-list`, never a block inside it', () => {
   assert.ok(!/\bmargin\b/.test(decl), 'the band carries no vertical margin');
 });
 
-test('the band sits below the shared row and above the connections', () => {
+test('the band sits below the shared row and above the footer', () => {
   const shared = html.indexOf('class="rail-shared"');
   const rooms = html.indexOf('<div class="rail-rooms"');
-  const conn = html.indexOf('class="pane-grip grip-row conn-grip"');
-  assert.ok(shared < rooms && rooms < conn);
+  const foot = html.indexOf('class="rail-foot"');
+  assert.ok(shared < rooms && rooms < foot);
 });
 
 test('the rooms band never joins `composerSig`', () => {
@@ -554,7 +554,14 @@ test('the name ellipsises and no number ever shrinks — the rail is 20rem', () 
 });
 
 test('both themes, by tokens rather than by literal colours', () => {
-  const block = styles.slice(styles.indexOf('/* ============================================================= rooms ==='), styles.indexOf('/* ======================================================= connections ==='));
+  // The band's own block, cut at the create modal's divider below it. The end anchor used
+  // to be the connections banner; that section was deleted with the links feature, and an
+  // `indexOf` that misses returns -1, which slices to the end of the file and drags every
+  // later rule into the assertion. Anchored on a divider inside this section instead.
+  const start = styles.indexOf('/* ============================================================= rooms ===');
+  const end = styles.indexOf('/* ---------------------------------------------- the create-room modal ---', start);
+  assert.ok(start > -1 && end > start, 'both anchors must be found, in order');
+  const block = styles.slice(start, end);
   assert.ok(block.length > 500, 'the rooms block is where these rules live');
   // Every colour in the band is a token, so the light and dark palettes both answer for it
   // — the same reason `--shelf` and `--row-open` exist rather than two hand-picked tints.

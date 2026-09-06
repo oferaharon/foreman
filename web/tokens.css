@@ -36,7 +36,7 @@
      byte-for-byte the `1fr 1fr` the split shipped with. It also lets one number drive two
      things that must never disagree — the grid's first track and the grip's own `left` —
      because a reader who has dragged nothing still has a boundary for the grip to sit on.
-     Spelled here for the reason `--rail`, `--aside` and `--conn-h` are: a reset *removes*
+     Spelled here for the reason `--rail` and `--aside` are: a reset *removes*
      the custom property, so this is the one place the default lives. Only the first pane's
      width is ever stored; the second takes what is left. */
   --pane-a: 50%;
@@ -72,34 +72,6 @@
      drops the dark reading to 4.49. Going deeper buys a louder band by making the words on
      it harder to read, which is the wrong trade for a heading. */
   --band-head: color-mix(in srgb, var(--ink) 8%, var(--surface));
-
-  /* Both ends of a link, marked when either one is open. It has to clear the same three
-     backgrounds `--row-open` does — plain surface, `--shelf` inside an open group, and
-     `--surface-sunk` under the cursor — and one more besides: it must not be mistakable
-     for the selection. So it is a different *hue* rather than a weaker accent. A second
-     indigo tint at some lower percentage is exactly the ambiguity `--row-open` exists to
-     fix, one step further on.
-
-     The teal is borrowed from `--mode-edits`, the palette's one hue that is neither a
-     status (green/amber/red) nor the accent — so the mark cannot be read as a session
-     state either. Mixed rather than hard-coded, so it tracks both themes from one line the
-     way `--shelf` and `--row-open` do.
-
-     **The band is the quiet half and the edge is the load-bearing one**, which is what
-     makes 16% enough where the selection needed 22%. Measured in the dark theme, contrast
-     against surface / shelf / surface-sunk: this band 1.36 / 1.24 / 1.43, against
-     `--row-open`'s 1.46 / 1.33 / 1.53 — deliberately the quieter of the two, because the
-     row you selected should stay the loudest thing in the rail. The 3px left edge is
-     `--mode-edits` at full strength and is *opaque*, so it cannot be washed out by any of
-     the three: 8.28 / 7.54 / 8.70, where `.is-open`'s own accent edge measures 6.36
-     against surface. Same "three signals rather than one" argument the selected row makes.
-
-     The connections band's own height sits here for the reason `--rail` and `--aside` do:
-     a reset *removes* the custom property, so this is the one place the default is
-     spelled. 13rem is about two cards — enough to read the pair and the last line without
-     the band taking a third of the rail before anybody has dragged anything. */
-  --row-linked: color-mix(in srgb, var(--mode-edits) 16%, var(--surface));
-  --conn-h: 13rem;
 
   /* The shared room's speaker ring — `web/session-colour.js`'s `colourFor` picks a slot,
      these are the slots. Seven, not the eight the plan started at: an eighth hue can still

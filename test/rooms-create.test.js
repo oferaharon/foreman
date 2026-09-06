@@ -636,10 +636,22 @@ test('the band’s `+ room` is what opens it', () => {
   assert.match(code, /el\.roomsAdd\).*onclick = openCreateRoom/s);
 });
 
-test('the modal wears the repo’s own modal chrome and spells no colour of its own', () => {
+/**
+ * The create-room modal's own rules, cut at the next divider of *either* weight.
+ *
+ * It used to be cut at the next `/* ======` banner, which happened to be the connections
+ * section immediately below. That section was deleted with the links feature on 2026-09-05
+ * and the cut then ran on past the toast block, whose rules spell an `rgba()` shadow that
+ * the "every colour is a token" assertion below is not about.
+ */
+function modalCss() {
   const block = styles.slice(styles.indexOf('the create-room modal'));
-  const end = block.indexOf('/* ======');
-  const css = end > 0 ? block.slice(0, end) : block;
+  const ends = ['/* ======', '/* ---'].map((d) => block.indexOf(d)).filter((i) => i > 0);
+  return ends.length ? block.slice(0, Math.min(...ends)) : block;
+}
+
+test('the modal wears the repo’s own modal chrome and spells no colour of its own', () => {
+  const css = modalCss();
   assert.match(css, /\.modal\.is-room/);
   assert.ok(
     !/#[0-9a-f]{3,8}\b|\brgba?\(|\bhsla?\(/i.test(css),
@@ -656,9 +668,7 @@ test('the tick is drawn by the panel, never by the browser', () => {
   // scheme rather than from this page's `data-theme`. With the panel in light theme and the
   // browser in dark, an **unticked** box came back a solid dark square — which in a
   // multi-select reads as ticked. `appearance: none` takes the UA out of the decision.
-  const block = styles.slice(styles.indexOf('the create-room modal'));
-  const end = block.indexOf('/* ======');
-  const css = end > 0 ? block.slice(0, end) : block;
+  const css = modalCss();
   const box = css.match(/\.room-pick-row input\[type='checkbox'\]\s*\{[^}]*\}/);
   assert.ok(box, 'the tick must carry rules of its own');
   assert.match(box[0], /appearance:\s*none/);
