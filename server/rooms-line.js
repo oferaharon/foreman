@@ -65,11 +65,13 @@ import { humanHead, peerHead } from './room-header.js';
  * them, so no body can begin a line at column 0 and therefore no body can forge the
  * other speaker's shape or the panel's own. A third prefix for "another session in a room"
  * would not be a new distinction, it would make the existing one ambiguous: a lead reads
- * one rule for links and rooms both, and the rule is *read the prefix, never the sentence*.
+ * one rule everywhere the panel types, and the rule is *read the prefix, never the
+ * sentence*.
  *
- * One departure from `linkLine`'s shape, and it is on purpose: there is no `speaker`
- * parameter here. Two exported functions, one per speaker, so which one is composed is
- * decided by **which endpoint called it** and there is no argument to plumb — the stance
+ * One departure from `linkLine` — the composer this one was modelled on, retired with the
+ * links feature — and it is on purpose: there is no `speaker` parameter here. Two exported
+ * functions, one per speaker, so which one is composed is decided by **which endpoint
+ * called it** and there is no argument to plumb — the stance
  * `SPEAKERS`' own comment states, and the stance `skipPermissions` already has in the
  * dispatch path. A `speaker` string reaching this file from a request body would be a
  * one-word promotion of a session's message to the maintainer's word.

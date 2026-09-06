@@ -88,12 +88,12 @@ import { humanName } from './human-name.js';
 import { leadBrief } from './lead-brief.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
-// The envelope primitives, from the module they were lifted into rather than from
-// `links.js`, which re-exports them and is on a path to deletion. Every message the panel
-// types goes through the same refusal a link message does — see `envelope.js`'s header for
-// why a carriage return is refused rather than stripped. (`assertClean` and `quoteBody`
-// left this list with the peer-message composer; the group rooms reach them through
-// `rooms-line.js` instead.)
+// The envelope primitives, from the module they were lifted into — the lift happened while
+// `links.js` still existed and re-exported them, precisely so nothing would be importing it
+// on the day it went. Every message the panel types goes through the same refusal — see
+// `envelope.js`'s header for why a carriage return is refused rather than stripped.
+// (`assertClean` and `quoteBody` left this list with the peer-message composer; the group
+// rooms reach them through `rooms-line.js` instead.)
 import { assertSendableBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
 import { GroupRoomStore, memberMatches, MAX_MEMBERS } from './rooms.js';
@@ -2856,7 +2856,8 @@ app.get('/api/rooms', (req, res) => {
 
 /**
  * Create a room. **The maintainer's own press and nobody else's** — the enforcement is
- * that no `foreman` tool reaches this route, exactly as there is no tool to open a link.
+ * that no `foreman` tool reaches this route. Membership is who may type into whose
+ * terminal, so it is his call and there is deliberately no door for a session to make it.
  *
  * `members` are **session ids**, because that is what the picker has: the modal is built
  * from the live roster, so the ids it holds are roster ids. They are turned into member
@@ -3134,9 +3135,8 @@ app.post('/api/rooms/:id/post', async (req, res) => {
 
         /*
          * Composed **per member**, because the maintainer's name is resolved for the folder
-         * that will read it — a brief, a link message and this must not call him three
-         * different things — and a room's members are in different folders
-         * by construction.
+         * that will read it — a brief and this must not call him two different things —
+         * and a room's members are in different folders by construction.
          */
         let line;
         try {
@@ -4413,10 +4413,11 @@ function unsubscribeShared(ws) {
  * One group room’s frames.
  *
  * **One per socket, not one per room** — `sharedSubs`’ shape rather than `roomSubs`’,
- * because only one room is open at a time (the pane model’s own rule: a room replaces the
- * shared room or a link thread in that slot). A second `subscribe-group-room` on the same
- * socket supersedes the first rather than stacking a listener on the store, which is how
- * the transcript tailer once ended up sending every message twice.
+ * because only one room is open at a time (the pane model’s own rule: a room replaces
+ * whatever held that slot — the peer-message log, or another room). A second
+ * `subscribe-group-room` on the same socket supersedes the first rather than stacking a
+ * listener on the store, which is how the transcript tailer once ended up sending every
+ * message twice.
  *
  * The registry holds the room id beside the listener because the listener alone cannot be
  * asked what it was watching, and a client that re-subscribes to the room it already has

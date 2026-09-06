@@ -695,9 +695,10 @@ both spellings against it.
 
 **A room delivery leaves the same record a typed message leaves, so the only witnesses are
 in the text — MEASURED on v2.1.257, on a real delivery in the sandbox.** Every other message
-the panel types into a pane can be recognised off the record: a nudge and a link message
-carry a mark, a task notification carries `origin.kind`, a peer message carries
-`origin.kind: 'peer'`. A room copy carries **`type: 'user'`, `origin: {kind: 'human'}`,
+the panel types into a pane can be recognised off the record: a nudge carries a mark (and so
+did a link message, before links were retired — `LINK_MARK` in `normalize.js` outlived the
+feature so those records still read), a task notification carries `origin.kind`, a peer message
+carries `origin.kind: 'peer'`. A room copy carries **`type: 'user'`, `origin: {kind: 'human'}`,
 `promptSource: 'typed'`, `entrypoint: 'cli'`** — byte-for-byte what the maintainer typing at
 the keyboard leaves behind, because that is exactly what it is: text typed into a composer.
 So `readRoomDelivery` (`server/room-header.js`) is **two witnesses that both come out of the
@@ -1735,7 +1736,7 @@ freshly launched session answered `{"you":"%0","rooms":[]}`, and the duplicate o
 answered `{"you":"%1","rooms":[]}` — one file, two identities. `mcp/foreman.js` fails closed
 when `TMUX_PANE` is absent, twice over: a `session` with no pane refuses to start at all
 (those three tools are its whole surface) and a lead refuses per call and keeps its other
-eighteen tools.
+fifteen tools.
 
 The second half is the expensive one. **`--mcp-config` merges; `--strict-mcp-config` makes
 it a replacement.** `launchLead` passes the strict flag and is right to — a lead should hold
@@ -1933,12 +1934,13 @@ side is built out of) are named places where up to **8** peer sessions coordinat
 posts once, the panel appends one entry and types a copy into every *other* member's terminal
 through `sendOrQueue` → `PaneLock` → `assertNotBlocked`, the same guarded path as everything
 else it types. Six things hold it together and none of them bends. **Only a human makes a
-room or changes its membership** — there is no create, join or add tool, deliberately, the
-same call as "there is no tool to open a link". **Workers are never in one**, by an
+room or changes its membership** — there is no create, join or add tool, deliberately, because
+membership is who may type into whose terminal and that is never a session's call to make.
+**Workers are never in one**, by an
 allow-list on role (`participant` in `observe.js`, an allow-list because kinds have already
 grown once here) and again by the panel refusing them at the endpoint. **Two prefixes, never
-a third**: `> ` is *not the maintainer* — now widened to mean another **session**, not only
-another project's lead — and `| ` is the maintainer's own word, which authorizes. **The word
+a third**: `> ` is *not the maintainer* — any other **session**, which may be nobody's lead —
+and `| ` is the maintainer's own word, which authorizes. **The word
 is `handed`**, never *delivered* and never *read*. **State is under `STATE_DIR`**, resolved:
 `rooms.json` rewritten wholesale from memory (so unknown keys are carried through, or a
 rollback past this feature deletes rooms — `TaskStore`'s erasure) and `rooms/<id>.jsonl`
@@ -1978,6 +1980,29 @@ socket frames for a label is a large diff whose failure mode is **silent** — a
 client no longer switches on — and `peer_*` beside `peers.js` would be exactly the sibling
 name the `room_*` / `group_*` rule above refuses. `server/shared-room.js`'s header says the
 same thing from the store's end; do not "fix" the mismatch without deciding to.
+
+**Links are retired, and a room is what replaced them.** The panel used to run *links*: a
+private line between the team **leads** of two projects, opened from a project's own aside,
+drawn as a band at the foot of the rail, with `link_open` / `link_send` / `link_list` /
+`link_read` / `link_close` on the lead's tool surface and a copy of every message kept in both
+teams' rooms. All of it is gone — the store, the routes, the roster field, the rail band, the
+tools and the brief section. Retired on **2026-09-05**, the date every comment in the tree
+carries; the last of the code went on 2026-09-06 (PRs #85, #86, #88, #89, #90). A room does the
+same job with a shared record, a name and a log you can scroll, and **a room with one member is
+legal** (`GroupRoomStore` has a maximum of eight and no minimum): that one-member room is the
+real replacement both for a link and for the `@` composer peer messages used to carry.
+
+Three things outlived the deletion on purpose, and none of them is a leftover to tidy. The
+`> ` / `| ` envelope was **lifted into `server/envelope.js` before** the module went, precisely
+so rooms would never import from something scheduled for deletion — its header is the story of
+that lift, and `test/envelope.test.js` exists so the refusals stay proven from a file that
+still exists. `LINK_MARK` moved into `normalize.js` with its anchored `[link] ` match, because
+the `[link] ` records already sitting in transcripts on this Mac must still read as what they
+were. And `roomLinkPill` with the two `kind === 'link'` branches beside it in `web/app.js`
+stays, because `room.jsonl` is append-only and holds two dozen link entries across four team
+rooms that a reader still has to be able to see. `~/.foreman/links.json` is left exactly where
+it is — unread, unmigrated, undeleted: it is the only record of what was ever linked, deleting
+a maintainer's state file is not a code change's call, and leaving it makes a revert clean.
 
 **The team** has a `pending` task state — a task recorded with its brief and nothing else,
 the middle rung between an issue on a tracker and a dispatched worker: added via `task_add`,

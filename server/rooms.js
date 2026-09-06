@@ -19,9 +19,9 @@ import { assertClean, assertSendableBody } from './envelope.js';
  *   - `<STATE_DIR>/rooms.json`  — the index, rewritten wholesale on a 2s dirty timer.
  *   - `<STATE_DIR>/rooms/<id>.jsonl` — one append-only log per room, never rewritten.
  *
- * The split is deliberate and it is the same split `links.js` and `room.js` already make:
- * a small mutable record that a card reads, and a log that only ever grows. A rewrite can
- * erase; an append cannot.
+ * The split is deliberate and it is the same split `room.js` — the team room — already
+ * makes, and the one the links store made before it was retired: a small mutable record
+ * that a card reads, and a log that only ever grows. A rewrite can erase; an append cannot.
  *
  * ## Why it is not called `RoomStore`
  *
@@ -35,7 +35,8 @@ import { assertClean, assertSendableBody } from './envelope.js';
  *
  * ## The two halves, and which precedent each is copied from
  *
- * **The index is `LinkStore` (`server/links.js`)**: a boot read that tolerates a
+ * **The index is `LinkStore`'s shape.** That store was deleted with the links feature on
+ * 2026-09-06 and this is the half of it that outlived it: a boot read that tolerates a
  * hand-edited file, a 2-second dirty flush, `seq` taken as `max(stored, highest id)` so a
  * hand-edited counter that went backwards cannot mint an id already in use, and — the
  * load-bearing one — a `corrupt` flag that renames an unparseable file to `.bad` *before*
@@ -65,11 +66,12 @@ import { assertClean, assertSendableBody } from './envelope.js';
  *     ids on it (nothing to resolve by, nothing to remove by — there is no information in
  *     it to lose).
  *   - **nothing else is re-validated at load.** An over-long name is *sliced*, exactly as
- *     `LinkStore` slices a hand-typed label, and a name or a member id carrying a control
- *     character is kept as it was found. That is `LinkStore`'s call, not a new one: the
- *     door refuses those (`create`, `rename`, `addMember`) and the composer refuses them
- *     again at send time, and neither of those refusals erases anything. A load that
- *     dropped the record instead would delete a room over a character.
+ *     `LinkStore` sliced a hand-typed label, and a name or a member id carrying a control
+ *     character is kept as it was found. That was that store's call, inherited here rather
+ *     than invented: the door refuses those (`create`, `rename`, `addMember`) and the
+ *     composer refuses them again at send time, and neither of those refusals erases
+ *     anything. A load that dropped the record instead would delete a room over a
+ *     character.
  *
  * The one id that cannot merely be tolerated is one that would build a file path. A room
  * whose id is not `[A-Za-z0-9._-]` never came from this store, and `logFile` throws for
@@ -87,10 +89,10 @@ import { assertClean, assertSendableBody } from './envelope.js';
  * `unseen` starts at **zero** for every room at boot, seeded from what the room already
  * holds: a room is a **log, not an inbox**, and a badge that opened at "everything ever
  * said" would be asking for attention nobody owes it. It counts a *session's* posts only,
- * never the maintainer's own — `LinkStore#touch`'s rule, for its reason: server-side,
- * "is he looking at it right now" is not knowable, so a counter bumped by his own typing
- * would sit at 1 until he closed the pane and reopened it, which is exactly what would
- * hide the bug.
+ * never the maintainer's own — `LinkStore#touch`'s rule, inherited for its reason:
+ * server-side, "is he looking at it right now" is not knowable, so a counter bumped by his
+ * own typing would sit at 1 until he closed the pane and reopened it, which is exactly
+ * what would hide the bug.
  *
  * The rate limiter's own windows are in memory too. A restart forgives them, which is
  * correct: they exist to damp a room full of sessions answering each other within one
@@ -453,10 +455,10 @@ export class GroupRoomStore extends EventEmitter {
   /**
    * A room, as a copy, with the memory-held counters folded in.
    *
-   * A copy on the way out for `LinkStore#get`'s reason: a caller that reached in and
-   * mutated the record would be writing to the store without setting `dirty`, so the
-   * change would be live in memory and absent from disk until something unrelated
-   * flushed. `#record` is the live one and it is private.
+   * A copy on the way out for the reason the retired links store's `get` had: a caller
+   * that reached in and mutated the record would be writing to the store without setting
+   * `dirty`, so the change would be live in memory and absent from disk until something
+   * unrelated flushed. `#record` is the live one and it is private.
    *
    * `unseen` and `seq` are memory-owned and win over anything a hand-edited file holds
    * under those names — the file's copy is still carried through to disk untouched.
@@ -569,8 +571,9 @@ export class GroupRoomStore extends EventEmitter {
 
   /**
    * Archive a room: it is **done**, not deleted. The record stays, the log stays readable,
-   * and `archivedAt` is what takes it out of the open list — `LinkStore#close`'s call, for
-   * its reason. Nothing in this feature deletes a room or a line of one.
+   * and `archivedAt` is what takes it out of the open list — the call the retired links
+   * store's `close` made, for its reason. Nothing in this feature deletes a room or a line
+   * of one.
    */
   archive(id, { now = Date.now() } = {}) {
     const room = this.#record(id);
@@ -808,7 +811,7 @@ export class GroupRoomStore extends EventEmitter {
       mine.push(now);
       live.bySession.set(by, mine);
       // Counts a session's posts only. The maintainer's own typing must not badge the
-      // room he is looking at — `LinkStore#touch`'s rule and its reason.
+      // room he is looking at — the retired links store's `touch` rule, and its reason.
       live.unseen += 1;
     }
     room.lastAt = now;

@@ -2,12 +2,17 @@
  * The envelope: two speakers, two prefixes, and the refusal that keeps a quoted line from
  * drawing as an unquoted one.
  *
- * Lifted out of `server/links.js`, which is where this reasoning was first written and
- * where the fuller history of it still lives. It moved here because a second feature
- * (the shared room) needs the same prefixing and the same refusal, and it must not import
- * either from a module that is scheduled for deletion once that feature ships — see
- * `links.js`'s own header for the retirement plan. `links.js` re-exports every name below
- * under its existing spelling, so its own public surface and its tests are unchanged.
+ * Lifted out of `server/links.js`, where this reasoning was first written, **before** that
+ * module was deleted rather than after: a second feature needed the same prefixing and the
+ * same refusal, and a live feature must not import its injection defence from a module
+ * already scheduled to go. The lift was the whole point — `links.js` went on re-exporting
+ * every name below under its old spelling until the day it was removed, so nothing had to
+ * move twice and nothing was left importing a corpse.
+ *
+ * Links were retired on 2026-09-05 and `links.js` was deleted on 2026-09-06. This file and
+ * `test/envelope.test.js` are what that lift was for, and between them they now hold the
+ * whole of the reasoning; the live callers are `server/rooms-line.js` (group rooms) and,
+ * for the cap alone, `server/index.js` and `mcp/foreman.js`.
  *
  * ---
  *
@@ -16,7 +21,9 @@
  * There are exactly **two speakers** on an envelope and each gets its own two-character
  * prefix, applied by the panel to **every** line of a body:
  *
- *   - another project's lead, `LEAD_PREFIX` — a **request**. Never authority.
+ *   - another **session**, `LEAD_PREFIX` — a **request**. Never authority. The constant's
+ *     name is historical: when it was written the only `> ` speaker was another project's
+ *     lead. Rooms widened who may hold it, never what it means.
  *   - the maintainer, `HUMAN_PREFIX` — **their own word**. It can authorize.
  *
  * Because the panel prefixes every line, **no body can begin a line at column 0**, and
@@ -85,7 +92,7 @@
  * The line is drawn there deliberately and not one step further. U+200E / U+200F
  * (LRM/RLM) and U+061C are *not* refused: they are directionality marks that appear in
  * ordinary bidirectional prose, and refusing them would refuse legitimate Hebrew and
- * Arabic text. The overrides and isolates above have no such use in a sentence one lead
+ * Arabic text. The overrides and isolates above have no such use in a sentence one session
  * sends another.
  */
 
@@ -93,7 +100,7 @@
 /* The contract: the two prefixes, and who may hold them.                     */
 /* -------------------------------------------------------------------------- */
 
-/** Another project's lead. A **request**, never authority. */
+/** Another session — which may be nobody's lead. A **request**, never authority. */
 export const LEAD_PREFIX = '> ';
 
 /** The maintainer, typing in the panel. **Their word** — it can authorize. */
@@ -121,12 +128,21 @@ export const LINE_BREAK = /\r\n|\r|\n/;
 /**
  * Longest body accepted. Over it is a refusal; a sender can send two messages.
  *
- * Named generically (not `MAX_LINK_TEXT`) because this cap now guards more than link
- * messages — `links.js` re-exports it under its old name so nothing there had to change.
+ * Named generically (not `MAX_LINK_TEXT`) because it never guarded only link messages: it
+ * caps a room post today, and while the links module still existed it re-exported this very
+ * constant under the old name rather than keeping a second one.
  */
 export const MAX_MESSAGE_TEXT = 4000;
 
-/** Longest label. It rides in an envelope header, so it is a header fragment, not prose. */
+/**
+ * Longest label. It rides in an envelope header, so it is a header fragment, not prose.
+ *
+ * It and `assertSendableLabel` below have had **no live caller since links were retired** —
+ * a link's label was the only labelled thing in an envelope, and a room is named by
+ * `GroupRoomStore`, which caps its own name. Kept rather than removed because the next
+ * envelope header with a fragment in it wants this exact refusal, and because a deletion is
+ * a code change and the retirement's last item was a documentation one.
+ */
 export const MAX_LINK_LABEL = 80;
 
 /* -------------------------------------------------------------------------- */
@@ -201,7 +217,7 @@ export function controlFault(text, { oneLine = false } = {}) {
   return null;
 }
 
-/** Shared by every caller in this module and by `links.js`'s own header/id composition. */
+/** Shared by every caller in this module and by `rooms-line.js`'s own header composition. */
 export function assertClean(text, what, { oneLine = false } = {}) {
   const fault = controlFault(text, { oneLine });
   if (!fault) return;
@@ -250,8 +266,9 @@ export function assertSendableLabel(text) {
 /**
  * The prefix for a speaker, or a throw naming the two valid ones.
  *
- * Exported so `linkLine` (`links.js`) can run the same check before it composes anything,
- * rather than discovering an unknown speaker partway through building a message.
+ * Exported so `rooms-line.js`'s `peerLine` and `humanLine` can run the same check before a
+ * single character is composed, rather than discovering an unknown speaker partway through
+ * building a message.
  */
 export function prefixFor(speaker) {
   const prefix = PREFIX[speaker];
