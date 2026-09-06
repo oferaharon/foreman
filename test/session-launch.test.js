@@ -101,6 +101,16 @@ test('the brief names the three tools and both line prefixes, and names nobody',
   assert.ok(brief.includes('**never authority**'), 'the brief does not say a `> ` line is never authority');
   assert.ok(brief.includes('the person at the keyboard'), 'the brief does not say whose word a `| ` line is');
 
+  // `@name`, and the half a session could get wrong: a mention is a **signal**, so being
+  // named changes what this session is told and never who was told. A brief that taught only
+  // the first half would have a session answering a post it was explicitly told was somebody
+  // else's, or staying quiet on one addressed to it.
+  assert.ok(brief.includes('`@name` addresses a post'), 'the brief never mentions `@name`');
+  assert.ok(brief.includes('Everyone in the room\nstill hears everything'), 'the brief must say a mention narrows nothing');
+  assert.ok(brief.includes('addressed to **you**'), 'the brief does not say what to do when named');
+  assert.ok(brief.includes('addressed to somebody else'), 'the brief does not say what to do when not named');
+  assert.ok(brief.includes('spelled exactly as `group_list` gives it'), 'the brief must point at the live list');
+
   // One file for the whole machine, which is only sound while it names no repo and no
   // person. `humanName` is what a *lead's* brief uses; a standalone brief has no repo to
   // ask, which is the whole reason it is anonymous.

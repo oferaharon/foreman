@@ -42,6 +42,19 @@
  * this side's decision and it is `tmuxSession` first: a tmux session name survives a
  * `/clear` and a relaunch, a pane id survives neither (tmux reissues `%0` with every fresh
  * server), and a label collides by design (`<repo>-<branch>`).
+ *
+ * **`@name` is typed here and parsed nowhere here.** The four mention helpers below are the
+ * composer's affordance and the bubble's quiet label, and not one of them decides anything:
+ * `mentionsIn` in `server/rooms-line.js` is the single parse, the endpoint runs it on every
+ * post whoever wrote it, and what a bubble shows comes off the entry's own `to` rather than
+ * from re-reading the text. So the one thing that could drift — *which member did this post
+ * name* — has exactly one implementation, and the browser never asks the question.
+ *
+ * `mentionQuery` does share one small rule with the server, the character class that
+ * continues a name, and that is on purpose rather than an oversight: it decides when a
+ * **popup opens**, so a disagreement costs a suggestion that does not appear, never a
+ * mention that is read differently at the two ends. `test/rooms-pane.test.js` drives both
+ * against one set of names anyway.
  */
 
 import { orderForHere, roomParticipants, rowName } from './rooms-create.js';
@@ -204,4 +217,119 @@ export function addReason(room, sessions = [], max = 8) {
     return 'Every session that can be in a room is already in this one.';
   }
   return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* `@name`: the composer's affordance, and the bubble's quiet label.           */
+/* -------------------------------------------------------------------------- */
+
+/** What continues a name once one has started — `NAME_TAIL` in `server/rooms-line.js`,
+ *  mirrored for the reason the header gives and for nothing more than opening a popup. */
+const NAME_TAIL = /[A-Za-z0-9_-]/;
+
+/**
+ * The name a mention would have to spell — `memberLabel` in `server/rooms-line.js`, `''`
+ * exactly where that one answers `''`.
+ *
+ * Deliberately **not** `memberName` above, which falls back to the words `a session` for a
+ * member holding no id at all. That is a label for a chip; it can never be a member label on
+ * the server, so a menu offering it would insert a token the parse cannot match.
+ */
+const mentionable = (m) => str(m?.name) || str(m?.tmuxSession) || str(m?.paneId) || '';
+
+/**
+ * Who a post named, off the entry itself — **never** by re-reading the text.
+ *
+ * An entry written before mentions existed carries no `to` at all, which is why this reads
+ * as "nobody" rather than as anything to repair: `rooms/<id>.jsonl` is append-only and old
+ * lines are never rewritten.
+ */
+export function addressedNames(entry) {
+  const list = Array.isArray(entry?.to) ? entry.to : [];
+  return list.map(str).filter(Boolean);
+}
+
+/**
+ * The quiet line a bubble carries when its post named somebody, or `null`.
+ *
+ * Deliberately not an inline highlight of the `@` tokens in the body: that would need the
+ * server's match rule spelled a second time in the browser, on the one question this file's
+ * header says the browser must never ask. A muted label beside the timestamp says the same
+ * fact off the field the server already wrote down.
+ */
+export function addressedText(entry) {
+  const names = addressedNames(entry);
+  if (!names.length) return null;
+  const list =
+    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `to ${list}`;
+}
+
+/**
+ * The `@…` token the caret is sitting in, or `null`.
+ *
+ * Scans back from the caret over name characters to an `@`, and stops at anything else — so
+ * a space, a newline or punctuation between the caret and the nearest `@` means there is no
+ * token here. `sharedAtToken`'s job one file over, written as a scan rather than a
+ * `lastIndexOf` because a room's names carry `-` and a scan is what makes the boundary rule
+ * the same one the server uses.
+ *
+ * @returns {{start: number, query: string} | null} `start` is the index of the `@` itself
+ */
+export function mentionQuery(value = '', caret = 0) {
+  const s = typeof value === 'string' ? value : '';
+  const at = Math.max(0, Math.min(Number(caret) || 0, s.length));
+  for (let i = at - 1; i >= 0; i -= 1) {
+    const ch = s[i];
+    if (ch === '@') {
+      const before = i > 0 ? s[i - 1] : '';
+      // A name character or another `@` in front: part of a word, not the start of a mention.
+      if (before && (NAME_TAIL.test(before) || before === '@')) return null;
+      return { start: i, query: s.slice(i + 1, at) };
+    }
+    if (!NAME_TAIL.test(ch)) return null;
+  }
+  return null;
+}
+
+/**
+ * The member names an open menu offers, in the room's own order.
+ *
+ * Matched case-insensitively on a **prefix**, which is the one place this side is more
+ * forgiving than the server's exact match — and it is the right way round: the menu is what
+ * puts the exact spelling into the box, so being generous about what opens it costs
+ * nothing, while being generous about what *counts* as a mention would be a second rule.
+ */
+export function mentionMatches(query = '', room = null, limit = 8) {
+  const q = String(query ?? '').trim().toLowerCase();
+  const names = (Array.isArray(room?.members) ? room.members : []).map(mentionable).filter(Boolean);
+  const seen = new Set();
+  const out = [];
+  for (const n of names) {
+    if (seen.has(n)) continue;
+    seen.add(n);
+    if (q && !n.toLowerCase().startsWith(q)) continue;
+    out.push(n);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+/**
+ * Put one name in, replacing the half-typed token under the caret.
+ *
+ * The trailing space is part of the insertion — a mention is followed by a sentence — and a
+ * space already sitting after the caret is swallowed rather than doubled, which is what a
+ * reader gets for choosing from the menu in the middle of a line they already wrote.
+ *
+ * @returns {{value: string, caret: number}}
+ */
+export function insertMention(value = '', start = 0, caret = 0, name = '') {
+  const s = typeof value === 'string' ? value : '';
+  const from = Math.max(0, Math.min(Number(start) || 0, s.length));
+  const to = Math.max(from, Math.min(Number(caret) || 0, s.length));
+  const token = `@${String(name ?? '')} `;
+  const tail = s.slice(to);
+  const rest = tail.startsWith(' ') ? tail.slice(1) : tail;
+  return { value: `${s.slice(0, from)}${token}${rest}`, caret: from + token.length };
 }

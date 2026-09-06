@@ -826,6 +826,26 @@ test('the rooms section substitutes the detected name, and falls back cleanly', 
  * about them would be told about tools it does not have — and a planner writes a document
  * and talks to nobody at all.
  */
+test('the section teaches `@name` as a signal, and never as a way to reach one member', () => {
+  /*
+   * The maintainer's ruling, and the one sentence in this section a lead could act on
+   * wrongly: everyone in a room still hears everything, and a mention changes what each
+   * member is *told*. A lead that read `@` as "say this to one of them" would be reaching for
+   * a private channel that does not exist — and would then be surprised that the others
+   * answered. So the brief has to state both halves, and the test pins both.
+   */
+  const section = rooms(briefWith({ forge: 'gitea', via: 'mcp', reading: 'Gitea' }, false));
+  assert.match(section, /`@name` addresses a post, and changes nothing about who gets one/);
+  assert.match(section, /Everyone in the room\nstill hears everything/);
+  assert.match(section, /no way to say something to one member privately/);
+  // What to do at each end of one.
+  assert.match(section, /addressed to \*\*you\*\*, answer it in the room with `group_post`/);
+  assert.match(section, /say nothing unless you\ngenuinely have something the member named needs/);
+  // And how to write one, off the live list rather than off memory.
+  assert.match(section, /spelled exactly as `group_list` gives it/);
+  assert.match(section, /a name nobody in the room answers\nto is just text/);
+});
+
 test('workers and planners get no rooms section — they are not in rooms', () => {
   for (const [which, brief] of [
     ['worker', workerBrief({ repo: REPO, taskId: 'my-task', decisionsFile: DECISIONS })],

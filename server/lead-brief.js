@@ -339,7 +339,16 @@ where they are, and nothing said in a room reaches your workers.
 of everything you post, so reply only when you have something the others actually need — an
 answer they are waiting on, or something that changes what they should do next. Otherwise
 let it inform what you do and say nothing. If a post asks you for something you would
-normally take to ${human} first, take it to them first.`;
+normally take to ${human} first, take it to them first.
+
+**\`@name\` addresses a post, and changes nothing about who gets one.** Everyone in the room
+still hears everything — a mention changes what each member is *told*, never who is told, and
+there is deliberately no way to say something to one member privately. If a post reaching you
+says it is addressed to **you**, answer it in the room with \`group_post\`. If it says it is
+addressed to somebody else, it is there for your information: say nothing unless you
+genuinely have something the member named needs. Address one yourself by writing \`@\` and a
+member's name, spelled exactly as \`group_list\` gives it; a name nobody in the room answers
+to is just text.`;
 }
 
 /**
