@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { imageBlocks, normalizeRecord, servableImage, stitch } from '../server/normalize.js';
+import { probe } from '../server/transcript.js';
 import { linkLine } from '../server/links.js';
 import { mergeLine } from '../server/merge-queue.js';
 
@@ -595,4 +596,103 @@ test('a busy delivery with an empty body is dropped, the same as an idle one', (
     attachment: { ...BUSY_MESSAGE.attachment, origin: { ...BUSY_MESSAGE.attachment.origin, kind: 'human' } },
   };
   assert.deepEqual(normalizeRecord(notPeer), []);
+});
+
+/* ------------------------------------------- a group-room delivery --- */
+
+/*
+ * A room post another member made, typed into this session's pane by the panel, and drawn
+ * as a folded chip rather than as the maintainer's own bubble.
+ *
+ * `test/fixtures/room-delivery.jsonl` is a **real capture**, not a reconstruction: four
+ * consecutive records off a live sandbox session on Claude Code v2.1.257, driven through a
+ * scratch panel on a scratch tmux server with alpha, beta and gamma in one room. Only the
+ * home directory in `cwd` was rewritten, to the `/Users/dev/…` spelling every other fixture
+ * here uses; every other byte is as Claude Code wrote it. The four are, in order: a peer
+ * post addressed to this session, a post from the maintainer addressed to somebody else, a
+ * message a person actually typed with a delivery quoted inside it, and the reply to that.
+ *
+ * The last two are the point of capturing rather than constructing. **A delivery leaves the
+ * same record a typed message leaves** — `origin: {kind: 'human'}`, `promptSource: 'typed'`,
+ * `entrypoint: 'cli'` on all three user records here — so there is nothing on the record to
+ * key on and both witnesses have to come out of the text. A constructed fixture would have
+ * been built from the same belief it is meant to check.
+ */
+
+const ROOM_JSONL = path.join(FIXTURES, 'room-delivery.jsonl');
+const roomRecords = () =>
+  fs.readFileSync(ROOM_JSONL, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+
+test('a captured delivery and a captured typed message carry the same record fields', () => {
+  // The measurement the detection rests on, pinned so a Claude Code release that started
+  // marking these fails here rather than silently leaving a stricter witness unused.
+  const [peer, human, typed] = roomRecords();
+  for (const rec of [peer, human, typed]) {
+    assert.equal(rec.type, 'user');
+    assert.deepEqual(rec.origin, { kind: 'human' });
+    assert.equal(rec.promptSource, 'typed');
+    assert.equal(rec.isMeta, undefined);
+  }
+});
+
+test('a peer delivery becomes a chip, with the addressing mark and the raw post behind it', () => {
+  const [peer] = roomRecords();
+  const [msg] = normalizeRecord(peer);
+
+  assert.equal(msg.kind, 'group_message');
+  assert.equal(msg.from, 'alpha-room');
+  assert.equal(msg.room, 'the checkout flow');
+  assert.equal(msg.roomId, 'room-1');
+  assert.equal(msg.speaker, 'peer');
+  // This copy was addressed to the session that received it.
+  assert.equal(msg.to, 'you');
+  // The body, prefix off every line — what the chip's summary line is built from.
+  assert.equal(msg.text, '@beta-room what does your t/run.sh exit with when a case fails? I need to match it.');
+  // …and the delivery exactly as it arrived, which is what the chip opens on. The `> ` is
+  // the whole of the trust model and it stays in the thing a reader can look at.
+  assert.equal(msg.raw, peer.message.content);
+  assert.ok(msg.raw.includes('\n> @beta-room'));
+});
+
+test("the maintainer's delivery is the other speaker, and names who it was for", () => {
+  const [, human] = roomRecords();
+  const [msg] = normalizeRecord(human);
+
+  assert.equal(msg.kind, 'group_message');
+  assert.equal(msg.speaker, 'human');
+  assert.equal(msg.to, 'gamma-room', 'the aside comes off; the names stay');
+  assert.ok(msg.raw.includes('(not you — for your information)'));
+  assert.ok(msg.raw.includes('\n| @gamma-room'));
+});
+
+test('a person quoting a delivery inside their own message stays a bubble', () => {
+  /*
+   * The case the two witnesses exist for, and the reason this record was captured rather
+   * than written: it holds a whole, correct, unedited envelope — header line and prefixed
+   * body — with a sentence of somebody's own above it and another below.
+   */
+  const [, , typed] = roomRecords();
+  assert.ok(typed.message.content.includes('in "the checkout flow" (room-1) → all · '), 'a real envelope, quoted');
+  assert.ok(typed.message.content.includes('\n> the checkout total is off'), 'and a real prefixed body under it');
+
+  const [msg] = normalizeRecord(typed);
+  assert.equal(msg.kind, 'user', 'a quoted envelope must not turn somebody’s message into a chip');
+  assert.equal(msg.text, typed.message.content.trim());
+});
+
+test('a delivery never counts as unread, because unread counts what Claude said', async () => {
+  /*
+   * Room deliveries are user-side records, so they were never in the unread count and this
+   * change does not put them there. Pinned against the same capture rather than asserted in
+   * prose: `probe` reads `replyTimes` off `assistant` records carrying text, and three of
+   * the four records here are `user`.
+   */
+  const stamps = roomRecords()
+    .filter((r) => r.type === 'assistant' && Array.isArray(r.message?.content))
+    .filter((r) => r.message.content.some((b) => b?.type === 'text' && b.text?.trim()))
+    .map((r) => r.timestamp);
+  assert.equal(stamps.length, 1, 'one assistant reply in the four records');
+
+  const meta = await probe(ROOM_JSONL);
+  assert.deepEqual(meta.replyTimes, stamps, 'only the assistant turn is a reply');
 });
