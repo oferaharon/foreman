@@ -96,10 +96,12 @@ import {
   MAX_LINK_TEXT,
 } from './links.js';
 // The envelope primitives, from the module they were lifted into rather than from
-// `links.js`, which re-exports them and is on a path to deletion. The shared room's own
-// send goes through the same refusal a link message does — see `envelope.js`'s header for
-// why a carriage return is refused rather than stripped.
-import { assertClean, assertSendableBody, quoteBody, MAX_MESSAGE_TEXT } from './envelope.js';
+// `links.js`, which re-exports them and is on a path to deletion. Every message the panel
+// types goes through the same refusal a link message does — see `envelope.js`'s header for
+// why a carriage return is refused rather than stripped. (`assertClean` and `quoteBody`
+// left this list with the peer-message composer; the group rooms reach them through
+// `rooms-line.js` instead.)
+import { assertSendableBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
 import { GroupRoomStore, memberMatches, MAX_MEMBERS } from './rooms.js';
 import {
@@ -146,8 +148,9 @@ const room = new RoomStore();
 const links = new LinkStore();
 
 /*
- * The shared room: one machine-wide log of what the sessions on this Mac say to each
- * other, and the observer that fills it.
+ * The shared room — `peer messages` in the panel, `shared` in every identifier here — one
+ * machine-wide log of what the sessions on this Mac say to each other, and the observer
+ * that fills it. The section further down says why the two names differ.
  *
  * A sibling of `room` rather than a second copy of it — that one is per repo and belongs
  * to a team, this one has no project at all. Constructed here with the other stores so the
@@ -3554,18 +3557,25 @@ app.post('/api/team/links/:id/seen', (req, res) => {
 });
 
 
-/* -------------------------------------------------------- shared room --- */
+/* ------------------------------------------ peer messages (shared room) --- */
 
 /*
- * The machine-wide room: one log of what the sessions on this Mac say to each other, and
- * one way for the maintainer to say something into any of them.
+ * The machine-wide log of what the sessions on this Mac say to each other. **The panel
+ * calls it `peer messages`; every identifier here still says `shared`** — the store class,
+ * this route, the three socket frames, the CSS. The rename was display copy only,
+ * deliberately: renaming a store class and three socket frames for a label is a large diff
+ * whose failure mode is silent (a frame the client no longer switches on), and `peer_*`
+ * beside `peers.js` would be the sibling-name mistake CLAUDE.md's `room_*` / `group_*`
+ * trap refuses. `server/shared-room.js`'s header says the same thing from the store's end.
  *
- * Two halves that meet only in the store. The **observer** (wired at `/hook` above and on
- * the sweep timer in the boot block) is pure observation — it writes down traffic that
- * would have happened without the panel. The **endpoint below is not**, and it has to not
- * be: a message the panel types lands in the recipient's transcript as an ordinary user
- * record, with `origin.kind: 'human'` rather than `'peer'`, so the observer will never see
- * it and nothing else would ever record it. That also means there is no double-count.
+ * **It is read-only now, and that is the whole feature.** The panel writes nothing here:
+ * the observer (wired at `/hook` above and on the sweep timer in the boot block) is pure
+ * observation, writing down traffic that would have happened without the panel at all.
+ * There used to be a second half — an `@` composer that typed the maintainer's own message
+ * into one chosen session, recorded as `kind: 'human'` — and a group room with one member
+ * is exactly that, with a shared record and a proper log, so it was retired on 2026-09-05.
+ * **The `human` entries already on disk stay and still render**: three of the seven in
+ * `~/.foreman/shared-room.jsonl` are that composer's history, and only the writer went.
  */
 
 /** The room, as a tail. `since` is a seq, and `read` caps from the end. */
@@ -3580,172 +3590,6 @@ app.get('/api/shared-room', (req, res) => {
   );
 });
 
-/**
- * What a session is told it has been sent, and by whom.
- *
- * Deliberately **not** `linkLine`: that envelope names a link, a peer project and a link
- * id, none of which exist here. What it shares is the part that matters — every line of
- * the body carries the human prefix, so no body can begin a line at column 0 and therefore
- * no body can forge the panel's own voice or the other speaker's. `envelope.js`'s header
- * has the whole argument, carriage returns included.
- *
- * The sentence itself is the same one the joint thread's human envelope makes, for the
- * same reason: this is the one message in the shared room that can *authorize* something,
- * and a lead that could not tell it from a peer session's request would be one press away
- * from treating another session's ask as a merge word.
- */
-function sharedRoomLine(body, human) {
-  const who = String(human ?? '').trim() || 'the human';
-  assertClean(who, "The maintainer's name", { oneLine: true });
-  return [
-    `${who} sent this from the shared room in their panel — the one place they can see ` +
-      `every Claude session on this Mac at once. These are their own words, typed by them, ` +
-      `not another session's relayed to you. They carry their authority: a merge word, a ` +
-      `dispatch confirmation or a plan approval given here is given, exactly as if they had ` +
-      `typed it in this conversation. Everything below the line is what they wrote.`,
-    quoteBody(body, 'human'),
-  ].join('\n');
-}
-
-/**
- * The maintainer's own message into one session's pane.
- *
- * Delivery is `registry.get` -> `sendOrQueue` -> `PaneLock#claim` -> `sendText` ->
- * `assertNotBlocked`, **reused unmodified** and never `send-keys`: three live reads of the
- * pane, each one there because something once got typed into the wrong place.
- * `/api/trigger`'s own comment is the precedent and `POST /api/team/links/:id/message` is
- * the working example. Note what it is *not* — the peer socket. A session's own
- * `SendMessage` is a session speaking; this is the human speaking, and it goes in through
- * the composer like everything else the panel types.
- *
- * The refusals, and the order is deliberate:
- *
- *   400  a body that is empty, over `MAX_MESSAGE_TEXT`, or carrying a character that can
- *        make a quoted line draw as an unquoted one — checked **first**, because it is
- *        true of the message whatever it is addressed to, and it is the only refusal the
- *        caller can fix by editing what they typed
- *   404  no session by that id
- *   409  that session is not in the room — the participant allow-list, which is a
- *        worker's whole exclusion
- *   409  that session is not live any more — the race between picking a target and
- *        pressing send. Nothing is written and nothing is launched (2026-08-27).
- *   409  that session's queue is full
- *   200  typed, or queued for when that pane can hear it
- */
-app.post('/api/shared-room/message', async (req, res) => {
-  const text = String(req.body?.text ?? '');
-  try {
-    // Refused, never trimmed, escaped or shortened — `MAX_TRIGGER_TEXT`'s reasoning:
-    // silently rewriting a caller's input hands them a way to have it rewritten into
-    // something else. The error names the character it found, which is the only way a
-    // person can act on it.
-    assertSendableBody(text, 'A message in the shared room');
-  } catch (err) {
-    return res.status(400).json({ error: err.message, cap: MAX_MESSAGE_TEXT });
-  }
-
-  const to = String(req.body?.to ?? '').trim();
-  if (!to) return res.status(400).json({ error: 'A shared-room message needs `to`, a session id.' });
-
-  const target = registry.get(to);
-  if (!target) {
-    return res.status(404).json({
-      error: `No session ${to}. The panel is not watching one by that id — it may have exited.`,
-    });
-  }
-
-  const name = target.label || target.title || target.project || to;
-
-  /*
-   * The participant test, imported rather than restated. It is an **allow-list on role** —
-   * an ordinary session or a lead — never "not a worker", because task kinds have already
-   * grown once in this repo and a negative test silently admits the next one. Applied to
-   * both ends of the room: `observe.js` refuses a message *to* a non-participant, and this
-   * refuses a message *to* one for the same reason. A worker's traffic is its lead's
-   * business, and the room is not a second inbox for it.
-   */
-  if (!participant(target)) {
-    return res.status(409).json({
-      error:
-        `${name} is a worker, so it is not in the shared room — its messages are its lead's ` +
-        'business. Say it to the lead, or to the worker in its own session.',
-    });
-  }
-
-  /*
-   * Re-read the panes rather than trusting the roster row, which is up to one poll stale.
-   * The picker is built from the live roster, so this can only fire in the race between
-   * choosing a target and pressing send — which is real, and the alternative is a message
-   * queued against a pane id tmux has already handed to somebody else.
-   *
-   * A pane read that *throws* is not a refusal: tmux being briefly unavailable is not
-   * evidence that this session is gone, and `sendOrQueue`'s own three live reads are still
-   * in front of the keystroke. Only a successful read that does not contain the pane is.
-   */
-  let panes = null;
-  try {
-    panes = await listPanes();
-  } catch {
-    /* unreadable, not absent — fall through to the send, which reads the pane again */
-  }
-  if (!target.paneId || (panes && !panes.some((p) => p.paneId === target.paneId))) {
-    return res.status(409).json({
-      error:
-        `${name} is not live any more — its pane is gone, so there is nothing to type into. ` +
-        'Nothing was written and nothing was launched.',
-      to: target.id,
-      name,
-      delivered: false,
-    });
-  }
-
-  // Resolved for the folder that will read it: a brief, a link message and this must not
-  // call the maintainer three different things.
-  const human = humanName(target.paneCwd || target.cwd || null);
-
-  let queued;
-  try {
-    ({ queued } = await sendOrQueue(target, sharedRoomLine(text, human)));
-  } catch (err) {
-    // A full queue is the 409 here, exactly as it is for the panel's own send box. Nothing
-    // is recorded: the room is a log of messages that happened.
-    return res.status(err.status || 500).json({ error: err.message, to: target.id, name, delivered: false });
-  }
-
-  /*
-   * The entry. `kind: 'human'` and no `msgId` — there is nothing to dedupe against, because
-   * this is the one entry in the room with a single sighting by construction.
-   *
-   * `delivered` means **handed off**, not read: `queue.js` may hold this for hours and
-   * `queued` says whether it did. That is the trigger's and the link endpoint's own
-   * honesty, and two adjacent lines contradicting each other on the maintainer's scan
-   * surface is worse than the vaguer verb.
-   *
-   * `fromRole` / `toRole` / `fromSource` ride here as they do on an observed entry, so a
-   * reader (and any later tightening of who is in the room) sees one shape of record rather
-   * than two. `fromSource: 'panel'` is the honest third value beside `registry` and `name`:
-   * this end was not resolved from anything, it *is* the panel.
-   */
-  const entry = sharedRoom.post({
-    kind: 'human',
-    text,
-    from: { name: human, pid: null, tmuxSession: null, paneId: null, cwd: null, sessionId: null },
-    to: {
-      name,
-      tmuxSession: target.tmuxSession ?? null,
-      paneId: target.paneId ?? null,
-      cwd: target.cwd ?? null,
-      sessionId: target.id,
-    },
-    fromRole: null,
-    toRole: target.team?.role ?? null,
-    fromSource: 'panel',
-    delivered: true,
-    queued: Boolean(queued),
-  });
-
-  res.json({ ok: true, entry, delivered: !queued, queued: Boolean(queued) });
-});
 
 /* --------------------------------------------------------- group rooms --- */
 
@@ -4033,7 +3877,7 @@ app.get('/api/rooms/:id', (req, res) => {
  * "blocked" is wider than any one status (the trust gate sets no `dialog` at all, and
  * reads as a fully populated permission box).
  *
- * The refusals, in the order `/api/shared-room/message` answers its own:
+ * The refusals, in the order they are answered:
  *
  *   400  an empty body, one over `MAX_MESSAGE_TEXT`, or one carrying a character that can
  *        make a quoted line draw as an unquoted one — **first**, because it is true of the
@@ -4154,8 +3998,8 @@ app.post('/api/rooms/:id/post', async (req, res) => {
 
         /*
          * Composed **per member**, because the maintainer's name is resolved for the folder
-         * that will read it — a brief, a link message, the shared room and this must not
-         * call him three different things — and a room's members are in different folders
+         * that will read it — a brief, a link message and this must not call him three
+         * different things — and a room's members are in different folders
          * by construction.
          */
         let line;

@@ -1782,7 +1782,8 @@ closed by hand.** `sendOrQueue` types or queues; a queued copy waits for a pane 
 which may be hours and may be never, and `queue.prune` silently drops everything for a pane
 that has gone away or come back with a different birthday. Nothing writes back to an
 append-only log, so **an entry that says `queued` says it forever** — that is the state, not a
-bug, and `/api/shared-room/message`'s own comment made the call first. Every surface says
+bug, and the retired `/api/shared-room/message` made the call first, in a comment that went
+with it. Every surface says
 `handed`: the log entry's key, the room pane's line under a bubble, the tool description, and
 `test/rooms-pane.test.js` greps for the word. Making a dropped copy visible (a `dropped` event
 out of `queue.prune`, a `system` line in the room) was costed and deliberately left unbuilt,
@@ -1817,8 +1818,8 @@ is told* — the addressee is told to answer in the room, everybody else is told
 know rather than to answer. Typing only into the named sessions was asked for and **refused**:
 the room is the shared record, and a question two members cannot see is a side conversation
 nobody can catch up on. So the fan-out in `POST /api/rooms/:id/post` has no branch on `to` at
-all, and the composer's `@` menu is not the shared room's picker in disguise — that one
-*chooses a destination* and lifts the token back out of the text, this one types a name **into**
+all, and the composer's `@` menu is not the retired peer-message picker in disguise — that one
+*chose a destination* and lifted the token back out of the text, this one types a name **into**
 the body and the send still carries `{text}` and nothing else. Two details behind it: the parse
 matches the **stored** member label (`memberLabel`), never the live row's name, because the
 endpoint's per-copy "is this recipient an addressee" test asks the same function and two
@@ -1963,10 +1964,20 @@ rooms by a message, because it forgets — but it is a change to every session o
 panel, not only the ones put in a room.
 
 They sit beside two things they are not. The **team room** is one lead and its workers,
-vertical, untouched by any of this. The **shared room** (`server/shared-room.js` plus the
+vertical, untouched by any of this. **Peer messages** (`server/shared-room.js` plus the
 `observe.js` collector) is an observation log of native peer traffic with no writer and no
-reader on the session side — a room is where sessions write *into*, the shared room is where
-the panel *reads from*. `docs/panel.md` documents both.
+reader on the session side — a room is where sessions write *into*, peer messages is where the
+panel *reads from*. `docs/panel.md` documents both.
+
+**And peer messages is `shared` in every identifier it has, on purpose.** The panel's label,
+the pane header and the docs read `peer messages`; `SharedRoomStore`, `shared-room.jsonl`,
+`GET /api/shared-room`, the `subscribe-shared` / `shared` / `shared-append` / `markSharedRead`
+frames, `.shared-*` and `rail-shared` all still say `shared`. That is the 2026-09-05 rename
+read the safe way rather than a rename somebody abandoned: renaming a store class and three
+socket frames for a label is a large diff whose failure mode is **silent** — a frame the
+client no longer switches on — and `peer_*` beside `peers.js` would be exactly the sibling
+name the `room_*` / `group_*` rule above refuses. `server/shared-room.js`'s header says the
+same thing from the store's end; do not "fix" the mismatch without deciding to.
 
 **The team** has a `pending` task state — a task recorded with its brief and nothing else,
 the middle rung between an issue on a tracker and a dispatched worker: added via `task_add`,

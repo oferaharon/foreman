@@ -77,7 +77,9 @@
         <div class="rail-list" id="railList"></div>
 
         <!--
-          The shared room: one row, always here, above the connections band.
+          Peer messages — `shared room` in every identifier here, and the mismatch is
+          deliberate (see `server/shared-room.js`'s header). One row, always here, above the
+          connections band.
 
           It is a *row* rather than a card because there is exactly one of it — the machine
           has one room, however many sessions are on it — and a band that can hold only one
@@ -95,7 +97,7 @@
         -->
         <button class="rail-shared" id="railShared" type="button">
           <span class="rail-shared-mark" aria-hidden="true">⁂</span>
-          <span class="rail-shared-name">shared room</span>
+          <span class="rail-shared-name">peer messages</span>
           <span class="rail-shared-unseen" id="railSharedUnseen" hidden></span>
         </button>
 

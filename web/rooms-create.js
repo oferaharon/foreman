@@ -47,9 +47,11 @@ export const MAX_ROOM_NAME = 60;
 /**
  * Who can be put in a room, off the roster.
  *
- * The allow-list, and the same one `sharedParticipants` asks for — that function calls this
- * one rather than repeating it, because two spellings of "who is addressable" is the
- * `isLeadName` lesson and this one would disagree in the direction of showing a worker.
+ * **The only spelling of the allow-list on this side of the wire.** Peer messages' `@` picker
+ * was the second caller and delegated here rather than repeating the filter, because two
+ * spellings of "who is addressable" is the `isLeadName` lesson and a copy would disagree in
+ * the direction of showing a worker. That picker was retired on 2026-09-05; the rule now has
+ * one caller and `test/rooms-create.test.js` pins that `web/app.js` grows no second copy.
  */
 export function roomParticipants(sessions = []) {
   const rows = Array.isArray(sessions) ? sessions : [];

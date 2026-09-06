@@ -903,9 +903,15 @@ spread across two codebases, a migration both of them have to land. A member say
 
 There are three coordination surfaces here and they are not the same shape. The [team
 room](team.md#the-room) is one lead talking to the workers it dispatched — vertical, a chain
-of command. The [shared room](#the-shared-room) below is a window onto the messages sessions
-send each other natively — traffic the panel reads rather than carries. A room is the
-horizontal surface, and the only one sessions write *into* as equals.
+of command. [Peer messages](#peer-messages) below is a window onto the messages sessions send
+each other natively — traffic the panel reads rather than carries, and reads only. A room is
+the horizontal surface, and the only one sessions write *into* as equals.
+
+**A room with one member in it is legal, and it is how you type to a single session.**
+`GroupRoomStore` has a maximum of eight and no minimum, so a room whose only member is one
+session gives you a box that types into that session's terminal, with a name, a log you can
+scroll and a rail row. That is what replaced peer messages' own `@` composer when it was
+retired on 2026-09-05.
 
 **You make a room, and only you.** `+ room` in the rail's rooms band opens a box: a name, and
 a tick list of the sessions that can be in one — each with a live status dot, the name the
@@ -920,9 +926,9 @@ tool for any of it, the same call the panel makes about opening a link. A sessio
 room asks you in conversation.
 
 **Who can be in one:** ordinary sessions and team leads. Workers are excluded structurally —
-a worker's channel is its lead — and it is the same allow-list the shared room's `@` picker
-uses: a list of the roles that are *in*, never "not a worker", so a role added later has to be
-named to get in rather than sliding in behind a negative.
+a worker's channel is its lead — and it is a list of the roles that are *in*, never "not a
+worker", so a role added later has to be named to get in rather than sliding in behind a
+negative. It is the same allow-list peer messages applies to who may appear in its log.
 
 **What a member's terminal receives.** One header line, then the post with `> ` on every
 line of it:
@@ -993,7 +999,7 @@ Enter or Tab to take one, Escape to dismiss) and a post that named somebody carr
 There is no create, no join, no add, and no tool takes a pane or a speaker: which session is
 posting is read from the tool server's own environment, so a session cannot post as another.
 
-**The rail band** sits under the shared-room row: one row per open room with its name, member
+**The rail band** sits under the peer-messages row: one row per open room with its name, member
 count and a count of what has arrived since anybody last opened it. Archived rooms fold into a
 collapsed `archived · N`. The band's head and its `+ room` are in the rail even when there are
 no rooms at all — a control that only appears once you have used it is a control nobody finds.
@@ -1044,7 +1050,7 @@ Every one of these is a deliberate limit, not a gap waiting to be filled.
   terminal, so eight is seven typed messages per post. Raising it later is one constant;
   lowering it once rooms exist is not.
 - **One room open at a time**, in the one non-session pane slot: opening a room replaces the
-  shared room or a link thread that was there.
+  peer-message log or a link thread that was there.
 - **A body carrying a control character is refused**, never stripped or shortened, and so is
   one over 4,000 characters. The refusal names the character.
 - **The tools and the brief are launch flags, so a session already running has neither.**
@@ -1054,16 +1060,21 @@ Every one of these is a deliberate limit, not a gap waiting to be filled.
   them by a message. `relaunch all…` is how they get them. There is still no "refresh brief"
   control, for ordinary sessions any more than for leads.
 
-### The shared room
+### Peer messages
 
-Claude Code sessions can message each other directly, one to one. The shared room is the one
+Claude Code sessions can message each other directly, one to one. Peer messages is the one
 place you can watch that happen: every message one session on this Mac sent another, in the
 order the messages actually happened, whoever launched them and whatever folder they sit in.
 
 It is **observed, not routed**, and that is the whole difference from a room one section up. A
-room is a place sessions write *into*; the shared room is a place the panel *reads from*. No
-session can subscribe to it, post into it, or know it exists — the panel reads those messages
-after the fact off the recipient's own transcript.
+room is a place sessions write *into*; this is a place the panel *reads from*, and nothing
+else. No session can subscribe to it, post into it, or know it exists — the panel reads those
+messages after the fact off the recipient's own transcript.
+
+Every identifier behind it still says `shared`: the store class, the route, the socket frames,
+the CSS. The 2026-09-05 rename was display copy only, deliberately — renaming those for a
+label is a large diff whose failure mode is silent. `server/shared-room.js`'s header carries
+the argument.
 
 Two channels fill it and they overlap on purpose: the `UserPromptSubmit` hook fires on the
 recipient the moment a peer message lands, which is the fast path, and a 60-second sweep of
@@ -1075,20 +1086,18 @@ Only the **recipient's** record is ever read. The sender's own tool result is no
 harness refusal carries no message id, a classifier denial is a bare error string and the send
 never happened — while the recipient's record exists if and only if a message actually arrived.
 
-The rail's shared-room row is permanent, with a count of what has arrived since anybody last
-opened it; zero draws nothing, because the room is a log and not an inbox. Open it and it
-takes the same pane slot a room or a link thread would.
+The rail's peer-messages row is permanent, with a count of what has arrived since anybody last
+opened it; zero draws nothing, because this is a log and not an inbox. Open it and it takes
+the same pane slot a room or a link thread would.
 
-**You can type into it**, and that is the one thing in the room that is not observation. `@`
-picks one session and the message goes into that session's composer, through the pane lock and
-the three live reads like everything else the panel types, prefixed `| ` under the sentence
-saying these are your own words and carry your authority. One target per message. `@` means
-files in a session's own composer, so here the placeholder says what it means instead and the
-picker's rows are visibly sessions — a status dot, a name, a folder.
+**There is nothing to type into.** Until 2026-09-05 the pane carried an `@` composer that put
+your own message into one chosen session; a [room](#rooms) with a single member does exactly
+that with a shared record and a proper log, so the box went and the log stayed. Entries that
+composer already wrote are still here and still render as your own — three of them, marked
+with the accent edge that means *this one could authorize*.
 
-Two limits worth knowing. The `@` picker offers ordinary sessions and leads only, the same
-allow-list a room uses, so a worker is not addressable from here. And there is one shape of
-peer delivery the collector cannot see at all: a message that lands while the recipient is
+One limit worth knowing, and it is about the collector rather than the view: there is a shape
+of peer delivery it cannot see at all. A message that lands while the recipient is
 **mid-tool-call** is absorbed into the turn already running and written as an `attachment` /
 `queued_command` record, which fires no hook — so neither channel finds it. The measurement is
 in `CLAUDE.md`; the fix belongs in the transcript parser rather than in a second reader here.

@@ -6,6 +6,15 @@ import { STATE_DIR } from './config.js';
 /**
  * The shared room's log — one append-only `shared-room.jsonl` for the whole machine.
  *
+ * **The panel calls this `peer messages`; this module, its file, its route and its three
+ * socket frames all still say `shared`.** That mismatch is deliberate and is not a rename
+ * anyone finished halfway: when the room's `@` composer was retired on 2026-09-05 the label
+ * changed and not one identifier did, because renaming a store class and three socket
+ * frames for a label is a large diff whose failure mode is silent — a frame the client no
+ * longer switches on — and `peer_*` beside `peers.js` would be exactly the sibling name
+ * CLAUDE.md's `room_*` / `group_*` trap refuses. Written down here so the next reader does
+ * not "fix" it.
+ *
  * `room.js` is a *team's* chatroom, one file per repo, and this is its machine-wide
  * sibling: the traffic that passes between sessions on this Mac, whoever launched them
  * and whatever folder they sit in. Same two moves — append one line, read since a cursor —
