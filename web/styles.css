@@ -4814,6 +4814,503 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-muted);
 }
 
+/* =========================================== a group room, in a pane === */
+
+/* One named room: its members along the top, everything said in it below, and a box to say
+   something into. It borrows the shared room's *furniture* — a `.main-head` above, a
+   scrolling middle, bubbles under name pills — because a slot holding a room should read as
+   the same kind of object as a slot holding a conversation.
+
+   It does **not** borrow the shared room's classes, and that is the same trade `.shared-*`
+   itself made against `.link-*` one block up. The shared room's own future is explicitly
+   deferred (the plan's Q5 — it is the one half-room nobody writes into and no session
+   reads), and a view quietly depending on its rules would come apart on the day that is
+   answered, in a stylesheet nobody was looking at. The duplication is the price of that
+   independence and it is worth paying a second time. */
+
+.group-head { flex: none; }
+
+.main-head.is-group .group-mark {
+  font-family: var(--mono);
+  color: var(--ink-muted);
+  flex: none;
+}
+
+/* The name **acts**: pressing it renames the room in place. So it is a button rather than an
+   `h1` with a handler — reachable from the keyboard, announcing itself as pressable — and it
+   carries the heading role so the pane still has one. It looks like the heading it replaced
+   and grows an underline on hover, which is the whole of the affordance: a control that
+   looked like a control would be a second loud thing in a header that already has two. */
+.main-head.is-group .group-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: text;
+}
+.main-head.is-group .group-name:hover { text-decoration: underline dotted var(--rule-strong); }
+
+.main-head.is-group .group-name-edit {
+  flex: 1;
+  min-width: 0;
+  padding: 0.1rem 0.35rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.main-head.is-group .group-name-edit:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong));
+}
+
+/* The members, on their own line under the head rather than inside it. A header row is a
+   fixed-height strip with three things in it; membership is a list that grows to eight and
+   wraps, and squeezing it in beside the controls would make the close button move as people
+   join. `position: relative` is load-bearing: the `+` popover is placed against this. */
+.group-strip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.4rem 1.1rem 0.5rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+/* One member. The dot is the live status off the roster — the same dot the rail draws, so
+   one session looks the same in both places — and it is patched on the roster beat rather
+   than rebuilt, which is what keeps an armed `remove` question from being taken away by a
+   status flicker. */
+.group-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: none;
+  max-width: 14rem;
+  padding: 0.08rem 0.45rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+}
+
+.group-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A member the panel cannot find a live pane for. Faded rather than removed, because the
+   room still holds it and the server still records a post as *not reached* for it — a chip
+   that vanished would leave the panel disagreeing with the store about who is in the room,
+   silently. */
+.group-chip.is-gone { opacity: 0.55; border-style: dashed; }
+
+/* A hollow ring rather than a colour, because "no pane" is not a status the session is in —
+   it is the absence of one. `.dot.dialog` uses the same shape for the same kind of reason. */
+.dot.gone { background: transparent; border: 1px solid var(--rule-strong); }
+
+.group-chip-x {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.8rem;
+  line-height: 1;
+  opacity: 0.6;
+  cursor: pointer;
+}
+.group-chip-x:hover { opacity: 1; color: var(--decision); }
+
+.group-add {
+  flex: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: 1px dashed var(--rule-strong);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.group-add:hover { color: var(--ink); border-color: var(--ink-faint); }
+
+/* Who is left to add. It opens **downward, over the log**, which is the opposite of the
+   shared room's `@` picker and correct for the opposite reason: that one hangs off a
+   composer at the bottom of the pane and would leave the window going down, this one hangs
+   off a strip at the top and would leave it going up. */
+.group-add-pop {
+  position: absolute;
+  top: 100%;
+  right: 1.1rem;
+  z-index: 5;
+  width: min(24rem, calc(100% - 2rem));
+  max-height: 15rem;
+  overflow-y: auto;
+  margin-top: 0.3rem;
+  padding: 0.25rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.22);
+}
+
+.group-add-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.78rem;
+  text-align: left;
+  cursor: pointer;
+}
+.group-add-row:hover { background: var(--surface-sunk); }
+
+.group-add-name {
+  flex: none;
+  max-width: 12rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-add-role {
+  flex: none;
+  padding: 0 0.28rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  color: var(--accent);
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+}
+
+.group-add-where {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.group-add-none {
+  margin: 0;
+  padding: 0.45rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-muted);
+}
+
+/* A refusal the header owes the reader — a name the store would not take, a cap, a session
+   that has exited. The server's own sentence, painted from view state so it survives the
+   repaint that arrives with the next roster beat. */
+.group-head-err {
+  flex: none;
+  padding: 0.3rem 1.1rem 0.4rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+/* The frame the scroll box and its `N new below` pill share. Absolute inside the *scroller*
+   anchors to the content and scrolls the pill away with the words it is about; `.pane` is
+   shared with every session pane and giving it a position would re-anchor anything else ever
+   placed absolutely in one. Measured on the shared room's bench, where the pill drew half off
+   the left edge of the pane, having anchored to the window. */
+.group-body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.group-room {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 1.4rem 0 1.6rem;
+}
+
+.group-room-inner {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0 1.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  font-size: 0.82rem;
+}
+
+.app.split .group-room-inner { padding-left: 1rem; padding-right: 1rem; }
+
+/* An empty room says what it is waiting for, and what happens when somebody speaks. The
+   register is `renderThread`'s and `renderRoom`'s: a quiet sentence in muted ink, never an
+   error and never a placeholder card. */
+.group-quiet {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+  max-width: 34rem;
+}
+
+/* **One lane, all left-aligned.** A link has exactly two ends and lanes them left and right;
+   a room has up to eight speakers and there is no second side to lane against, so the name
+   pill carries the identity and every peer line starts at the same edge. */
+.group-msg { max-width: 82%; line-height: 1.45; align-self: flex-start; }
+
+/* The maintainer's own line. Full width rather than laned, because it is not one of eight
+   speakers — it is the one voice on this channel whose word can authorize, and it has to be
+   **structurally** distinguishable rather than merely a different colour of the same shape.
+   It is literally true on the wire too: these are the `| ` lines every member's terminal
+   receives, and every other line is `> `. */
+.group-msg.from-human {
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.group-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0 0.1rem 0.15rem;
+  flex-wrap: wrap;
+}
+
+/* The pill is the identity, and it is the **only** thing here that carries colour. The
+   maintainer's own recorded correction of an earlier coloured-bubbles suggestion was to the
+   header alone: two tinted bubble bodies in one column are two competing page backgrounds
+   rather than two labels, and a room holds up to eight speakers. So `.group-bubble` below is
+   byte-identical whoever spoke, and the hue is set inline on this node off the `--peer-N`
+   ring (`web/session-colour.js`, keyed on the name the entry carries).
+
+   The ring's own contrast is measured and recorded in `tokens.css` — every hue clears 7:1
+   against `--ground` in both themes, which is what this pill sits on: the bubble starts
+   below it. */
+.group-pill {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  color: var(--ink-muted);
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Later than any hue the ring can set, and it wins over the inline colour for nobody —
+   `groupEntryNode`'s human branch never sets one. It is here so the maintainer's pill is the
+   accent whatever else is added beside it later: the accent is *his* colour in this panel,
+   and it is deliberately not in the peer ring. */
+.group-pill.is-human { color: var(--accent); border-color: currentColor; }
+
+.group-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
+
+.group-bubble {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  border-top-left-radius: 3px;
+  padding: 0.45rem 0.7rem;
+  background: var(--surface);
+}
+
+/* The maintainer's line gets the accent edge the room, the joint thread and the shared room
+   already use, and for the same reason: this is the shape that carries authority. */
+.group-msg.from-human .group-bubble {
+  border-left: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+}
+
+/* Sessions writing to each other in prose: keep their paragraphs. */
+.group-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* **Ten** lines, then a quiet way in — the shared room's number rather than the room aside's
+   five, and the difference is what is being folded. The aside logs events, a line each, and
+   five is generous there; these are whole messages between sessions, and cutting one at five
+   hides the message instead of trimming it.
+
+   `scrollHeight > clientHeight` is what decides a message gets a control at all, so a short
+   one keeps its own height and grows nothing (see `groupClampable`). */
+.group-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 10;
+  overflow: hidden;
+}
+/* Deliberately no standard `line-clamp: 10` beside that, for the reason every clamp in this
+   file records: Chrome answers `CSS.supports('line-clamp', '10')` with false, so it is dead
+   weight today — and the shape it will eventually ship is `continue: discard`, which
+   *removes* the clamped lines from the box rather than hiding them. The overflow test above
+   is `scrollHeight > clientHeight`; discard the lines and those two are equal, every message
+   reads as fitting, and the control silently stops appearing on exactly the ones that need
+   it. Add it the day it can be measured, not the day it parses. */
+
+.group-more {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.group-more:hover { color: var(--ink); }
+
+/* What became of one post. Quiet — the same register as the shared room's delivery line —
+   because "queued" is a fact to read rather than an error to act on, and amber is this
+   panel's own "waiting". The word is **handed**, never *delivered*: a queued copy may sit for
+   hours, `queue.prune` may drop it, and nothing writes back to an append-only log. */
+.group-handed {
+  margin-top: 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+.group-handed.is-waiting { color: var(--working); }
+
+/* "Keep it quiet" — the maintainer's condition on the room aside's own pill, and the same one
+   applies here. Muted ink on the surface, no accent, no motion; it sits over the box's bottom
+   edge so it never reflows the list under the reader. */
+.group-hint {
+  position: absolute;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.12rem 0.55rem;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.18);
+}
+.group-hint:hover { color: var(--ink); }
+
+/* An archived room, where the composer would have been — because that is where a reader looks
+   for the box. Not an error and not a disabled control: archiving is a state somebody chose,
+   the endpoint refuses a post with a 409, and a box that took typing it cannot send would be
+   a control that lies about itself. */
+.group-shut {
+  flex: none;
+  padding: 0.7rem 1.6rem 0.9rem;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+}
+
+/* The maintainer's own box, and it sits **beside** `.group-body` rather than inside it. That
+   frame exists to anchor the `N new below` pill to the scroll box's bottom edge
+   (`bottom: 1rem` against it), so a composer added as a third child of it would put the pill
+   above the *textarea* instead of above the words it is about. As a sibling under `.pane` — a
+   flex column — it takes the height it needs and the scroller keeps the rest.
+
+   No `position: relative` here, unlike the shared room's: that one carries it to anchor an
+   `@` popover, and a room has one destination and therefore no picker at all. */
+.group-composer {
+  flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.group-composer-inner {
+  max-width: 52rem;
+  margin: 0 auto;
+  padding: 0.6rem 1.6rem 0.8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.app.split .group-composer-inner { padding-left: 1rem; padding-right: 1rem; }
+
+/* A refusal, painted from view state so it survives the repaint that arrives with the next
+   message in the room — `linkErrors`' lesson, and it bites here for the same reason it bites
+   in the shared room: this box repaints on every entry rather than on a press. */
+.group-composer-err {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+.group-composer textarea {
+  width: 100%;
+  resize: none;
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  padding: 0.5rem 0.6rem;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.group-composer textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong));
+}
+
+.group-composer-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+/* What a line typed here *is* — the same claim the envelope makes on the way out, said in the
+   panel's own voice every time rather than in a tooltip nobody opens. It says both halves:
+   whose words these are, and that everybody gets them. */
+.group-composer-hint {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* The rail's way in: one row, always here, above the connections band. A sibling of
    `.rail-list` rather than a block inside it — an open group's tint in that list is tiled
    from three full-width rows, and anything joining that flow has to answer to it.

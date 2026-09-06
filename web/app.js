@@ -42,6 +42,22 @@ import {
   rowFolder,
   rowName,
 } from './rooms-create.js';
+// The room pane's own arithmetic: the order entries are drawn in, which roster row a stored
+// member is *right now* (for a dot, and only for a dot), what became of one post, and who is
+// left to add. The eighth, for the reason each of the seven above it gives — and its header
+// records why `memberRow` mirrors `server/rooms-line.js` rather than importing it, and what
+// stops the two drifting into a disagreement that matters.
+import {
+  addableSessions,
+  addReason,
+  entryKey,
+  handedText,
+  handedWaiting,
+  memberKey,
+  memberName,
+  memberRow,
+  roomOrdered,
+} from './rooms-pane.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -217,6 +233,24 @@ function rememberOpenLink(slot, linkId, autoSplit = false) {
  */
 function rememberOpenShared(slot, on, autoSplit = false) {
   if (on) state.opened[slot] = { kind: 'shared', autoSplit: Boolean(autoSplit) };
+  else delete state.opened[slot];
+  persistOpen();
+}
+
+/**
+ * The fifth shape a slot can be remembered in: one group room, by id.
+ *
+ * By id where the shared room needs none, because there are many of them — and with its own
+ * `kind` rather than a `link` entry carrying a room id, for `rememberOpenShared`'s reason:
+ * `adopt` reads `kind` to tell the shapes apart, and a slot remembering something under
+ * somebody else's word would be restored as the wrong thing rather than as nothing.
+ *
+ * `autoSplit` means what it means for the other two — whether this pane exists *because* the
+ * room was opened, and so whether closing it should take the panel back to one pane. See
+ * `threadSplit`.
+ */
+function rememberOpenGroup(slot, roomId, autoSplit = false) {
+  if (roomId) state.opened[slot] = { kind: 'group-room', room: roomId, autoSplit: Boolean(autoSplit) };
   else delete state.opened[slot];
   persistOpen();
 }
@@ -2950,10 +2984,11 @@ function renderRoomsBand() {
   el.app.classList.toggle('has-rooms', rooms.length > 0);
   if (!el.roomsList) return;
 
-  // Which rooms are on screen right now. `groupRoomId` is the pane-side hook items 9/10
-  // fill in; until then no pane answers it, the set is empty, and nothing wears the open
-  // tint — which is the correct drawing of a panel that cannot yet open a room.
-  const openIds = panes.map((p) => p.groupRoomId?.()).filter(Boolean);
+  // Which rooms are on screen right now — asked of the panes rather than held in module
+  // scope, for the reason everything per-pane is inside the factory: split view means two of
+  // them, and only a pane knows what it is holding. At most one answers, because a room
+  // replaces whatever non-session pane is open (`openGroupRoom`).
+  const openIds = panes.map((p) => p.groupRoomId()).filter(Boolean);
 
   const archivedCollapsed = state.roomsArchivedShut;
   const sig = bandSig(rooms, { openIds, archivedCollapsed });
@@ -2980,14 +3015,45 @@ function toggleArchivedRooms() {
 }
 
 /**
- * Open a room in a pane — **items 9 and 10**, dispatched as one worker.
+ * Put one group room on screen — `openSharedRoom`'s shape, and deliberately so.
  *
- * A named hook and nothing else, so the band's rows have somewhere real to point today and
- * that worker has one place to change. It says so rather than failing silently, because a
- * row that swallowed its own click would read as a broken band rather than an unbuilt one.
+ * Where it lands, and why it is never the pane you are in: **one pane open** → split, and
+ * the room takes the new slot, so the conversation you were reading stays where it is.
+ * **Two open** → it replaces the pane you are *not* focused in, for the same reason. A room
+ * is a thing you consult beside what you were doing; taking that away to show it would
+ * defeat the point of putting it in a slot at all.
+ *
+ * **One non-session pane at a time** — the maintainer's own answer to the plan's Q6. A pane
+ * already holding a thread, the shared room *or another group room* is what this replaces,
+ * ahead of any session: two non-session panes and no conversation is not a state worth being
+ * able to reach, and it is also what guarantees `sessionPane` always has somewhere to send a
+ * rail click.
+ *
+ * It never leaves **focus** on the room, for the reason `sessionPane` records: focus means
+ * "the pane the rail and the keyboard drive", and a pane you consult is never that — handing
+ * it focus is precisely how a rail click came to eat a thread (#36).
  */
 function openGroupRoom(id) {
-  console.info(`[foreman] the room pane is not built yet (item 9/10) — room ${id}`);
+  if (!id) return;
+  // Already on screen. Doing nothing is the whole answer — taking focus to it is the bug
+  // above, and there is nothing else a second press could reveal.
+  if (panes.some((p) => p.groupRoomId() === id)) return;
+
+  const holder = panes.find((p) => p.kind() !== 'session');
+  const madeSplit = !holder && panes.length < 2;
+  const target =
+    holder ||
+    (panes.length > 1
+      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
+      : openSplit({ adopt: false, focus: false }));
+  if (!target) return;
+  if (madeSplit) threadSplit = true;
+  target.openGroup(id);
+  // Put focus where a click will land, which after this is never the room.
+  const keep = sessionPane();
+  if (keep) setFocus(keep.slot);
+  for (const p of panes) p.renderHead();
+  renderRail();
 }
 
 /**
@@ -4982,6 +5048,86 @@ function createPane(slot, host) {
     // A send in flight. Module scope is where a second pane gets caught, and `disabled` on
     // the button is gone by the next arriving line — the rail's `duplicating` guard.
     sharedBusy: false,
+
+    /* --------------------------------------------- one group room --- */
+
+    /*
+     * `kind === 'group-room'` is the fourth thing a pane can hold: one named room, its
+     * members, and everything they have said to each other through the panel.
+     *
+     * Not `'room'`, which is the *team* room's word one aside over, and not `'rooms'`: the
+     * socket frames are `group-room` / `group-room-append` for exactly that reason
+     * (`server/index.js`'s own block says so), and a pane kind spelled one word away from a
+     * feature it is not would be the same trap in the client's clothes.
+     *
+     * Everything about it lives **inside this factory** for the reason everything per-session
+     * already does — split view means two panes at once, and module scope is where a second
+     * pane gets caught. Only one room is open at a time (`openGroupRoom` enforces it, and
+     * the server holds one subscription per socket), but its scroll position, its follow
+     * intention, its unfolded entries and its half-written message are facts about *this*
+     * pane's box and belong to it.
+     */
+    // The room record, as the frame or the roster last described it. It moves under the pane
+    // — a rename, a member added, an archive, from here or from another browser — so the head
+    // repaints from it on the roster beat rather than from what was true when it opened.
+    groupRoom: null,
+    groupEntries: [],
+    groupCursor: 0,
+    // Is the room pinned to its newest line? An *intention*, flipped only by a real scroll —
+    // the shared room's rule and its reason: this box repaints in full when a message
+    // arrives, and being yanked to the bottom mid-read is worse than scrolling down.
+    groupFollow: true,
+    // What arrived while the reader was up in the history, for the `N new below` pill.
+    groupUnseen: 0,
+    // How many entries the last paint drew, so that arithmetic has something to subtract
+    // from. Floored at zero where it is used: a fresh `group-room` frame can be *shorter*
+    // than the list it replaces (the tail is capped), and a negative count would hide a hint
+    // that is due.
+    groupPainted: 0,
+    groupEl: null,
+    groupHintEl: null,
+    groupHeadEl: null,
+    groupStripEl: null,
+    groupErrEl: null,
+    // The `+` popover's own node, held so the roster beat can repaint what is in it without
+    // rebuilding the strip around it.
+    groupAddPopEl: null,
+    /* The scroll box's height when the pin was last taken, so the scroll handler can tell a
+     * resize's own event from a reader's — Chrome emits one when a resize clamps `scrollTop`
+     * and it is indistinguishable from a real scroll by anything else. `null` until the box
+     * has been laid out, which never equals a real `clientHeight`. */
+    groupFollowH: null,
+    // Which entries the reader has opened out of their clamp. Keyed by `seq`, which is unique
+    // in this log by construction — one room, one file, one counter — and on the *record*
+    // rather than the node, because every child is replaced on every paint.
+    groupOpenKeys: new Set(),
+    // Is the name being edited in place? One boolean, because the input replaces the heading
+    // and a repaint mid-edit must not put the heading back under the caret.
+    groupRenaming: false,
+    // Is the `+` popover open? Built from the roster when it opens and repainted on the beat,
+    // because whether a session is still addressable moves without anybody touching it.
+    groupAddOpen: false,
+    /*
+     * The header's own refusal — the server's sentence for a rename, an add, a remove or an
+     * archive — held **in view state and never on the node that was pressed**. `linkErrors`'
+     * reason, and it is sharper here: the strip repaints on the roster beat, so a 409 painted
+     * onto a chip's ✕ would be in a detached tree within two seconds and nobody would ever
+     * see why their press did nothing.
+     */
+    groupHeadError: null,
+    // The composer's standing refusal, for the same reason again and kept apart from the
+    // header's: one is about the message, the other about the room, and one line saying both
+    // would be a line that contradicts itself.
+    groupError: null,
+    // A send in flight, and a header press in flight. Module scope is where a second pane
+    // gets caught, and `disabled` on a button is gone by the next arriving line.
+    groupBusy: false,
+    groupHeadBusy: false,
+    // Whether the pane was *drawn* for an archived room. An archive can land while the pane
+    // is open — from this pane's own control or from another browser — and it changes the
+    // pane's shape rather than its contents (the composer goes), which is the one thing a
+    // repaint of the head cannot do on its own. `null` means nothing has been drawn yet.
+    groupArchivedDrawn: null,
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -4996,6 +5142,9 @@ function createPane(slot, host) {
   // third shape for one, because everything that reads `composerEl` assumes a session
   // behind it and everything that reads `linkComposerEl` assumes a link.
   let sharedComposerEl = null;
+  // …and a group room's. A fourth variable for the third time the same reason has been
+  // given: everything that reads one of the three above it assumes what that one is behind.
+  let groupComposerEl = null;
 
   // The team room — and, since Wave E, the whole team panel: tasks and settings ride the
   // same aside. Lives in the factory because two leads can be open in two slots and must
@@ -5236,6 +5385,7 @@ function createPane(slot, host) {
     saveLinkDraft(); // …and the same for a thread, if that is what this pane was showing
     saveDraft(); // hold on to what was being typed in the session we're leaving
     leaveShared(); // …and the room's subscription, if that is what this pane was holding
+    leaveGroup(); // …or a group room's, which is the server's to stop for the same reason
     // Coming back from a thread: the pane stops being a link before anything else, or the
     // guards below would keep refusing on its behalf.
     view.kind = 'session';
@@ -5290,6 +5440,7 @@ function createPane(slot, host) {
     saveLinkDraft(); // this pane may already be holding another thread
     saveDraft();
     leaveShared(); // …or the shared room, whose subscription is the server's to stop
+    leaveGroup(); // …or a group room's, for every word of the same reason
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'link';
@@ -5391,6 +5542,7 @@ function createPane(slot, host) {
     if (view.kind === 'shared') return;
     saveLinkDraft(); // this pane may have been holding a thread
     saveDraft();
+    leaveGroup(); // …or a group room, whose subscription is the server's to stop
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'shared';
@@ -6513,6 +6665,1106 @@ function createPane(slot, host) {
     }
   }
 
+  /* --------------------------------------------------------- group room --- */
+
+  /*
+   * One named room, in a pane: its members along the top, everything said in it below, and
+   * a box to say something into.
+   *
+   * It is the shared room's shape and almost none of its code, and the split is deliberate.
+   * What is **copied** is the reasoning, every piece of which was paid for somewhere else in
+   * this repo and is re-recorded at the line it governs: the order (`ts`, `seq` only as the
+   * tie-break), the scroll held across a paint, the clamp measured in one batch and its
+   * control built only where it is needed, the quiet `N new below` pill, the colour on the
+   * pill and never on the bubble, and a composer that does not go through `buildComposer`.
+   * What is **not** shared is the CSS or the functions: `.shared-*` belongs to a feature
+   * whose future is explicitly deferred (the plan's Q5), and a view quietly depending on its
+   * rules would come apart on the day that is answered, in a stylesheet nobody was looking
+   * at. That is the same trade `.shared-*` itself made against `.link-*`, and it is worth
+   * paying a second time.
+   *
+   * Two things here have no analogue one pane over. A room has a **header that acts** —
+   * rename, add, remove, archive — where the shared room's is a label; every destructive one
+   * of those goes through `armConfirm`, which is the maintainer's own ruling on destructive
+   * controls (#11). And a room has **one destination**, so the composer has no `@` target
+   * and no chip: a line typed here goes to everybody in the room, which is what the standing
+   * sentence under the box says.
+   */
+
+  /** One room's half-written message. Keyed by room, because there are many of them and a
+   *  draft written for one must never be restored into another. */
+  const groupDraftKey = (id) => `group:${id}`;
+
+  /** Hold on to what was being typed. No target rides along — the shared room's draft carries
+   *  one because it has to pick a session; a room *is* the destination. */
+  function saveGroupDraft() {
+    const id = view.groupRoom?.id;
+    if (!groupComposerEl || !id) return;
+    const text = groupComposerEl.ta.value;
+    if (text.trim()) state.drafts[groupDraftKey(id)] = text;
+    else delete state.drafts[groupDraftKey(id)];
+    persistDrafts();
+  }
+
+  /** …and drop it once it has actually been sent. */
+  function clearGroupDraft() {
+    const id = view.groupRoom?.id;
+    if (!id) return;
+    delete state.drafts[groupDraftKey(id)];
+    persistDrafts();
+  }
+
+  /**
+   * The room record as the **roster** last described it, or the one this pane is holding.
+   *
+   * The roster carries every room, open and archived, and it is the live answer: a rename or
+   * a member added from another browser arrives on the next beat with nobody touching this
+   * pane. The held record is the fallback for the beat between a press and the frame that
+   * confirms it, and for a room the roster has somehow stopped carrying — the pane keeps
+   * what it had rather than blanking, which is `refreshThread`'s own rule for a closed link.
+   */
+  function groupLive() {
+    const id = view.groupRoom?.id;
+    if (!id) return null;
+    return state.rooms.find((r) => r?.id === id) || view.groupRoom;
+  }
+
+  /**
+   * Put one group room in this pane.
+   *
+   * The transcript subscription goes first, and the team room's with it — both are *server*
+   * state, and a pane that stopped drawing a session while the server went on tailing its
+   * file is the "subscription that outlives its slot" trap from the other end. The room's own
+   * subscription then replaces them: `subscribe-group-room` answers with the tail and every
+   * entry after it, which is why nothing here fetches over HTTP.
+   *
+   * Opening zeroes the band row's count, which is the only thing that ever does.
+   */
+  function openGroup(id) {
+    if (!id) return;
+    if (view.kind === 'group-room' && view.groupRoom?.id === id) return;
+    saveLinkDraft(); // this pane may have been holding a thread
+    saveDraft();
+    leaveShared(); // …or the shared room, whose subscription is the server's to stop
+    leaveGroup(); // …or another room, whose subscription is one per socket and supersedes
+    send({ type: 'unsubscribe', slot });
+    syncRoom(null);
+    view.kind = 'group-room';
+    view.selected = null;
+    view.messages = [];
+    view.hasEarlier = false;
+    view.error = null;
+    view.lastMarked = null;
+    chipNodes.clear();
+    clearThread();
+    clearGroup();
+    // The record we have now, so the head has a name to draw before the first frame lands.
+    // The frame carries the authoritative one a moment later.
+    view.groupRoom = state.rooms.find((r) => r?.id === id) || { id, name: 'room', members: [] };
+    // `threadSplit` is already settled by the caller — `openGroupRoom` sets it before it gets
+    // here, and `adopt` restores it off the stored entry before it calls this.
+    rememberOpenGroup(slot, id, threadSplit);
+    send({ type: 'subscribe-group-room', roomId: id, slot });
+    // Nothing in it is new any more. Server-side, the same shape `markSharedRead` has: the
+    // count is one number for the machine, not one per browser.
+    send({ type: 'markGroupRoomRead', roomId: id, slot });
+    renderRail();
+    renderMain();
+  }
+
+  /**
+   * Give a room's subscription back, on the way to holding something else.
+   *
+   * `leaveShared`'s reason verbatim: a pane can stop holding a room by being *given* a
+   * session, a thread or another room, and nothing looks wrong when it does — the frames go
+   * on arriving and `receive` quietly drops them, while a server-side listener pushes every
+   * entry into a socket for a slot that is drawing a transcript. A no-op for a pane that was
+   * not holding one, which is what lets every caller say it unconditionally.
+   */
+  function leaveGroup() {
+    if (view.kind !== 'group-room') return;
+    send({ type: 'unsubscribe-group-room', slot });
+    clearGroup();
+  }
+
+  /**
+   * Everything a room leaves behind, dropped in one place so nothing half-clears.
+   *
+   * The draft is captured **first**, before anything below it is nulled — this is the one
+   * function every way out goes through (`leaveGroup` for a pane being given something else,
+   * `closeGroup` for the way out, `close` for a slot going away), so putting the save
+   * anywhere else would mean finding all three and keeping them in step. It is a no-op when
+   * there is no composer, which is what lets `openGroup` call it on the way *in* without
+   * writing anything.
+   */
+  function clearGroup() {
+    saveGroupDraft();
+    view.groupRoom = null;
+    view.groupEntries = [];
+    view.groupCursor = 0;
+    view.groupFollow = true;
+    view.groupUnseen = 0;
+    view.groupPainted = 0;
+    view.groupEl = null;
+    view.groupHintEl = null;
+    view.groupHeadEl = null;
+    view.groupStripEl = null;
+    view.groupErrEl = null;
+    view.groupAddPopEl = null;
+    view.groupFollowH = null;
+    view.groupOpenKeys.clear();
+    view.groupRenaming = false;
+    view.groupAddOpen = false;
+    view.groupArchivedDrawn = null;
+    // A held refusal belongs to the press that raised it and a press in flight belongs to the
+    // pane that started it — `clearThread`'s last two lines, for their reasons.
+    view.groupHeadError = null;
+    view.groupError = null;
+    view.groupBusy = false;
+    view.groupHeadBusy = false;
+    groupComposerEl = null;
+    groupStripSig = '';
+  }
+
+  /**
+   * Leave the room, and put the panel back where it came from.
+   *
+   * `closeShared`'s reasoning verbatim, and it is the same two places: a reader who was in
+   * one pane and pressed a band row gets one pane back, a reader who was already in split
+   * keeps both and this slot goes back to a session. `threadSplit` is the only thing that can
+   * tell those apart — a pane looking at itself sees the same thing either way.
+   */
+  function closeGroup() {
+    if (panes.length > 1 && threadSplit) {
+      closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
+      return;
+    }
+    send({ type: 'unsubscribe-group-room', slot });
+    rememberOpenGroup(slot, null);
+    view.kind = 'session';
+    clearGroup();
+    adopt();
+    // `adopt` repaints by opening something. With nothing to open — no sessions at all — it
+    // returns silently and the pane would still be showing the room it was just told to
+    // close. Repaint into the empty state instead.
+    if (!view.selected) renderMain();
+    renderRail();
+  }
+
+  /**
+   * The room, in a pane.
+   *
+   * `buildComposer` is never called, for the reason the shared room and the joint thread both
+   * record: it reads `s.prompt`, `s.plan`, `s.question`, `s.mode` and `s.model`, all null at
+   * once with no session behind the pane, and `shortModel(null)` throwing *inside* it once
+   * took a pane down after it had decided to draw a question card and left it unable to heal
+   * on any later frame. `buildGroupComposer` is a sibling of `buildSharedComposer` instead —
+   * the same trade, made three times now for one reason.
+   *
+   * **An archived room draws no composer at all**, and that is the shape of the pane rather
+   * than a disabled button: the endpoint refuses a post to it with a 409, and a box that
+   * takes typing it cannot send is a control that lies about itself. The log stays readable,
+   * which is what archiving means — nothing here deletes a room or a line of one.
+   */
+  function renderGroupPane() {
+    const room = groupLive();
+    const archived = Boolean(room?.archivedAt);
+    view.groupArchivedDrawn = archived;
+
+    host.replaceChildren();
+    host.append(buildGroupHead());
+
+    const wrap = document.createElement('div');
+    wrap.className = 'group-room';
+    const inner = document.createElement('div');
+    inner.className = 'group-room-inner';
+    wrap.append(inner);
+
+    /*
+     * Following is an intention, flipped only by a real scroll — never a geometry test at
+     * paint time. And a scroll event that arrives because the *box* changed height is the
+     * layout moving rather than the reader: Chrome emits one when a resize clamps
+     * `scrollTop`, and it is indistinguishable from a real scroll by anything except the
+     * height. So a height change swallows the one event it caused, and following survives the
+     * split grip being dragged. Both halves are the room aside's, learned there rather than
+     * here and copied through the shared room.
+     */
+    wrap.addEventListener('scroll', () => {
+      if (wrap.clientHeight !== view.groupFollowH) {
+        view.groupFollowH = wrap.clientHeight;
+        return;
+      }
+      view.groupFollow = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight < 40;
+      if (view.groupFollow) {
+        view.groupUnseen = 0; // scrolled back down: you have seen them
+        markGroupSeen();
+      }
+      updateGroupHint();
+    });
+
+    // The quiet half of "don't yank the reader": if the room moves on while you are reading
+    // back through it, something has to say so — softly. A muted pill over the bottom edge,
+    // counting what arrived, clicking it is how you rejoin, and it exists only while you are
+    // *not* following. Absolutely positioned against the box, so it never reflows the list
+    // under whoever is reading.
+    const hint = document.createElement('button');
+    hint.className = 'group-hint';
+    hint.type = 'button';
+    hint.hidden = true;
+    hint.onclick = () => {
+      view.groupFollow = true;
+      view.groupUnseen = 0;
+      pinGroup();
+      markGroupSeen();
+      updateGroupHint();
+    };
+    view.groupHintEl = hint;
+
+    /*
+     * The pill hangs off the scroll box's bottom edge, so it needs a positioned ancestor that
+     * is **not** the scrolling box itself — absolute inside a scroller anchors to the
+     * content, which scrolls the pill away with the words it is about. `.pane` is not that
+     * ancestor either: it is shared with every session pane and giving it a position would
+     * re-anchor anything else that is ever absolutely placed in one. So the box and the pill
+     * share a frame of their own. Measured on the shared room's bench, where the pill drew
+     * half off the left edge of the pane — it had been anchoring to the window.
+     */
+    const body = document.createElement('div');
+    body.className = 'group-body';
+    body.append(wrap, hint);
+
+    view.groupEl = { wrap, inner };
+    host.append(body);
+
+    if (archived) {
+      // Said where the composer would have been, because that is where a reader looks for
+      // the box. Not an error: archiving is a state somebody chose, and the room is still
+      // exactly as readable as it was.
+      const shut = document.createElement('div');
+      shut.className = 'group-shut';
+      shut.textContent =
+        'This room is archived. Everything in it is still here to read; nothing more is typed into anyone.';
+      host.append(shut);
+    } else {
+      /*
+       * The composer goes **beside** `.group-body`, not inside it, and that is a placement
+       * with a reason rather than a preference. `.group-body` exists to be the positioned
+       * frame the `N new below` pill hangs off — `bottom: 1rem` against it — so a composer
+       * added as a third child of that frame would put the pill 1rem above the *composer's*
+       * bottom edge, floating over the textarea instead of over the words it is about.
+       */
+      host.append(buildGroupComposer());
+    }
+
+    renderGroup();
+    // Sizing needs the textarea in the document — `scrollHeight` is 0 before that, so a
+    // restored multi-line draft would sit crammed into a two-row box. The link composer's own
+    // ordering, and its reason.
+    groupComposerEl?.autoGrow();
+  }
+
+  /* ------------------------------------------------------- the header --- */
+
+  /** The room's own header: what it is called, how much is in it, the members, and the two
+   *  controls that change the room itself. Built once per pane; everything on it that can
+   *  move is repainted by `renderGroupHead` and `renderGroupStrip`. */
+  function buildGroupHead() {
+    const box = document.createElement('div');
+    box.className = 'group-head';
+
+    const head = document.createElement('div');
+    head.className = 'main-head is-group';
+
+    const mark = document.createElement('span');
+    mark.className = 'group-mark';
+    mark.textContent = '◎';
+    mark.title = 'A group room — a handful of sessions coordinating on one thing';
+    head.append(mark);
+
+    /*
+     * The name, and it renames **in place**. A button rather than an `h1` with a click
+     * handler, because a thing that acts when it is pressed has to be reachable from the
+     * keyboard and announce itself as pressable; the heading role rides on it so the pane
+     * still has one. Escape cancels, Enter commits, and a blur cancels rather than committing
+     * — a rename you walked away from is one you did not finish.
+     */
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'group-name';
+    name.setAttribute('role', 'heading');
+    name.setAttribute('aria-level', '1');
+    name.title = 'Rename this room';
+    name.onclick = () => startGroupRename(name);
+    head.append(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'head-meta';
+
+    const stat = document.createElement('span');
+    stat.className = 'head-status group-status';
+    view.groupHeadEl = { name, stat, meta };
+    meta.append(stat);
+
+    // The room never offers to split — it is already the second thing on screen, and a panel
+    // showing one room twice is not a state worth being able to reach. What `close` *does* is
+    // decided when it is pressed and never here: this head is drawn once, and the other pane
+    // can be opened or closed under it afterwards.
+    const close = document.createElement('button');
+    close.className = 'ghost-btn';
+    close.textContent = 'close';
+    close.title = 'Close this room';
+    close.onclick = closeGroup;
+    meta.append(close);
+    head.append(meta);
+    box.append(head);
+
+    const strip = document.createElement('div');
+    strip.className = 'group-strip';
+    view.groupStripEl = strip;
+    box.append(strip);
+
+    // The header's own refusals, painted from view state and never onto the node that was
+    // pressed — the strip repaints on the roster beat, so a sentence written onto a chip's ✕
+    // would be in a detached tree within two seconds.
+    const err = document.createElement('div');
+    err.className = 'group-head-err';
+    err.hidden = true;
+    view.groupErrEl = err;
+    box.append(err);
+
+    renderGroupHead();
+    renderGroupStrip();
+    return box;
+  }
+
+  /**
+   * The name, the tally and the archive control — repainted on the roster beat, because every
+   * one of them is a fact about the record and the record moves under this pane.
+   *
+   * The one thing it will not touch is a name being edited: a repaint that put the heading
+   * back would take the input out from under a caret mid-word, on a beat nobody asked for.
+   */
+  function renderGroupHead() {
+    const els = view.groupHeadEl;
+    if (!els) return;
+    const room = groupLive();
+    if (!room) return;
+
+    // An archive changes the pane's *shape* rather than its contents — the composer goes —
+    // and it can land from another browser. Redraw the whole pane when it does, which is rare
+    // enough to cost nothing and is the only thing a head repaint cannot do on its own.
+    if (view.groupArchivedDrawn !== null && Boolean(room.archivedAt) !== view.groupArchivedDrawn) {
+      renderGroupPane();
+      return;
+    }
+
+    if (!view.groupRenaming) {
+      els.name.textContent = room.name || 'room';
+      els.name.title = `Rename “${room.name || 'room'}”`;
+    }
+
+    const n = view.groupEntries.length;
+    const members = room.members?.length || 0;
+    els.stat.textContent = `${n} message${n === 1 ? '' : 's'} · ${members} member${members === 1 ? '' : 's'}`;
+
+    // The archive control lives beside `close` and is rebuilt only when the word on it
+    // changes, so an armed confirmation is never taken away by an unrelated beat.
+    const want = room.archivedAt ? 'unarchive' : 'archive';
+    if (els.archive?.dataset.word !== want) {
+      const btn = document.createElement('button');
+      btn.className = 'ghost-btn';
+      btn.dataset.word = want;
+      btn.textContent = want;
+      if (room.archivedAt) {
+        btn.title = 'Put this room back in the open list, so it can be posted to again.';
+        // Unarchiving takes nothing away, so it asks nothing. `armConfirm` is for the
+        // destructive half — the maintainer's ruling names destructive controls, not every
+        // control.
+        btn.onclick = () => patchGroup({ archived: false }, btn);
+      } else {
+        btn.title = 'Stop anything more being posted to this room. Everything in it stays readable.';
+        btn.onclick = () =>
+          armConfirm(btn, `archive “${room.name || 'this room'}”?`, () => patchGroup({ archived: true }, btn));
+      }
+      if (els.archive) els.archive.replaceWith(btn);
+      else els.meta.insertBefore(btn, els.meta.lastChild);
+      els.archive = btn;
+    }
+  }
+
+  /** Swap the heading for an input, and put it back whatever happens next. */
+  function startGroupRename(btn) {
+    const room = groupLive();
+    if (!room || view.groupRenaming) return;
+    view.groupRenaming = true;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'group-name-edit';
+    // A courtesy, not the authority: `server/rooms.js` refuses an over-long name rather than
+    // shortening it, and that refusal is what gets shown if one arrives by paste.
+    input.maxLength = MAX_ROOM_NAME;
+    input.value = room.name || '';
+
+    const done = (commit) => {
+      if (!view.groupRenaming) return;
+      view.groupRenaming = false;
+      const next = input.value.trim();
+      if (input.isConnected) input.replaceWith(btn);
+      renderGroupHead();
+      if (commit && next && next !== room.name) patchGroup({ name: next }, btn);
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        done(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        done(false);
+      }
+    };
+    // A rename you walked away from is one you did not finish. Cancelling on blur is the
+    // conservative half: the worst it costs is retyping, where committing would rename a room
+    // because somebody clicked elsewhere.
+    input.onblur = () => done(false);
+
+    btn.replaceWith(input);
+    input.focus();
+    input.select();
+  }
+
+  /** What the strip last drew, so a roster beat that changed nothing rebuilds nothing.
+   *  `connSig`'s reason, and the sharper one here: these chips carry `armConfirm` questions
+   *  that live four seconds, and a rebuild would take one away from under the cursor about to
+   *  answer it. Status is deliberately *out* of it — a dot is patched in place below. */
+  let groupStripSig = '';
+
+  /**
+   * The members strip: a chip per member with a live status dot, an ✕ to remove it, and the
+   * `+` that adds another.
+   *
+   * **Rebuilt only when the membership changes; the dots are patched.** A status moves every
+   * couple of seconds and a rebuild on that beat would be the "question taken away from under
+   * the cursor" bug the whole `connSig` idiom exists to stop — and here it would be taking
+   * away a *confirmation to remove somebody*. So the structure has a signature and the dots
+   * do not.
+   *
+   * The dot is resolved through `memberRow`, which mirrors the server's own rung order, and
+   * its answer decides **only the dot**: the fan-out re-resolves against a fresh roster read
+   * at post time. A member that resolves to nothing is drawn plainly and said to be gone,
+   * rather than dropped — a chip that vanished would leave a room whose membership the panel
+   * disagrees with the server about, silently.
+   */
+  function renderGroupStrip() {
+    const strip = view.groupStripEl;
+    if (!strip) return;
+    const room = groupLive();
+    if (!room) return;
+    const members = Array.isArray(room.members) ? room.members : [];
+    const archived = Boolean(room.archivedAt);
+
+    const sig = [
+      room.id,
+      archived ? 1 : 0,
+      view.groupAddOpen ? 1 : 0,
+      members.map((m) => [memberKey(m), memberName(m)].join('|')).join('~'),
+    ].join('#');
+
+    if (sig !== groupStripSig) {
+      groupStripSig = sig;
+      // A question armed on a chip this rebuild is about to replace. Scoped, so one pane
+      // never answers for the other's.
+      disarmConfirm(strip);
+      strip.replaceChildren();
+
+      for (const m of members) {
+        const chip = document.createElement('span');
+        chip.className = 'group-chip';
+        chip.dataset.member = memberKey(m);
+
+        const dot = document.createElement('span');
+        dot.className = 'dot';
+        chip.append(dot);
+
+        const who = document.createElement('span');
+        who.className = 'group-chip-name';
+        who.textContent = memberName(m);
+        chip.append(who);
+
+        if (!archived) {
+          const x = document.createElement('button');
+          x.type = 'button';
+          x.className = 'group-chip-x';
+          x.textContent = '×';
+          x.title = `Take ${memberName(m)} out of this room. It stops receiving what is said here.`;
+          // Behind a question, because it takes something away — the maintainer's ruling on
+          // destructive controls (#11). Nothing about it deletes anything the room has
+          // already recorded; the log keeps every line the member was handed.
+          x.onclick = () =>
+            armConfirm(x, `remove ${memberName(m)}?`, () => patchGroup({ remove: memberKey(m) }, x));
+          chip.append(x);
+        }
+        strip.append(chip);
+      }
+
+      if (!archived) {
+        const add = document.createElement('button');
+        add.type = 'button';
+        add.className = 'group-add';
+        add.textContent = '+';
+        add.title = 'Put another session in this room';
+        add.onclick = () => {
+          view.groupAddOpen = !view.groupAddOpen;
+          renderGroupStrip();
+        };
+        strip.append(add);
+
+        // The popover, a child of the strip so it is positioned against it — and rebuilt with
+        // the strip rather than kept, because what is in it is a live list of who can be
+        // added and a row that has left the roster must not still be clickable.
+        const pop = document.createElement('div');
+        pop.className = 'group-add-pop';
+        pop.hidden = !view.groupAddOpen;
+        strip.append(pop);
+        view.groupAddPopEl = pop;
+      } else {
+        view.groupAddPopEl = null;
+      }
+    }
+
+    // The dots, every beat, patched onto the chips that are already there. A member that
+    // resolves to no row gets the `gone` shape and says so on hover.
+    for (const m of members) {
+      const chip = [...strip.children].find((c) => c.dataset?.member === memberKey(m));
+      if (!chip) continue;
+      const row = memberRow(m, state.sessions);
+      const dot = chip.firstChild;
+      if (dot) dot.className = `dot ${row ? row.status : 'gone'}`;
+      chip.title = row
+        ? `${memberName(m)}${row.project ? ` · ${row.project}` : ''}\n${row.status}`
+        : `${memberName(m)} — not in the panel right now. Anything said here is recorded as ` +
+          'not reached until it is back.';
+      chip.classList.toggle('is-gone', !row);
+    }
+
+    if (view.groupAddOpen) renderGroupAdd();
+    renderGroupHeadError();
+  }
+
+  /**
+   * Who is left to add, in the create modal's own order and off the same allow-list.
+   *
+   * Repainted whenever the strip is, and on the roster beat while it is open, for the shared
+   * picker's reason: it is a live list of who can be addressed, so a session appearing or
+   * going away has to move it — a row that has left the roster must not still be clickable.
+   */
+  function renderGroupAdd() {
+    const pop = view.groupAddPopEl;
+    if (!pop) return;
+    const room = groupLive();
+    pop.hidden = !view.groupAddOpen;
+    if (!view.groupAddOpen || !room) return;
+    pop.replaceChildren();
+
+    // The folder in front of you: whichever session is open in a pane. `orderForHere` puts
+    // those first — a room is usually the sessions you are looking at — and it is a sort
+    // rather than a filter, because filtering would make a cross-project room unbuildable.
+    const openId = panes.map((p) => p.selected()).find(Boolean) || null;
+    const here = rowFolder(state.sessions.find((s) => s.id === openId));
+    const rows = addableSessions(state.sessions, room, here);
+
+    // `MAX_MEMBERS` is the client's **fallback**, never a second authority — the create
+    // modal's own rule, and `server/rooms.js` refuses anything past its own cap with a
+    // sentence that is shown verbatim. Two rungs, and this is the cheap one.
+    const why = addReason(room, state.sessions, MAX_MEMBERS);
+    if (why) {
+      const none = document.createElement('p');
+      none.className = 'group-add-none';
+      none.textContent = why;
+      pop.append(none);
+      return;
+    }
+
+    for (const s of rows) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'group-add-row';
+
+      const dot = document.createElement('span');
+      dot.className = `dot ${s.status}`;
+      item.append(dot);
+
+      const label = document.createElement('span');
+      label.className = 'group-add-name';
+      label.textContent = rowName(s);
+      item.append(label);
+
+      if (s.isLead) {
+        const role = document.createElement('span');
+        role.className = 'group-add-role';
+        role.textContent = 'lead';
+        item.append(role);
+      }
+
+      const where = document.createElement('span');
+      where.className = 'group-add-where';
+      where.textContent = s.project || '';
+      where.title = s.paneCwd || s.cwd || '';
+      item.append(where);
+
+      // The **id**, which is what `PATCH /api/rooms/:id` looks up — never the row's position,
+      // because a roster frame between the paint and the press would choose whoever moved
+      // into that slot. `renderSharedPicker` records the same reasoning.
+      item.onclick = () => {
+        view.groupAddOpen = false;
+        patchGroup({ add: s.id }, item);
+      };
+      pop.append(item);
+    }
+  }
+
+  /** The header's standing refusal, drawn from view state and never from a pressed node. */
+  function renderGroupHeadError() {
+    const err = view.groupErrEl;
+    if (!err) return;
+    err.textContent = view.groupHeadError || '';
+    err.hidden = !view.groupHeadError;
+  }
+
+  /**
+   * Rename, add, remove, archive — one press, one PATCH.
+   *
+   * **The server's own sentence is what a refusal says**, verbatim: every one of them names
+   * the thing that is wrong (the character in the name, the count against the cap, the
+   * session that has exited, the member that is not in the room), and a paraphrase here would
+   * be the panel's guess at a refusal it did not make. The create modal makes the same call
+   * one band up and for the same reason.
+   *
+   * Nothing is drawn from the answer. `PATCH` broadcasts a roster frame, the frame carries
+   * every room, and the head and the strip repaint off it — so the record on screen is always
+   * the one the store holds rather than the one this browser hoped for.
+   */
+  async function patchGroup(body, btn) {
+    const id = view.groupRoom?.id;
+    if (!id || view.groupHeadBusy) return;
+    view.groupHeadBusy = true;
+    if (btn) btn.disabled = true;
+    try {
+      const data = await postJSONMethod('PATCH', `/api/rooms/${encodeURIComponent(id)}`, body);
+      view.groupHeadError = null;
+      // The frame is authoritative and is a beat away; this is only so the head is not stale
+      // for that beat. The pane may have been given something else while this was out.
+      if (view.kind === 'group-room' && view.groupRoom?.id === id && data.room) view.groupRoom = data.room;
+    } catch (err) {
+      view.groupHeadError = err.message;
+    } finally {
+      view.groupHeadBusy = false;
+      // `btn` may have been replaced by a repaint while this was in flight — the rail's
+      // `duplicating` guard in miniature, and re-enabling a detached node costs nothing.
+      if (btn) btn.disabled = false;
+      if (view.kind === 'group-room') {
+        renderGroupHead();
+        renderGroupStrip();
+      }
+    }
+  }
+
+  /* --------------------------------------------------------- the list --- */
+
+  /**
+   * **Sorted on `ts`, never on `seq`.** See `roomOrdered`'s own note in `web/rooms-pane.js`
+   * for why the two come apart here, and why `seq` is still the tie-break.
+   */
+  const groupOrdered = () => roomOrdered(view.groupEntries);
+
+  /**
+   * Paint the room. Held scroll, one batched measurement — the room aside's two rules, copied
+   * for their reasons rather than for their code.
+   *
+   * `scrollTop` is read **before** the swap. Reading it after `replaceChildren` is a forced
+   * layout on an emptied box, which clamps the answer to zero before you have read it — the
+   * aside's own bug, which put the reader at the top of the list on every arriving line.
+   *
+   * And every clamp candidate is measured before anything is written to any of them.
+   * Interleaving a layout read with a class write per entry is a reflow per entry on a box
+   * that repaints whenever a message arrives; two passes is one layout. The controls are
+   * built only where they are needed, never built-for-all-and-removed-from-most — that was
+   * 66px of silent creep per incoming line, with no scroll event to notice it by.
+   */
+  function renderGroup() {
+    const el = view.groupEl;
+    if (!el || !el.inner.isConnected) return;
+    const held = el.wrap.scrollTop;
+    const follow = view.groupFollow !== false;
+    const entries = groupOrdered();
+    renderGroupHead();
+
+    el.inner.replaceChildren();
+    if (!entries.length) {
+      const quiet = document.createElement('div');
+      quiet.className = 'group-quiet';
+      quiet.textContent =
+        'Nothing said in here yet. Anything a member posts — or anything you type below — is ' +
+        'typed into every other member’s terminal.';
+      el.inner.append(quiet);
+      view.groupPainted = 0;
+      view.groupUnseen = 0;
+      updateGroupHint();
+      return;
+    }
+
+    const before = view.groupPainted ?? 0;
+    const clamps = [];
+    for (const e of entries) el.inner.append(groupEntryNode(e, clamps));
+    for (const c of clamps) c.overflows = c.el.scrollHeight > c.el.clientHeight + 1;
+    for (const c of clamps) applyGroupClamp(c);
+    view.groupPainted = entries.length;
+
+    if (follow) {
+      pinGroup();
+      view.groupUnseen = 0;
+    } else {
+      // Put the reader back exactly where they were. The entries above them are the same
+      // entries at the same heights they had last paint, so the old offset is still the right
+      // one, and it is only wrong to keep if you are following the bottom.
+      el.wrap.scrollTop = held;
+      // Floored rather than trusted: a full `group-room` frame can *shrink* the list (the
+      // tail is capped), and a negative count would hide a hint that is due.
+      view.groupUnseen += Math.max(0, entries.length - before);
+    }
+    updateGroupHint();
+  }
+
+  /** Put the room back on its newest line — but only while you are following it. */
+  function pinGroup() {
+    const el = view.groupEl;
+    if (!el || !el.wrap.isConnected) return;
+    // The height this pin was taken at, so the scroll handler can tell a resize's own event
+    // from a reader's. Recorded even when we are not following: the box still changed size,
+    // and the next event is still the layout's rather than theirs.
+    view.groupFollowH = el.wrap.clientHeight;
+    if (view.groupFollow === false) return;
+    el.wrap.scrollTop = el.wrap.scrollHeight;
+  }
+
+  /** Draw (or drop) the "new below" pill. Quiet by design — muted ink, no accent, no motion,
+   *  and it exists only while the reader is not following. */
+  function updateGroupHint() {
+    const hint = view.groupHintEl;
+    if (!hint) return;
+    const n = view.groupFollow === false ? view.groupUnseen || 0 : 0;
+    hint.hidden = n === 0;
+    if (n === 0) return;
+    hint.textContent = n === 1 ? '1 new below ↓' : `${n} new below ↓`;
+    hint.title = 'Jump to the newest message and follow the room again.';
+  }
+
+  /** Tell the server this room's count is spent. Only from this pane, and only while it is
+   *  actually the room on screen — the count is one number for the machine. */
+  function markGroupSeen() {
+    if (view.kind !== 'group-room' || !view.groupRoom?.id) return;
+    send({ type: 'markGroupRoomRead', roomId: view.groupRoom.id, slot });
+  }
+
+  /**
+   * Clamp one long message behind a quiet "view more" — ten lines, the shared room's number
+   * rather than the aside's five, and for its reason: these are whole messages between
+   * sessions, and folding one at five hides the message instead of trimming it.
+   *
+   * Nothing is decided here and nothing is drawn here. The element goes out clamped and
+   * registered; `renderGroup` measures the whole batch at once and `applyGroupClamp` is what
+   * puts a control on screen, because a message that fits must not grow a "view more" that
+   * does nothing when clicked.
+   */
+  function groupClampable(node, e, pending) {
+    node.classList.add('group-clamp');
+    pending.push({ key: entryKey(e), el: node, btn: null, overflows: false });
+  }
+
+  /** Settle one measured candidate: no overflow, no control; otherwise draw its state. */
+  function applyGroupClamp(c) {
+    if (!c.overflows) {
+      c.el.classList.remove('group-clamp');
+      return;
+    }
+    const open = view.groupOpenKeys.has(c.key);
+    c.el.classList.toggle('group-clamp', !open);
+    if (!c.btn) {
+      c.btn = document.createElement('button');
+      c.btn.className = 'group-more';
+      c.btn.type = 'button';
+      c.btn.onclick = () => toggleGroupEntry(c);
+      c.el.after(c.btn); // directly under the words it cut off, inside the bubble
+    }
+    c.btn.textContent = open ? 'view less' : 'view more';
+    c.btn.title = open ? 'Fold this message back to ten lines.' : 'Show the whole message.';
+  }
+
+  /**
+   * Open or fold one message, keeping it where the reader is looking.
+   *
+   * `groupFollow` is deliberately untouched and nothing is pinned: expanding changes the box's
+   * height and that must never read as the reader having scrolled away, and a message you have
+   * just opened is one you are about to read, so snapping to the newest line is exactly the
+   * yank the rule exists to stop. Growing a node never moves its own top, so the anchor holds
+   * for free on the way open; folding is the case that needs the arithmetic, because the
+   * browser clamps `scrollTop` to the new maximum.
+   */
+  function toggleGroupEntry(c) {
+    if (view.groupOpenKeys.has(c.key)) view.groupOpenKeys.delete(c.key);
+    else view.groupOpenKeys.add(c.key);
+    const wrap = view.groupEl?.wrap;
+    const node = c.el.closest('.group-msg');
+    if (!wrap || !node || !node.isConnected) {
+      applyGroupClamp(c);
+      return;
+    }
+    const was = node.getBoundingClientRect().top;
+    applyGroupClamp(c);
+    const now = node.getBoundingClientRect().top;
+    if (now !== was) wrap.scrollTop += now - was;
+  }
+
+  /**
+   * One message in the room.
+   *
+   * **One lane, all left-aligned.** A link has exactly two ends and lanes them left and right;
+   * a room has up to eight speakers and there is no second side to lane against. The name pill
+   * carries the identity instead, and the maintainer's own lines take the `from-human` shape —
+   * full width with an accent left edge — because that shape already means *this one can
+   * authorize*, and it is the one thing in here that has to be structurally distinguishable
+   * rather than merely a different colour. It is also literally true of the wire: those are
+   * the `| ` lines every member's terminal receives, and every other line is `> `.
+   *
+   * **Colour goes on the pill, never on the bubble body.** The maintainer's own recorded
+   * correction: two tinted bodies in one column are two competing page backgrounds rather than
+   * two labels. So the pill takes a `--peer-N` hue keyed on the speaker's name and the bubble
+   * is byte-identical whoever spoke.
+   *
+   * **Keyed on the entry's own `from`**, which is a name and is what `colourFor` wants: a pane
+   * id can be reissued as `%0` by a fresh tmux server, while the name is the one thing an
+   * entry still carries when it is read back tomorrow. Two sessions that share a name share a
+   * colour, which is fine for a colour and would be fatal for an identity.
+   */
+  function groupEntryNode(e, pending = []) {
+    const human = e.kind === 'human';
+    const name = e.from || 'unknown';
+
+    const wrap = document.createElement('div');
+    wrap.className = `group-msg ${human ? 'from-human' : 'from-peer'}`;
+
+    const meta = document.createElement('div');
+    meta.className = 'group-meta';
+
+    const who = document.createElement('span');
+    who.className = `group-pill${human ? ' is-human' : ''}`;
+    who.textContent = human ? 'you' : name;
+    if (!human) {
+      // The hue is set inline off the ring rather than by a class per slot: `--peer-N` is
+      // seven tokens and a class each would be seven near-identical rules that a later change
+      // to `PEER_COLOUR_COUNT` would silently leave short. `currentColor` on the border is
+      // what keeps the ring one value per speaker rather than two.
+      who.style.color = `var(--peer-${colourFor(name)})`;
+      who.style.borderColor = 'currentColor';
+      who.title = name;
+    } else {
+      who.title = 'You, from this room in the panel — every member gets a copy carrying your authority.';
+    }
+    meta.append(who);
+
+    if (e.ts) {
+      const t = document.createElement('span');
+      t.className = 'group-time';
+      const d = new Date(e.ts);
+      t.textContent = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      t.title = d.toLocaleString();
+      meta.append(t);
+    }
+    wrap.append(meta);
+
+    const bubble = document.createElement('div');
+    bubble.className = 'group-bubble';
+    const text = document.createElement('div');
+    text.className = 'group-text';
+    // `text` is the body as it was posted and nothing else. The line each member's terminal
+    // received carries the same words wrapped in the envelope's peer-safety boilerplate, and a
+    // bubble built from that would be the boilerplate.
+    text.textContent = e.text || '';
+    bubble.append(text);
+    // The control lands under the words it cut off and above the handed line below — that is
+    // short machinery, and a clamp must never swallow it.
+    groupClampable(text, e, pending);
+
+    /*
+     * What became of this post, on **every** entry rather than only the maintainer's: a room
+     * fans out from whoever spoke, so a session's post has exactly the same question hanging
+     * off it as one of his. The word is **handed**, never *delivered* — a queued copy waits
+     * for a pane to go idle, which may be hours and may be never, and nothing writes back to
+     * an append-only log. Quiet register either way: this is a fact to read, not an error.
+     */
+    const line = document.createElement('div');
+    line.className = 'group-handed';
+    if (handedWaiting(e)) line.classList.add('is-waiting');
+    line.textContent = handedText(e);
+    line.title =
+      'Handed means typed into a terminal or put in that pane’s queue. Nothing here says ' +
+      'anybody read it.';
+    bubble.append(line);
+
+    wrap.append(bubble);
+    return wrap;
+  }
+
+  /* ----------------------------------------------------- the composer --- */
+
+  /**
+   * The maintainer's own box — and it is **simpler than the shared room's**, because a room
+   * has one destination. No `@`, no target, no chip, no picker: a line typed here goes to
+   * every member, which is exactly what the standing sentence under it says.
+   *
+   * `buildComposer` is still never called, for the reason `renderGroupPane` records: that
+   * function reads five session fields that are all null here and one of them
+   * (`shortModel(null)`) has already thrown inside it and taken a pane down. So this is a
+   * textarea, a send button and two lines of chrome — no attachments, no queue chip, no
+   * interrupt row, no ghost text, no permission bar, no mode control, and **no signature**:
+   * this composer is torn down only when the pane stops holding this room.
+   */
+  function buildGroupComposer() {
+    const wrap = document.createElement('div');
+    wrap.className = 'group-composer';
+    const inner = document.createElement('div');
+    inner.className = 'group-composer-inner';
+    wrap.append(inner);
+
+    // The standing refusal, painted from `view.groupError` and never appended to whatever node
+    // was pressed — see the field's own note.
+    const err = document.createElement('div');
+    err.className = 'group-composer-err';
+    err.hidden = true;
+
+    const ta = document.createElement('textarea');
+    ta.rows = 2;
+    ta.placeholder = 'Say it once — Enter to send, Shift+Enter for a new line';
+
+    const autoGrow = () => {
+      ta.style.height = 'auto';
+      ta.style.height = `${Math.min(ta.scrollHeight, 224)}px`;
+    };
+
+    ta.value = state.drafts[groupDraftKey(view.groupRoom?.id)] || '';
+    ta.oninput = () => {
+      autoGrow();
+      saveGroupDraft();
+    };
+    ta.onkeydown = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendGroupMessage();
+      }
+    };
+
+    const row = document.createElement('div');
+    row.className = 'group-composer-row';
+
+    /*
+     * What a line typed here *is*, in the panel's own voice — said every time rather than in a
+     * tooltip nobody opens, because the envelope makes exactly this claim on the way out. It
+     * says **both** halves and neither is decoration: it carries the maintainer's authority
+     * (the `| ` prefix, which no session's body can reach), and it reaches everybody (a room
+     * fans out to every other member, so this is never a quiet word to one of them).
+     */
+    const hint = document.createElement('span');
+    hint.className = 'group-composer-hint';
+    hint.textContent = 'your own words, to every member — they may act on them';
+    hint.title =
+      'This goes out as your own line, prefixed so no session can forge it, and a copy is ' +
+      'typed into every member’s terminal.';
+
+    const btn = document.createElement('button');
+    btn.className = 'send-btn';
+    btn.textContent = 'send';
+    btn.onclick = sendGroupMessage;
+
+    row.append(hint, btn);
+    inner.append(err, ta, row);
+
+    groupComposerEl = { wrap, ta, btn, err, autoGrow };
+    renderGroupError();
+    return wrap;
+  }
+
+  /** The composer's standing refusal, drawn from view state and never from a pressed node. */
+  function renderGroupError() {
+    const el = groupComposerEl;
+    if (!el) return;
+    el.err.textContent = view.groupError || '';
+    el.err.hidden = !view.groupError;
+  }
+
+  /**
+   * Send what is in the box to everybody in the room.
+   *
+   * **No `paneId` in the body**, and that is the whole of who is speaking: the endpoint
+   * decides the speaker by what the request carries — a pane id means a session posting
+   * through its own tool, nothing means the panel, and the panel is the maintainer. There is
+   * no `speaker` field to set and there must never be one.
+   *
+   * **The server's own sentence is what a refusal says**, never a paraphrase and never a
+   * generic "that didn't work". The refusals it can answer with are things only it can know —
+   * the room is archived, a limit was hit and when it lifts — or they name the exact character
+   * in the body that made it unsendable. Such a character is *refused with the character
+   * named*, never stripped: a body that could make a quoted line draw as an unquoted one is a
+   * working forgery, and silently rewriting somebody's input hands them a way to have it
+   * rewritten into something else. Nothing here trims, escapes or normalises the value on the
+   * way out.
+   *
+   * **Nothing is drawn locally on success.** The endpoint appends the entry and the store
+   * emits it, so the socket's `group-room-append` brings it back to this very pane — appending
+   * it here as well would draw the maintainer's own message twice, with its handed line, and
+   * the second copy would look exactly as real as the first.
+   */
+  async function sendGroupMessage() {
+    const el = groupComposerEl;
+    if (!el || view.groupBusy) return;
+    const id = view.groupRoom?.id;
+    if (!id) return;
+    const text = el.ta.value;
+    if (!text.trim()) return;
+
+    view.groupBusy = true;
+    el.btn.disabled = true;
+    try {
+      const res = await fetch(`/api/rooms/${encodeURIComponent(id)}/post`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      // `data.error` is the server's own words. The fallback exists only for a response that
+      // carried no body at all — a proxy, a dropped socket — and is deliberately the only
+      // sentence in this function the panel wrote itself.
+      if (!res.ok) throw new Error(data.error || `That message was not sent (${res.status}).`);
+      view.groupError = null;
+      // The pane may have been given a session, or another room, while this was out.
+      if (view.kind === 'group-room' && view.groupRoom?.id === id && groupComposerEl === el) {
+        el.ta.value = '';
+        el.autoGrow();
+        clearGroupDraft();
+      }
+    } catch (err) {
+      // Held, not appended: this pane repaints whenever a message arrives in the room, and a
+      // sentence painted onto a node a repaint has already replaced is a sentence nobody sees.
+      // The box keeps its text — a refused message is one the reader may want to re-time
+      // rather than retype.
+      view.groupError = err.message;
+    } finally {
+      view.groupBusy = false;
+      if (groupComposerEl === el) el.btn.disabled = false;
+      renderGroupError();
+    }
+  }
+
   /* -------------------------------------------------------------- main --- */
 
   function renderMain() {
@@ -6527,6 +7779,10 @@ function createPane(slot, host) {
     // …and the machine-wide room, for every word of the same reason. It has no session
     // either, and `buildComposer` must not be taught to cope with having none.
     if (view.kind === 'shared') return renderSharedPane();
+    // …and one group room, for the same reason a third time. Three panes now that have no
+    // session behind them, and not one of them has been allowed to teach `buildComposer` to
+    // cope with that — see `renderGroupPane`.
+    if (view.kind === 'group-room') return renderGroupPane();
 
     const s = current();
     host.replaceChildren();
@@ -9840,6 +11096,20 @@ function createPane(slot, host) {
       return;
     }
 
+    /*
+     * A room's head is the one that has real work on this beat. The record moves under the
+     * pane — a rename, a member added or removed, an archive, from here or from another
+     * browser — and every member's **status dot** is a fact about the roster by definition.
+     * `renderGroupStrip` rebuilds only when the membership itself changed and patches the
+     * dots otherwise, which is what keeps an armed `remove` question from being taken away
+     * by a status flicker two seconds later.
+     */
+    if (view.kind === 'group-room') {
+      renderGroupHead();
+      renderGroupStrip();
+      return;
+    }
+
     if (view.kind === 'link') {
       renderLinkHead();
       // Whether a side has a live lead is a fact about the roster, so it moves without
@@ -12541,6 +13811,42 @@ function createPane(slot, host) {
      * slot of whoever asked — so a pane that has since been given a session must not go on
      * accumulating a log it is not drawing.
      */
+    /*
+     * One group room's frames, and they are `group-room` / `group-room-append` rather than
+     * `room` / `room-append` for the reason `server/index.js`'s own block gives: those two
+     * are the **team** room's, keyed by `repo`, and a frame arriving under one of them with a
+     * `roomId` and no `repo` is a frame the team-room handler below silently swallows.
+     *
+     * Both are checked against this pane actually holding **this** room. The subscription is
+     * one per **socket** rather than one per slot, and the frames carry the slot of whoever
+     * asked — so a pane that has since been given a session, or another room, must not go on
+     * accumulating a log it is not drawing.
+     */
+    if (msg.type === 'group-room') {
+      if (view.kind !== 'group-room' || msg.roomId !== view.groupRoom?.id) return;
+      // A room the server says is not there. The record stands as far as this pane knows —
+      // the roster is what carries it — and an empty log is drawn rather than a blank pane.
+      if (msg.room) view.groupRoom = msg.room;
+      view.groupEntries = msg.entries || [];
+      view.groupCursor = msg.cursor || 0;
+      renderGroup();
+      renderGroupStrip();
+      return;
+    }
+    if (msg.type === 'group-room-append') {
+      if (view.kind !== 'group-room' || msg.roomId !== view.groupRoom?.id || !msg.entry) return;
+      view.groupEntries.push(msg.entry);
+      view.groupCursor = msg.entry.seq || view.groupCursor;
+      renderGroup();
+      // The reader is at the newest line, so the count is spent the moment this lands.
+      // Scrolled up it is not spent, and the `N new below` pill over the box is what says so
+      // — the band row stays quiet either way while the room is on screen (`patchBand` zeroes
+      // it for an open room), because two counters saying different things about one box is
+      // worse than one saying it in the right place.
+      if (view.groupFollow !== false) markGroupSeen();
+      return;
+    }
+
     if (msg.type === 'shared') {
       if (view.kind !== 'shared') return;
       view.shared = msg.entries || [];
@@ -12682,6 +13988,22 @@ function createPane(slot, host) {
       return openShared();
     }
 
+    /*
+     * A reload of a window that had a group room open. The fifth shape
+     * (`rememberOpenGroup`), and it is restored **only if the room is still there** — the
+     * link's rule rather than the shared room's, because a room is a record that can be gone
+     * from the index by hand and a pane put back onto one would draw a name with nothing
+     * behind it. Archived is not gone: the roster carries every room, so an archived room
+     * comes back read-only, which is what it is.
+     */
+    if (last?.kind === 'group-room') {
+      if (state.rooms.some((r) => r?.id === last.room)) {
+        threadSplit = Boolean(last.autoSplit);
+        return openGroup(last.room);
+      }
+      rememberOpenGroup(slot, null);
+    }
+
     const pick =
       (last && state.sessions.find((s) => s.id === last.id && free(s))) ||
       // The id rotated while the tab was closed — same terminal, new conversation.
@@ -12706,6 +14028,9 @@ function createPane(slot, host) {
     // message this composer refuses.
     if (view.kind === 'link') saveLinkDraft();
     else if (view.kind === 'shared') saveSharedDraft();
+    // …and a group room's, keyed by the room rather than by `view.selected` or by nothing:
+    // there are many rooms and a draft written for one must never be restored into another.
+    else if (view.kind === 'group-room') saveGroupDraft();
     else saveDraft();
     send({ type: 'unsubscribe', slot });
     // The room's subscription is server state like a tailer's, and a pane that stopped
@@ -12713,6 +14038,8 @@ function createPane(slot, host) {
     // "subscription that outlives its slot" trap from the other end. Harmless for a socket
     // about to close, load-bearing for a slot closed while the window stays open.
     if (view.kind === 'shared') send({ type: 'unsubscribe-shared', slot });
+    // …and a group room's, for every word of the same reason.
+    if (view.kind === 'group-room') send({ type: 'unsubscribe-group-room', slot });
     host.remove();
   }
 
@@ -12736,6 +14063,17 @@ function createPane(slot, host) {
      * with the whole tail, so nothing has to be reconciled here.
      */
     if (view.kind === 'shared') return void send({ type: 'subscribe-shared', slot });
+
+    /*
+     * …and a group room's, which is the same server state under a different name and dies the
+     * same way. Without this the rail's band goes on drawing an open room above a pane that
+     * silently stopped at the moment the connection dropped — the failure the panel cannot
+     * see from the inside, shipped once already in the transcript pane. The server answers
+     * `subscribe-group-room` with the whole tail, so nothing has to be reconciled here.
+     */
+    if (view.kind === 'group-room' && view.groupRoom?.id) {
+      return void send({ type: 'subscribe-group-room', roomId: view.groupRoom.id, slot });
+    }
 
     if (view.selected) send({ type: 'subscribe', sessionId: view.selected, slot });
     // The room subscription is server state too, and dies with the socket the same way
@@ -12770,8 +14108,12 @@ function createPane(slot, host) {
      * marker, `adopt`'s don't-take-what-the-other-pane-has list, and ⇧⇥. A thread is none
      * of their business, and a pane that answered with the session it held *before* the
      * thread would mark a row open that nobody is looking at.
+     *
+     * Written as "only when it *is* a session" rather than as "not a link", because there are
+     * four kinds now and a negative test silently admits the next one — `benchEntries`'
+     * recorded reasoning, and the same shape `roomParticipants` is written in.
      */
-    selected: () => (view.kind === 'link' ? null : view.selected),
+    selected: () => (view.kind === 'session' ? view.selected : null),
     /** The link this pane is holding, or null — the same question from the other side. */
     linkId: () => (view.kind === 'link' ? view.link?.id ?? null : null),
     /*
@@ -12785,6 +14127,12 @@ function createPane(slot, host) {
     kind: () => view.kind,
     /** Is the shared room in this pane? The rail row reads it to mark itself open. */
     sharedOpen: () => view.kind === 'shared',
+    /** Put one group room in this pane. `openGroupRoom` is the only caller — it decides
+     *  *which* pane, the way `openSharedRoom` and `openLinkThread` do. */
+    openGroup,
+    /** The group room this pane is holding, or null — the same question from the other side
+     *  as `linkId()`, and what the rail's band reads to mark a row open. */
+    groupRoomId: () => (view.kind === 'group-room' ? view.groupRoom?.id ?? null : null),
   };
   return api;
 }

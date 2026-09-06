@@ -522,14 +522,16 @@ test('the band is drawn on the roster beat, from `renderRail`, on both its paths
   );
 });
 
-test('the hook items 9/10 fill in is still named, and still does nothing else', () => {
-  // Item 8 has since filled its own hook in — the create modal is real, and
-  // `test/rooms-create.test.js` drives it. This one is the half that is still a hook, and
-  // what it must keep is that it says so rather than swallowing the click: a row that
-  // silently did nothing would read as a broken band rather than an unbuilt one.
+test('both of the band’s ways out reach a real pane', () => {
+  /*
+   * Both hooks are filled in now — item 8's create modal and items 9/10's room pane — and
+   * what this holds is the wiring the band itself owns: a row opens a room, the head's
+   * control opens the modal, and neither of them was quietly left pointing at a stub. The
+   * pane's own contracts are `test/rooms-pane.test.js`'s.
+   */
   const open = fn('openGroupRoom');
-  assert.match(open, /console\.info/);
-  assert.ok(!/fetch\(/.test(open), 'a hook that quietly called an endpoint would be a half-built feature');
+  assert.ok(!/console\.info/.test(open), 'the hook is built — a row must not merely log');
+  assert.match(open, /target\.openGroup\(id\);/);
   assert.match(fn('renderRoomsBand'), /onOpen: openGroupRoom/);
   assert.match(code, /el\.roomsAdd\.onclick = openCreateRoom;/);
 });
