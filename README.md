@@ -8,12 +8,12 @@ session you talk to that dispatches other sessions as workers, each in its own g
 worktree, and brings you only the decisions that need you.
 
 ![The panel in dark theme, open on a team lead. On the left, a rail: the lead pinned at the
-top, reading "1 task · 1 in review", with its worker nested underneath on branch
-agent/readme-screenshots. In the middle, the lead's transcript, tool calls folded into
-one-line chips, and above the composer a merge-queue row naming the one branch waiting on
-a decision with a MERGE button beside it. On the right, the team panel: a task list with
-one task blocked, two pending and two done — one of them marked deployed — and under it the
-room, the team's log of dispatches, reports and PRs.](docs/images/panel.png)
+top, with two workers nested underneath on their own agent branches, and below the rail a
+peer-messages row and a rooms band. In the middle, the lead's transcript, tool calls folded
+into one-line chips, and the composer beneath it. On the right, the team panel: a task list
+mixing review, working, pending and done rows, two of them marked deployed, and under it the
+team room, read only, showing worker reports as bubbles with the panel's own dispatch and
+merge lines running between them.](docs/images/panel.png)
 
 The panel is the whole product on its own; the team is the second chapter and every part of
 it is optional. Sessions can be started anywhere — a terminal, another tool — and, on
