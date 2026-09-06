@@ -8143,8 +8143,8 @@ function createPane(slot, host) {
    * spelling of a fact already on the record — the `isLeadName` lesson — and it would be
    * missing from every line already on disk. Deriving it instead means the lines written
    * before this existed are named too, without an append-only log being rewritten. It is
-   * `projectName`, the same one function the joint thread's own pill uses, so the two
-   * readers of one entry cannot disagree about who spoke.
+   * `projectName`, the same one function the retired joint thread's own pill used, so a
+   * line written then and read now names its project identically.
    *
    * `speaker` decides the shape, never the path: a human entry's `sender` is not a repo at
    * all and has no basename to take. That is the field's whole reason for existing, and it
@@ -9063,9 +9063,12 @@ function createPane(slot, host) {
       }
       /*
        * Another project's lead, delivered down a link and typed into this session by the
-       * panel. Same register as the nudge above and for a sharper reason: drawn as a user
-       * bubble it would be **another project's lead speaking in the maintainer's voice**,
-       * which is the exact failure this whole feature is designed around. It is the
+       * panel. **Links were retired on 2026-09-05 and nothing writes one of these any
+       * more** — this case draws the `[link] ` records already sitting in transcripts on
+       * this Mac, which is why `LINK_MARK` outlived the module that owned it
+       * (`normalize.js`). Same register as the nudge above and for a sharper reason: drawn
+       * as a user bubble it would be **another project's lead speaking in the maintainer's
+       * voice**, which is the exact failure that feature was designed around. It is the
        * `task-notification` bug one more time, and the third time this repo has learned it.
        *
        * The contrast that makes the register load-bearing: the merge line
@@ -9073,10 +9076,11 @@ function createPane(slot, host) {
        * user bubble, deliberately, because it is the maintainer's own word.
        *
        * The text is drawn whole and never parsed. The envelope — who it is from, that it is
-       * a request and not an instruction, the `> ` on every body line — is composed
-       * server-side in `links.js` and is the message; a client that picked it apart to
-       * restyle the halves would be a second spelling of the one sentence that says which
-       * of the two speakers this is. `white-space: pre-wrap` is what keeps the quoting
+       * a request and not an instruction, the `> ` on every body line — was composed
+       * server-side, by the module these records outlived, and *is* the message; a client
+       * that picked it apart to restyle the halves would be a second spelling of the one
+       * sentence that says which of the two speakers this is. The same holds for the room
+       * deliveries that replaced them, composed in `server/rooms-line.js`. `white-space: pre-wrap` is what keeps the quoting
        * lined up, and the quoting is the whole of the injection defence.
        */
       case 'link_message': {

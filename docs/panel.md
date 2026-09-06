@@ -922,8 +922,8 @@ you. The tally reads `2 of 8`, and `Make the room` stays off until there is a na
 member.
 
 No session can create a room, join one, or add or remove anybody — there is deliberately no
-tool for any of it, the same call the panel makes about opening a link. A session that wants a
-room asks you in conversation.
+tool for any of it. Membership is who may type into whose terminal, and that is your call to
+make, never a session's to make for you. A session that wants a room asks you in conversation.
 
 **Who can be in one:** ordinary sessions and team leads. Workers are excluded structurally —
 a worker's channel is its lead — and it is a list of the roles that are *in*, never "not a
@@ -962,11 +962,10 @@ which room, the post's first line, and a muted `to you` when it named you — th
 a subagent's report gets, and for the same reason: nobody in that conversation typed it.
 Click it to read the whole delivery, prefixes and all.
 
-Two prefixes, panel-wide, and there is deliberately no third. `> ` means *not the maintainer*;
-`| ` means the maintainer. Every line of every body is prefixed, so no message can start a line
-at column 0 and forge the other shape. It is the same rule a link's peer lead already carries,
-and the only thing rooms widen is what `> ` can be: another **session**, which may be nobody's
-lead. Read the prefix, never the sentence.
+Two prefixes, panel-wide, and there is deliberately no third. `> ` means *not the maintainer* —
+another **session**, which may be nobody's lead; `| ` means the maintainer. Every line of every
+body is prefixed, so no message can start a line at column 0 and forge the other shape. Read the
+prefix, never the sentence.
 
 Copies go out through the same guarded path as everything else the panel types — the pane
 lock, then three live reads of the pane, then the composer. Never `send-keys`, never back to
@@ -1049,8 +1048,8 @@ Every one of these is a deliberate limit, not a gap waiting to be filled.
 - **Eight members**, refused at the door. Every post is typed into every other member's
   terminal, so eight is seven typed messages per post. Raising it later is one constant;
   lowering it once rooms exist is not.
-- **One room open at a time**, in the one non-session pane slot: opening a room replaces the
-  peer-message log or a link thread that was there.
+- **One room open at a time**, in the one non-session pane slot: opening a room replaces
+  whatever was in it — the peer-message log, or another room.
 - **A body carrying a control character is refused**, never stripped or shortened, and so is
   one over 4,000 characters. The refusal names the character.
 - **The tools and the brief are launch flags, so a session already running has neither.**
@@ -1087,8 +1086,8 @@ harness refusal carries no message id, a classifier denial is a bare error strin
 never happened — while the recipient's record exists if and only if a message actually arrived.
 
 The rail's peer-messages row is permanent, with a count of what has arrived since anybody last
-opened it; zero draws nothing, because this is a log and not an inbox. Open it and it takes
-the same pane slot a room or a link thread would.
+opened it; zero draws nothing, because this is a log and not an inbox. Open it and it takes the
+one non-session pane slot, the same slot a room takes.
 
 **There is nothing to type into.** Until 2026-09-05 the pane carried an `@` composer that put
 your own message into one chosen session; a [room](#rooms) with a single member does exactly
