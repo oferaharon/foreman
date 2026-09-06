@@ -337,21 +337,63 @@ select {
 
 .m-prefs-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.65rem;
-  /* The whole row is the label, so the tap target is the sentence and not the 20px box. */
+  /* The whole row is the label, so the tap target is the sentence and not the switch. */
   min-height: 44px;
 }
 
+/* The switch, drawn by the panel rather than by the browser — `.team-toggle-row`'s call on
+   the desktop, followed here rather than invented a second time. Still a real
+   `input[type=checkbox]` — checked, focused, toggled by Space and read out as a checkbox,
+   all for free — with `appearance: none` turning the box itself into the track and
+   `::before` into the knob, so there is no second node that can disagree with the input's
+   state. This is exactly the exposure CLAUDE.md records for `.field-check`: a stock
+   checkbox is painted from the *browser's* colour scheme rather than the page's
+   `data-theme`, so an unticked box viewed from a differently-themed browser can come back a
+   solid dark square and read as ticked. Drawing it ourselves removes that here. */
 .m-prefs-box {
+  appearance: none;
   flex: none;
-  width: 1.15rem;
-  height: 1.15rem;
-  margin-top: 0.15rem;
+  position: relative;
+  width: 2.3rem;
+  height: 1.3rem;
+  margin: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.m-prefs-box::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0.16rem;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transform: translateY(-50%);
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+.m-prefs-box:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* The travel, since it is arithmetic rather than a guess: the padding box is 2.175rem wide
+   (2.3rem less two 1px borders), the knob is 0.9rem, and it sits 0.16rem in at each end —
+   2.175 − 0.16 − 0.9 − 0.16 = 0.955rem. */
+.m-prefs-box:checked::before {
+  background: var(--surface);
+  transform: translate(0.955rem, -50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .m-prefs-box,
+  .m-prefs-box::before { transition: none; }
 }
 
 .m-prefs-title { display: block; font-size: 0.9rem; color: var(--ink); }
-.m-prefs-hint { display: block; margin-top: 0.2rem; font-size: 0.78rem; color: var(--ink-faint); }
 
 
 .m-team {
