@@ -63,7 +63,7 @@ turn up.
 
 ## What it does
 
-Eight things, one line each. The full reference lives in [`docs/`](docs/) — [the
+Nine things, one line each. The full reference lives in [`docs/`](docs/) — [the
 panel](docs/panel.md), [the team](docs/team.md), [running it](docs/running.md).
 
 ### The rail, and the sessions that need you
@@ -110,6 +110,13 @@ folded; and a last grey card for the PR it opened.](docs/images/team-room.png)
 A lead scopes the work, dispatches workers into their own git worktrees, and reports back
 through a room you can read — and nothing merges, and nothing is killed, without your
 word. [Docs →](docs/team.md)
+
+### Rooms, for sessions that have to agree
+
+Make a room, drop a few sessions in it, and any one of them says a thing once — the panel
+writes it down and types a copy into every other member's terminal. Only you make a room and
+choose who is in it; a session gets three tools and none of them is *join*.
+[Docs →](docs/panel.md#rooms)
 
 ### Split view
 

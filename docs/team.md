@@ -187,6 +187,17 @@ to the lead, which reads and decides. A burst coalesces into one nudge, with a f
 minute per team and never more than one waiting at a time — otherwise a busy team spends
 its day telling the lead it is busy.
 
+**A room is not this room.** The panel also has [rooms](panel.md#rooms) — named places where
+a handful of *peer* sessions coordinate on one thing, each member's post typed into every
+other member's terminal. That is the horizontal surface and this is the vertical one: a team
+room is one lead and the workers it dispatched, and it is a chain of command rather than a
+conversation between equals. **Workers are never in rooms.** They have no `group_*` tools, the
+panel refuses them by role at both ends, and a worker cannot be ticked in the create box —
+its channel is its lead, and a peer telling it something would be an instruction from
+somewhere its lead cannot see. A room post is never a substitute for `worker_send`, an
+escalation or a dispatch confirmation. Nothing about rooms touches this room, the dispatch
+path, or the merge path.
+
 ### The team panel
 
 The right side of a lead's pane, stacked in three:
