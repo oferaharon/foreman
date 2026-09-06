@@ -268,6 +268,15 @@ select {
 .m-icon-btn:active { background: var(--surface-sunk); }
 .m-icon-btn.is-busy { color: var(--working); }
 
+/* `display: flex` above is a class rule and beats the UA stylesheet's `[hidden]`, so the
+   `+` would sit in the header with nothing behind it. The shell's own header and the quota
+   block have each paid for this trap once already, twenty lines apart. */
+.m-icon-btn[hidden] { display: none; }
+
+/* The `+` opens the start sheet. The same 44px control as `⟳` beside it — only the glyph is
+   larger, because a `+` at the arrow's size reads as a hairline rather than a control. */
+.m-start-btn { font-size: 1.35rem; }
+
 /* One screen at a time. Screens are appended here and manage their own scrolling — the
    shell never scrolls, or the header would leave with the list. */
 .m-screen {
@@ -354,7 +363,7 @@ select {
 
 /*
  * One grid for the whole row: the dot's gutter, the text, and a trailing control column
- * that the badge takes on line 1 and the launch button on line 2.
+ * that the badge takes on line 1 and the context percentage on line 2.
  *
  * `0.9rem` first column matches the rail's dot gutter, so the dot reads as a mark beside
  * the name rather than part of it. 60px minimum on the body: the whole reason this view
@@ -371,13 +380,13 @@ select {
   min-height: 60px;
 }
 
-button.m-team-body:active { background: var(--surface-sunk); }
+.m-team-body:active { background: var(--surface-sunk); }
 
 /*
  * The name takes the trailing column too unless the badge is actually there. A grid's
- * columns are shared down the rows, so the launch button on line 2 sizes column 3 for
- * line 1 as well — and the row that most needs reading, the one you are about to launch
- * into, was the one whose name ellipsised.
+ * columns are shared down the rows, so whatever sits on line 2 — the context percentage
+ * now, the launch button before it moved to the start sheet — sizes column 3 for line 1 as
+ * well, and the row's name was the thing that ellipsised to pay for it.
  */
 .m-team-body:not(.has-badge) .m-team-name { grid-column: 2 / -1; }
 
@@ -525,12 +534,11 @@ button.m-team-body:active { background: var(--surface-sunk); }
  * uses, and **no colour by fullness**. The desktop has a `ctx-warn` and this is not it — a
  * threshold is a decision about when the maintainer should care, and nobody has taken it.
  *
- * Row 2 of the trailing column, which is the launch button's cell — they never coexist, a
- * percentage needing a lead and the button being built only when there is none. Its font is
- * smaller than the meta line beside it, so the grid row is sized by the meta and adding this
- * cannot make a team row taller. That is the whole reason it is here and not on a line of
- * its own: a row that changes height as a number appears and vanishes is the layout-moves
- * failure this project keeps relearning.
+ * Row 2 of the trailing column, which it now has to itself — the launch button used to
+ * share it and is in the start sheet. Its font is smaller than the meta line beside it, so
+ * the grid row is sized by the meta and adding this cannot make a team row taller. That is
+ * the whole reason it is here and not on a line of its own: a row that changes height as a
+ * number appears and vanishes is the layout-moves failure this project keeps relearning.
  *
  * `tabular-nums` so 9% → 10% → 100% does not shuffle the digits sideways every poll.
  */
@@ -547,34 +555,141 @@ button.m-team-body:active { background: var(--surface-sunk); }
   white-space: nowrap;
 }
 
-/* The launch control lives on the row itself: the home list *is* the folder menu, so a
-   team with no lead offers the one thing you can do with it without a second screen. */
-.m-team-launch {
-  grid-column: 3;
-  grid-row: 2;
-  justify-self: end;
+/* ========================================================== start sheet === */
+
+/*
+ * The `+` in the shell header opens this: the teams the home list is hiding — the ones with
+ * no lead running — each startable from here. The home list is what is happening now; this
+ * is what could be started, and they were the same list until they were separated.
+ *
+ * The overlay idiom is `tasks.css`'s brief modal: a fixed backdrop over the page, one
+ * scroller, `overscroll-behavior: contain` so a scroll running out here does not leak to
+ * the screen underneath. One property differs — `align-items: flex-end` instead of
+ * `center` — and it is the whole point: every row in this box is something to press, and a
+ * centred box puts its own close control at the top of a six-inch phone.
+ */
+.m-sheet-back {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.m-sheet {
+  width: min(100vw, 32rem);
+  max-height: min(80vh, 80dvh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border-top: 1px solid var(--rule-strong);
+  border-radius: 14px 14px 0 0;
+  box-shadow: 0 -18px 50px rgb(0 0 0 / 45%);
+  /* The home indicator sits over the last row without this — the same inset `.m-scroll`
+     pays for the screen behind it. */
+  padding-bottom: calc(0.4rem + env(safe-area-inset-bottom));
+}
+
+.m-sheet-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem 0;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+}
+
+.m-sheet-head h2 {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.m-sheet-x {
+  flex: none;
+  min-width: 44px;
   min-height: 44px;
-  padding: 0.5rem 0.8rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: -0.55rem -0.55rem 0 0;
+  font-size: 1rem;
+  color: var(--ink-muted);
+  border-radius: 8px;
+}
+
+.m-sheet-x:active { background: var(--surface-sunk); }
+
+/* One line saying what the list is. The `+` is a verb; this is what it acts on, and it is
+   how a reader learns the panel cannot make a team from here — only start a lead in a
+   folder that already has one. */
+.m-sheet-hint {
+  margin: 0.15rem 0 0.75rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.m-sheet-item { border-top: 1px solid var(--rule); }
+
+/* The whole row is the control, which is what the home list could never do: there the body
+   was a tap target of its own (open this lead) and the launch button had to sit inside it.
+   Here the row means one thing, so 56px of it is the target. */
+.m-sheet-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+  min-height: 56px;
+  padding: 0.7rem 1rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  text-align: left;
+}
+
+.m-sheet-row:active { background: var(--surface-sunk); }
+
+.m-sheet-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+/* Reads as the verb and not as a second name: the accent, and small. `--working` while it
+   is going, which is the colour the row it replaced used for the same beat. */
+.m-sheet-go {
+  flex: none;
   font-family: var(--mono);
   font-size: 0.74rem;
   color: var(--accent);
-  background: var(--accent-soft);
-  border: 1px solid var(--rule);
-  border-radius: 8px;
   white-space: nowrap;
 }
 
-.m-team-launch:active { background: var(--surface-sunk); }
-
-.m-team-launch.is-busy {
-  color: var(--working);
-  cursor: default;
-}
+.m-sheet-row.is-busy { cursor: default; }
+.m-sheet-row.is-busy .m-sheet-go { color: var(--working); }
 
 /* A launch failure is the server's own sentence, verbatim — "not a git repository" and
    "this project already has a team lead" are both real answers and both are actionable. */
-.m-team-error {
-  padding: 0 1rem 0.85rem 1.9rem;
+.m-sheet-error {
+  padding: 0 1rem 0.8rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
   font-family: var(--mono);
   font-size: 0.72rem;
   line-height: 1.45;
