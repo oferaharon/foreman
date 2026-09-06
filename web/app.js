@@ -7001,13 +7001,28 @@ function createPane(slot, host) {
     name.onclick = () => startGroupRename(name);
     head.append(name);
 
+    /*
+     * The tally goes on a **second line**, under the name, rather than beside it in
+     * `.head-meta` where every other pane's status sits. Two reasons, and neither is taste.
+     * A room's name is the one thing on this header a reader is looking for and it is
+     * user-typed, so it is the part that ellipsises — sharing the line with a tally that
+     * never shrinks meant a name losing characters to `12 messages · 4 members`. And the
+     * controls are the other fixed thing on that line: pushed right by `.head-meta`'s
+     * `margin-left: auto`, they moved leftwards as the tally grew, so a button was at a
+     * different place on a busy room than on a quiet one.
+     *
+     * It is a grid rather than a wrapped flex line because the buttons must stay on the
+     * *name's* row while the tally sits under it — a wrap would take them down with it. The
+     * rail's three-line team row is the same shape and the same `grid-column: 2 / -1` for
+     * the extra line; see the trap it is recorded under.
+     */
     const meta = document.createElement('div');
     meta.className = 'head-meta';
 
-    const stat = document.createElement('span');
-    stat.className = 'head-status group-status';
+    const stat = document.createElement('div');
+    stat.className = 'head-status group-status group-tally';
     view.groupHeadEl = { name, stat, meta };
-    meta.append(stat);
+    head.append(stat);
 
     // The room never offers to split — it is already the second thing on screen, and a panel
     // showing one room twice is not a state worth being able to reach. What `close` *does* is
@@ -10082,9 +10097,18 @@ function createPane(slot, host) {
   function buildRoomPanel() {
     const panel = document.createElement('aside');
     panel.className = 'room-panel';
+    /*
+     * The one plain heading left in this column — `settings`, `tasks` and `connect` all
+     * carry controls and are built by hand. It is banded (`is-band`) because it is the
+     * heading the tasks list runs straight into: everything here sits on `--shelf`, and a
+     * head with a rule under it and nothing above read as one more line of the list above
+     * rather than as the start of the room. The band is a paint and nothing else — see the
+     * stylesheet for why a border here would move `.tasks-grip` off what it was measured
+     * against.
+     */
     const section = (label, title) => {
       const head = document.createElement('div');
-      head.className = 'room-head';
+      head.className = 'room-head is-band';
       head.textContent = label;
       head.title = title;
       return head;
@@ -10209,7 +10233,10 @@ function createPane(slot, host) {
     // one and two elements over.
     const asideGrip = paneGrip('x', 'Panel width', "Drag to set the panel's width · double-click to reset");
     asideGrip.classList.add('aside-grip');
-    const roomHead = section('room', 'Workers and the lead coordinate here. View only — talk to the lead in the composer.');
+    const roomHead = section(
+      'Team room (read only)',
+      'Workers and the lead coordinate here. View only — talk to the lead in the composer.',
+    );
     // The room's own edge. It is still the Tasks/Room divider — one boundary, one control
     // — but it sizes the *room* now, so it says so: the reader drags the thing they want
     // bigger, not the thing above it.

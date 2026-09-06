@@ -562,3 +562,43 @@ test('both themes, by tokens rather than by literal colours', () => {
   assert.deepEqual(colours, [], 'no literal colour may be defined only for one theme');
   assert.match(block, /var\(--row-open\)/, 'the open row borrows the rail’s own answer');
 });
+
+test('the band’s head is not spelled like a folder heading — measured, not eyeballed', () => {
+  /*
+   * It was: `--ink-faint`, 0.63rem, 0.13em, uppercase, on `--surface` — the same five values
+   * `.group-label` uses for a folder heading three rows up. So the one heading in this column
+   * that is not a folder read as one of them, and at 3.48 against the dark surface the words
+   * were faint on top of that.
+   *
+   * Both halves are pinned because either alone leaves the complaint standing: a stronger ink
+   * on the same ground still reads as a folder heading, and a ground with faint text on it is
+   * a band whose words got quieter. And the `+ room` control has to come up with the title —
+   * `--ink-faint` measures 2.87 on the new ground, *worse* than the 3.48 it had, and it is the
+   * only way into the create modal.
+   */
+  const head = styles.match(/\.rooms-head \{[\s\S]*?\n\}/)[0];
+  assert.match(head, /background: var\(--band-head\);/);
+  const title = styles.match(/\.rooms-title \{[^}]*\}/)[0];
+  assert.match(title, /color: var\(--ink\);/);
+  const add = styles.match(/\.rooms-add \{[\s\S]*?\n\}/)[0];
+  assert.match(add, /color: var\(--ink-muted\);/);
+  // Neither may go back to the token that started this.
+  assert.ok(!/color: var\(--ink-faint\)/.test(title));
+  assert.ok(!/color: var\(--ink-faint\)/.test(add));
+
+  // Not the accent — in this panel that means a selected row and the maintainer's own
+  // authority, and a band heading wearing it would be claiming to be one of those.
+  for (const decl of [head, title, add]) assert.ok(!/var\(--accent/.test(decl));
+
+  // The size is deliberately untouched: two bands in one column reading at two sizes is the
+  // thing a person notices without being able to say what is wrong — `.conn-head`'s own
+  // recorded reason, and this fix is about weight and ground, never scale.
+  assert.match(title, /font-size: 0\.63rem;/);
+  assert.match(title, /letter-spacing: 0\.13em;/);
+  assert.match(head, /padding: 0\.7rem 1\.1rem 0\.4rem;/);
+
+  // The ground stops at the head. A permanently tinted block in the rail would be competing
+  // with an open group's tint for the same meaning.
+  const list = styles.match(/\.rooms-list \{[^}]*\}/)[0];
+  assert.ok(!/background/.test(list));
+});

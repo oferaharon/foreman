@@ -398,6 +398,38 @@ test('a full room and an exhausted list each say why, in the room’s own words'
 
 /* --------------------------------------------------------- the header --- */
 
+test('the tally is a line of its own, under the name, with the controls left on the name’s row', () => {
+  /*
+   * Two lines, and the thing worth pinning is *which* of them the buttons are on. The tally
+   * grows as a room fills; while it shared `.head-meta` with `archive` and `close`, those
+   * two were pushed leftwards by every message that arrived — a control at a different place
+   * on a busy room than on a quiet one. A wrapping flex line fixes the name's ellipsis and
+   * reintroduces exactly that, because a wrap takes the controls down with the tally.
+   *
+   * So: built as a child of the header rather than of `.head-meta` (or nothing has moved at
+   * all, and the header looks identical while the tally is back beside the buttons), and the
+   * grid rows are stated in the stylesheet — the tally on row 2 spanning to the right edge,
+   * the controls pinned to row 1.
+   */
+  const build = fn('buildGroupHead');
+  assert.match(build, /stat\.className = 'head-status group-status group-tally';/);
+  assert.match(build, /head\.append\(stat\);/, 'the tally hangs off the header, not off `.head-meta`');
+  assert.ok(!/meta\.append\(stat\)/.test(build), 'a tally inside `.head-meta` is back on the name’s line');
+
+  assert.match(styles, /\.main-head\.is-group \{[^}]*display: grid;/);
+  const tally = styles.slice(styles.indexOf('.main-head.is-group .group-tally {'));
+  assert.match(tally.slice(0, tally.indexOf('}')), /grid-column: 2 \/ -1;[\s\S]*grid-row: 2;/);
+  assert.match(styles, /\.main-head\.is-group \.head-meta \{ grid-column: 3; grid-row: 1; \}/);
+  // `.main-head` and `.app.split .main-head` both set `gap` as a shorthand, so each of them
+  // sets the row gap too — and the split one out-specifies a bare `.main-head.is-group`.
+  // Without the second spelling the two lines fall 0.6rem apart in split view only.
+  assert.match(styles, /\.app\.split \.main-head\.is-group \{ row-gap:/);
+
+  // And the tally is still the same node `renderGroupHead` writes, so nothing about the
+  // repaint changed with the line it sits on.
+  assert.match(fn('renderGroupHead'), /els\.stat\.textContent = `\$\{n\} message/);
+});
+
 test('remove and archive both go through `armConfirm`', () => {
   const strip_ = fn('renderGroupStrip');
   assert.match(strip_, /armConfirm\(x, `remove \$\{memberName\(m\)\}\?`/);

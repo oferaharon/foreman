@@ -56,6 +56,23 @@
      `--surface` are the pair that flip. */
   --row-open: color-mix(in srgb, var(--accent) 22%, var(--surface));
 
+  /* A section heading that has to read as a *band* rather than as a line of text — the lead
+     aside's team-room head, and the rail's rooms band. Built the way `--shelf` is, one line
+     that darkens the light theme and lightens the dark one, and deliberately a **different
+     depth** rather than a reuse of `--shelf` itself: both of those headings sit next to
+     something already wearing `--shelf` (the aside *is* `--shelf`, and in the rail it is an
+     open group's tint), so a band painted with it would be invisible in one place and read
+     as "this is an open group" in the other.
+
+     8% is measured rather than picked. Against `--surface` it is 1.214 (dark) / 1.181
+     (light), comfortably past the 1.095 / 1.081 step `--shelf` itself relies on to be seen,
+     so the band separates from a folder heading; against `--shelf` it is 1.109 / 1.092,
+     which is that same step again, so it separates inside the aside too. And it is the
+     deepest mix that still leaves `--ink-muted` above 4.5 on it — 4.68 / 5.42, where 9%
+     drops the dark reading to 4.49. Going deeper buys a louder band by making the words on
+     it harder to read, which is the wrong trade for a heading. */
+  --band-head: color-mix(in srgb, var(--ink) 8%, var(--surface));
+
   /* Both ends of a link, marked when either one is open. It has to clear the same three
      backgrounds `--row-open` does — plain surface, `--shelf` inside an open group, and
      `--surface-sunk` under the cursor — and one more besides: it must not be mistakable
