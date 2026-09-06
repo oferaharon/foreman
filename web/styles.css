@@ -46,10 +46,9 @@ button {
 
 /* ------------------------------------------------------------- grips --- */
 
-/* The five draggable dividers: the rail's right edge, the connections band's top edge,
-   the lead aside's left edge, the Tasks/Room split inside that aside, and the boundary
-   between two panes in split view. One class, because they are one behaviour — see
-   `resizer` in app.js.
+/* The four draggable dividers: the rail's right edge, the lead aside's left edge, the
+   Tasks/Room split inside that aside, and the boundary between two panes in split view.
+   One class, because they are one behaviour — see `resizer` in app.js.
 
    Each overhangs its own 1px rule by three pixels each way, so there is something to grab
    without the cursor having to land on a hairline, and each is positioned *over* the
@@ -122,14 +121,14 @@ button {
 /* The rail's own edge, overhanging its border. Measured: 315–322 against a 320px rail. */
 .rail-grip { right: -3px; }
 
-/* The split's boundary. The fifth divider and the first that hangs off nothing — the two
+/* The split's boundary. The fourth divider and the first that hangs off nothing — the two
    panes meet at a line the grid computes, so the grip is placed at that line from the same
    variable the track is: `--pane-a` minus half the strip. `.rail-grip` and `.aside-grip`
    can each sit on a border they overhang; this one has to be told where the border is.
 
    On screen only while there are two panes, which is `.app.split` — the same show/hide
-   trade `.app.split .main` and `.app.has-links .conn-grip` already make, and what makes
-   the handle appear and disappear with the split for free. */
+   trade `.app.split .main` already makes, and what makes the handle appear and disappear
+   with the split for free. */
 .split-grip {
   display: none;
   left: calc(var(--pane-a) - 3px);
@@ -1050,23 +1049,6 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .session-row:hover { background: var(--surface-sunk); }
 
-/* Both ends of a link, whenever either end is open — "selecting a connected lead highlights
-   both linked rows", and there is no line drawn between them because nothing here may
-   measure where a row is.
-
-   It sits **above** `.is-open` deliberately, so the selected row keeps its own band: on the
-   row you are in, "selected" is the more useful of the two things to say, and the link is
-   already named by the chip on that row's third line. What this marks is the *other* end —
-   the row you were not looking at.
-
-   `--row-linked` is a different hue rather than a weaker accent, for the reason spelled out
-   beside it in `tokens.css`. The left edge is the same 3px every row already reserves, so
-   nothing steps sideways when it appears. */
-.session-row.is-linked {
-  background: var(--row-linked);
-  border-left-color: var(--mode-edits);
-}
-
 /* Three signals rather than one, because the rail is long and the row you are reading has
    to be findable without hunting: a filled band, a left edge thick enough to read as a
    marker instead of a hairline, and a title at full ink. The hover rule above is deliberately
@@ -1738,12 +1720,12 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 .room-pill.is-lead { color: var(--accent); border-color: currentColor; }
-/* A link entry names the **project** that spoke, not the role — both ends of a link are
-   leads, so `lead` on each of them told you nothing. Deliberately *not* the thread's
-   green/blue: that pair is per link and a room can carry more than one, so four projects
-   would be sharing two colours here. The name is what does the work; the pill just has to
-   stop looking like the lead's own. Filled rather than outlined, so a project reads as a
-   different kind of speaker from the accent-outlined lead at a glance. */
+/* A historical `kind: 'link'` entry names the **project** that spoke, not the role — both
+   ends of a link were leads, so `lead` on each of them told you nothing. Links were retired
+   on 2026-09-05; two dozen of these entries are on disk and this is what still attributes
+   them. The name is what does the work; the pill just has to stop looking like the lead's
+   own. Filled rather than outlined, so a project reads as a different kind of speaker from
+   the accent-outlined lead at a glance. */
 .room-pill.is-project {
   color: var(--ink);
   border-color: transparent;
@@ -1897,18 +1879,14 @@ body.row-dragging * { cursor: row-resize !important; }
    "whatever the block turns out to be" without anything measuring it. A `max-height`
    would need a number, and the number is wrong the day somebody adds a row — too small
    clips the block, too large spends the transition on empty space. */
-/* Shared with the aside's `connect` fold (`.conn-fold`): one mechanism, two blocks. A
-   second copy of this trick is a second thing to get wrong the day it changes. */
-.team-settings-fold,
-.conn-fold {
+.team-settings-fold {
   flex: none;
   display: grid;
   grid-template-rows: 0fr;
   overflow: hidden;
   transition: grid-template-rows 200ms ease;
 }
-.team-settings-fold.is-open,
-.conn-fold.is-open { grid-template-rows: 1fr; }
+.team-settings-fold.is-open { grid-template-rows: 1fr; }
 /* The grid item, and it is deliberately bare. `min-height: auto` is a grid item's default
    and would hold the row open at content height — the fold would never close at all. And
    even at `min-height: 0` an item cannot be shorter than its own padding and border, so
@@ -1916,8 +1894,7 @@ body.row-dragging * { cursor: row-resize !important; }
    (0.5rem twice, plus the 1px rule) under the heading with the block shut. */
 .team-settings-clip { min-height: 0; overflow: hidden; }
 @media (prefers-reduced-motion: reduce) {
-  .team-settings-fold,
-  .conn-fold { transition: none; }
+  .team-settings-fold { transition: none; }
 }
 
 .team-settings {
@@ -4013,395 +3990,22 @@ body.row-dragging * { cursor: row-resize !important; }
 .confirm-no { color: var(--ink-faint); }
 .confirm-no:hover { color: var(--ink); border-color: var(--ink-faint); }
 
-/* ====================================================== joint thread === */
-
-/* A pane holding something that is not a session: the joint thread over one link's two
-   rooms. It reuses split view rather than taking a column of its own — the locked ruling,
-   on the grounds that four columns (rail, connections, conversation, lead aside) do not fit
-   a laptop.
-
-   It borrows the pane's own furniture — `.main-head` above, a scrolling middle, a quiet
-   foot — so a slot holding a thread reads as the same kind of object as a slot holding a
-   conversation. What it does not borrow is the room's bubbles: those lane by worker/lead,
-   and here both speakers are leads. */
-
-.main-head.is-link .link-mark {
-  font-family: var(--mono);
-  color: var(--ink-muted);
-  flex: none;
-}
-
-.main-head.is-link h1 { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-
-/* The label the link was opened with, in the maintainer's own words. Quiet: it is why the
-   link exists, not what is happening on it. */
-.link-head-label {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  color: var(--ink-muted);
-}
-
-/* A link closed while its thread was open. The pane stays and goes on rendering its
-   history — never blank a pane — so this is the only thing that says the channel is shut. */
-.link-head-closed {
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  letter-spacing: 0.04em;
-  color: var(--decision);
-  border: 1px solid currentColor;
-  border-radius: 2px;
-  padding: 0 0.3rem;
-  margin-left: 0.4rem;
-}
-
-.link-thread {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 1.4rem 0 1.6rem;
-}
-
-/* The thread reads at the **room's** scale, not the transcript's, and the reason is that
-   it is the room's content: a joint thread is a view over the two projects' `room.jsonl`
-   files, the same entries the aside draws one pane over. It was inheriting the body's 16px
-   serif — measured identical, to the pixel, to an ordinary transcript message — which is
-   what made it read as a conversation rather than a log, and too big beside the room it is
-   a view of. 0.82rem is `.room-list`'s own size, so this is the second scale in the panel
-   rather than a third one. Same serif; only the size moves. */
-.link-thread-inner {
-  max-width: 52rem;
-  margin: 0 auto;
-  padding: 0 1.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.9rem;
-  font-size: 0.82rem;
-}
-
-.app.split .link-thread-inner { padding-left: 1rem; padding-right: 1rem; }
-
-.link-quiet {
-  color: var(--ink-muted);
-  font-size: 0.85rem;
-  max-width: 34rem;
-}
-
-.link-quiet.is-error { color: var(--decision); }
-
-/* Laned by *which end of the link* said it — `a` left, `b` right — because a joint thread
-   belongs to neither project and so has no "own repo" to lane against, the way the room's
-   bubbles do. `a` and `b` are stored sorted, so a side never moves between paints. */
-.link-msg { max-width: 82%; line-height: 1.45; }
-.link-msg.from-a { align-self: flex-start; }
-.link-msg.from-b { align-self: flex-end; }
-.link-msg.from-b .link-meta { justify-content: flex-end; }
-
-/* The maintainer's own line. Full width and centred rather than laned, because it is not
-   one of the two ends — it is the one speaker on this channel whose word can authorize,
-   and it must be **structurally** distinguishable from a lead's line rather than merely a
-   different colour of the same shape. Item 7 is what puts one here; the lane exists now so
-   that entry has somewhere to land the day it does. */
-.link-msg.from-human {
-  align-self: stretch;
-  max-width: 100%;
-}
-
-.link-meta {
-  display: flex;
-  align-items: baseline;
-  gap: 0.35rem;
-  padding: 0 0.1rem 0.15rem;
-}
-
-.link-pill {
-  font-family: var(--mono);
-  font-size: 0.64rem;
-  letter-spacing: 0.04em;
-  border: 1px solid var(--rule-strong);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
-  color: var(--ink-muted);
-  max-width: 14rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Two speakers, told apart at a glance — **on the header only**. The bubble body is
-   deliberately unchanged: the maintainer corrected an earlier coloured-bubbles suggestion
-   to exactly this, and two tinted bodies in one column would be two competing page
-   backgrounds rather than two labels.
-
-   The pair is `--idle` and `--mode-edits`, both already in the palette, and the choice is
-   argued rather than picked. Measured in the dark theme against `--ground`, which is what
-   the pill actually sits on (the bubble starts below it): green 8.04:1, blue 8.93:1 —
-   both past WCAG AAA's 7:1 for body text at a pill's size. Told apart from each other by
-   ΔE2000 **23.0**, which is a large difference rather than a just-noticeable one.
-
-   `--accent` measures further still (ΔE 44 from the green) and is **reserved**: it is the
-   maintainer's own colour in this very list — `.link-pill.is-human` below — and item 7
-   puts his lines here beside these. Two identical pills in one thread, one of them the one
-   speaker whose word can authorize, is not a trade worth a few ΔE. `--working` and
-   `--decision` are refused for the reason the room refuses them: amber and red mean
-   attention and trouble everywhere else in this panel, and neither project is either.
-
-   Which side is which never moves — see `linkEntryNode`. `a` and `b` are the two paths
-   sorted, written once when the link is opened and never rewritten, so the same project
-   keeps its colour across a reopen, a restart and a relaunch of either lead. */
-.link-msg.from-a .link-pill { color: var(--idle); border-color: currentColor; }
-.link-msg.from-b .link-pill { color: var(--mode-edits); border-color: currentColor; }
-/* Later than the two above on purpose: a human line is `from-human`, so neither of them
-   can reach it — but if a lane is ever added or renamed, the accent still wins here. */
-.link-pill.is-human { color: var(--accent); border-color: currentColor; }
-
-.link-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
-
-.link-bubble {
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  padding: 0.45rem 0.7rem;
-  background: var(--surface);
-}
-
-.link-msg.from-a .link-bubble { border-top-left-radius: 3px; }
-.link-msg.from-b .link-bubble { border-top-right-radius: 3px; }
-
-/* The maintainer's line gets the accent edge the room already uses for an audit trail, and
-   for the same reason: this is the shape that carries authority. */
-.link-msg.from-human .link-bubble {
-  border-left: 2px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
-}
-
-/* Two leads writing prose: keep their paragraphs. */
-.link-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-
-/* **Ten** lines, then a quiet way in — twice the room's five, and the difference is what
-   is being folded. The room logs events, a line each, and five is generous there; these
-   are whole messages between two leads, and cutting one at five hides the message instead
-   of trimming it. Ten is the maintainer's own number.
-
-   `scrollHeight > clientHeight` is what decides a message gets a control at all, so a short
-   one keeps its own height and grows nothing (see `threadClampable`). */
-.link-clamp {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 10;
-  overflow: hidden;
-}
-/* Deliberately no standard `line-clamp: 10` beside that, for the room's reason and it is
-   the same reason here: Chrome 151 answers `CSS.supports('line-clamp','10')` with false,
-   so it is dead weight today — and the shape it will eventually ship is `continue: discard`,
-   which *removes* the clamped lines from the box rather than hiding them. The overflow test
-   above is `scrollHeight > clientHeight`; discard them and those two are equal, every
-   message reads as fitting, and the control silently stops appearing on exactly the ones
-   that need it. Add it the day it can be measured, not the day it parses. */
-
-/* Inside the bubble, never floating over it, in the thread's own muted ink — the same
-   restraint as the room's: no accent, no motion, nothing competing with the two coloured
-   name pills for the eye. */
-.link-more {
-  display: block;
-  margin-top: 0.2rem;
-  padding: 0;
-  border: 0;
-  background: none;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--ink-muted);
-  cursor: pointer;
-}
-.link-more:hover { color: var(--ink); }
-
-/* A message that did not land exists only in the sender's room, which is right — and it
-   has to say so, or the thread reads as though it arrived. */
-.link-msg.is-undelivered .link-bubble {
-  border-color: color-mix(in srgb, var(--decision) 45%, transparent);
-  background: color-mix(in srgb, var(--decision) 6%, var(--surface));
-}
-
-.link-undelivered {
-  margin-top: 0.3rem;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--decision);
-  overflow-wrap: anywhere;
-}
-
-/* Handed off, not read: the queue may hold it for hours. The vaguer verb is deliberate. */
-.link-queued {
-  margin-top: 0.3rem;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--working);
-}
-
-/* The end of a closed link's thread. Quiet and not alarming: closing was a decision the
-   maintainer took, so this is a full stop rather than a warning. */
-.link-closed-line {
-  align-self: center;
-  max-width: 34rem;
-  text-align: center;
-  font-family: var(--mono);
-  font-size: 0.68rem;
-  line-height: 1.5;
-  color: var(--ink-faint);
-  border-top: 1px solid var(--rule);
-  padding-top: 0.7rem;
-  margin-top: 0.3rem;
-}
-
-/* What each end did with one of the maintainer's messages, per side. Quiet — the same
-   register as the `room-ready` line under a report bubble, because a message that reached
-   one lead and not the other is a fact to read rather than an error to act on. Amber only
-   when a side missed it, red only when both did; neither is an alarm colour here by
-   accident — they are this panel's own "waiting" and "needs you". */
-.link-delivery {
-  margin-top: 0.3rem;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--ink-faint);
-  overflow-wrap: anywhere;
-}
-.link-delivery.is-partial { color: var(--working); }
-.link-delivery.is-dark { color: var(--decision); }
-
-/* `record as a ruling` — post-hoc, on his own lines only, and the one control in this
-   thread that writes to something permanent. It sits inside the bubble under the delivery
-   line, so it belongs visibly to the message it is about. */
-.link-record {
-  margin-top: 0.4rem;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.3rem 0.6rem;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-}
-
-/* Both sides in. Not a control any more — there is nothing left to press — so it is a
-   statement, in the muted ink everything settled in this thread uses. */
-.link-record.is-done { color: var(--ink-faint); }
-
-/* Half in: which file took it and which did not, with the reason. The button stays beside
-   it, because a retry writes only the side still missing. */
-.link-record-state { color: var(--working); flex-basis: 100%; overflow-wrap: anywhere; }
-
-.link-record-btn {
-  padding: 0.05rem 0.5rem;
-  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
-  border-radius: 999px;
-  background: none;
-  font: inherit;
-  color: var(--accent);
-  cursor: pointer;
-}
-.link-record-btn:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.link-record-btn:disabled { opacity: 0.55; cursor: default; }
-
-.link-record-err {
-  flex-basis: 100%;
-  color: var(--decision);
-  overflow-wrap: anywhere;
-}
-
-/* The maintainer's own composer. Deliberately small: a textarea, a send button and two
-   lines of chrome. It is not `.composer` and shares none of its machinery — that one is
-   about a session, and a link pane has none. */
-.link-composer {
-  flex: none;
-  border-top: 1px solid var(--rule);
-  background: var(--surface);
-}
-
-.link-composer-inner {
-  max-width: 52rem;
-  margin: 0 auto;
-  padding: 0.6rem 1.6rem 0.8rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.app.split .link-composer-inner { padding-left: 1rem; padding-right: 1rem; }
-
-/* Who this reaches, said **before** anything is typed. The reach half is quiet; the half
-   that names a lead nobody is running takes the panel's waiting colour, because that is
-   the one thing here that changes what he would write. */
-.link-reach {
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--ink-faint);
-  overflow-wrap: anywhere;
-}
-.link-reach-miss { color: var(--working); }
-
-/* A refusal, painted from view state so it survives the repaint that arrives with the next
-   message — `mergeErrors`' own lesson, one pane over. */
-.link-composer-err {
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--decision);
-  overflow-wrap: anywhere;
-}
-
-.link-composer textarea {
-  width: 100%;
-  resize: none;
-  border: 1px solid var(--rule-strong);
-  border-radius: 6px;
-  padding: 0.5rem 0.6rem;
-  background: var(--ground);
-  color: var(--ink);
-  font-family: inherit;
-  font-size: 0.9rem;
-  line-height: 1.45;
-}
-.link-composer textarea:focus {
-  outline: none;
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong));
-}
-.link-composer textarea:disabled { opacity: 0.6; cursor: default; }
-
-.link-composer-row {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-}
-
-/* What a line typed here *is*. The only box in this panel whose words reach two
-   conversations at once, and the only one a lead is told it may act on — so it says so
-   every time, quietly, rather than in a tooltip nobody opens. */
-.link-composer-hint {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--ink-faint);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* ==================================== peer messages (shared room) === */
 
 /* The machine-wide log of what the sessions on this Mac say to each other, in a pane. The
    panel calls it `peer messages` and every class here still says `.shared-*` — display copy
    was the whole of the 2026-09-05 rename, and `server/shared-room.js`'s header says why.
 
-   It borrows the joint thread's furniture — a `.main-head` above, a scrolling middle,
-   bubbles under name pills — because a slot holding it should read as the same kind of
-   object as a slot holding a thread or a conversation. **There is no composer**: the `@` box
-   that used to sit beside `.shared-body` went with the rename, so the scroller now takes the
-   whole pane under the head and `.shared-body` keeps its `flex: 1` for the pill's sake.
+   It borrows the pane's own furniture — a `.main-head` above, a scrolling middle, bubbles
+   under name pills — because a slot holding it should read as the same kind of object as a
+   slot holding a conversation. **There is no composer**: the `@` box that used to sit beside
+   `.shared-body` went with the rename, so the scroller now takes the whole pane under the
+   head and `.shared-body` keeps its `flex: 1` for the pill's sake.
 
-   It does **not** borrow the joint thread's classes. Everything here is `.shared-*` with
-   its own rules, deliberately: the link feature is on a documented path to deletion (the
-   plan's §12 removes every `.link-*` rule in one commit), and a view that quietly depended
-   on those rules would come apart on the day that lands, in a stylesheet nobody was looking
-   at. The duplication is the price of that independence and it is worth paying once. */
+   Everything here is `.shared-*` with its own rules and borrows nothing from another view's
+   classes, deliberately. It was written that way against the `.link-*` block that used to
+   sit above it — a feature on a documented path to deletion — and that deletion landed on
+   2026-09-05 with this block untouched, which is the independence working. */
 
 .main-head.is-shared .shared-mark {
   font-family: var(--mono);
@@ -4432,7 +4036,7 @@ body.row-dragging * { cursor: row-resize !important; }
   padding: 1.4rem 0 1.6rem;
 }
 
-/* The room reads at the joint thread's scale, which is `.room-list`'s — this is the same
+/* The room reads at `.room-list`'s scale — this is the same
    kind of content, a log of messages rather than a conversation, and it would be too big
    beside the room aside it sits next to. Same serif; only the size moves. */
 .shared-room-inner {
@@ -4447,25 +4051,23 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .app.split .shared-room-inner { padding-left: 1rem; padding-right: 1rem; }
 
-/* An empty room says what it is waiting for. The register is `renderThread`'s and
-   `renderRoom`'s: a quiet sentence in muted ink, never an error and never a placeholder
-   card. */
+/* An empty room says what it is waiting for. The register is `renderRoom`'s: a quiet
+   sentence in muted ink, never an error and never a placeholder card. */
 .shared-quiet {
   color: var(--ink-muted);
   font-size: 0.85rem;
   max-width: 34rem;
 }
 
-/* **One lane, all left-aligned.** A link has exactly two ends and lanes them left and
-   right; this room has N sessions and there is no second side to lane against, so the name
-   pill carries the identity and every peer line starts at the same edge. Laning by sender
-   would put a message from one session on the right for no reason a reader could name. */
+/* **One lane, all left-aligned.** This room has N sessions and no second side to lane
+   against, so the name pill carries the identity and every peer line starts at the same
+   edge. Laning by sender would put a message from one session on the right for no reason a
+   reader could name. */
 .shared-msg { max-width: 82%; line-height: 1.45; align-self: flex-start; }
 
 /* The maintainer's own line. Full width rather than laned, because it is not one of N
    speakers — it is the one voice on this channel whose word can authorize, and it has to be
-   **structurally** distinguishable rather than merely a different colour of the same shape.
-   The joint thread's `from-human` shape, for exactly that reason. */
+   **structurally** distinguishable rather than merely a different colour of the same shape. */
 .shared-msg.from-human {
   align-self: stretch;
   max-width: 100%;
@@ -4549,8 +4151,8 @@ body.row-dragging * { cursor: row-resize !important; }
   background: var(--surface);
 }
 
-/* The maintainer's line gets the accent edge the room and the joint thread already use, and
-   for the same reason: this is the shape that carries authority. */
+/* The maintainer's line gets the accent edge the team room already uses, and for the same
+   reason: this is the shape that carries authority. */
 .shared-msg.from-human .shared-bubble {
   border-left: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
@@ -4559,8 +4161,8 @@ body.row-dragging * { cursor: row-resize !important; }
 /* Sessions writing to each other in prose: keep their paragraphs. */
 .shared-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 
-/* **Ten** lines, then a quiet way in — the joint thread's number rather than the room
-   aside's five, and the difference is what is being folded. The aside logs events, a line
+/* **Ten** lines, then a quiet way in — twice the room aside's five, and the difference is
+   what is being folded. The aside logs events, a line
    each, and five is generous there; these are whole messages between two sessions, and
    cutting one at five hides the message instead of trimming it.
 
@@ -4638,7 +4240,8 @@ body.row-dragging * { cursor: row-resize !important; }
    the same kind of object as a slot holding a conversation.
 
    It does **not** borrow the shared room's classes, and that is the same trade `.shared-*`
-   itself made against `.link-*` one block up. The shared room's own future is explicitly
+   itself made against the `.link-*` block that used to sit above it. The shared room's own
+   future is explicitly
    deferred (the plan's Q5 — it is the one half-room nobody writes into and no session
    reads), and a view quietly depending on its rules would come apart on the day that is
    answered, in a stylesheet nobody was looking at. The duplication is the price of that
@@ -4937,17 +4540,17 @@ body.row-dragging * { cursor: row-resize !important; }
 .app.split .group-room-inner { padding-left: 1rem; padding-right: 1rem; }
 
 /* An empty room says what it is waiting for, and what happens when somebody speaks. The
-   register is `renderThread`'s and `renderRoom`'s: a quiet sentence in muted ink, never an
-   error and never a placeholder card. */
+   register is `renderRoom`'s: a quiet sentence in muted ink, never an error and never a
+   placeholder card. */
 .group-quiet {
   color: var(--ink-muted);
   font-size: 0.85rem;
   max-width: 34rem;
 }
 
-/* **One lane, all left-aligned.** A link has exactly two ends and lanes them left and right;
-   a room has up to eight speakers and there is no second side to lane against, so the name
-   pill carries the identity and every peer line starts at the same edge. */
+/* **One lane, all left-aligned.** A room has up to eight speakers and no second side to
+   lane against, so the name pill carries the identity and every peer line starts at the
+   same edge. */
 .group-msg { max-width: 82%; line-height: 1.45; align-self: flex-start; }
 
 /* The maintainer's own line. Full width rather than laned, because it is not one of eight
@@ -5022,8 +4625,8 @@ body.row-dragging * { cursor: row-resize !important; }
   background: var(--surface);
 }
 
-/* The maintainer's line gets the accent edge the room, the joint thread and the shared room
-   already use, and for the same reason: this is the shape that carries authority. */
+/* The maintainer's line gets the accent edge the team room and the shared room already use,
+   and for the same reason: this is the shape that carries authority. */
 .group-msg.from-human .group-bubble {
   border-left: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
@@ -5186,7 +4789,7 @@ body.row-dragging * { cursor: row-resize !important; }
 .app.split .group-composer-inner { padding-left: 1rem; padding-right: 1rem; }
 
 /* A refusal, painted from view state so it survives the repaint that arrives with the next
-   message in the room — `linkErrors`' lesson, and it bites here for the same reason it bites
+   message in the room — `mergeErrors`' lesson, and it bites here for the same reason it bites
    in the shared room: this box repaints on every entry rather than on a press. */
 .group-composer-err {
   font-family: var(--mono);
@@ -5232,14 +4835,13 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 
-/* The rail's way in: one row, always here, above the connections band. A sibling of
-   `.rail-list` rather than a block inside it — an open group's tint in that list is tiled
-   from three full-width rows, and anything joining that flow has to answer to it.
+/* The rail's way in: one row, always here. A sibling of `.rail-list` rather than a block
+   inside it — an open group's tint in that list is tiled from three full-width rows, and
+   anything joining that flow has to answer to it.
 
-   Persistent, unlike the connections band that hides itself when there are no links: a room
-   with nothing in it yet still has something to say, and a control that only appears once
-   traffic exists is a control nobody discovers. The narrow query hides the whole rail, so
-   this costs the phone-width layout nothing. */
+   Persistent: a room with nothing in it yet still has something to say, and a control that
+   only appears once traffic exists is a control nobody discovers. The narrow query hides the
+   whole rail, so this costs the phone-width layout nothing. */
 .rail-shared {
   flex: none;
   display: flex;
@@ -5292,7 +4894,7 @@ body.row-dragging * { cursor: row-resize !important; }
    that makes a new one.
 
    A **sibling** of `.rail-list`, never a block inside it, for the reason the shared row
-   above and the connections below both give in their own words: an open group's tint in
+   above gives in its own words: an open group's tint in
    that list is tiled from three full-width rows *in that flow*, and `.folder-label.in-group`
    carries a hand-measured sticky offset against the row heights in there. Out here this is
    one more item in the rail's flex column. **No vertical margin**, deliberately — a gap
@@ -5303,15 +4905,13 @@ body.row-dragging * { cursor: row-resize !important; }
    left. The list inside has its own ceiling rather than the band having one: a person with
    nine rooms should scroll the rooms, not lose the sessions.
 
-   **The head is persistent and only the list comes and goes**, which is the one place this
-   band does not copy `.app.has-links`. The connections band can hide whole because a link
-   is made somewhere else; `+ room` is the *only* way into the create modal (plan §2 item
+   **The head is persistent and only the list comes and goes.** `+ room` is the *only* way
+   into the create modal (plan §2 item
    8), so a gate over the whole band would mean the first room could never be made — the
    control would appear only once traffic existed, which is exactly what the shared row
    above refuses to do in its own markup's words. So `.rail-rooms` is always here, carrying
    one quiet heading line, and `.app.has-rooms` gates `.rooms-list` alone. The class stays
-   on `.app` rather than on the rail because it is one fact about the whole window, exactly
-   as `has-links` is. */
+   on `.app` rather than on the rail because it is one fact about the whole window. */
 .rail-rooms {
   display: flex;
   flex: none;
@@ -5321,9 +4921,9 @@ body.row-dragging * { cursor: row-resize !important; }
   background: var(--surface);
 }
 
-/* The rail's own headings scale, not the lead aside's — `.conn-head`'s call, and the same
-   numbers, because two bands in one column reading at two sizes is the thing a person
-   notices without being able to say what is wrong. The `+ room` control sits on the same
+/* The rail's own headings scale, not the lead aside's, because two bands in one column
+   reading at two sizes is the thing a person notices without being able to say what is
+   wrong. The `+ room` control sits on the same
    line rather than under it: the head is one row tall and this band is meant to cost the
    rail as little as it can. */
 .rooms-head {
@@ -5455,7 +5055,7 @@ body.row-dragging * { cursor: row-resize !important; }
 
 /* What has arrived since anybody last opened it. Zero draws nothing — a `· 0` is furniture,
    the same reason an empty group heading is not drawn — and it is the shared row's quiet
-   outline rather than the connections' accent pill, for that row's reason: a room is a log,
+   outline rather than anything louder, for that row's reason: a room is a log,
    not an inbox. Every message in it was typed into its members' terminals before the panel
    saw it, so a count that asked for attention would be asking for something nobody owes. */
 .room-unseen {
@@ -5666,318 +5266,6 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-faint);
 }
 
-/* ======================================================= connections === */
-
-/* Links as **cards**, never lines drawn between two rows. The maintainer's own call, after
-   it was flagged that a line needs both endpoints on screen and that measuring row
-   positions on every rail repaint is the class of bug that already bit this project. A card
-   is the object: it survives scrolling, sorting and a collapsed group, and nothing about it
-   knows where either row is.
-
-   The bottom band of the rail, under the session list — the maintainer moved it here from a
-   column of its own the day after it shipped. A **sibling** of `.rail-list`, never a block
-   inside it: an open group's tint in that list is tiled from three full-width rows, and
-   anything joining that flow has to answer to it. Out here it is one more band in the
-   rail's flex column, exactly as `.rail-foot` below it already is, and the tint is
-   untouched.
-
-   `flex: none` with an explicit height, so the session list above takes what is left — and
-   so the grip always does something visible, which is what `--rail` and `--aside` promise
-   and what a content-height block with a `max-height` could not. */
-.rail-conn {
-  display: none;
-  flex: none;
-  height: var(--conn-h);
-  min-height: 0;
-  flex-direction: column;
-  border-top: 1px solid var(--rule);
-  background: var(--surface);
-}
-
-.app.has-links .rail-conn { display: flex; }
-.app.has-links .conn-grip { display: flex; }
-
-/* The Tasks/Room divider's twin: a row grip between two blocks that simply meet, so it is
-   a flex item rather than an overlay, and the negative margins are what stop it costing
-   seven pixels of the rail — -4 above and -3 below nets zero, landing its hairline on the
-   block's own top rule. `position: relative` because the shared `.pane-grip` is absolute
-   and a row divider has to sit where the flow put it. */
-.conn-grip {
-  display: none;
-  position: relative;
-  flex: none;
-  margin: -4px 0 -3px;
-}
-
-/* The rail's own headings scale, not the lead aside's — this is a band in the rail and it
-   should read as one. No rule under it: the block already carries one above, and two
-   hairlines two lines apart in a 20rem column is furniture. */
-.conn-head {
-  flex: none;
-  font-family: var(--mono);
-  font-size: 0.63rem;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  padding: 0.7rem 1.1rem 0.4rem;
-}
-
-.conn-list {
-  flex: 1;
-  overflow-y: auto;
-  min-height: 0;
-  padding: 0 0.7rem 0.7rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-}
-
-.conn-card {
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  background: var(--ground);
-  overflow: hidden;
-}
-
-/* The card whose thread is in a pane right now. The same accent edge the rail's open row
-   wears, for the same reason and with the same meaning: this is the one you are in. */
-.conn-card.is-open {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule));
-  background: color-mix(in srgb, var(--accent) 10%, var(--ground));
-}
-
-.conn-open {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 0.5rem 0.55rem 0.4rem;
-  min-width: 0;
-}
-
-.conn-open:hover { background: var(--surface-sunk); }
-
-.conn-pair {
-  display: flex;
-  align-items: baseline;
-  gap: 0.3rem;
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  min-width: 0;
-}
-
-/* Both names shrink together rather than one eating the other — a link is symmetrical and
-   a card that showed one project whole and the other as an ellipsis would read as being
-   about the first. The full paths are on the card's own hover. */
-.conn-proj {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink);
-}
-
-.conn-tie { flex: none; color: var(--ink-faint); }
-
-.conn-unseen {
-  flex: none;
-  font-family: var(--mono);
-  font-size: 0.62rem;
-  background: var(--accent);
-  color: var(--surface);
-  border-radius: 999px;
-  padding: 0 0.35rem;
-}
-
-.conn-label {
-  font-size: 0.74rem;
-  color: var(--ink-muted);
-  margin-top: 0.15rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* One line, cut by CSS and never by a measurement. The room's five-line clamp has to
-   measure because it decides whether to draw a control; this decides nothing, so it does
-   not — and this repaints on the roster beat, where a forced layout is what slides a list
-   under whoever is reading it. */
-.conn-last {
-  margin-top: 0.25rem;
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  color: var(--ink-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.conn-last.is-quiet { color: var(--ink-faint); font-style: italic; }
-.conn-last-from { color: var(--ink-faint); margin-right: 0.3rem; }
-
-.conn-foot {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 0.4rem;
-  padding: 0.1rem 0.55rem 0.4rem;
-  font-family: var(--mono);
-  font-size: 0.64rem;
-  color: var(--ink-faint);
-}
-
-/* Quiet until you go for it. Closing writes into two projects' standing records and cannot
-   be undone from here, so it asks first (`armConfirm`) — but a control that shouted about
-   itself on a card you read every day would be the wrong kind of warning. */
-.conn-close {
-  flex: none;
-  color: var(--ink-faint);
-  border: 1px solid transparent;
-  border-radius: 2px;
-  padding: 0 0.3rem;
-  font-family: var(--mono);
-  font-size: 0.64rem;
-}
-
-.conn-close:hover { color: var(--decision); border-color: currentColor; }
-.conn-close:disabled { opacity: 0.5; cursor: default; }
-
-/* ---- the `connect` block in a lead's aside: the control that MAKES a link ----
-
-   A form, not a list. The band at the foot of the rail is where links are read; this is where one
-   is opened, and it lives in the aside because a link is between two *projects* and this is
-   the only per-project surface that already exists.
-
-   It borrows the settings block's chrome deliberately — `--mono` on `--ground` inside a
-   `--rule` border, the accent halo on focus — because it is the same kind of thing one
-   heading up: values you set, on a panel this narrow. */
-.conn-form {
-  padding: 0.5rem 0.7rem 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  border-bottom: 1px solid var(--rule);
-  font-size: 0.8rem;
-}
-
-/* The plus, in the gear's own slot. It rotates into a cross when the form is open — the
-   gear turns 60°, which reads as a dial being adjusted; a plus wants 45°, where it stops
-   being a plus and starts being the way back out. */
-.conn-add {
-  font-family: var(--mono);
-  font-size: 1.15rem;
-  font-weight: 500;
-}
-.conn-add.is-open { transform: rotate(45deg); }
-
-.conn-form-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  justify-content: space-between;
-}
-.conn-form-cap { flex: none; color: var(--ink-muted); cursor: pointer; }
-
-/* Wider than the settings knobs' 60%: a project name is longer than a number, and the one
-   thing this control must not do is show two projects as the same truncated word. */
-.conn-pick { max-width: 68%; }
-
-/* The chosen project's whole path, on the page rather than on a hover — an `<option>`'s
-   `title` is not drawn at all in a native macOS dropdown, and this line is the only thing
-   that separates two projects sharing a basename.
-
-   It **wraps** rather than truncating, and that is the second thing tried. A one-line box
-   truncates at the wrong end (the head of a path is where two projects sharing a basename
-   differ), and `direction: rtl` — the usual way to move an ellipsis to the front — renders
-   a leading `/` at the *right* of the line, because a slash is bidi-neutral and lands at
-   the paragraph direction's end: measured, `/Users/…/beta` came out as `…/foreman-sandbox/
-   beta/`, a path that is not the one on disk. Two or three wrapped lines inside a form that
-   is only open while you fill it in is the cheaper answer than a line that reads wrongly.
-
-   It holds one line's height when nothing is chosen, so the form does not jump on the
-   first selection. */
-.conn-form-path {
-  font-family: var(--mono);
-  font-size: 0.66rem;
-  line-height: 1.4;
-  color: var(--ink-muted);
-  overflow-wrap: anywhere;
-  margin-top: -0.2rem;
-  min-height: 1.4em;
-}
-.conn-form-path.is-quiet { color: transparent; }
-
-.conn-form-input {
-  appearance: none;
-  flex: 1 1 auto;
-  min-width: 0;
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  color: var(--ink);
-  background: var(--ground);
-  border: 1px solid var(--rule);
-  border-radius: 3px;
-  padding: 0.15rem 0.35rem;
-  transition: border-color 120ms ease, background-color 120ms ease;
-}
-.conn-form-input::placeholder { color: var(--ink-faint); font-family: inherit; }
-.conn-form-input:hover:not(:disabled) { border-color: var(--rule-strong); }
-.conn-form-input:focus-visible {
-  outline: none;
-  border-color: var(--accent);
-  background: var(--surface);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
-}
-.conn-form-input:disabled { color: var(--ink-faint); cursor: default; }
-
-.conn-form-foot { display: flex; justify-content: flex-end; }
-
-/* The one press in this block. Opening a link is not destructive — closing one is, and that
-   control asks first on the card — so this is an ordinary filled button rather than a quiet
-   one, and it is simply not pressable until a project is chosen. */
-.conn-form-go {
-  font-family: var(--mono);
-  font-size: 0.72rem;
-  color: var(--surface);
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 3px;
-  padding: 0.15rem 0.7rem;
-  cursor: pointer;
-  transition: opacity 120ms ease;
-}
-.conn-form-go:hover:not(:disabled) { opacity: 0.85; }
-.conn-form-go:disabled {
-  color: var(--ink-faint);
-  background: none;
-  border-color: var(--rule);
-  cursor: default;
-}
-
-/* The "reading the projects on this Mac" line and the "nothing to link to yet" one. Fine
-   print rather than an error: neither of them is anything going wrong. (It used to carry
-   the relaunch sentence too — that is gone; see the link-create endpoint for why.) */
-.conn-form-note {
-  color: var(--ink-faint);
-  font-size: 0.7rem;
-  line-height: 1.45;
-}
-
-/* The chip on a lead's row: which other project this lead is connected to, and the way into
-   that thread. On the third line team rows already have — never a fourth. */
-.link-chip {
-  flex: none;
-  border-radius: 2px;
-  padding: 0 0.28rem;
-  font-size: 0.9em;
-  letter-spacing: 0.04em;
-  color: var(--mode-edits);
-  border: 1px solid currentColor;
-  cursor: pointer;
-}
-
-.link-chip:hover { background: color-mix(in srgb, var(--mode-edits) 18%, transparent); }
-
 /* -------------------------------------------------------- the toast --- */
 
 /* A sentence with nowhere else to go — see `toast` in app.js. Over the panel rather than in
@@ -6020,12 +5308,6 @@ body.row-dragging * { cursor: row-resize !important; }
   .app[data-view="rail"] .main { display: none; }
   /* The rail is the whole viewport here, so there is no edge between two columns to
      drag — and a col-resize strip down the right of a phone-width list is a thing to
-     catch a thumb on. `--rail` is overridden by the `1fr` above either way.
-
-     The connections grip goes with it, and for the same reason: the rail is the whole
-     viewport here, and the band under it does not want a row-resize strip across a
-     phone-width list. The band itself stays — it is inside the rail, so it comes and goes
-     with it, which is half of why it lives there. */
-  .rail-grip,
-  .app.has-links .conn-grip { display: none; }
+     catch a thumb on. `--rail` is overridden by the `1fr` above either way. */
+  .rail-grip { display: none; }
 }

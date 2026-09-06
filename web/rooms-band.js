@@ -12,8 +12,9 @@
  * Three rules are carried in here rather than left to the caller, because each of them has
  * already been paid for somewhere else in this repo:
  *
- * **Patched in place, never rebuilt.** `renderSharedRow` says why for one row and `connSig`
- * says it for a column of cards: the roster broadcasts every couple of seconds, and a band
+ * **Patched in place, never rebuilt.** `renderSharedRow` says why for one row and
+ * `renderMergeQueue` says it for a list one pane over: the roster broadcasts every couple of
+ * seconds, and a band
  * that replaced its children on every beat would take a row out from under the cursor on
  * its way to press it. `patchBand` indexes the children it already has by `data-room-key`,
  * reuses every node it can, and only ever creates the ones that are genuinely new. The row
@@ -21,8 +22,8 @@
  *
  * **Joined with real punctuation.** `|` inside a row, `~` between them. `mergeSig`'s first
  * version joined with what read in every editor as an empty string and was three literal
- * control bytes, so two different queues could spell one signature; `connSig` carries the
- * fix and so does this.
+ * control bytes, so two different queues could spell one signature. This one carries the
+ * fix.
  *
  * **A count is not a badge that asks for anything.** A room is a log, not an inbox — every
  * message in it was typed into its members' terminals before the panel drew a thing — so
@@ -90,7 +91,7 @@ export function bandEntries(rooms = [], { archivedCollapsed = true } = {}) {
 /**
  * What the band last drew, as one string.
  *
- * Every field the face reads is in here, which is the half `connSig` had to learn twice: a
+ * Every field the face reads is in here, which is the half a signature has to get right: a
  * field a card draws but the signature does not is a card that stops repainting on a real
  * change. `openIds` is in it because a row wears the open tint, and `archivedCollapsed`
  * because the fold's caret and its rows both turn on it.

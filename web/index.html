@@ -60,8 +60,8 @@
             answer to two things that are measured against the rows around them: the sticky
             `.folder-label.in-group { top: 2.5rem }` offset, and an open group's tint, which
             is tiled from three full-width rows *in that flow*. That is the reason the
-            connections band and the footer further down are siblings of the list rather
-            than blocks inside it, and it is the reason for this one too.
+            footer further down is a sibling of the list rather than a block inside it, and
+            it is the reason for this one too.
           -->
           <div class="rail-quota" id="railQuota"></div>
 
@@ -78,16 +78,13 @@
 
         <!--
           Peer messages — `shared room` in every identifier here, and the mismatch is
-          deliberate (see `server/shared-room.js`'s header). One row, always here, above the
-          connections band.
+          deliberate (see `server/shared-room.js`'s header). One row, always here.
 
           It is a *row* rather than a card because there is exactly one of it — the machine
           has one room, however many sessions are on it — and a band that can hold only one
-          card is a band that should have been a row. It is persistent for the same reason:
-          the connections band shows and hides with `.app.has-links` because a panel with no
-          links should be the panel it was before that feature, but a room with nothing in
-          it yet still has something to say (`renderShared`'s empty line says it), and a
-          control that only appears once traffic exists is a control nobody discovers.
+          card is a band that should have been a row. It is persistent because a room with
+          nothing in it yet still has something to say (`renderShared`'s empty line says it),
+          and a control that only appears once traffic exists is a control nobody discovers.
 
           A sibling of `.rail-list`, never a block inside it — an open group's tint is tiled
           from three full-width rows in that list, and anything joining that flow has to
@@ -104,35 +101,33 @@
         <!--
           The rooms band: one row per open room, and the archived ones folded away.
 
-          A **sibling** of `.rail-list`, never a block inside it — the third band in the
-          rail's own flex column, after the shared-room row above and before the connections
-          below. The reason is the one both of those already give in their own words: an open
-          group's tint in that list is tiled from three full-width rows *in that flow*, so
-          anything joining it has to answer to it, and `.folder-label.in-group`'s sticky
-          `top` is a hand-measured offset against the row heights in there. Out here the band
-          is one more item in the column and neither of those has anything to know about it.
-          It carries no vertical margin for the same reason.
+          A **sibling** of `.rail-list`, never a block inside it — the last band in the
+          rail's own flex column, after the shared-room row above. The reason is the one that
+          row already gives in its own words: an open group's tint in that list is tiled from
+          three full-width rows *in that flow*, so anything joining it has to answer to it,
+          and `.folder-label.in-group`'s sticky `top` is a hand-measured offset against the
+          row heights in there. Out here the band is one more item in the column and neither
+          of those has anything to know about it. It carries no vertical margin for the same
+          reason.
 
           **The head is persistent; only the list comes and goes.** `.app.has-rooms` gates
-          `.rooms-list` alone, which is the one place this band does not copy
-          `.app.has-links` one band down — and the difference is not a lapse, it is the whole
-          reason the head is a sibling of the list rather than a wrapper around it.
+          `.rooms-list` alone, and the head being a sibling of the list rather than a wrapper
+          around it is the whole reason that is possible.
 
           Why: `+ room` is the **only** way into the create modal, so a gate over the whole
           band would mean the first room could never be made from the panel at all. The
           control would appear only once traffic existed — precisely what the shared-room row
           above refuses to do in its own words: "a control that only appears once traffic
-          exists is a control nobody discovers." The connections band can afford to hide
-          whole because a link is made somewhere else; this one cannot. The maintainer's
-          ruling, taken on those grounds after it was escalated.
+          exists is a control nobody discovers." The maintainer's ruling, taken on those
+          grounds after it was escalated.
 
           So with no rooms the band is one quiet heading line and its control, the way
           `.rail-shared` above is one row — and the rail is otherwise the rail it was before
           this feature.
 
           The rows are filled by `renderRoomsBand` from the roster frame's `rooms` array, and
-          they are **patched in place, never rebuilt**: `renderSharedRow`'s reason one band
-          up, `connSig`'s reason one band down. The log itself never rides that frame.
+          they are **patched in place, never rebuilt**: `renderSharedRow`'s reason, one band
+          up. The log itself never rides that frame.
         -->
         <div class="rail-rooms" id="railRooms">
           <div class="rooms-head">
@@ -143,40 +138,6 @@
           </div>
           <div class="rooms-list" id="roomsList"></div>
         </div>
-
-        <!--
-          The connections: one card per open link, at the bottom of the rail under the
-          session list. It was a column of its own for one day; the maintainer moved it
-          here — same content, new home.
-
-          A **sibling** of `.rail-list`, never a block inside it, for the reason the footer
-          below says in its own words: an open group's tint is tiled from three full-width
-          rows *in that list*, and anything joining that flow has to answer to it. Out here
-          it is simply another band in the rail's own flex column, and the tint has nothing
-          to know about.
-
-          In the markup always, on screen only while at least one open link exists —
-          `.app.has-links` is what shows it, the same show/hide trade `.app.split .main`
-          already makes. With no links the rail is what it was before this feature. The
-          narrow query hides the whole rail, so this comes for free there.
-
-          The grip is the Tasks/Room divider's twin, down to the negative margins: a row
-          divider between two blocks that simply meet, with nothing to hang it off. It is
-          a sibling above the block rather than a child of it, because that is where the
-          edge it drags actually is.
-        -->
-        <div
-          class="pane-grip grip-row conn-grip"
-          id="connGrip"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Connections height"
-          title="Drag to set how much of the rail the connections take · double-click to reset"
-        ></div>
-        <aside class="rail-conn" id="connCol" aria-label="Connections">
-          <div class="conn-head">connections</div>
-          <div class="conn-list" id="connList"></div>
-        </aside>
 
         <!-- A sibling of the list, never inside it: an open group's tint is tiled from
              three full-width rows in `.rail-list`, and anything joining that flow would

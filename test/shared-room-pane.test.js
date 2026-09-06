@@ -173,12 +173,13 @@ test('a reconnect re-subscribes the room, like every other open subscription', (
 
 test('every way out of the room gives the subscription back', () => {
   /*
-   * `closeShared` and `close` are the obvious two. The other two are the ones that look
-   * fine when they are wrong: a pane can stop holding the room by being *given* a session
-   * or a thread, and the frames then go on arriving into a slot that drops them — a
-   * server-side listener pushing into a socket for a pane drawing a transcript.
+   * `closeShared` and `close` are the obvious two. The others are the ones that look fine
+   * when they are wrong: a pane can stop holding the room by being *given* a session or a
+   * group room, and the frames then go on arriving into a slot that drops them — a
+   * server-side listener pushing into a socket for a pane drawing a transcript. (There was a
+   * third opener, the joint thread's, until links were retired on 2026-09-05.)
    */
-  for (const fn of ['function open(id) {', 'function openLink(id) {']) {
+  for (const fn of ['function open(id) {', 'function openGroup(id) {']) {
     const body = app.slice(app.indexOf(fn), app.indexOf(fn) + 900);
     assert.match(body, /leaveShared\(\)/, `${fn} must hand the room's subscription back`);
   }
@@ -212,11 +213,11 @@ test('a pane that can hold a session is asked by kind, not by `linkId`', () => {
   assert.match(fn, /here\.kind\(\) === 'session'/);
   assert.match(fn, /panes\.find\(\(p\) => p\.kind\(\) === 'session'\)/);
   assert.ok(!/linkId\(\)/.test(fn), '`linkId` cannot answer this question any more');
-  // Opening a link, the shared room or a group room replaces a pane holding any of them,
-  // never a session pane — **one non-session pane at a time**, which is also what guarantees
-  // `sessionPane` always has somewhere to send a rail click. Three openers now, and the count
-  // is the point: a fourth kind added without this line would be a second non-session pane.
-  assert.equal(app.match(/panes\.find\(\(p\) => p\.kind\(\) !== 'session'\)/g).length, 3);
+  // Opening the shared room or a group room replaces a pane holding either of them, never a
+  // session pane — **one non-session pane at a time**, which is also what guarantees
+  // `sessionPane` always has somewhere to send a rail click. Two openers now, and the count
+  // is the point: a third kind added without this line would be a second non-session pane.
+  assert.equal(app.match(/panes\.find\(\(p\) => p\.kind\(\) !== 'session'\)/g).length, 2);
 });
 
 test('the room is remembered as its own shape, and restored on a reload', () => {
@@ -232,12 +233,12 @@ test('the room is remembered as its own shape, and restored on a reload', () => 
 
 /* ------------------------------------------------------------ the entry --- */
 
-test('the rail’s row is markup and is persistent, unlike the connections band', () => {
+test('the rail’s row is markup and is persistent', () => {
   assert.match(html, /id="railShared"/);
   assert.match(html, /id="railSharedUnseen"/);
-  // The band hides itself with `.app.has-links`; this row has no such gate, because a room
-  // with nothing in it yet still has something to say and a control that appears only once
-  // traffic exists is a control nobody discovers.
+  // The row has no show/hide gate at all, because a room with nothing in it yet still has
+  // something to say and a control that appears only once traffic exists is a control
+  // nobody discovers.
   const row = styles.match(/\.rail-shared \{[\s\S]*?\}/)[0];
   assert.ok(!/display: none/.test(row), 'the row must not hide itself');
   assert.match(app, /el\.railShared\.onclick = openSharedRoom;/);
