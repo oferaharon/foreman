@@ -9953,9 +9953,18 @@ function createPane(slot, host) {
   function buildRoomPanel() {
     const panel = document.createElement('aside');
     panel.className = 'room-panel';
+    /*
+     * The one plain heading left in this column — `settings`, `tasks` and `connect` all
+     * carry controls and are built by hand. It is banded (`is-band`) because it is the
+     * heading the tasks list runs straight into: everything here sits on `--shelf`, and a
+     * head with a rule under it and nothing above read as one more line of the list above
+     * rather than as the start of the room. The band is a paint and nothing else — see the
+     * stylesheet for why a border here would move `.tasks-grip` off what it was measured
+     * against.
+     */
     const section = (label, title) => {
       const head = document.createElement('div');
-      head.className = 'room-head';
+      head.className = 'room-head is-band';
       head.textContent = label;
       head.title = title;
       return head;

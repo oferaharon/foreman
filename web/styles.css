@@ -1392,6 +1392,27 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-muted);
   border-bottom: 1px solid var(--rule);
 }
+
+/* The team room's own heading, and the one section head in this column that has to read as
+   a boundary: the aside is `--shelf` end to end, `.room-head` carries a rule underneath it
+   and nothing above, and the tasks list runs straight into it — so on screen the heading
+   read as one more line of that list rather than as the start of something else.
+
+   **Background only, no border and no padding**, which is the whole of why this is safe.
+   The heading's height is an input to the block above it — `.tasks-grip` sits between them
+   with `-4px / -3px` margins chosen to land its hairline on the tasks block's own bottom
+   rule — so a `border-top` here would be both a second hairline and a pixel of height, and
+   the grip would stop meeting what it was measured against. A paint changes no metrics.
+   (`.folder-label.in-group`'s hand-measured sticky offset is the rail's version of this
+   trap; different column, same class of mistake.)
+
+   `--band-head` rather than `--surface-sunk`, which was the other existing token that
+   would show here: sunk is the row-hover tint, and the task rows immediately above hover
+   to it, so the heading would have been painted the colour the thing above it turns under
+   the cursor. Measured in dark: this band separates from the `--shelf` panel by 1.109 and
+   holds `--ink-muted` at 4.68; sunk separates by 1.150 but collides, and plain `--surface`
+   separates by only 1.095. */
+.room-head.is-band { background: var(--band-head); }
 /* The one header that folds its block away. The gear is pushed to the right edge of the
    panel and the label keeps the line, so the heading reads exactly as the other two do
    until you go looking for the control. */
@@ -5455,8 +5476,21 @@ body.row-dragging * { cursor: row-resize !important; }
   align-items: baseline;
   gap: 0.5rem;
   padding: 0.7rem 1.1rem 0.4rem;
+  /* The band's head is the one heading in this column that is not a folder, and it was
+     spelled exactly like one: `--ink-faint`, 0.63rem, 0.13em, on `--surface` — the same
+     four values `.group-label` uses. So it did not stand apart from the headings around it,
+     it read as one of them, and at 3.48 against the dark surface the words were faint on
+     top of that. The band carries its own ground now, and the head is the only part of it
+     that does: the rows below stay on `.rail-rooms`'s surface, or a permanently tinted
+     block in the rail would be competing with an open group's tint for the same meaning. */
+  background: var(--band-head);
 }
 
+/* `--ink`, and the size left alone. This is a heading for a block, which in this column is
+   what `.shelf-label` is — and that one is already `--ink` for the same reason: a rail of
+   nine folders has to read as five things. Not the accent, which in this panel means the
+   maintainer's own authority and a selected row. Measured in dark on `--band-head`: 11.69,
+   against 3.48 for the old faint-on-surface. */
 .rooms-title {
   flex: 1;
   min-width: 0;
@@ -5464,7 +5498,7 @@ body.row-dragging * { cursor: row-resize !important; }
   font-size: 0.63rem;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: var(--ink-faint);
+  color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5479,7 +5513,12 @@ body.row-dragging * { cursor: row-resize !important; }
   font-family: var(--mono);
   font-size: 0.63rem;
   letter-spacing: 0.06em;
-  color: var(--ink-faint);
+  /* One step up from `--ink-faint`, and it is the band that forces it rather than taste:
+     faint reads 2.87 on `--band-head` where it read 3.48 on the surface, so leaving it
+     would have made the only way into the create modal *less* legible as a side effect of
+     making the title more. `--ink-muted` puts it at 4.68 and still a clear step under the
+     title's `--ink`, which is the hierarchy this line was written with. */
+  color: var(--ink-muted);
   padding: 0 0.15rem;
   border-radius: 3px;
 }
