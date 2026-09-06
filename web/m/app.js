@@ -196,6 +196,10 @@ function leaveRoute() {
   if (route.kind === 'home') {
     clearInterval(homeTick);
     homeTick = null;
+    // The sheet hangs off `document.body`, not off the screen, so the `replaceChildren`
+    // below does not reach it — and a launch that navigates straight into its new lead
+    // would otherwise leave it sitting over the transcript.
+    closeStartSheet();
   }
   el.screen.replaceChildren();
 }
@@ -209,6 +213,7 @@ const el = {
   title: document.createElement('div'),
   quota: document.createElement('button'),
   conn: document.createElement('span'),
+  start: document.createElement('button'),
   refresh: document.createElement('button'),
   screen: document.createElement('div'),
 };
@@ -241,12 +246,33 @@ el.quota.addEventListener('click', () => {
 
 el.conn.className = 'm-conn';
 el.conn.textContent = '●';
+
+/*
+ * The `+`, and it opens a list rather than a form: the panel cannot create a team from a
+ * phone — a team directory is written the first time a lead is launched in a folder, which
+ * is a thing you do once at the Mac — so this is *start something*, never *add a team*.
+ * The sheet it opens is exactly the teams the home list is hiding, and its heading and hint
+ * say so in words for the same reason.
+ *
+ * Drawn only when there is at least one of them (`renderStartButton`), the way every count
+ * on this screen drops entirely at zero. It sits between the connection dot and `⟳` so the
+ * refresh stays in the corner a thumb has already learned; the shell header hides itself on
+ * the lead screen, so this inherits the right visibility with no branch of its own.
+ */
+el.start.className = 'm-icon-btn m-start-btn';
+el.start.type = 'button';
+el.start.textContent = '+';
+el.start.hidden = true;
+el.start.setAttribute('aria-label', 'Start a lead');
+el.start.title = 'Start a lead in a team that has none running';
+el.start.addEventListener('click', openStartSheet);
+
 el.refresh.className = 'm-icon-btn';
 el.refresh.type = 'button';
 el.refresh.textContent = '⟳';
 el.refresh.setAttribute('aria-label', 'Refresh');
 el.refresh.addEventListener('click', refresh);
-el.head.append(el.title, el.quota, el.conn, el.refresh);
+el.head.append(el.title, el.quota, el.conn, el.start, el.refresh);
 
 el.screen.className = 'm-screen';
 
@@ -562,6 +588,13 @@ function homeRow(team) {
   };
 }
 
+/*
+ * Note the first line is now a guard rather than something on screen. `homeRow` still
+ * answers for a team with no lead — the start sheet is built out of exactly those rows —
+ * but the home list no longer draws one, so the sentence is what this returns for a row
+ * nothing renders. Left total rather than trimmed to the cases home has: a partial function
+ * over `homeRow`'s own output would throw the day something asks it the other question.
+ */
 function stateWord(row) {
   if (!row.lead) return 'no lead running';
   if (row.blocked) return 'blocked';
@@ -570,8 +603,40 @@ function stateWord(row) {
   return row.lead.status || 'unknown';
 }
 
+/**
+ * The home list and the start sheet, out of one pass over the teams.
+ *
+ * The test for "is this team running" is `homeRow`'s own `lead` field and there is
+ * deliberately no second one. `leadFor` is what fills it, matched on `paneCwd` for the
+ * reasons written over it, and a sheet that asked the same question its own way could offer
+ * to start a lead that is already up — or hide the one row the home list is also hiding.
+ * Two spellings of one rule is this project's oldest lesson in a smaller costume.
+ *
+ * Both halves come out in `state.teams`' order, which `loadTeams` sorts by name and
+ * deliberately not by urgency: the order is a promise about where a row will be, and a list
+ * that reorders under a thumb is how you tap the wrong one. `map` and `filter` preserve it,
+ * so neither list re-sorts and the sheet is ordered the way home is.
+ */
+function partitionTeams() {
+  const rows = (state.teams || []).map(homeRow);
+  return {
+    live: rows.filter((r) => r.lead),
+    startable: rows.filter((r) => !r.lead),
+  };
+}
+
 function renderHome() {
   if (!homeList?.isConnected) return;
+
+  /*
+   * Ahead of the signature guard below, because the sheet carries its own. A launch
+   * starting or failing changes what the sheet draws and nothing at all on the home list —
+   * its rows are the teams with a lead, which is the one thing a launch in flight has not
+   * got yet — so a repaint gated on the home signature would leave `start` on a row that is
+   * already going. This is the one function every path that could move either list already
+   * goes through.
+   */
+  renderStartSheet();
 
   /*
    * One clock for the whole paint. The gauges' signature and the nodes it guards both ask
@@ -587,6 +652,7 @@ function renderHome() {
     if (sig === homeSignature) return;
     homeSignature = sig;
     renderQuota(now);
+    renderStartButton(0);
     const note = document.createElement('div');
     note.className = 'm-note';
     note.textContent = 'Loading teams…';
@@ -599,6 +665,7 @@ function renderHome() {
     if (sig === homeSignature) return;
     homeSignature = sig;
     renderQuota(now);
+    renderStartButton(0);
     const note = document.createElement('div');
     note.className = 'm-note';
     note.textContent =
@@ -607,16 +674,33 @@ function renderHome() {
     return;
   }
 
-  const rows = state.teams.map(homeRow);
+  /*
+   * Only the teams whose lead is running. A team with no live lead is not on this screen at
+   * all — it is behind the header's `+`, which is the whole of this change: home answers
+   * *what is happening right now*, and *what I could start* is a different question that was
+   * being answered in the same list.
+   *
+   * The empty state one branch up is untouched and there is deliberately no second one. It
+   * belongs to "no team directories exist", which is a different fact and still the one it
+   * describes; a home list with every lead stopped draws no rows and no note, and the `+`
+   * in the header is what it has to say.
+   */
+  const { live, startable } = partitionTeams();
 
   // Repaint only when something a reader could see has changed. The roster is broadcast on
   // every real change and a list rebuilt under a thumb is a list that eats taps.
+  //
+  // `startable.length` rides in it because the header's `+` is painted from inside this
+  // guard and appears and vanishes with that number — without it the button would still be
+  // there after the last lead-less team gained a lead, opening onto nothing. The launching
+  // and error state of those teams deliberately is *not* in here any more: home no longer
+  // draws either, and the sheet keeps its own signature for exactly that.
   const sig =
-    `${quota}::` +
+    `${quota}::${startable.length}::` +
     JSON.stringify(
-      rows.map((r) => [
+      live.map((r) => [
         r.team.repo,
-        r.lead?.id || null,
+        r.lead.id,
         stateWord(r),
         // The rendered string, not `lastActivity` — see the field's own note in `homeRow`.
         r.age,
@@ -626,15 +710,14 @@ function renderHome() {
         r.unread,
         r.workers,
         r.review,
-        launching.has(r.team.repo),
-        launchErrors.get(r.team.repo) || '',
       ]),
     );
   if (sig === homeSignature) return;
   homeSignature = sig;
 
   renderQuota(now);
-  homeList.replaceChildren(...rows.map(teamNode));
+  renderStartButton(startable.length);
+  homeList.replaceChildren(...live.map(teamNode));
 }
 
 /* --------------------------------------------------------------- quota --- */
@@ -789,21 +872,21 @@ function teamNode(row) {
 
   /*
    * One grid, three columns: the dot's gutter, the text, and a trailing control column
-   * that the badge takes on line 1 and the launch button on line 2.
+   * that the badge takes on line 1 and the context percentage on line 2.
    *
-   * The whole body is the tap target when there is a lead to open — and is a plain `div`
-   * when there is not, because the launch button lives *inside* it and a `<button>` inside
-   * a `<button>` is invalid markup whose disabled form swallows the child's clicks
-   * outright. That would have killed the one control that matters on a team with no lead.
+   * The whole body is the tap target, and unconditionally a `<button>` — `renderHome` hands
+   * this only teams whose lead is live, so there is no lead-less shape to branch for any
+   * more. It used to be a plain `div` in that case, because the launch button lived inside
+   * it and a `<button>` inside a `<button>` is invalid markup whose disabled form swallows
+   * the child's clicks; that control is now the header's `+` and its sheet, so the branch,
+   * its `is-static` class and the row's error line all went with it.
    */
-  const body = document.createElement(row.lead ? 'button' : 'div');
-  body.className = `m-team-body${row.lead ? '' : ' is-static'}`;
-  if (row.lead) {
-    body.type = 'button';
-    body.addEventListener('click', () => {
-      location.hash = `#/lead/${encodeURIComponent(row.lead.id)}`;
-    });
-  }
+  const body = document.createElement('button');
+  body.className = 'm-team-body';
+  body.type = 'button';
+  body.addEventListener('click', () => {
+    location.hash = `#/lead/${encodeURIComponent(row.lead.id)}`;
+  });
 
   /*
    * The gutter is two reserved slots, not one dot that moves.
@@ -831,7 +914,7 @@ function teamNode(row) {
   // A muted numeric badge, deliberately not the dot and deliberately not amber: it answers
   // a different question — the lead has said something since I last looked. Every count on
   // this row drops entirely at zero, this one included.
-  if (row.lead && row.unread > 0) {
+  if (row.unread > 0) {
     body.classList.add('has-badge');
     const badge = document.createElement('span');
     badge.className = 'm-badge';
@@ -854,9 +937,8 @@ function teamNode(row) {
    * into `3` + `4`. Grid also means it cannot make the row taller: it lands in a cell that
    * already exists, beside a meta line it is smaller than.
    *
-   * It shares that cell with the launch button below, and the two are mutually exclusive by
-   * construction — a percentage needs a lead and the button is only built when there is
-   * none. Nothing is layered.
+   * It used to share that cell with the launch button, which is now in the start sheet, so
+   * it is the only thing in it. Nothing was layered then and nothing is now.
    */
   if (row.ctx != null) {
     const ctx = document.createElement('span');
@@ -866,37 +948,7 @@ function teamNode(row) {
     body.appendChild(ctx);
   }
 
-  if (!row.lead) {
-    // The row *is* the launch menu: the home list is the teams that already exist, which
-    // is precisely the folder menu the ruling asked for, so there is no path typing and no
-    // second screen for a four-item choice.
-    //
-    // It sits on the second line, beside `no lead running`, rather than spanning both. On
-    // line 1 it took the trailing column from the name, and the row that most needs
-    // reading — the one you are about to launch into — was the one whose name ellipsised.
-    const busy = launching.has(row.team.repo);
-    const start = document.createElement('button');
-    start.type = 'button';
-    start.className = `m-team-launch${busy ? ' is-busy' : ''}`;
-    start.textContent = busy ? 'starting…' : 'start lead';
-    start.disabled = busy;
-    start.addEventListener('click', () => startLead(row.team));
-    body.appendChild(start);
-  }
-
   wrap.appendChild(body);
-
-  const err = launchErrors.get(row.team.repo);
-  if (err) {
-    const line = document.createElement('div');
-    line.className = 'm-team-error';
-    // The server's own sentence, verbatim. "Not a git repository — a team lead needs one"
-    // and "This project already has a team lead" are both real answers and both tell you
-    // what to do next; a rewrite here would lose that.
-    line.textContent = err;
-    wrap.appendChild(line);
-  }
-
   return wrap;
 }
 
@@ -965,6 +1017,13 @@ async function startLead(team) {
     if (!res.ok || data.error) throw new Error(data.error || `Launch failed (${res.status}).`);
 
     if (data.sessionId) {
+      // Closed here rather than left to `leaveRoute`, which does close it a moment later:
+      // assigning `location.hash` fires `hashchange` as a task, so the `finally` below runs
+      // first and would repaint this row back to `start` for a frame on a launch that
+      // worked. The route change is still the backstop, and is what covers every other way
+      // off this screen.
+      closeStartSheet();
+
       // Straight into it — and note what that lands on: a session that has not yet written
       // a transcript carries a synthetic `pane-19` id, `subscribe` answers with an empty
       // transcript, and the registry issues a `rebound` the moment it first speaks. See
@@ -977,6 +1036,166 @@ async function startLead(team) {
     launching.delete(team.repo);
     renderHome();
   }
+}
+
+/* --------------------------------------------------------- start sheet --- */
+
+/*
+ * The teams the home list is now hiding — the ones with no lead running — and the one thing
+ * that can be done with them. Opened by the `+` in the shell header, which is drawn only
+ * when there is at least one.
+ *
+ * The overlay idiom is the tasks tab's brief modal (`tasks.css`): a fixed backdrop over the
+ * whole page, one scroller with `overscroll-behavior: contain`, and three ways out — the
+ * ✕, the backdrop, and Escape. One thing differs and it is deliberate: this box is anchored
+ * to the **bottom** of the screen rather than centred, because every row in it is something
+ * to press and a centred box puts its own controls out of a thumb's reach on a big phone.
+ *
+ * It repaints behind its own signature for the reason `renderHome` has one. This box is
+ * rendered from `renderHome`, which runs on every roster frame, and a list rebuilt under a
+ * thumb is a list that eats taps — the signature moves only when a row appears, goes, or
+ * changes what it says.
+ *
+ * There is no launch path of its own here: `startLead` is the one, unchanged, with its
+ * `launching` set and its `launchErrors` map, and this is now its only caller.
+ */
+let sheet = null;
+
+function openStartSheet() {
+  if (sheet) return;
+
+  const back = document.createElement('div');
+  back.className = 'm-sheet-back';
+
+  const box = document.createElement('div');
+  box.className = 'm-sheet';
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-label', 'Start a lead');
+
+  const head = document.createElement('div');
+  head.className = 'm-sheet-head';
+  const h = document.createElement('h2');
+  h.textContent = 'Start a lead';
+  const x = document.createElement('button');
+  x.type = 'button';
+  x.className = 'm-sheet-x';
+  x.textContent = '✕';
+  x.setAttribute('aria-label', 'Close');
+  head.append(h, x);
+
+  // What the list is, in one line, because the `+` is a verb and this is what it acts on.
+  // The panel cannot create a team from a phone — a team directory is written the first
+  // time a lead is launched in a folder, and that is a thing done once at the Mac.
+  const hint = document.createElement('p');
+  hint.className = 'm-sheet-hint';
+  hint.textContent = 'Teams with no lead running.';
+
+  const list = document.createElement('div');
+  list.className = 'm-sheet-list';
+
+  box.append(head, hint, list);
+  back.appendChild(box);
+  document.body.appendChild(back);
+
+  sheet = { back, list, sig: null };
+
+  x.addEventListener('click', closeStartSheet);
+  back.addEventListener('mousedown', (e) => {
+    if (e.target === back) closeStartSheet();
+  });
+  document.addEventListener('keydown', onSheetKey, true);
+
+  renderStartSheet();
+  x.focus();
+}
+
+function onSheetKey(e) {
+  if (e.key === 'Escape') closeStartSheet();
+}
+
+function closeStartSheet() {
+  if (!sheet) return;
+  sheet.back.remove();
+  sheet = null;
+  document.removeEventListener('keydown', onSheetKey, true);
+}
+
+function renderStartSheet() {
+  if (!sheet) return;
+
+  const { startable } = partitionTeams();
+
+  /*
+   * The last one gained a lead — started at the Mac, or by the tap that is still in flight.
+   * The header's `+` goes in the same paint, so an empty box left up would be a second
+   * thing on screen saying nothing. It closes instead: there is no note here, and the one
+   * on the home list belongs to a different fact and is not being reworded to cover this.
+   */
+  if (!startable.length) {
+    closeStartSheet();
+    return;
+  }
+
+  const sig = JSON.stringify(
+    startable.map((r) => [
+      r.team.repo,
+      launching.has(r.team.repo),
+      launchErrors.get(r.team.repo) || '',
+    ]),
+  );
+  if (sig === sheet.sig) return;
+  sheet.sig = sig;
+
+  sheet.list.replaceChildren(...startable.map(sheetRow));
+}
+
+/** One team, and the one thing that can be done with it. */
+function sheetRow(row) {
+  const item = document.createElement('div');
+  item.className = 'm-sheet-item';
+
+  const busy = launching.has(row.team.repo);
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `m-sheet-row${busy ? ' is-busy' : ''}`;
+  btn.disabled = busy;
+  btn.addEventListener('click', () => startLead(row.team));
+
+  const name = document.createElement('span');
+  name.className = 'm-sheet-name';
+  name.textContent = row.team.name;
+
+  const go = document.createElement('span');
+  go.className = 'm-sheet-go';
+  go.textContent = busy ? 'starting…' : 'start';
+
+  btn.append(name, go);
+  item.appendChild(btn);
+
+  const err = launchErrors.get(row.team.repo);
+  if (err) {
+    const line = document.createElement('div');
+    line.className = 'm-sheet-error';
+    // The server's own sentence, verbatim. "Not a git repository — a team lead needs one"
+    // and "This project already has a team lead" are both real answers and both tell you
+    // what to do next; a rewrite here would lose that.
+    line.textContent = err;
+    item.appendChild(line);
+  }
+
+  return item;
+}
+
+/**
+ * The header's `+`: drawn only when there is something behind it.
+ *
+ * `[hidden]` alone would not do it — `.m-icon-btn` sets `display: flex`, which is a class
+ * rule and beats the UA stylesheet. `m.css` carries the matching `[hidden]` rule, which is
+ * the third time that trap has been paid for on this screen.
+ */
+function renderStartButton(n) {
+  el.start.hidden = n === 0;
 }
 
 /* --------------------------------------------------------------- lead --- */
