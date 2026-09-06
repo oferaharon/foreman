@@ -212,8 +212,11 @@ test('a pane that can hold a session is asked by kind, not by `linkId`', () => {
   assert.match(fn, /here\.kind\(\) === 'session'/);
   assert.match(fn, /panes\.find\(\(p\) => p\.kind\(\) === 'session'\)/);
   assert.ok(!/linkId\(\)/.test(fn), '`linkId` cannot answer this question any more');
-  // Opening a link or the room replaces a pane holding either, never a session pane.
-  assert.equal(app.match(/panes\.find\(\(p\) => p\.kind\(\) !== 'session'\)/g).length, 2);
+  // Opening a link, the shared room or a group room replaces a pane holding any of them,
+  // never a session pane — **one non-session pane at a time**, which is also what guarantees
+  // `sessionPane` always has somewhere to send a rail click. Three openers now, and the count
+  // is the point: a fourth kind added without this line would be a second non-session pane.
+  assert.equal(app.match(/panes\.find\(\(p\) => p\.kind\(\) !== 'session'\)/g).length, 3);
 });
 
 test('the room is remembered as its own shape, and restored on a reload', () => {
