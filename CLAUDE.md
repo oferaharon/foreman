@@ -108,7 +108,10 @@ housekeeping, `deployed.js` whether a merged task is actually running on this Ma
 
 - **The lead never writes code.** Its `--settings` denies the checkout and allows only
   its team dir. It reads, decides, dispatches, reviews, reports. No exception for
-  one-liners — dispatch a worker.
+  one-liners — dispatch a worker. It may publish a release (`Bash(gh release create:*)` is
+  a standing allow rule, unconditional unlike `leadMerges`, because a release can only
+  follow a version bump the maintainer already merged by hand) — it still cannot commit,
+  push, or merge without the maintainer's own word.
 - **Workers never launch with bypass.** `skipDangerousModePermissionPrompt` is set
   globally, so a bypass worker would look entirely normal in the rail. The flag is not
   reachable from the dispatch path at all.
