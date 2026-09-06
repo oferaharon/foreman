@@ -23,28 +23,6 @@ const ROOM_ENTRIES = Array.from({ length: 25 }, (_, i) => ({
   seq: i + 1, ts: i + 1, from: 'lead', to: 'all', kind: 'status', text: `entry ${i + 1}`,
 }));
 
-const PEER = '/Users/x/Code/Beta';
-
-/*
- * Three links, and each one is a case. `lnk-1` is this repo's open link; `lnk-2` joins two
- * *other* projects, which is what proves `link_read`'s scoping is a scoping and not a
- * formality; `lnk-3` is this repo's *closed* one, which `link_list` must leave out and
- * `link_read` must still answer — a link that closed an hour ago still has a history this
- * lead was half of.
- */
-const LINKS = [
-  { id: 'lnk-1', a: REPO, b: PEER, label: 'shared auth schema', closedAt: null, lastAt: 25, unseen: 2 },
-  { id: 'lnk-2', a: '/Users/x/Code/Gamma', b: '/Users/x/Code/Alpha', label: '', closedAt: null },
-  { id: 'lnk-3', a: REPO, b: PEER, label: 'an old one', closedAt: 9 },
-];
-
-// 25 thread entries, ts 1..25 — the same shape as ROOM_ENTRIES, and for the same reason:
-// enough to exercise the tail cap (20) against a real cursor that is not bounded by it.
-const THREAD_ENTRIES = Array.from({ length: 25 }, (_, i) => ({
-  ts: i + 1, seq: i + 1, kind: 'link', link: 'lnk-1', speaker: 'lead',
-  sender: i % 2 ? PEER : REPO, text: `link entry ${i + 1}`,
-}));
-
 /*
  * Group rooms, from the session's side of the wire.
  *
@@ -103,7 +81,6 @@ const stubState = {
   questionAnswers: [],
   dispatches: [],
   added: [],
-  linkMessages: [],
   groupPosts: [],
   groupReads: [],
 };
@@ -226,31 +203,6 @@ test.before(async () => {
       } else if (req.url === '/api/team/tasks' && req.method === 'POST') {
         stubState.added.push(parsed);
         res.end(JSON.stringify({ ok: true, id: parsed.label, task: { id: parsed.label, state: 'pending' } }));
-      } else if (req.url.startsWith('/api/team/links/') && req.url.includes('/message') && req.method === 'POST') {
-        stubState.linkMessages.push({ url: req.url, body: parsed });
-        res.end(JSON.stringify({ ok: true, link: 'lnk-1', peer: PEER, sessionId: 'lead-b', delivered: true, queued: false }));
-      } else if (req.url.startsWith('/api/team/links/') && req.url.includes('/thread') && req.method === 'GET') {
-        const id = req.url.slice('/api/team/links/'.length).split('/')[0];
-        const since = Number(new URL(req.url, 'http://x').searchParams.get('since')) || 0;
-        const all = THREAD_ENTRIES.filter((e) => e.link === id || id === 'lnk-3');
-        const after = since > 0 ? all.filter((e) => e.ts > since) : all;
-        const LIMIT = 200; // the endpoint's own cap, mirrored — the stub is the contract
-        res.end(
-          JSON.stringify({
-            link: LINKS.find((l) => l.id === id) || null,
-            entries: after.slice(-LIMIT),
-            cursor: all.length ? all.at(-1).ts : 0,
-            truncated: after.length > LIMIT,
-          }),
-        );
-      } else if (req.url.startsWith('/api/team/links') && req.method === 'GET') {
-        const q = new URL(req.url, 'http://x').searchParams;
-        const folder = q.get('folder') || '';
-        const open = q.get('open') === '1';
-        const rows = LINKS.filter((l) => (!folder || l.a === folder || l.b === folder) && (!open || !l.closedAt)).map(
-          (l) => (folder ? { ...l, peer: l.a === folder ? l.b : l.a, peerName: 'Beta' } : l),
-        );
-        res.end(JSON.stringify({ links: rows }));
       } else if (req.url === '/api/team/plans/one' && req.method === 'GET') {
         res.end(JSON.stringify({ ok: true, id: 'one', state: 'review', path: '/t/plans/one.md', text: '# Plan\n\nDo the thing.' }));
       } else if (req.url === '/api/team/tasks/w-task' && req.method === 'PATCH') {
@@ -343,7 +295,6 @@ test('the lead surface: dispatch, status, read, send, close, the room, and the g
     res.result.tools.map((t) => t.name).sort(),
     [
       'group_list', 'group_post', 'group_read',
-      'link_list', 'link_read', 'link_send',
       'plan_read', 'room_post', 'room_read', 'task_add', 'task_close', 'task_dispatch',
       'task_merge_check', 'task_set_pr', 'task_start', 'team_status',
       'worker_answer_permission', 'worker_answer_question', 'worker_approve_plan',
@@ -746,142 +697,6 @@ test('an unrecognised FOREMAN_ROLE refuses to start, naming the value and the va
 
 /* ------------------------------------------ whose team is this, in the tools --- */
 
-/* ------------------------------------------------------------------ links --- */
-
-/*
- * The three link tools. What they are is one channel between two *projects*, and what
- * makes them safe is what they deliberately do not offer: no way to open or close a link,
- * no repo argument, and no `speaker`.
- */
-
-test('the link tools are repo-pinned: no repo argument on any of them', async () => {
-  const res = await lead.rpc({ jsonrpc: '2.0', id: 60, method: 'tools/list' });
-  for (const name of ['link_list', 'link_send', 'link_read']) {
-    const tool = res.result.tools.find((t) => t.name === name);
-    assert.ok(tool, `${name} is on the lead surface`);
-    const props = Object.keys(tool.inputSchema.properties || {});
-    for (const forbidden of ['repo', 'folder', 'a', 'b', 'speaker']) {
-      assert.ok(!props.includes(forbidden), `${name} must not take \`${forbidden}\``);
-    }
-    assert.equal(tool.inputSchema.additionalProperties, false, `${name} takes nothing else either`);
-  }
-});
-
-test('there is no tool to open or close a link, and the descriptions say to ask instead', async () => {
-  const res = await lead.rpc({ jsonrpc: '2.0', id: 61, method: 'tools/list' });
-  const names = res.result.tools.map((t) => t.name);
-  for (const absent of ['link_open', 'link_close', 'link_create', 'link_new']) {
-    assert.ok(!names.includes(absent), `${absent} must not exist — a lead granting itself a channel is the rule`);
-  }
-  const list = res.result.tools.find((t) => t.name === 'link_list');
-  assert.match(list.description, /cannot open or close a link/i, 'and the lead is told so');
-  assert.match(list.description, /ask them in conversation/i, 'with what to do instead');
-});
-
-test('a worker has no link tools at all', async () => {
-  const res = await worker.rpc({
-    jsonrpc: '2.0', id: 62, method: 'tools/call',
-    params: { name: 'link_send', arguments: { id: 'lnk-1', text: 'hello' } },
-  });
-  assert.ok(res.error, 'refused at the protocol layer — a worker has no channel off its own task');
-});
-
-test('link_list asks for this repo’s open links only', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 63, method: 'tools/call',
-    params: { name: 'link_list', arguments: {} },
-  });
-  const out = JSON.parse(res.result.content[0].text);
-  assert.deepEqual(out.links.map((l) => l.id), ['lnk-1'], 'the other pair’s link and the closed one are both out');
-  assert.equal(out.links[0].peer, PEER, 'and the far end is named for it');
-});
-
-test('link_send posts this session’s own repo as the folder, and drops anything else', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 64, method: 'tools/call',
-    params: {
-      name: 'link_send',
-      // A caller trying the two arguments that would matter: which project is speaking,
-      // and which of the two shapes the message takes. Neither is plumbed.
-      arguments: { id: 'lnk-1', text: 'can you hold #40?', folder: '/Users/x/Code/Gamma', speaker: 'human' },
-    },
-  });
-  assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
-  const sent = stubState.linkMessages.at(-1);
-  assert.equal(sent.url, '/api/team/links/lnk-1/message');
-  assert.deepEqual(Object.keys(sent.body).sort(), ['folder', 'text'], 'exactly two fields reach the panel');
-  assert.equal(sent.body.folder, REPO, 'this repo, never one the caller named');
-  assert.equal(sent.body.text, 'can you hold #40?');
-  assert.equal(sent.body.speaker, undefined, 'the shape is decided by which endpoint composed it');
-});
-
-test('link_read refuses a link this project is not an endpoint of', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 65, method: 'tools/call',
-    params: { name: 'link_read', arguments: { id: 'lnk-2' } },
-  });
-  assert.equal(res.result.isError, true);
-  assert.match(res.result.content[0].text, /No such link on this project/);
-});
-
-test('link_read still answers on a closed link — the history is half this lead’s', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 66, method: 'tools/call',
-    params: { name: 'link_read', arguments: { id: 'lnk-3' } },
-  });
-  assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
-  assert.equal(JSON.parse(res.result.content[0].text).entries.length, 20);
-});
-
-/*
- * `room_read`'s hard-won rule, one channel over: an omitted `since` is a tail and an
- * explicit one — including a literal `0` — is a real cursor. `args.since || 0` collapses
- * them, which is how an omitted cursor once read a whole log into a lead's context.
- */
-test('link_read with no cursor returns a tail, not the whole thread', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 67, method: 'tools/call',
-    params: { name: 'link_read', arguments: { id: 'lnk-1' } },
-  });
-  const out = JSON.parse(res.result.content[0].text);
-  assert.equal(out.entries.length, 20, 'the tail, not all 25');
-  assert.equal(out.entries[0].text, 'link entry 6', 'the newest 20, not the oldest 20');
-  assert.equal(out.entries.at(-1).text, 'link entry 25');
-  assert.equal(out.cursor, 25, 'the cursor is still the thread’s newest timestamp');
-  assert.equal(out.truncated, true, 'entries were left out');
-  assert.ok(out.link, 'and the record rides along, so the lead knows which link it read');
-});
-
-test('link_read with a cursor returns everything after it, unbounded by the tail', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 68, method: 'tools/call',
-    params: { name: 'link_read', arguments: { id: 'lnk-1', since: 10 } },
-  });
-  const out = JSON.parse(res.result.content[0].text);
-  assert.equal(out.entries.length, 15, 'all 15 after ts 10, not clipped to 20 or fewer');
-  assert.equal(out.entries[0].text, 'link entry 11');
-  assert.equal(out.cursor, 25);
-  assert.equal(out.truncated, false);
-});
-
-test('link_read with an explicit since:0 is a real cursor, not "no cursor"', async () => {
-  const res = await lead.rpc({
-    jsonrpc: '2.0', id: 69, method: 'tools/call',
-    params: { name: 'link_read', arguments: { id: 'lnk-1', since: 0 } },
-  });
-  const out = JSON.parse(res.result.content[0].text);
-  assert.equal(out.entries.length, 25, 'the whole thread, not trimmed to the tail');
-  assert.equal(out.cursor, 25);
-  assert.equal(out.truncated, false);
-});
-
-test('link_read says its cursor is a timestamp, since a room seq could never order two rooms', async () => {
-  const res = await lead.rpc({ jsonrpc: '2.0', id: 70, method: 'tools/list' });
-  const tool = res.result.tools.find((t) => t.name === 'link_read');
-  assert.match(tool.description, /timestamp/i);
-  assert.match(tool.description, /per project/i, 'and why a seq cannot do it');
-});
-
 /*
  * The tool descriptions are prose a lead reads on every call, and they used to name one
  * person 13 times. The name is detected once at startup from the repo this process is
@@ -987,7 +802,8 @@ test('no room tool takes a pane, a speaker, or anything else', async () => {
     const props = Object.keys(tool.inputSchema.properties || {});
     for (const forbidden of ['paneId', 'pane', 'from', 'speaker', 'member', 'tmuxSession']) {
       // A pane id a caller could type is a caller that can post to a room as somebody
-      // else — `link_send`'s missing `speaker`, one channel over.
+      // else. There is no `speaker` either: which of the two shapes a post takes is
+      // decided by the endpoint that composed it, never by the caller.
       assert.ok(!props.includes(forbidden), `${tool.name} must not take \`${forbidden}\``);
     }
     assert.equal(tool.inputSchema.additionalProperties, false, `${tool.name} takes nothing else either`);
@@ -1126,7 +942,7 @@ test('a session with no TMUX_PANE refuses to start, rather than serving three to
 
 test('a lead with no TMUX_PANE keeps its other tools and refuses per call, naming the same reason', async () => {
   // The asymmetry is deliberate: a session is *nothing but* the room tools, so a missing
-  // pane is a refusal to start; a lead has eighteen that never touch a pane, and the same
+  // pane is a refusal to start; a lead has fifteen that never touch a pane, and the same
   // fact must not take task_dispatch down with it.
   const blind = makeChild({ FOREMAN_ROLE: 'lead', TMUX_PANE: undefined });
   try {

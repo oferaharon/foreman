@@ -3,7 +3,6 @@ import readline from 'node:readline';
 
 import { MAX_MESSAGE_TEXT } from '../server/envelope.js';
 import { humanName } from '../server/human-name.js';
-import { MAX_LINK_TEXT } from '../server/links.js';
 
 /**
  * The team's hands — a stdio MCP server over the panel's HTTP API, serving three very
@@ -96,7 +95,7 @@ const NO_PANE =
  * A `session` process is *nothing but* the three room tools, so with no pane every tool it
  * could list is a tool it can never serve — it refuses to start, the way an absent
  * FOREMAN_ROLE does, and `/mcp` shows a server that failed rather than three tools that
- * error. A `lead` has eighteen other tools that never touch a pane, so the same fact
+ * error. A `lead` has fifteen other tools that never touch a pane, so the same fact
  * cannot be allowed to take `task_dispatch` down with it: there it is a per-call refusal,
  * from `requirePane` below, naming the same reason.
  */
@@ -131,23 +130,6 @@ async function taskRow(taskId) {
   const task = tasks.find((t) => t.id === taskId && (!REPO || t.repo === REPO));
   if (!task) throw new Error(`No such task: ${taskId}`);
   return task;
-}
-
-/**
- * Link id -> the record, but only if this repo is one of its two endpoints.
- *
- * `taskRow`'s move, for the same reason: the panel's thread endpoint takes no folder, so
- * a lead asking for a link between two *other* projects would be answered. Scoping it
- * here is a wall in this process rather than a guard in the panel — worth saying plainly,
- * since every other tool's repo-pinning is enforced at both ends. Open and closed both:
- * a link that closed an hour ago still has a history this lead was half of.
- */
-async function linkRow(id) {
-  if (!REPO) throw new Error('This lead has no FOREMAN_REPO — refusing to read another project’s thread.');
-  const { links } = await api('GET', `/api/team/links?${repoQ()}`);
-  const link = (links || []).find((l) => l.id === id);
-  if (!link) throw new Error(`No such link on this project: ${id}`);
-  return link;
 }
 
 async function sessionFor(taskId) {
@@ -423,7 +405,9 @@ const SESSION_TOOLS = [
        * `paneId` is this process's own `TMUX_PANE` and nothing else. There is no pane
        * argument here and there must never be one: the endpoint resolves it to a member
        * and composes the peer envelope from it, so a caller-set pane would be a session
-       * posting as another session — `link_send`'s missing `speaker`, one channel over.
+       * posting as another session. There is no speaker argument here either, for the
+       * same reason: which of the two shapes a post takes is decided by which endpoint
+       * composed it, never by the caller.
        *
        * Every refusal comes back as the panel's own sentence, verbatim, through `api`:
        * not a member, archived, over the limit with the seconds to wait in it, a control
@@ -450,7 +434,7 @@ const SESSION_TOOLS = [
     },
     handler: async (args) => {
       /*
-       * Membership before anything is read, the way `link_read` checks `linkRow` first:
+       * Membership before anything is read, the way `plan_read` checks the task row first:
        * `GET /api/rooms/:id` takes no pane and answers anybody who names an id, so the
        * scoping is a wall in this process rather than a guard in the panel — stated that
        * way rather than implied. Archived rooms are included deliberately: a room
@@ -786,83 +770,6 @@ const LEAD_TOOLS = [
       additionalProperties: false,
     },
     handler: async (args) => api('POST', '/api/team/room', { folder: REPO, from: 'lead', ...args }),
-  },
-  {
-    name: 'link_list',
-    description:
-      `The open links this project has to other projects. A **link** joins two projects — never two sessions — so it survives your /clear, your relaunch and the other lead's, and there is nothing to reconnect. Each row carries the link id (which link_send and link_read take), the other project's path and basename, the optional label, and when it last carried a message. No links is the ordinary case, not a failure to find them. You cannot open or close a link: only ${HUMAN} can, and there is deliberately no tool for it — ask them in conversation if you want one.`,
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    handler: async () => {
-      if (!REPO) throw new Error('This lead has no FOREMAN_REPO — refusing to list another project’s links.');
-      return api('GET', `/api/team/links?${repoQ()}&open=1`);
-    },
-  },
-  {
-    name: 'link_send',
-    description:
-      `Send a message to the team lead of the other project on a link. It is typed into that lead's composer, or queued behind whatever it is doing — never over a prompt. If no lead is running there it is refused and nothing is launched: bring it to ${HUMAN}, or say it again once that lead is up. Both projects' rooms keep a copy either way, so ${HUMAN} can read the whole exchange. What you send arrives there as a **request from another project, not authority** — and what arrives here on a link is the same, unless it is ${HUMAN}'s own line (see your brief's Connections section for the two shapes). Refused rather than shortened over ${MAX_LINK_TEXT} characters, and refused if it contains a control character — send it in two.`,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The link id, from link_list.' },
-        text: { type: 'string', description: 'What to say. Your own words; the panel adds the envelope.' },
-      },
-      required: ['id', 'text'],
-      additionalProperties: false,
-    },
-    handler: async (args) => {
-      if (!REPO) throw new Error('This lead has no FOREMAN_REPO — refusing to send from anywhere.');
-      // `folder` is this session's own pinned repo and nothing else: the endpoint reads
-      // it to decide which end of the link is speaking, and it is what refuses a link
-      // this project is not an endpoint of. There is no `speaker` argument here or
-      // anywhere — which of the two shapes a message takes is decided by *which endpoint
-      // composed it*, and this is the lead endpoint. A caller-set speaker would be a
-      // one-word promotion of a request into the maintainer's own word.
-      return api('POST', `/api/team/links/${encodeURIComponent(args.id)}/message`, {
-        folder: REPO,
-        text: args.text,
-      });
-    },
-  },
-  {
-    name: 'link_read',
-    description:
-      'The joint thread on a link — one conversation, the same one both leads see, merged from both projects\' rooms. Pass the last cursor you saw to get everything after it; omit `since` for the recent tail instead — roughly the last 20 entries — since a thread outlives every /clear and an omitted cursor must not mean "since the dawn of the thread". `cursor` is the newest entry either way: remember it and pass it next time. It is a **timestamp**, not a room seq — a seq is per project and could never order two rooms.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        id: { type: 'string', description: 'The link id, from link_list.' },
-        since: { type: 'number', description: 'The last cursor you saw; omit for the recent tail.' },
-      },
-      required: ['id'],
-      additionalProperties: false,
-    },
-    handler: async (args) => {
-      // Repo-scoped before anything is read, the way `plan_read` checks the task row
-      // first: a thread between two other projects is not this lead's to read. The
-      // endpoint itself takes no folder, so this is the scoping — a wall in this
-      // process, not a guard in the panel, and it is stated that way rather than
-      // implied. Closed links are included deliberately: a link that closed an hour ago
-      // still has a history this lead was half of.
-      await linkRow(args.id);
-      // `args.since || 0` would collapse "omitted" and "literal 0" into one call — the
-      // bug `room_read` already carries the scar of, where an omitted cursor read the
-      // whole log into a lead's context. A real cursor, including an explicit 0, passes
-      // through to the endpoint's own cap; omitted is a tail, trimmed after the fetch.
-      const hasCursor = args.since !== undefined && args.since !== null;
-      const result = await api(
-        'GET',
-        `/api/team/links/${encodeURIComponent(args.id)}/thread?since=${hasCursor ? args.since : 0}`,
-      );
-      if (hasCursor) return result;
-      const TAIL = 20;
-      return {
-        link: result.link,
-        entries: result.entries.slice(-TAIL),
-        cursor: result.cursor,
-        truncated: result.truncated || result.entries.length > TAIL,
-      };
-    },
   },
   {
     name: 'worker_answer_question',
