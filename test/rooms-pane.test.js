@@ -403,6 +403,21 @@ test('remove and archive both go through `armConfirm`', () => {
   assert.match(head, /btn\.onclick = \(\) => patchGroup\(\{ archived: false \}, btn\);/);
 });
 
+test('the archive control’s handler is re-bound every paint, not only when it is built', () => {
+  /*
+   * Found on the bench: the node is replaced only when the *word* on it changes (so an armed
+   * confirmation is never taken away by an unrelated roster beat), and the first version bound
+   * the handler in the same branch — so a room renamed while the pane was open still asked
+   * *"archive “the old name”?"*. `patchBand` records this exact reason one column over: a
+   * handler closing over a stale room record is the class of bug the reuse invites.
+   */
+  const head = fn('renderGroupHead');
+  const built = head.indexOf('els.archive = btn;');
+  const bound = head.indexOf('btn.onclick');
+  assert.ok(built > 0 && bound > built, 'the handler must be bound after — and outside — the build branch');
+  assert.match(head, /const btn = els\.archive;/);
+});
+
 test('the strip rebuilds only when the membership changes, and patches the dots', () => {
   /*
    * The chips carry `armConfirm` questions that live four seconds. The roster broadcasts

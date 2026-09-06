@@ -4926,6 +4926,14 @@ body.row-dragging * { cursor: row-resize !important; }
    it is the absence of one. `.dot.dialog` uses the same shape for the same kind of reason. */
 .dot.gone { background: transparent; border: 1px solid var(--rule-strong); }
 
+/* While a question is on it, the chip is as wide as the question.
+   **Found on the bench, and it is a legibility bug rather than a preference.** `armConfirm`
+   replaces the ✕ *inside* the chip, so the chip's own 14rem ceiling squeezed
+   `remove gamma-master?` down to `remove g…` — the half that says *which member* is exactly
+   the half that was cut. The question is the whole reason the control asks. */
+.group-chip:has(.confirm) { max-width: none; }
+.group-chip:has(.confirm) .group-chip-name { overflow: visible; text-overflow: clip; }
+
 .group-chip-x {
   flex: none;
   padding: 0;

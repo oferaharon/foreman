@@ -7067,28 +7067,38 @@ function createPane(slot, host) {
     const members = room.members?.length || 0;
     els.stat.textContent = `${n} message${n === 1 ? '' : 's'} · ${members} member${members === 1 ? '' : 's'}`;
 
-    // The archive control lives beside `close` and is rebuilt only when the word on it
-    // changes, so an armed confirmation is never taken away by an unrelated beat.
+    /*
+     * The archive control, beside `close`.
+     *
+     * The **node** is replaced only when the word on it changes, so an armed confirmation is
+     * never taken away by an unrelated roster beat — `connSig`'s rule, and the strip one line
+     * down follows it too. The **handler** is re-bound on every call regardless, which is
+     * `patchBand`'s own recorded reason one column over: a handler closing over a stale room
+     * record is exactly the class of bug the reuse is otherwise inviting. Found on the bench —
+     * a room renamed while the pane was open still asked *"archive “the old name”?"*, which is
+     * a confirmation naming something that is not there any more.
+     */
     const want = room.archivedAt ? 'unarchive' : 'archive';
     if (els.archive?.dataset.word !== want) {
       const btn = document.createElement('button');
       btn.className = 'ghost-btn';
       btn.dataset.word = want;
       btn.textContent = want;
-      if (room.archivedAt) {
-        btn.title = 'Put this room back in the open list, so it can be posted to again.';
-        // Unarchiving takes nothing away, so it asks nothing. `armConfirm` is for the
-        // destructive half — the maintainer's ruling names destructive controls, not every
-        // control.
-        btn.onclick = () => patchGroup({ archived: false }, btn);
-      } else {
-        btn.title = 'Stop anything more being posted to this room. Everything in it stays readable.';
-        btn.onclick = () =>
-          armConfirm(btn, `archive “${room.name || 'this room'}”?`, () => patchGroup({ archived: true }, btn));
-      }
       if (els.archive) els.archive.replaceWith(btn);
       else els.meta.insertBefore(btn, els.meta.lastChild);
       els.archive = btn;
+    }
+    const btn = els.archive;
+    if (room.archivedAt) {
+      btn.title = 'Put this room back in the open list, so it can be posted to again.';
+      // Unarchiving takes nothing away, so it asks nothing. `armConfirm` is for the
+      // destructive half — the maintainer's ruling names destructive controls, not every
+      // control.
+      btn.onclick = () => patchGroup({ archived: false }, btn);
+    } else {
+      btn.title = 'Stop anything more being posted to this room. Everything in it stays readable.';
+      btn.onclick = () =>
+        armConfirm(btn, `archive “${room.name || 'this room'}”?`, () => patchGroup({ archived: true }, btn));
     }
   }
 
