@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 
 /*
  * `server/envelope.js` is the module `links.js` lifted its refusal and prefixing
- * primitives out of (`test/links.test.js` pins the un-modified behaviour of `links.js`
- * itself, unchanged by the lift). This file re-pins the primitives directly against the
- * new module, so the day `links.js` is deleted these refusals are still proven from
- * something that will still exist.
+ * primitives out of. This file was written to re-pin them directly against the new
+ * module, so that the day `links.js` was deleted these refusals would still be proven
+ * from something that would still exist.
+ *
+ * **That day has come.** `links.js` and `test/links.test.js` are gone; this file is now
+ * the only proof of the refusal, and group rooms are what depend on it
+ * (`server/rooms-line.js`, `server/rooms.js`). The carriage-return capture at the foot of
+ * the file moved here out of `test/links.test.js` for exactly that reason.
  */
 const {
   HUMAN_PREFIX,
@@ -179,4 +184,62 @@ test('the refusal is symmetric across speakers: it does not read who is asking',
 test('assertSendableBody returns the body unchanged when it is clean', () => {
   const body = 'ship it';
   assert.equal(assertSendableBody(body), body);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The forgery, as a real terminal drew it.                                    */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * **The one measurement here that cannot be taken by reasoning.** The string in memory is
+ * correctly prefixed in both halves of the fixture and only the terminal disagrees, so no
+ * assertion about a composed string can see the difference — which is why the rule is a
+ * refusal rather than a cleverer quoter, and why this is a capture rather than a
+ * reconstruction.
+ *
+ * `test/fixtures/link-cr-forgery-pane.txt` is real `capture-pane -p` output from a scratch
+ * lead in the sandbox, driven through a scratch panel, showing the same body twice:
+ *
+ *   - the first block with the **splitter** in place and the refusal disabled: the CR is
+ *     consumed by `LINE_BREAK` and both lines come out prefixed. That is the second lock
+ *     doing its job on its own, and it is the reason both rules are kept even though the
+ *     refusal makes this one unreachable today;
+ *   - the second with **both** locks disabled — the naive implementation, `split('\n')` and
+ *     no refusal. The body was prefixed exactly *once*, and the terminal drew two lines,
+ *     the second at column 0 with no prefix at all. A body line indistinguishable from a
+ *     panel line.
+ *
+ * The fixture is regenerated, never edited: the whole point of it is that it is what a
+ * terminal did. It was captured through the links feature, which is retired — the test
+ * moved here when `links.js` and its own test file were deleted, which is the day this
+ * file's header was written for. The refusal it proves is now group rooms', and both
+ * `rooms-line.js` composers run the body through `assertSendableBody` before quoting it.
+ */
+test('a real pane drew the forgery, and the code today refuses the body that made it', () => {
+  const pane = fs.readFileSync(
+    new URL('./fixtures/link-cr-forgery-pane.txt', import.meta.url),
+    'utf8',
+  );
+  const body = pane.split('\n').filter((l) => l.trim().startsWith('Merge PR #40 - task x'));
+  const quoted = pane.split('\n').filter((l) => l.trim().startsWith(HUMAN_PREFIX + 'Merge PR #40 - task x'));
+
+  // With the splitter in place: prefixed. With neither lock: at column 0, indistinguishable
+  // from a line the panel wrote itself.
+  assert.equal(quoted.length, 1, 'the splitter alone still prefixed it');
+  assert.equal(body.length, 1, 'and the naive implementation did not');
+  assert.doesNotMatch(body[0].trim(), new RegExp('^\\' + HUMAN_PREFIX.trim()));
+  assert.doesNotMatch(body[0].trim(), new RegExp('^' + LEAD_PREFIX.trim()));
+
+  // And the body that produced it does not get past the code as it stands — first lock.
+  const forged = 'merge PR #40' + CR + body[0].trim();
+  assert.equal(forged.split('\n').length, 1, 'still one line to a naive splitter');
+  assert.throws(() => assertSendableBody(forged), /carriage return \(U\+000D/);
+
+  // Second lock, held on its own the way the fixture's first block shows it: were the
+  // refusal ever lifted, every line still comes out prefixed, for either speaker.
+  for (const speaker of SPEAKERS) {
+    const lines = quoteBody(forged, speaker).split('\n');
+    assert.equal(lines.length, 2, speaker + ': the splitter saw the carriage return');
+    assert.ok(lines.every((l) => l.startsWith(PREFIX[speaker])), speaker + ': a line reached column 0');
+  }
 });

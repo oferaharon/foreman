@@ -7,7 +7,6 @@
  */
 
 import { NUDGE_MARK } from './watch.js';
-import { LINK_MARK } from './links.js';
 import { readRoomDelivery } from './room-header.js';
 
 const DROP_TYPES = new Set([
@@ -397,6 +396,30 @@ function resultDetail(tur) {
   return out;
 }
 
+/* -------------------------------------------------------------------------- */
+/* The mark a retired feature left in the transcript.                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * **Links are retired** — the feature, its store, its routes, its tools and its panel are
+ * all gone, and `server/links.js` with them. This constant is the one thing that outlived
+ * them, and it lives here now because this module's `link_message` branch is its only
+ * caller: the mark is kept so *history still reads*. `~/.foreman/links.json` and the
+ * `[link] ` records already sitting in transcripts on this Mac are unchanged, and without
+ * this a historical delivery draws as a full user bubble in the maintainer's voice, two
+ * screens tall, saying something they never typed.
+ *
+ * The bare word, exactly as `NUDGE_MARK` (`server/watch.js`) spells its own: **the
+ * trailing space is added by whoever matches it**, and the match is anchored to the start
+ * of the message — so a message merely *mentioning* `[link]`, or opening with `[link]:`,
+ * stays the user's own words. That is the `parseCommandOutput` lesson, and moving the
+ * string without moving the anchored-prefix match beside it is how it gets lost.
+ *
+ * Exported for `test/normalize.test.js`, which composes its fixtures from it rather than
+ * spelling the mark a second time.
+ */
+export const LINK_MARK = '[link]';
+
 /**
  * @param {object} rec  one parsed JSONL record
  * @returns {Array<object>} zero or more view messages
@@ -489,11 +512,13 @@ export function normalizeRecord(rec) {
     // *mentioning* [room] stays the user's words (the parseCommandOutput lesson).
     if (text.startsWith(`${NUDGE_MARK} `)) return [{ ...base, kind: 'nudge', text }];
 
-    // Another project's lead, delivered through a link — same family as the nudge above,
-    // and typed by the panel rather than by anyone. Prefix-anchored with the space so a
-    // message merely *mentioning* [link] stays the user's words (the parseCommandOutput
-    // lesson, learned a third time here). The merge sentence carries no such prefix and
-    // must keep drawing as a user bubble — it is the maintainer's own word.
+    // Another project's lead, delivered through a link. The feature is retired and
+    // nothing writes this any more, but the records are on disk for good — same family as
+    // the nudge above, and typed by the panel rather than by anyone. Prefix-anchored with
+    // the space so a message merely *mentioning* [link] stays the user's words (the
+    // parseCommandOutput lesson, learned a third time here). The merge sentence carries no
+    // such prefix and must keep drawing as a user bubble — it is the maintainer's own word.
+    // See LINK_MARK above for why the mark outlived the module that owned it.
     if (text.startsWith(`${LINK_MARK} `)) return [{ ...base, kind: 'link_message', text }];
 
     // Claude Code's own tap on the shoulder when a subagent, a background command or a
