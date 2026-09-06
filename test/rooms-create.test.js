@@ -132,14 +132,21 @@ test('a malformed roster draws an empty list rather than throwing', () => {
   assert.deepEqual(roomParticipants([null, undefined]), []);
 });
 
-test('`sharedParticipants` asks this one function rather than spelling the filter twice', () => {
-  const fn = code.match(/function sharedParticipants\(\)[\s\S]*?\n  \}/);
-  assert.ok(fn, '`sharedParticipants` must exist');
-  assert.match(fn[0], /roomParticipants\(state\.sessions\)/);
+test('this is the only spelling of the allow-list on the client side', () => {
+  /*
+   * There used to be a second caller — `sharedParticipants`, the peer-message `@` picker's
+   * source — and it was pinned to *delegate* here rather than repeat the filter, because two
+   * spellings of "who is addressable" is the `isLeadName` lesson and the disagreement would
+   * be in the direction of offering a worker. That picker was retired on 2026-09-05, so what
+   * is pinned now is stronger and simpler: `web/app.js` holds no copy of the test at all, and
+   * the only way it can ask the question is by calling this function.
+   */
+  assert.ok(!/team\?\.role\s*===?\s*null/.test(code), 'the role test must live only in `roomParticipants`');
   assert.ok(
-    !/team\?\.role\s*==\s*null/.test(fn[0]),
-    'two spellings of “who is addressable” is the `isLeadName` lesson',
+    !/sharedParticipants/.test(code),
+    'the retired peer-message picker must not have grown back',
   );
+  assert.match(code, /roomParticipants\(state\.sessions\)/);
 });
 
 /* ------------------------------------------------------- here, then away --- */
