@@ -101,6 +101,8 @@ import {
 // why a carriage return is refused rather than stripped.
 import { assertClean, assertSendableBody, quoteBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
+import { GroupRoomStore, memberMatches, MAX_MEMBERS } from './rooms.js';
+import { memberFor, resolveMembers, roomHumanLine, roomPeerLine, rowName } from './rooms-line.js';
 import { Observer, isPeerPrompt, participant } from './observe.js';
 import { readTail } from './transcript.js';
 import {
@@ -148,6 +150,20 @@ const links = new LinkStore();
  */
 const sharedRoom = new SharedRoomStore();
 sharedRoom.setMaxListeners(0);
+
+/*
+ * The group rooms, beside the shared room and the team rooms and confusable with
+ * neither. `room` is one repo’s team log; `sharedRoom` is one machine-wide observation
+ * log with no writer; this is a handful of named rooms a person makes, each with a
+ * membership and a fan-out. Constructed here with the other stores so the log rotation it
+ * may do at boot happens once, before anything reads it.
+ *
+ * `setMaxListeners(0)` for `sharedRoom`’s reason: a subscription is per **socket**, so
+ * eleven open tabs would otherwise print a listener-leak warning into a log nothing
+ * rotates.
+ */
+const rooms = new GroupRoomStore();
+rooms.setMaxListeners(0);
 
 // A worker whose tmux session vanished has crashed — the spec's failure table says mark
 // it `failed` and keep the worktree as evidence. Cheap: one `list-sessions` every 30s,
@@ -3711,6 +3727,422 @@ app.post('/api/shared-room/message', async (req, res) => {
   res.json({ ok: true, entry, delivered: !queued, queued: Boolean(queued) });
 });
 
+/* --------------------------------------------------------- group rooms --- */
+
+/*
+ * Named rooms: a handful of sessions coordinating on one thing, where a member says
+ * something once and the panel types a copy into every *other* member's terminal.
+ *
+ * Three modules and a hard split between them, which is what makes each half testable on
+ * its own. `rooms.js` is the store — the index and one append-only log per room, and every
+ * refusal it can make. `rooms-line.js` is pure — a stored member to a live roster row, and
+ * a room plus a body to the string a terminal receives. **This block is the only place
+ * that touches a pane**, and it does it through `sendOrQueue` like everything else the
+ * panel types.
+ *
+ * ## Why the socket frames are not called `room-*`
+ *
+ * `subscribe-room`, `room` and `room-append` are already taken, by the **team** room, and
+ * they are keyed by `repo`. The client switches on the frame's `type` and then filters on
+ * `msg.repo`, so a group-room frame arriving under `room-append` with a `roomId` and no
+ * `repo` is a frame the team-room handler silently swallows — and the day somebody adds a
+ * group handler under the same name, the team room breaks instead. That is `rooms_post`
+ * beside `room_post` (the plan's §5.3) in socket clothing: one word apart, doing different
+ * things. So the frames are `group-room` / `group-room-append`, the message types are
+ * `subscribe-group-room` / `unsubscribe-group-room` / `markGroupRoomRead`, and the store's
+ * class is `GroupRoomStore` for the same reason. The HTTP routes can be `/api/rooms`
+ * because no team-room route is spelled that way.
+ */
+
+/**
+ * The store's refusals, as statuses. Mapped on `err.code` and **never** by matching a
+ * sentence: every one of those sentences is written for a person or a session to read and
+ * will be reworded, and a status decided by a phrase list turns off silently the day it is.
+ */
+const ROOM_FAULTS = new Map([
+  ['bad-name', 400],
+  ['bad-member', 400],
+  ['bad-sender', 400],
+  ['bad-poster', 400],
+  ['bad-room-id', 400],
+  ['duplicate-member', 400],
+  ['too-many-members', 400],
+  ['no-room', 404],
+  ['archived', 409],
+  ['not-a-member', 409],
+  ['rate-limited', 429],
+]);
+
+/** A store throw as a response, or a rethrow for anything this map has never heard of —
+ *  a 500 with a stack in the log beats a 400 that says "bad request" about a bug. */
+function roomFault(res, err) {
+  const status = ROOM_FAULTS.get(err?.code);
+  if (!status) throw err;
+  const body = { error: err.message, code: err.code };
+  if (err.code === 'rate-limited') body.retryAfterMs = err.retryAfterMs ?? null;
+  return res.status(status).json(body);
+}
+
+/**
+ * One fan-out at a time per room, and the reason is the gap between checking and
+ * appending.
+ *
+ * The refusals have to be answered **before** anything is typed — `rateFault` is public for
+ * exactly that, and its own comment says so — but the handoff marks ride on the entry, so
+ * the append can only happen **after** the fan-out. That leaves a window: two posts to one
+ * room landing together both pass `rateFault`, both type into every pane, and the second is
+ * then refused by `post()` with the copies already delivered and nothing written down. For
+ * a single poster the limiter only ever gets more forgiving as time passes, so the window
+ * needs a *second* poster — which is precisely what a room is for.
+ *
+ * A promise chain per room closes it, the way `PaneLock` serialises per pane. A fan-out is
+ * a second or two; posts are minutes apart.
+ */
+const roomTurns = new Map(); // roomId -> Promise, deleted when it is the tail and settles
+function roomTurn(id, work) {
+  const next = (roomTurns.get(id) ?? Promise.resolve()).then(work, work);
+  const done = next.then(
+    () => {},
+    () => {},
+  );
+  roomTurns.set(id, done);
+  // Not a leak that matters — rooms are few — but a Map that only grows is a Map somebody
+  // has to reason about later. It is cleared only if nothing queued behind it.
+  done.then(() => {
+    if (roomTurns.get(id) === done) roomTurns.delete(id);
+  });
+  return next;
+}
+
+/** Machine tokens for why a member's copy did not go, beside `rooms-line.js`'s own two.
+ *  Tokens rather than sentences: these ride on an append-only log entry that a card reads,
+ *  and a sentence written into history is a sentence that cannot be reworded. */
+const NO_PANE = 'no-pane';
+const QUEUE_FULL = 'queue-full';
+const SEND_FAILED = 'send-failed';
+const BAD_ENVELOPE = 'bad-envelope';
+
+/** What a member is called on the log entry and in the line its peers read. The live row
+ *  wins when there is one — it is today's answer — with the stored ids behind it so a
+ *  member that resolved to nothing is still named something. */
+const memberName = (member, row) =>
+  rowName(row) || member?.name || member?.tmuxSession || member?.paneId || 'a session';
+
+/** Every room, with `unseen` and `lastAt` folded in. `list()` reads no file. */
+app.get('/api/rooms', (req, res) => {
+  const open = req.query.open === '1' || req.query.open === 'true';
+  res.json({ rooms: rooms.list({ open }), maxMembers: MAX_MEMBERS });
+});
+
+/**
+ * Create a room. **The maintainer's own press and nobody else's** — the enforcement is
+ * that no `foreman` tool reaches this route, exactly as there is no tool to open a link.
+ *
+ * `members` are **session ids**, because that is what the picker has: the modal is built
+ * from the live roster, so the ids it holds are roster ids. They are turned into member
+ * records here, through `memberFor`, which is the only correct way to build one — it
+ * stores all three ids, and which of them will still answer in a week is not knowable now.
+ *
+ * The refusals:
+ *
+ *   404  a session id the roster does not hold — it exited between the picker and the press
+ *   409  a worker: `participant` is an allow-list on role, and a worker's channel is its lead
+ *   400  no name, an over-long one, a character that would forge a header line, a duplicate
+ *        member, or more than `MAX_MEMBERS`
+ *
+ * The roster is read before the name, which is the opposite of `POST /api/rooms/:id/post`'s
+ * order, and deliberately: there the body is the one thing the caller can fix by editing
+ * what they typed, while here a vanished session id is a fact about the world that a person
+ * retyping the name would never discover.
+ */
+app.post('/api/rooms', (req, res) => {
+  const ids = Array.isArray(req.body?.members) ? req.body.members : [];
+  const members = [];
+  for (const raw of ids) {
+    const id = String(raw ?? '').trim();
+    const row = id ? registry.get(id) : null;
+    if (!row) {
+      return res.status(404).json({
+        error: `No session ${id || '(none)'}. The panel is not watching one by that id — it may have exited.`,
+      });
+    }
+    if (!participant(row)) {
+      return res.status(409).json({
+        error:
+          `${rowName(row)} is a worker, so it cannot be in a room — its messages are its lead's ` +
+          'business. Put its lead in instead.',
+      });
+    }
+    members.push(memberFor(row));
+  }
+
+  let room;
+  try {
+    room = rooms.create(String(req.body?.name ?? ''), members);
+  } catch (err) {
+    return roomFault(res, err);
+  }
+  rooms.flush();
+  broadcastRoster();
+  res.json({ ok: true, room });
+});
+
+/**
+ * Rename, add or remove a member, archive or unarchive. One route rather than four,
+ * because every one of them is the same press on the same card and none of them can happen
+ * to a room that is not there.
+ *
+ * `add` is a session id (the picker again); `remove` is any one of the three member ids,
+ * and the strongest one held should be passed — a tmux session name survives a `/clear`
+ * and a relaunch, a pane id survives neither reliably.
+ *
+ * Archiving is **not** deleting: the record stays, the log stays readable, and
+ * `archivedAt` is what takes it out of the open list. Nothing in this feature deletes a
+ * room or a line of one.
+ */
+app.patch('/api/rooms/:id', (req, res) => {
+  const { id } = req.params;
+  if (!rooms.get(id)) return res.status(404).json({ error: `There is no room ${id}.`, code: 'no-room' });
+
+  let room = null;
+  try {
+    if (req.body?.name !== undefined) room = rooms.rename(id, String(req.body.name));
+
+    if (req.body?.add !== undefined) {
+      const who = String(req.body.add ?? '').trim();
+      const row = who ? registry.get(who) : null;
+      if (!row) {
+        return res.status(404).json({
+          error: `No session ${who || '(none)'}. The panel is not watching one by that id — it may have exited.`,
+        });
+      }
+      if (!participant(row)) {
+        return res.status(409).json({
+          error:
+            `${rowName(row)} is a worker, so it cannot be in a room — its messages are its lead's ` +
+            'business. Put its lead in instead.',
+        });
+      }
+      room = rooms.addMember(id, memberFor(row));
+    }
+
+    if (req.body?.remove !== undefined) {
+      const key = String(req.body.remove ?? '').trim();
+      const after = rooms.removeMember(id, key);
+      if (!after) {
+        // `removeMember` answers null for "nothing matched" as well as for "no such room",
+        // and the room was read at the top of this handler — so this is the first, and it
+        // is a 404 about the *member*, said as such rather than as a silent success.
+        return res.status(404).json({ error: `${key || '(none)'} is not in that room.` });
+      }
+      room = after;
+    }
+
+    if (req.body?.archived !== undefined) {
+      // `archive`/`unarchive` answer null when the room is already in that state, which is
+      // not a refusal — the press asked for a state and the room is in it.
+      room = (req.body.archived ? rooms.archive(id) : rooms.unarchive(id)) ?? rooms.get(id);
+    }
+  } catch (err) {
+    return roomFault(res, err);
+  }
+
+  rooms.flush();
+  broadcastRoster();
+  res.json({ ok: true, room: room ?? rooms.get(id) });
+});
+
+/** One room's log, as a tail. `since` is a seq and `read` caps from the end —
+ *  `/api/shared-room`'s shape, with the room's own record beside it. */
+app.get('/api/rooms/:id', (req, res) => {
+  const room = rooms.get(req.params.id);
+  if (!room) return res.status(404).json({ error: `There is no room ${req.params.id}.`, code: 'no-room' });
+
+  const since = Number.parseInt(String(req.query.since ?? ''), 10);
+  const limit = Number.parseInt(String(req.query.limit ?? ''), 10);
+  try {
+    res.json({
+      room,
+      ...rooms.read(req.params.id, {
+        since: Number.isFinite(since) && since > 0 ? since : 0,
+        ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+      }),
+    });
+  } catch (err) {
+    roomFault(res, err);
+  }
+});
+
+/**
+ * The fan-out — one thing said once, typed into every other member's terminal.
+ *
+ * Who is speaking is decided by **what the request carries**, not by a word in the body.
+ * A `paneId` means a session posting through its own MCP tool, which reads it from its
+ * `TMUX_PANE`; nothing means the panel's own composer, and the panel is the maintainer.
+ * There is no `speaker` field and there must never be one: it would be a one-word
+ * promotion of a session's message to the human's word, which is the whole distinction
+ * `envelope.js` exists to keep — `roomPeerLine` and `roomHumanLine` are two functions for
+ * exactly this reason, so which envelope is composed is decided by which branch called it
+ * and there is no argument to plumb.
+ *
+ * Delivery is `resolveMembers` -> `sendOrQueue` -> `PaneLock#claim` -> `sendText` ->
+ * `assertNotBlocked`, **reused unmodified** and never `send-keys`: three live reads of the
+ * pane, each one there because something once got typed into the wrong place. And **no
+ * roster-status pre-check in front of it** — `claim` deliberately dropped one, because the
+ * roster is a poll stale and could veto a send it should have rescued, and because
+ * "blocked" is wider than any one status (the trust gate sets no `dialog` at all, and
+ * reads as a fully populated permission box).
+ *
+ * The refusals, in the order `/api/shared-room/message` answers its own:
+ *
+ *   400  an empty body, one over `MAX_MESSAGE_TEXT`, or one carrying a character that can
+ *        make a quoted line draw as an unquoted one — **first**, because it is true of the
+ *        message whatever room it was going to, and it is the only refusal the caller can
+ *        fix by editing what they typed
+ *   404  no such room
+ *   409  the room is archived — still readable, nothing more goes into it
+ *   409  the poster is not a member
+ *   429  over a limit, with the store's own `retryAfterMs`
+ *
+ * A member that **cannot be reached is not a refusal of the post.** The post happened; the
+ * entry says who missed it. And the word on the entry is `handed`, never *delivered*: a
+ * queued copy may sit for hours and `queue.prune` may drop it silently, so the log records
+ * a handoff and nothing about it is a promise that anybody read anything.
+ */
+app.post('/api/rooms/:id/post', async (req, res) => {
+  const { id } = req.params;
+  const text = String(req.body?.text ?? '');
+  try {
+    // Refused, never trimmed, escaped or shortened. The error names the character it
+    // found, which is the only way a person or a session can act on it.
+    assertSendableBody(text, 'A room message');
+  } catch (err) {
+    return res.status(400).json({ error: err.message, cap: MAX_MESSAGE_TEXT });
+  }
+
+  // `null` spells the maintainer, and it is spelled rather than defaulted: `post` refuses
+  // an omitted `by` outright, so a session that forgot to name itself cannot skip the
+  // membership check and the limiter by omission.
+  const paneId = String(req.body?.paneId ?? '').trim();
+  const by = paneId || null;
+
+  try {
+    return await roomTurn(id, async () => {
+      const room = rooms.get(id);
+      if (!room) return res.status(404).json({ error: `There is no room ${id}.`, code: 'no-room' });
+      if (room.archivedAt) {
+        return res.status(409).json({
+          error: `"${room.name}" is archived. It is still readable; nothing more can be posted to it.`,
+          code: 'archived',
+        });
+      }
+      if (by !== null && !rooms.isMember(id, by)) {
+        return res.status(409).json({ error: `${by} is not in "${room.name}".`, code: 'not-a-member' });
+      }
+      const over = rooms.rateFault(id, by);
+      if (over) {
+        return res.status(429).json({ error: over.message, code: over.code, retryAfterMs: over.retryAfterMs });
+      }
+
+      /*
+       * One resolution pass for the whole fan-out, against one roster read. Resolving per
+       * member would ask the registry N times for an answer that cannot have changed
+       * between them, and would let two members resolve against two different rosters —
+       * which is how a member ends up recorded against a row that had already gone.
+       */
+      const sessions = registry.list();
+      const resolved = resolveMembers(room.members, sessions);
+      const mine = by === null ? -1 : resolved.findIndex((r) => memberMatches(r.member, by));
+      const author = mine < 0 ? null : resolved[mine];
+      const from = by === null ? 'panel' : memberName(author?.member, author?.row);
+
+      /*
+       * Compose once before anything is typed, so a room whose own *name*, id or member
+       * list would forge a header line is a 400 with nothing sent — rather than a partial
+       * fan-out that stops halfway. The per-member composition below differs only in the
+       * maintainer's name, which is resolved per folder, so this catches everything
+       * shared: the body, the sender and the room.
+       */
+      try {
+        if (by === null) roomHumanLine({ room, body: text });
+        else roomPeerLine({ room, from, body: text });
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+
+      const handed = [];
+      for (let i = 0; i < resolved.length; i += 1) {
+        // Never to the author. A session handed its own post would answer it.
+        if (i === mine) continue;
+        const entry = resolved[i];
+
+        const mark = {
+          name: memberName(entry.member, entry.row),
+          tmuxSession: entry.row?.tmuxSession ?? entry.member?.tmuxSession ?? null,
+          state: 'unreachable',
+          reason: entry.reason,
+        };
+        handed.push(mark);
+
+        if (!entry.row) continue; // `unknown` or `not-a-participant` — `resolveMember`'s own word
+        if (!entry.row.paneId) {
+          mark.reason = NO_PANE;
+          continue;
+        }
+
+        /*
+         * Composed **per member**, because the maintainer's name is resolved for the folder
+         * that will read it — a brief, a link message, the shared room and this must not
+         * call him three different things — and a room's members are in different folders
+         * by construction.
+         */
+        let line;
+        try {
+          const human = humanName(entry.row.paneCwd || entry.row.cwd || null);
+          line =
+            by === null
+              ? roomHumanLine({ room, body: text, human })
+              : roomPeerLine({ room, from, body: text, human });
+        } catch {
+          // Only the per-folder name can differ from the composition above, so this is one
+          // member's miss and not the post's refusal.
+          mark.reason = BAD_ENVELOPE;
+          continue;
+        }
+
+        try {
+          const { queued } = await sendOrQueue(entry.row, line);
+          mark.state = queued ? 'queued' : 'typed';
+          mark.reason = null;
+        } catch (err) {
+          // A full queue (409) or a pane that threw. Not a refusal of the post: the entry
+          // records the miss and everybody else still heard it.
+          mark.reason = err.status === 409 ? QUEUE_FULL : SEND_FAILED;
+          mark.detail = err.message;
+        }
+      }
+
+      /*
+       * The entry, appended once, after the fan-out because the marks ride on it. The
+       * author is deliberately absent from `handed` — the list is who a copy was handed to,
+       * and `from` already names who said it.
+       *
+       * `post` re-checks every refusal above; passing them a moment ago and failing here
+       * would mean another post landed in between, which `roomTurn` is what prevents.
+       */
+      let entry;
+      try {
+        entry = rooms.post(id, { from, kind: by === null ? 'human' : 'peer', text, handed }, { by });
+      } catch (err) {
+        return roomFault(res, err);
+      }
+      return res.json({ ok: true, entry, handed });
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 /* -------------------------------------------------------------- model --- */
 
 /*
@@ -4914,6 +5346,63 @@ function unsubscribeShared(ws) {
   sharedSubs.delete(ws);
 }
 
+/* ------------------------------------------------ group-room subscriptions --- */
+
+/**
+ * One group room’s frames.
+ *
+ * **One per socket, not one per room** — `sharedSubs`’ shape rather than `roomSubs`’,
+ * because only one room is open at a time (the pane model’s own rule: a room replaces the
+ * shared room or a link thread in that slot). A second `subscribe-group-room` on the same
+ * socket supersedes the first rather than stacking a listener on the store, which is how
+ * the transcript tailer once ended up sending every message twice.
+ *
+ * The registry holds the room id beside the listener because the listener alone cannot be
+ * asked what it was watching, and a client that re-subscribes to the room it already has
+ * must not end up subscribed to two.
+ *
+ * **`ws.onopen` must re-subscribe this**, exactly as it re-subscribes every open pane. A
+ * subscription is server state and dies with the socket while the roster keeps arriving,
+ * so a dropped connection leaves a rail that looks perfectly alive above a room that
+ * silently stopped minutes ago. That failure has been shipped once already, in the
+ * transcript pane, and it is invisible from inside the panel.
+ *
+ * The frame names are `group-room` / `group-room-append` and not `room` / `room-append`:
+ * see the group-rooms block above for why one word apart is the whole problem.
+ */
+const groupRoomSubs = new WeakMap(); // ws -> { roomId, listener }
+
+function subscribeGroupRoom(ws, roomId, slot) {
+  unsubscribeGroupRoom(ws);
+  const listener = (postedId, entry) => {
+    if (postedId === roomId) send(ws, 'group-room-append', { roomId, entry, slot });
+  };
+  rooms.on('post', listener);
+  groupRoomSubs.set(ws, { roomId, listener });
+
+  const room = rooms.get(roomId);
+  if (!room) {
+    // The tail is what a pane opens on, so a room that is not there has to say so rather
+    // than send an empty log that reads as a room with nothing in it.
+    send(ws, 'group-room', { roomId, room: null, entries: [], cursor: 0, truncated: false, slot });
+    return;
+  }
+  try {
+    send(ws, 'group-room', { roomId, room, ...rooms.read(roomId), slot });
+  } catch {
+    // A hand-edited id that cannot name a file. The record stands and its log is
+    // unreachable — `rooms.js`’ own trade.
+    send(ws, 'group-room', { roomId, room, entries: [], cursor: 0, truncated: false, slot });
+  }
+}
+
+function unsubscribeGroupRoom(ws) {
+  const held = groupRoomSubs.get(ws);
+  if (!held) return;
+  rooms.off('post', held.listener);
+  groupRoomSubs.delete(ws);
+}
+
 wss.on('connection', (ws) => {
   send(ws, 'sessions', rosterFrame());
 
@@ -4939,6 +5428,14 @@ wss.on('connection', (ws) => {
       subscribeShared(ws, slot);
     } else if (msg.type === 'unsubscribe-shared') {
       unsubscribeShared(ws);
+    } else if (msg.type === 'subscribe-group-room') {
+      if (typeof msg.roomId === 'string' && msg.roomId) subscribeGroupRoom(ws, msg.roomId, slot);
+    } else if (msg.type === 'unsubscribe-group-room') {
+      unsubscribeGroupRoom(ws);
+    } else if (msg.type === 'markGroupRoomRead') {
+      // Per room, and it is the store that holds the mark — `rosterFrame` reads it out of
+      // memory every couple of seconds and must never read a file to answer it.
+      if (typeof msg.roomId === 'string' && msg.roomId && rooms.seen(msg.roomId)) broadcastRoster();
     } else if (msg.type === 'markSharedRead') {
       // The quiet counter on the rail footer, and it is deliberately not an inbox: the
       // room is a log of messages that have already been answered by the session they were
@@ -4966,11 +5463,13 @@ wss.on('connection', (ws) => {
     unsubscribe(ws);
     unsubscribeRoom(ws);
     unsubscribeShared(ws);
+    unsubscribeGroupRoom(ws);
   });
   ws.on('error', () => {
     unsubscribe(ws);
     unsubscribeRoom(ws);
     unsubscribeShared(ws);
+    unsubscribeGroupRoom(ws);
   });
 });
 
@@ -5092,6 +5591,12 @@ function sharedSummary() {
   return { unseen: Math.max(0, sharedRoom.seq - sharedSeen), lastAt: sharedLastAt };
 }
 
+/* One line in, one line out — `sharedRoom`’s own reason: without it a room’s unseen badge
+   would sit still until something unrelated moved the roster, which reads as a broken
+   feature. Traffic is a handful of messages a day and the limiter caps it at 30 per room
+   per five minutes, so a broadcast per entry is nothing. */
+rooms.on('post', () => broadcastRoster());
+
 function rosterFrame(sessions = registry.list()) {
   return {
     sessions,
@@ -5100,6 +5605,22 @@ function rosterFrame(sessions = registry.list()) {
     links: links.list({ open: true }),
     rateLimits: rateLimits.get(),
     sharedRoom: sharedSummary(),
+    /*
+     * Every room, open and archived, from **memory only** — `list()` folds `unseen`,
+     * `lastAt` and `memberCount` off the store’s own Map and reads no file, which is what
+     * a frame that runs every two seconds and is broadcast to every client requires (a
+     * file read here is a file read forever).
+     *
+     * All of them, where `links` sends only the open ones, and that is not an
+     * inconsistency: the rail’s rooms band draws open rooms as rows *and* folds the
+     * archived ones into a collapsed `archived (N)` group, so it needs the count. A room
+     * record is a name, a handful of members and four numbers.
+     *
+     * The client tests `'rooms' in msg`, never truth: **an empty array is the ordinary
+     * answer** — most people are in no rooms — and a truth test reads that as "the frame
+     * did not mention it". `rateLimits` learned this the expensive way.
+     */
+    rooms: rooms.list(),
   };
 }
 
@@ -5280,7 +5801,7 @@ process.on('SIGTERM', () => {
   // sweep firing into a process that is on its way out would read transcripts nobody is
   // going to be told about.
   clearInterval(sharedSweep);
-  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, links]) {
+  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, links, rooms]) {
     try {
       store.flush();
     } catch {
