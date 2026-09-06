@@ -428,14 +428,46 @@ test('the room you are looking at shows no unseen count, whatever the summary sa
 
 /* ---------------------------------------------------- the band in the app --- */
 
-test('the band is shown only when a room exists, and the gate is a CSS trade', () => {
+test('the rows are shown only when a room exists, and the gate is a CSS trade', () => {
   const render = fn('renderRoomsBand');
   assert.match(render, /classList\.toggle\('has-rooms', rooms\.length > 0\)/);
-  // The same show/hide trade `.app.has-links` makes one band down: the markup is always
-  // there and CSS decides, so a panel with no rooms is the panel it was before this feature.
-  assert.match(styles, /\.rail-rooms\s*\{[^}]*display:\s*none/);
-  assert.match(styles, /\.app\.has-rooms \.rail-rooms\s*\{\s*display:\s*flex/);
+  // The markup is always there and CSS decides — `.app.has-links`'s trade one band down,
+  // and `.app.split .main`'s two columns over.
+  assert.match(styles, /\.rooms-list\s*\{[^}]*display:\s*none/);
+  assert.match(styles, /\.app\.has-rooms \.rooms-list\s*\{\s*display:\s*flex/);
   assert.match(html, /class="rail-rooms" id="railRooms"/);
+});
+
+test('the head is persistent — `+ room` is in the rail with `rooms: []`', () => {
+  /*
+   * The one place this band does not copy `.app.has-links`, and it is a ruling rather than
+   * an oversight. `+ room` is the only way into the create modal (plan §2 item 8), so a gate
+   * over the whole band would mean the first room could never be made from the panel — the
+   * control would appear only once traffic existed, which is exactly what the shared-room
+   * row above refuses to do in its own markup's words. So the gate names `.rooms-list` and
+   * only `.rooms-list`.
+   *
+   * Written as three assertions rather than one because each fails for a different edit: a
+   * `display: none` creeping back onto the band, a gate widened to the band, and the head
+   * being moved inside the list where the gate would swallow it anyway.
+   */
+  const band = styles.match(/\.rail-rooms\s*\{[^}]*\}/)[0];
+  assert.match(band, /display:\s*flex/, 'the band itself is never hidden');
+  assert.ok(!/display:\s*none/.test(band), 'the band carries no hidden state of its own');
+  assert.ok(
+    !/\.app\.has-rooms \.rail-rooms/.test(styles) && !/\.app\.has-rooms \.rooms-head/.test(styles),
+    'the gate names the list alone — never the band, never the head',
+  );
+  // …and the head is a sibling of the list, which is what makes that gate possible at all.
+  const markup = html.slice(html.indexOf('<div class="rail-rooms"'), html.indexOf('</div>', html.indexOf('id="roomsList"')));
+  const head = markup.indexOf('class="rooms-head"');
+  const list = markup.indexOf('id="roomsList"');
+  assert.ok(head > -1 && list > head, 'the head opens and closes before the list begins');
+  assert.match(markup.slice(head, list), /id="roomsAdd"/, '`+ room` lives in the head');
+  assert.ok(
+    !/rooms-head/.test(markup.slice(list)),
+    'the head is not inside the list, where the gate would hide it anyway',
+  );
 });
 
 test('the band is a sibling of `.rail-list`, never a block inside it', () => {

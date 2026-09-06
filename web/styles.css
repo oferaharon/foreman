@@ -4885,19 +4885,23 @@ body.row-dragging * { cursor: row-resize !important; }
    left. The list inside has its own ceiling rather than the band having one: a person with
    nine rooms should scroll the rooms, not lose the sessions.
 
-   Hidden until there is a room — `.app.has-rooms`, the same trade `.app.has-links` makes
-   one band down. The class goes on `.app` rather than on the rail because it is one fact
-   about the whole window, exactly as `has-links` is. */
+   **The head is persistent and only the list comes and goes**, which is the one place this
+   band does not copy `.app.has-links`. The connections band can hide whole because a link
+   is made somewhere else; `+ room` is the *only* way into the create modal (plan §2 item
+   8), so a gate over the whole band would mean the first room could never be made — the
+   control would appear only once traffic existed, which is exactly what the shared row
+   above refuses to do in its own markup's words. So `.rail-rooms` is always here, carrying
+   one quiet heading line, and `.app.has-rooms` gates `.rooms-list` alone. The class stays
+   on `.app` rather than on the rail because it is one fact about the whole window, exactly
+   as `has-links` is. */
 .rail-rooms {
-  display: none;
+  display: flex;
   flex: none;
   flex-direction: column;
   min-height: 0;
   border-top: 1px solid var(--rule);
   background: var(--surface);
 }
-
-.app.has-rooms .rail-rooms { display: flex; }
 
 /* The rail's own headings scale, not the lead aside's — `.conn-head`'s call, and the same
    numbers, because two bands in one column reading at two sizes is the thing a person
@@ -4941,15 +4945,21 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .rooms-add:hover { color: var(--accent); background: var(--surface-sunk); }
 
+/* The rows, and the half that actually comes and goes. With nothing in it the band is its
+   head alone — one line, the way `.rail-shared` above is one line — and `padding-bottom`
+   rides on the list rather than on the band so that line does not sit over a gap it is not
+   using. */
 .rooms-list {
+  display: none;
   flex: none;
   min-height: 0;
   max-height: 11rem;
   overflow-y: auto;
   padding: 0 0.35rem 0.55rem;
-  display: flex;
   flex-direction: column;
 }
+
+.app.has-rooms .rooms-list { display: flex; }
 
 /* One room. The same row grammar as `.rail-shared` above — a mark, a name that ellipsises,
    and numbers that do not — because they are two ways into the same kind of thing and a

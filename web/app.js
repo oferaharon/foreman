@@ -2924,12 +2924,13 @@ let roomsSig = '';
 function renderRoomsBand() {
   const rooms = state.rooms;
 
-  // The band exists only while there is something in it — the same show/hide trade
-  // `.app.has-links` makes for the connections and `.app.split .main` makes for the second
-  // pane, and what keeps a panel with no rooms the panel it was before this feature. The
-  // class is on `.app` rather than on the rail because it is one fact about the whole
-  // window. See the markup for the gap this leaves around `+ room`, which is escalated
-  // rather than closed here.
+  // The **rows** exist only while there is something in them — `.app.has-rooms` gates
+  // `.rooms-list` and nothing else, so the head and its `+ room` are always in the rail.
+  // That is deliberately not the whole-band trade `.app.has-links` makes one band down:
+  // `+ room` is the only way into the create modal, and a control that appears only once
+  // traffic exists is a control nobody discovers — the shared row above says it in its own
+  // markup. The class is on `.app` rather than on the rail because it is one fact about the
+  // whole window, exactly as `has-links` is.
   el.app.classList.toggle('has-rooms', rooms.length > 0);
   if (!el.roomsList) return;
 

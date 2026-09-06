@@ -111,22 +111,22 @@
           is one more item in the column and neither of those has anything to know about it.
           It carries no vertical margin for the same reason.
 
-          On screen only while at least one room exists — `.app.has-rooms`, exactly the
-          show/hide trade `.app.has-links` makes for the connections and `.app.split .main`
-          makes for the second pane. That is the opposite call to the shared-room row above,
-          which is persistent, and the difference is real: there is exactly one shared room
-          and it always has something to say, while a panel with no rooms in it should be the
-          panel it was before this feature.
+          **The head is persistent; only the list comes and goes.** `.app.has-rooms` gates
+          `.rooms-list` alone, which is the one place this band does not copy
+          `.app.has-links` one band down — and the difference is not a lapse, it is the whole
+          reason the head is a sibling of the list rather than a wrapper around it.
 
-          **The gap that leaves, said plainly rather than discovered later:** `+ room` is in
-          this band's head, so while there are no rooms it is not on screen either, and the
-          *first* room cannot be made from here. The plan asks for both halves and they do
-          not compose; this is built as specified and the gap is escalated rather than
-          quietly closed, because which way it closes is a design call. Two ways it can:
-          drop `.rooms-head` out of the `.app.has-rooms` gate so the head and its control are
-          always here and only the list comes and goes, or give the create control a second
-          home outside this band. Either is a one-rule change from here — the head is already
-          a sibling of the list rather than a wrapper around it, for exactly that reason.
+          Why: `+ room` is the **only** way into the create modal, so a gate over the whole
+          band would mean the first room could never be made from the panel at all. The
+          control would appear only once traffic existed — precisely what the shared-room row
+          above refuses to do in its own words: "a control that only appears once traffic
+          exists is a control nobody discovers." The connections band can afford to hide
+          whole because a link is made somewhere else; this one cannot. The maintainer's
+          ruling, taken on those grounds after it was escalated.
+
+          So with no rooms the band is one quiet heading line and its control, the way
+          `.rail-shared` above is one row — and the rail is otherwise the rail it was before
+          this feature.
 
           The rows are filled by `renderRoomsBand` from the roster frame's `rooms` array, and
           they are **patched in place, never rebuilt**: `renderSharedRow`'s reason one band
