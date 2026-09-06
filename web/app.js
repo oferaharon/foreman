@@ -11559,6 +11559,33 @@ function createPane(slot, host) {
           body: m.text,
           markdown: true,
         });
+      /*
+       * A group-room post, typed into this session's composer by the panel. The fifth time
+       * this file has met the `task-notification` shape: a whole message from somewhere
+       * else, arriving as a `user` record, which drawn as a bubble is another session
+       * speaking in the maintainer's voice. Here it was also the *tallest* — a delivery is
+       * often several paragraphs and lands once a turn — which is what the maintainer's
+       * ruling of 2026-09-05 was actually about.
+       *
+       * So: the notice chip's register exactly. One muted line — who spoke, which room,
+       * and the post's own first line, ellipsised by `.chip-summary` — plus a `to you` /
+       * `to beta-main` mark when the post named somebody, which is the one thing a reader
+       * cannot get from the body.
+       *
+       * **It opens on `m.raw`, the delivery exactly as it arrived**, not on the stripped
+       * body beside it. The `> ` / `| ` prefixes are the whole of the trust model and they
+       * are composed server-side; a client that redrew the body without them, or restyled
+       * the two speakers itself, would be a second spelling of the one distinction this
+       * panel refuses to spell twice. `chip-out` is mono and `pre-wrap`, which is what
+       * keeps the quoting lined up — the same reason `msg-link` has it.
+       */
+      case 'group_message':
+        return renderChip({
+          name: 'room',
+          summary: `${m.from} in "${m.room}" · ${firstLine(m.text)}`,
+          mark: m.to ? `to ${m.to}` : '',
+          body: m.raw,
+        });
       // What the command printed back. Sits under its `/model` or `/exit` chip and is
       // styled off it, because that is what it is — the reply, not a turn of its own.
       case 'command_output': {
@@ -11763,7 +11790,7 @@ function createPane(slot, host) {
     return el;
   }
 
-  function renderChip({ name, summary, body, isError, muted, hasResult, result, images, markdown }) {
+  function renderChip({ name, summary, mark, body, isError, muted, hasResult, result, images, markdown }) {
     const wrap = document.createElement('div');
     if (muted) wrap.className = 'msg-thinking';
 
@@ -11782,6 +11809,19 @@ function createPane(slot, host) {
     sum.textContent = summary || '';
 
     chip.append(rule, nameEl, sum);
+
+    /*
+     * One muted word after the summary, for a chip whose line has a fact that is not part
+     * of what it summarises — today, only a room delivery's `to you` / `to beta-main`.
+     * `flex: none` beside a `flex: 1` summary, so the summary is the half that ellipsises
+     * and the mark never gets cut in the middle of a name.
+     */
+    if (mark) {
+      const markEl = document.createElement('span');
+      markEl.className = 'chip-mark';
+      markEl.textContent = mark;
+      chip.append(markEl);
+    }
 
     // An edit says how much it changed without being opened.
     const diff = result?.diff;

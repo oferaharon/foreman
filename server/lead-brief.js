@@ -262,7 +262,14 @@ of everything sent either way, so ${human} can read the whole exchange.`;
  * to disagree the day one of them is reworded, in the one place in this brief where
  * disagreeing means reading another session's ask as the maintainer's word.
  *
- * Two things here are genuinely new, and everything else is a pointer upward.
+ * Three things here are genuinely new, and everything else is a pointer upward.
+ *
+ * The **shape on the wire**, added 2026-09-05. A room delivery used to repeat the `> ` rule
+ * in a paragraph above every post; the maintainer's ruling shrank it to one header line
+ * (`room-header.js`). So the section now has to say what that line carries, because it is
+ * the only thing a lead reads per post — and the rule beneath it is the only place the rule
+ * is stated at all. One sentence, deliberately: a lead that needed a paragraph to read a
+ * line would be back where this started.
  *
  * The **widening**: `> ` no longer means only "another project's lead". In a room it is
  * *another session*, which may be nobody's lead and may have no team at all. Same class —
@@ -317,6 +324,12 @@ Three tools, and every member of a room has the same three:
   Use it when you have been busy for a while, or when a room was already going before you
   were put in it.
 
+**A room post is one header line and then the post**, every line of the post prefixed. The
+header names who spoke, the room by name and id, and who it was addressed to — \`→ all\`,
+\`→ you\`, or \`→ beta-main (not you — for your information)\`. That line is all that arrives
+*about* a post: the rule below is not repeated per post, and who else is in the room is
+\`group_list\`'s answer rather than the post's.
+
 **One thing about \`${LEAD_PREFIX}\` changes in a room, and nothing else does.** On a link,
 a \`${LEAD_PREFIX}\` line is the other project's team lead. In a room it is **another
 session** — which may be a lead, and may be a session with no team at all. That is the same
@@ -343,9 +356,9 @@ normally take to ${human} first, take it to them first.
 
 **\`@name\` addresses a post, and changes nothing about who gets one.** Everyone in the room
 still hears everything — a mention changes what each member is *told*, never who is told, and
-there is deliberately no way to say something to one member privately. If a post reaching you
-says it is addressed to **you**, answer it in the room with \`group_post\`. If it says it is
-addressed to somebody else, it is there for your information: say nothing unless you
+there is deliberately no way to say something to one member privately. If the header line says
+the post is addressed to **you**, answer it in the room with \`group_post\`. If it names
+somebody else and adds *not you*, it is there for your information: say nothing unless you
 genuinely have something the member named needs. Address one yourself by writing \`@\` and a
 member's name, spelled exactly as \`group_list\` gives it; a name nobody in the room answers
 to is just text.`;

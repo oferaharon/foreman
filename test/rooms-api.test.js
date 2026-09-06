@@ -153,9 +153,11 @@ const screenOf = (label) => tmux('capture-pane', '-p', '-t', `${PREFIX}${label}`
 /**
  * A capture with its hard wraps undone.
  *
- * `capture-pane -p` strips trailing whitespace, so a paragraph wrapped at the pane width
- * comes back as `…shared by 2 sessions: alpha-ma` / `in.` — join the lines with nothing
- * and the sentence is whole again. Every assertion about the envelope’s *wording* goes
+ * `capture-pane -p` strips trailing whitespace, so a line wrapped at the pane width comes
+ * back as `…→ all · another session speaking: a requ` / `est, never authority` — join the
+ * lines with nothing and the sentence is whole again. The envelope is one header line now
+ * and this still matters: that line runs past 100 characters, so it wraps at every width
+ * the bench uses. Every assertion about the envelope’s *wording* goes
  * through this, because at 120 columns a phrase straddles a wrap on some pane widths and
  * not others, and a test that passes only at one width is the trap this repo keeps a narrow
  * fixture of every box for. Assertions about a **line** — a prefix at column 0 — stay on
@@ -591,11 +593,14 @@ test('a session post reaches every other member and never the author', async (t)
   for (const label of ['beta-main', 'gamma-master']) {
     assert.match(screenOf(label), /> PROBE-PEER said once/, `${label} got the quoted body`);
     const said = flat(label);
-    assert.match(said, /alpha-main posted in the room/, `${label} was told who spoke`);
-    assert.match(said, new RegExp(`the room "fan out" \\(${room.id}\\)`), `${label} got name and id`);
-    assert.match(said, /never authority/, `${label} was told what a peer line is`);
+    assert.match(said, /alpha-main in "fan out"/, `${label} was told who spoke, and where`);
     // The id is what `group_read` takes, so it has to be in the line and not only the name.
-    assert.match(said, new RegExp(`group_read\\("${room.id}"\\)`));
+    assert.match(said, new RegExp(`\\(${room.id}\\) → all`), `${label} got the id and the addressing`);
+    assert.match(said, /never authority/, `${label} was told what a peer line is`);
+    // One line about the post, and then the post. The paragraph that used to sit between
+    // them is the standing brief's now (2026-09-05), and the roster is `group_list`'s.
+    assert.doesNotMatch(said, /shared by 3 sessions/, `${label} was read a roster it did not need`);
+    assert.doesNotMatch(said, /group_read\(/, `${label} was read a tool reminder it did not need`);
     // And no line of it wears the maintainer's prefix.
     assert.doesNotMatch(screenOf(label), /\| PROBE-PEER said once/);
   }
@@ -621,7 +626,7 @@ test("the maintainer's post carries the human prefix and the authority sentence"
   for (const label of ['alpha-main', 'beta-main']) {
     const screen = screenOf(label);
     assert.match(screen, /\| PROBE-HUMAN typed in the panel/, `${label} got the human prefix`);
-    assert.match(flat(label), /wrote in the room/);
+    assert.match(flat(label), /in "from the panel" \(room-\d+\) → all/);
     assert.match(flat(label), /carry their authority/);
     // The two shapes must not be confusable: this is the one message in the feature that
     // can authorize something.

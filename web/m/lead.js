@@ -1295,6 +1295,30 @@ function renderMessage(m) {
       div.append(sum);
       return div;
     }
+    // A group-room post, typed into this session by the panel. Same reasoning as the link
+    // message above and the same shape — and here it is not optional: `DRAWN` is an
+    // allow-list, so a kind this screen has no case for is a message that silently
+    // disappears, which is worse than the bubble it used to wear.
+    //
+    // The summary is composed rather than taken verbatim, because a room delivery's own
+    // header line is now short enough to say who and where but reads as machinery on its
+    // own; the post's first line is what a thumb is scrolling for. The `to you` mark rides
+    // in it too — on this screen there is no body to open, so anything not on this line is
+    // read on the desktop or in the terminal.
+    case 'group_message': {
+      const div = document.createElement('div');
+      div.className = 'm-msg-tool';
+      const name = document.createElement('span');
+      name.className = 'm-tool-name';
+      name.textContent = 'room';
+      div.append(name);
+      const sum = document.createElement('span');
+      sum.className = 'm-tool-summary';
+      const first = String(m.text || '').trim().split('\n')[0];
+      sum.textContent = `${m.from} in "${m.room}"${m.to ? ` → ${m.to}` : ''} · ${first}`;
+      div.append(sum);
+      return div;
+    }
     case 'command_output': {
       const div = document.createElement('div');
       div.className = 'm-msg-command is-output';
@@ -1342,6 +1366,7 @@ const DRAWN = new Set([
   'command_output',
   'tool_use',
   'task_notification',
+  'group_message',
 ]);
 
 function renderStream({ pin = false } = {}) {
