@@ -4859,6 +4859,42 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 .main-head.is-group .group-name:hover { text-decoration: underline dotted var(--rule-strong); }
 
+/* Two lines, not one: the name (with the controls) above, the tally below.
+
+   A grid rather than a wrapping flex line, because a wrap takes the *controls* down with the
+   tally — and they are the one thing on this header that must never move, since a room's
+   message count changes while somebody is reaching for `archive`. Row 1 is mark · name ·
+   controls, row 2 is the tally under the name; `2 / -1` so it runs to the header's right
+   edge instead of stopping under the buttons. The rail's three-line team row is the same
+   shape for the same reason.
+
+   `row-gap` is spelled twice because `.main-head`'s `gap` and `.app.split .main-head`'s are
+   shorthands, so each sets the row gap too and the split one out-specifies a bare
+   `.main-head.is-group`. Column gaps are deliberately left to those rules — the two lines
+   want a tighter gap than the things beside each other on one of them. */
+.main-head.is-group {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  row-gap: 0.15rem;
+}
+.app.split .main-head.is-group { row-gap: 0.15rem; }
+.main-head.is-group .head-meta { grid-column: 3; grid-row: 1; }
+
+/* The tally, in the same muted meta type as every other secondary line in a pane header —
+   it used to *be* one of `.head-meta`'s children and reads identically now it is not. */
+.main-head.is-group .group-tally {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .main-head.is-group .group-name-edit {
   flex: 1;
   min-width: 0;
