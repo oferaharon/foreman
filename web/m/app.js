@@ -375,26 +375,13 @@ function buildPrefs() {
   box.className = 'm-prefs-box';
   box.checked = ghostSend.on;
 
-  const text = document.createElement('span');
   const title = document.createElement('span');
   title.className = 'm-prefs-title';
-  title.textContent = 'Send a suggestion straight away';
-  const hint = document.createElement('span');
-  hint.className = 'm-prefs-hint';
-  text.append(title, hint);
-  row.append(box, text);
-
-  const paint = () => {
-    box.checked = ghostSend.on;
-    hint.textContent = ghostSend.on
-      ? 'On, in this browser. The button above the box reads “send” and goes on one tap.'
-      : 'Off. The button reads “use” and fills the box, so you can read it before it goes.';
-  };
-  paint();
+  title.textContent = 'Send suggestions on one tap';
+  row.append(box, title);
 
   box.addEventListener('change', () => {
     ghostSend.set(box.checked);
-    paint();
   });
 
   sec.append(cap, row);
