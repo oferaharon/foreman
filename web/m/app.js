@@ -14,9 +14,14 @@
  * grown once here already.
  *
  * This file owns five things and nothing else: the websocket, the roster, a hash router,
- * the tab bar, and the home list with its launch button. The lead screen, the answer cards
- * and the tasks tab are separate modules behind a fixed contract — see `mountLead` /
- * `buildCard` / `mountTasks`.
+ * the tab bar, and the home list with its launch button. The lead screen, the room screen,
+ * the answer cards and the tasks tab are separate modules behind a fixed contract — see
+ * `mountLead` / `mountRoom` / `buildCard` / `mountTasks`.
+ *
+ * The **socket** is the one thing a screen module never touches directly. `subscribe` and
+ * `unsubscribe`, for a transcript and for a room alike, are sent from `enterLead` /
+ * `enterRoom`, taken back in `leaveRoute`, and re-sent in `ws.onopen` — three places that
+ * have to agree, kept in one file for the reason the `onopen` block spells out at length.
  *
  * It shares the panel's websocket, its API and its five answering endpoints, and shares no
  * render code at all with `web/app.js`. That is deliberate: `app.js` is a shared shell plus
@@ -43,6 +48,10 @@ import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.
    room picker. See `standaloneRows`. */
 import { roomParticipants } from '../rooms-create.js';
 import { mountLead, updateLead } from './lead.js';
+/* The Rooms tab's list and the room screen. Its own module with its own state — a phone
+   shows one thing at a time, and that stays true only if the second screen is a second
+   module rather than a `kind` field bolted onto the first one's `view`. */
+import { mountRoom, roomsListView, updateRoom } from './rooms.js';
 
 /* ------------------------------------------------------------- state --- */
 
@@ -145,6 +154,16 @@ function connect() {
     if (route.kind === 'lead' && route.sessionId) {
       send({ type: 'subscribe', sessionId: route.sessionId, slot: SLOT });
     }
+    /*
+     * …and the open room, for exactly the same reason. `groupRoomSubs` is one per socket,
+     * so re-subscribing is safe (a second supersedes the first rather than stacking a
+     * listener) and *not* re-subscribing is the silent failure: a room screen that looks
+     * perfectly alive over a log that stopped when the socket dropped. The server's own
+     * block says so too — "`ws.onopen` must re-subscribe this".
+     */
+    if (route.kind === 'room' && route.roomId) {
+      send({ type: 'subscribe-group-room', roomId: route.roomId, slot: SLOT });
+    }
 
     // The team list changes when a lead is launched in a folder that never had one, which
     // can happen at the Mac while the phone is asleep. Cheap enough to re-ask on every
@@ -195,17 +214,17 @@ function handle(msg) {
 /* ------------------------------------------------------------ router --- */
 
 /*
- * Two kinds of screen — home and `#/lead/<sessionId>` — and home now carries which of its
- * three tabs is on: `#/leads`, `#/standalones`, `#/rooms`. The hash is the whole route, so
- * the phone's back gesture works without any history bookkeeping of ours, and a reload comes
- * back to the tab it was on rather than to the top of the pile.
+ * Three kinds of screen — home, `#/lead/<sessionId>` and `#/room/<roomId>` — and home
+ * carries which of its three tabs is on: `#/leads`, `#/standalones`, `#/rooms`. The hash is
+ * the whole route, so the phone's back gesture works without any history bookkeeping of
+ * ours, and a reload comes back to the tab it was on rather than to the top of the pile.
  *
- * `tab` is **sticky across a lead screen**. A hash naming a session says nothing about which
- * list you came from, so `parseHash` answers `null` there and `navigate` leaves the field
- * alone; the back control then returns you to the tab you left, not to Leads. It is also
- * what `homeHash` reads.
+ * `tab` is **sticky across a lead or a room screen**. A hash naming a session or a room says
+ * nothing about which list you came from, so `parseHash` answers `null` there and `navigate`
+ * leaves the field alone; the back control then returns you to the tab you left, not to
+ * Leads. It is also what `homeHash` reads.
  */
-const route = { kind: 'home', tab: 'leads', sessionId: null };
+const route = { kind: 'home', tab: 'leads', sessionId: null, roomId: null };
 
 /** The three tabs, in the order they are drawn. The keys are `web/prefs.js`'s — that file
  *  has to check a stored value against them, so it owns the vocabulary and this owns only
@@ -218,8 +237,10 @@ function homeHash() {
   return `#/${route.tab}`;
 }
 
-/** The mounted screen's teardown, or null on the home screen. */
+/** The mounted screen's teardown, or null on the home screen. One of these two at most:
+ *  a phone shows one thing at a time and the router is what enforces it. */
 let leadCtx = null;
+let roomCtx = null;
 let leadEverSeen = false;
 let goneTimer = null;
 
@@ -236,10 +257,16 @@ let goneTimer = null;
 function parseHash() {
   const hash = location.hash || '#/';
   const lead = /^#\/lead\/(.+)$/.exec(hash);
-  if (lead) return { kind: 'lead', sessionId: decodeURIComponent(lead[1]), tab: null };
+  if (lead) return { kind: 'lead', sessionId: decodeURIComponent(lead[1]), roomId: null, tab: null };
+  // A room id is opaque and is minted by the store, so it is matched the same greedy way a
+  // session id is and decoded rather than validated here — an id that names nothing is
+  // answered by the server's own `group-room` frame with `room: null`, which the screen
+  // draws as "there is no room with that id" instead of an empty log.
+  const room = /^#\/room\/(.+)$/.exec(hash);
+  if (room) return { kind: 'room', sessionId: null, roomId: decodeURIComponent(room[1]), tab: null };
   const seg = /^#\/([a-z]+)\/?$/.exec(hash);
   const tab = seg && TAB_LABELS[seg[1]] ? seg[1] : 'leads';
-  return { kind: 'home', sessionId: null, tab };
+  return { kind: 'home', sessionId: null, roomId: null, tab };
 }
 
 function navigate() {
@@ -247,6 +274,7 @@ function navigate() {
   if (
     next.kind === route.kind &&
     next.sessionId === route.sessionId &&
+    next.roomId === route.roomId &&
     (next.tab === null || next.tab === route.tab)
   ) {
     return;
@@ -255,6 +283,7 @@ function navigate() {
   leaveRoute();
   route.kind = next.kind;
   route.sessionId = next.sessionId;
+  route.roomId = next.roomId;
   if (next.tab) {
     route.tab = next.tab;
     // Remembered here rather than in the tab's click handler, so a tab reached by a typed
@@ -263,6 +292,7 @@ function navigate() {
   }
 
   if (route.kind === 'lead') enterLead();
+  else if (route.kind === 'room') enterRoom();
   else enterHome();
 }
 
@@ -274,6 +304,18 @@ function leaveRoute() {
     leadEverSeen = false;
     clearTimeout(goneTimer);
     goneTimer = null;
+  }
+  if (route.kind === 'room') {
+    /*
+     * The other half of the `ws.onopen` block above, and it is the same rule from the other
+     * end: a group-room subscription is *server* state, one per socket, so a screen that
+     * left without giving it back leaves a listener on the store sending frames at a slot
+     * this client no longer draws. `unsubscribe-group-room` takes no room id — the server
+     * holds exactly one per socket and drops whichever it has.
+     */
+    send({ type: 'unsubscribe-group-room', slot: SLOT });
+    roomCtx?._dispose();
+    roomCtx = null;
   }
   if (route.kind === 'home') {
     clearInterval(homeTick);
@@ -1006,29 +1048,28 @@ function standalonesView() {
 }
 
 /**
- * The Rooms tab, until its list lands.
+ * The Rooms tab.
  *
- * `state.rooms` is `null` until the socket's first frame and that is a third answer, not a
- * missing one: rooms ride on the roster frame only, so a phone that has painted from
- * `GET /api/sessions` has sessions and no rooms yet. Saying "no rooms" there would be the
- * panel showing something wrong.
+ * The body is `web/m/rooms.js`'s, in this same `{sig, startable, nodes}` contract — the
+ * list, the archived fold and the row that opens a room all live there with the room
+ * screen they belong to, rather than in a shell that owns the socket and the router.
+ *
+ * `state.rooms === null` is a third answer, not a missing one: rooms ride on the roster
+ * frame only, so a phone that has painted from `GET /api/sessions` has sessions and no
+ * rooms yet, and `roomsListView` says "loading" rather than "no rooms" for it.
+ *
+ * `onChange` is `renderHome` because the fold's state lives in that module and this
+ * screen's repaint guard lives here: a tap on `archived (N)` changes what the list draws
+ * and nothing else on the phone, so it repaints through the one function every other path
+ * already goes through.
  */
 function roomsView() {
-  if (state.rooms === null) {
-    return { sig: 'rm:loading', startable: 0, nodes: () => [note('Loading rooms…')] };
-  }
-  const n = state.rooms.length;
-  return {
-    sig: `rm:${n}`,
-    startable: 0,
-    nodes: () => [
-      note(
-        n === 0
-          ? 'No rooms yet. A room is a named place a few sessions coordinate in — make one at the Mac.'
-          : `${n} ${n === 1 ? 'room' : 'rooms'}. The list arrives in a later update — open them at the Mac for now.`,
-      ),
-    ],
-  };
+  return roomsListView(state.rooms, {
+    onOpen: (id) => {
+      location.hash = `#/room/${encodeURIComponent(id)}`;
+    },
+    onChange: renderHome,
+  });
 }
 
 /** The screen's one sentence, in the one shape it has. */
@@ -1612,6 +1653,78 @@ function sessionOf(id) {
   return (state.sessions || []).find((s) => s.id === id) || null;
 }
 
+/* --------------------------------------------------------------- room --- */
+
+/** One room off the roster, or null. `state.rooms` is null until the first frame carrying
+ *  the key, which is not the same answer as "there is no such room" — the screen tells the
+ *  two apart off the server's own `group-room` frame, never off this. */
+function roomOf(id) {
+  return (state.rooms || []).find((r) => r.id === id) || null;
+}
+
+/**
+ * `#/room/<id>`: the log, and a box that posts as the maintainer.
+ *
+ * The subscribe lives here rather than inside `mountRoom` so that it sits beside the
+ * `unsubscribe-group-room` in `leaveRoute` and the re-subscribe in `ws.onopen` — three
+ * lines that have to agree, in one file, which is the whole lesson of the transcript
+ * tailer. The screen module never touches the socket except through `ctx.send`.
+ */
+function enterRoom() {
+  // The room screen draws its own header (back, name, socket), so the shell's stands down
+  // and the frame takes over the status-bar inset — `enterLead`'s own two lines.
+  el.head.hidden = true;
+  app.classList.add('no-head');
+
+  const host = document.createElement('div');
+  host.className = 'm-host';
+  el.screen.appendChild(host);
+
+  roomCtx = makeRoomCtx();
+
+  // Mounted before anything paints, for the reason in `enterHome`.
+  mountRoom(host, roomCtx);
+
+  send({ type: 'subscribe-group-room', roomId: route.roomId, slot: SLOT });
+}
+
+/**
+ * The room screen's window onto the shell. These six names are its whole contract; nothing
+ * else in this file is public to it.
+ */
+function makeRoomCtx() {
+  const mine = [];
+  return {
+    /* A live getter for the same reason the lead screen's is one: the route is the truth
+       about which room is open, and a screen holding a copy would filter every frame
+       against an id the router has moved on from. */
+    get roomId() {
+      return route.roomId;
+    },
+    room: () => roomOf(route.roomId),
+    /* The socket's own state, asked rather than mirrored off the shell's DOM. `lead.js`
+       reads the header's dot with a literal selector and says why at length — a second
+       WebSocket would be worse than no indicator at all — and this is the same fact one
+       layer earlier, where a header refactor cannot reach it. */
+    connected: () => state.connected,
+    homeHash,
+    send: (msg) => send({ slot: SLOT, ...msg }),
+    on: (type, fn) => {
+      mine.push([type, fn]);
+      busOn(type, fn);
+    },
+    off: (type, fn) => {
+      busOff(type, fn);
+    },
+    /* Shell-internal: every handler the screen registered goes when the screen does, so a
+       route change cannot leave a dead screen listening to the socket. */
+    _dispose() {
+      for (const [type, fn] of mine) busOff(type, fn);
+      mine.length = 0;
+    },
+  };
+}
+
 /**
  * The registry moved a session from its synthetic id to a real one.
  *
@@ -1638,6 +1751,18 @@ function onRebound(msg) {
 function onRoster() {
   if (route.kind === 'home') {
     renderHome();
+    return;
+  }
+
+  /*
+   * A room's own record — its name, its membership and whether it is archived — reaches the
+   * screen through the roster rather than through the `group-room` frame, which is only
+   * sent at subscribe. A `PATCH` at the Mac broadcasts a roster frame, so a rename or an
+   * archive lands here a beat later. `updateRoom` ignores a null: a room is never deleted,
+   * so a missing record means the roster has not carried one yet.
+   */
+  if (route.kind === 'room') {
+    updateRoom(roomOf(route.roomId));
     return;
   }
 

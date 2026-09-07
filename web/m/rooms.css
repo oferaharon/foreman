@@ -1,0 +1,601 @@
+/*
+ * rooms.css — item 4. The Rooms tab's list, and the room screen.
+ *
+ * The fifth stylesheet in `web/m/index.html`, and the scope rule the other four already
+ * follow: one sheet per build item, so two items never collide in a shared `<head>`. That
+ * guarantee is about **files**, not about names — `lead.css` already owned `.m-tab` when
+ * the shell's tab bar wanted it, and the shell's bar came up wearing the lead screen's
+ * colours and its 34px height while leaking its own back in return. Neither screen looked
+ * broken, because only one of them is ever on screen at a time, which is exactly what makes
+ * a shared class cost nothing until it costs an hour.
+ *
+ * So every class here is `.m-room-*`, grepped against `m.css`, `lead.css`, `cards.css`,
+ * `tasks.css` and `tokens.css` before it was written. The three names deliberately borrowed
+ * are `.m-dot` / `.m-dot-wait` (the same mark on a room row, a team card and a tab, because
+ * it is the same fact at three depths), `.m-note` (the screen's one-sentence shape) and
+ * `.m-host` (the frame a route gets when the shell header stands down) — all three from
+ * `m.css`, all three used exactly as that file draws them.
+ *
+ * `.is-*` modifiers are all written under an `.m-room*` parent for the same reason: `is-on`,
+ * `is-busy` and `is-down` are already in this cascade and mean other things elsewhere in it.
+ */
+
+/* ============================================================== the list === */
+
+/*
+ * One room, in `.m-team-body`'s own grid so a room row and a team row line their marks up
+ * down the screen: the mark's gutter, the text, and a trailing count. 60px minimum on the
+ * body for the reason the whole view exists — the desktop's rows were laid out for a mouse.
+ */
+.m-room-item {
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.m-room-body {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  grid-template-columns: 0.9rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.15rem 0.65rem;
+  padding: 0.7rem 1rem;
+  min-height: 60px;
+}
+
+.m-room-body:active { background: var(--surface-sunk); }
+
+/* An archived room is still a room and still opens — it is read-only, not gone — so it is
+   quieted rather than struck through or greyed out of legibility. The `archived` chip on
+   the line below is what states the fact; this only stops it competing with a live room for
+   the eye. */
+.m-room-item.is-archived .m-room-name {
+  font-weight: 500;
+  color: var(--ink-muted);
+}
+
+/* The dot's own cell. One slot rather than `.m-dots`' reserved pair — a room has no second
+   fact to put in the lower one, and borrowing that gutter would draw this two pixels high
+   of centre for ever. */
+.m-room-dot {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  justify-self: center;
+  align-self: center;
+}
+
+/*
+ * The name takes the trailing column too unless the badge is actually there. A grid's
+ * columns are shared down its rows, so a column 3 sized for a badge on line 1 takes that
+ * width from the name whether or not the badge exists — `m.css`'s team row learned this and
+ * this is the same rule one list over.
+ */
+.m-room-body:not(.has-badge) .m-room-name { grid-column: 2 / -1; }
+
+.m-room-name {
+  grid-column: 2;
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The unseen count. Muted and never amber: the dot in the gutter is what says *this wants
+ * a look*, and a second loud mark on one row for one fact is a row you have to read twice.
+ * It drops entirely at zero, the way every count on this view does — `unseenText` is what
+ * decides, and it caps at `99+` so a long-quiet room cannot widen the column.
+ */
+.m-room-unseen {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  line-height: 1;
+  color: var(--ink-muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 0.2rem 0.45rem;
+}
+
+/*
+ * Who is in here, on the second line. Names only and read-only: membership is who may type
+ * into whose terminal, and the control that changes it is a decision with a real cost — it
+ * belongs on the room's own screen, behind a deliberate tap, not on a list row.
+ */
+.m-room-meta {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+.m-room-who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* `archived` says what you can do with the room, so it comes before the names and does not
+   shrink — a clipped membership still reads as a membership, a clipped `archi…` does not. */
+.m-room-tag {
+  flex: none;
+  font-size: 0.62rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+
+/* The archived fold, the rail band's own row at a thumb's size. 44px is Apple's minimum and
+   the floor every control on this view is built to. */
+.m-room-fold {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  background: var(--surface-sunk);
+}
+
+.m-room-fold:active { background: var(--surface); }
+
+.m-room-caret {
+  flex: none;
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.m-room-fold-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================ the screen === */
+
+/*
+ * The keyboard inset, paid as bottom padding on the frame. `box-sizing: border-box` is set
+ * globally in `m.css`, so a flex child's resolved height already includes it — the padding
+ * lifts the composer by exactly the strip the keyboard covers and the log above shrinks to
+ * match. Zero everywhere the keyboard is not up, which is every desktop browser.
+ */
+.m-room {
+  padding-bottom: var(--m-kb, 0px);
+}
+
+/*
+ * `hidden` is a UA-stylesheet `display: none` and any class rule carrying a `display` beats
+ * it. `m.css` has paid for this three times on one screen (the header, the quota block and
+ * the `+`) and `lead.css` says so at the top of its own file; every box here that is ever
+ * hidden is listed, whether or not it carries a `display` today, so the next declaration
+ * added above cannot quietly un-hide one.
+ */
+.m-room-sub[hidden],
+.m-room-new[hidden],
+.m-room-err[hidden],
+.m-room-mention[hidden],
+.m-room-input[hidden],
+.m-room-send[hidden],
+.m-room-say[hidden] {
+  display: none;
+}
+
+/* ---- the header ---- */
+
+.m-room-head {
+  flex: none;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.m-room-top {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.15rem 0.7rem 0.15rem 0.15rem;
+}
+
+/* The way out. The shell hides its own header on this route, so this and the phone's back
+   gesture are the only ways off the screen — 44px square, the same control `lead.css` draws
+   one route over. */
+.m-room-back {
+  flex: none;
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 1.5rem;
+  line-height: 1;
+  color: var(--ink-muted);
+  border-radius: 8px;
+}
+
+.m-room-back:active { background: var(--surface-sunk); }
+
+.m-room-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The socket. Quiet when it is fine — a dot in the idle green — and a *word* when it is not,
+ * because a dot that changes colour is exactly what you do not notice on a phone, and this
+ * is the one thing on the screen that says the log has stopped updating.
+ */
+.m-room-conn {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 1;
+  color: var(--idle);
+}
+
+.m-room-conn.is-down {
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--decision);
+  border: 1px solid var(--decision);
+  border-radius: 999px;
+  padding: 0.15rem 0.4rem;
+}
+
+/* Who is in here and whether it still takes posts. One line, clipped rather than wrapped —
+   the header's height is budgeted against the log below it, and a membership that grew the
+   header by a row on a wide room would take that room from the conversation. */
+.m-room-sub {
+  padding: 0 0.7rem 0.5rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-room-sub.is-archived { color: var(--ink-muted); }
+
+/* ---- the log ---- */
+
+.m-room-body-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.m-room-stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.m-room-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  padding: 0.9rem 0.8rem 1.2rem;
+  padding-left: calc(0.8rem + env(safe-area-inset-left));
+  padding-right: calc(0.8rem + env(safe-area-inset-right));
+}
+
+.m-room-quiet {
+  padding: 1.2rem 0.3rem;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--ink-faint);
+}
+
+/*
+ * `N new below ↓`. It exists only while the reader is not following the bottom, and it is
+ * the other half of "do not yank the reader": leaving the scroll alone means an arrival
+ * lands off screen with nothing to mark it. Absolutely positioned against the wrapper, so
+ * it never reflows the log under whoever is reading it. Quiet on purpose — muted ink, no
+ * accent, no motion.
+ */
+.m-room-new {
+  position: absolute;
+  left: 50%;
+  bottom: 0.7rem;
+  transform: translateX(-50%);
+  display: inline-block;
+  max-width: calc(100% - 1.6rem);
+  padding: 0.35rem 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 25%);
+  white-space: nowrap;
+}
+
+.m-room-new:active { background: var(--surface-sunk); }
+
+/* ---- one post ---- */
+
+/*
+ * **Two lanes**, and that is the phone's answer to drawing the two speakers distinguishably:
+ * the maintainer's own line sits right with the accent tint, a session's sits left in its
+ * own colour. It is the same distinction the terminal sees as `| ` against `> ` — the first
+ * is the maintainer's word and authorizes, the second is another session and does not — and
+ * a phone is the one screen where a pill alone is easy to skim past.
+ *
+ * 88% rather than a fixed width: at 320px a bubble any wider leaves no visible lane at all,
+ * and the lane is the whole signal.
+ */
+.m-room-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 88%;
+  min-width: 0;
+}
+
+.m-room-msg.is-peer { align-self: flex-start; }
+
+.m-room-msg.is-mine {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.m-room-msg-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.m-room-pill {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The maintainer's own pill takes the accent and nothing else does — `--accent` is the
+   panel's "this is you" colour on both front doors, and the peer ring in `tokens.css` is
+   chosen to stay clear of it. */
+.m-room-pill.is-mine {
+  color: var(--accent);
+  border-color: currentColor;
+}
+
+.m-room-time {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+}
+
+/* Who this post named, when it named anybody. Muted, no accent and no motion: it is a fact
+   to read rather than something to act on, and every member got a copy either way. */
+.m-room-to {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-room-bubble {
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+}
+
+.m-room-msg.is-mine .m-room-bubble {
+  background: var(--accent-soft);
+  border-color: var(--rule-strong);
+}
+
+/*
+ * `pre-wrap` keeps the newlines somebody typed, and `overflow-wrap: anywhere` is what stops
+ * a long unbroken token — a path, a URL, a sha — pushing the page into a horizontal scroll,
+ * which on a phone is the one layout bug you cannot get back out of by scrolling.
+ */
+.m-room-text {
+  font-size: 0.9rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * What became of this post, on every entry rather than only the maintainer's — a room fans
+ * out from whoever spoke. The word is **handed**: typed into a terminal, or put in that
+ * pane's queue. Nothing here says anybody read it, and nothing here is dressed as an error.
+ */
+.m-room-handed {
+  margin-top: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+/* One amber line to read, never a colour per name. */
+.m-room-handed.is-waiting { color: var(--working); }
+
+/* ---- the composer ---- */
+
+.m-room-composer {
+  position: relative;
+  flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.55rem 0.7rem;
+  padding-left: calc(0.7rem + env(safe-area-inset-left));
+  padding-right: calc(0.7rem + env(safe-area-inset-right));
+  /* With `viewport-fit=cover` the home indicator sits over the last few millimetres of the
+     screen, which is precisely where the send button is. */
+  padding-bottom: calc(0.55rem + env(safe-area-inset-bottom));
+}
+
+.m-room-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+/*
+ * 16px, and it is not a taste decision: Safari zooms the whole page in when a focused
+ * input's font-size is under 16px and does not zoom back out, leaving the page wider than
+ * the screen for the rest of the session. `m.css` sets it for every input on this page; it
+ * is repeated here because this is one of the two that actually gets focused.
+ */
+.m-room-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 16px;
+  line-height: 1.45;
+  resize: none;
+  overflow-y: auto;
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.6rem 0.7rem;
+}
+
+.m-room-input::placeholder { color: var(--ink-faint); }
+
+.m-room-send {
+  flex: none;
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.m-room-send:active { background: var(--surface-sunk); }
+
+.m-room-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/*
+ * What a line typed here *is*, said every time rather than in a tooltip nobody opens — the
+ * desktop's room composer makes the same claim in the same words, because the envelope makes
+ * exactly this claim on the way out.
+ */
+.m-room-say {
+  padding: 0.4rem 0.1rem 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+}
+
+/* The server's own sentence, never a paraphrase. `is-refusal` is the standing kind — an
+   archived room, or an id that names nothing — and reads quieter than a failed send, which
+   is something you can act on right now. */
+.m-room-err {
+  padding: 0 0.1rem 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--decision);
+  overflow-wrap: anywhere;
+}
+
+.m-room-err.is-refusal { color: var(--ink-muted); }
+
+/*
+ * The `@name` menu, opening **upward** over the log rather than downward under the keyboard.
+ * Absolutely placed against the composer, so it never pushes the textarea down under
+ * whoever is typing into it.
+ */
+.m-room-mention {
+  position: absolute;
+  left: calc(0.7rem + env(safe-area-inset-left));
+  right: calc(0.7rem + env(safe-area-inset-right));
+  bottom: 100%;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 10px;
+  box-shadow: 0 -10px 30px rgb(0 0 0 / 35%);
+}
+
+.m-room-mention-row {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 0.8rem;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--ink);
+  border-bottom: 1px solid var(--rule);
+}
+
+.m-room-mention-row:last-child { border-bottom: none; }
+
+.m-room-mention-row.is-on,
+.m-room-mention-row:active {
+  background: var(--surface-sunk);
+}
