@@ -15,11 +15,17 @@
  * session entering a box, and a task reaching `review`, each broadcast a frame on their
  * own. No server change, which also means nothing needs restarting to pick this up.
  *
- * The phone (`web/m/`) gets none of it and imports nothing from here. `Notification` needs
- * a secure context; a phone reaches this panel over plain `http://` on the LAN, and a
- * Home Screen web app would additionally need a push service — which is an
+ * The phone (`web/m/`) gets none of the *notification* machinery and never will.
+ * `Notification` needs a secure context; a phone reaches this panel over plain `http://` on
+ * the LAN, and a Home Screen web app would additionally need a push service — which is an
  * internet-reachable relay, and the LAN-only stance rules that out. Its half of the issue
  * was the Home Screen icon.
+ *
+ * What the phone *does* import is `needsKind`, and only that: `web/m/app.js` marks a row and
+ * lights a tab with it. That is the whole point of the rule living out here — the phone's own
+ * `isBlocked` was a second spelling that did not ask the trust gate first, so a session on
+ * that screen read as an ordinary permission prompt on one client and as the gate on the
+ * other. One function, two readers, and the gate distinction comes free.
  */
 
 import { isTrustGate } from './trust-gate.js';
