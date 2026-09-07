@@ -4512,15 +4512,28 @@ body.row-dragging * { cursor: row-resize !important; }
    `row-gap` is spelled twice because `.main-head`'s `gap` and `.app.split .main-head`'s are
    shorthands, so each sets the row gap too and the split one out-specifies a bare
    `.main-head.is-group`. Column gaps are deliberately left to those rules — the two lines
-   want a tighter gap than the things beside each other on one of them. */
+   want a tighter gap than the things beside each other on one of them.
+
+   The name column carries a floor (`minmax(3rem, 1fr)`), not `minmax(0, 1fr)`: column 3 is
+   `auto`, sized to its own max-content, and an armed `archive` confirm's un-ellipsised
+   question text is that content — without a floor here the name is what pays for it, all
+   the way to nothing. See `.main-head.is-group .confirm` below for the other half. */
 .main-head.is-group {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(3rem, 1fr) auto;
   align-items: center;
   row-gap: 0.15rem;
 }
 .app.split .main-head.is-group { row-gap: 0.15rem; }
 .main-head.is-group .head-meta { grid-column: 3; grid-row: 1; }
+
+/* The other half of the same fix. `.confirm` shrinks fine inside a flex container that is
+   itself constrained (the merge block, a task row) — but here it sits in `.head-meta`,
+   which is an `auto` grid column with nothing bounding it, so the question's max-content
+   width *is* the column's width and `.confirm-q`'s own ellipsis never gets a chance to
+   fire. Capped here rather than on `.confirm` itself, which must stay uncapped for the rows
+   that already rely on their own flex container doing the shrinking. */
+.main-head.is-group .confirm { max-width: 9rem; }
 
 /* The tally, in the same muted meta type as every other secondary line in a pane header —
    it used to *be* one of `.head-meta`'s children and reads identically now it is not. */
