@@ -710,6 +710,74 @@ select {
   white-space: nowrap;
 }
 
+/* ==================================================== standalone rows === */
+
+/*
+ * One ordinary session on the Standalones tab.
+ *
+ * Its own names rather than the team row's, and that is not tidiness: `.m-team-*` is being
+ * grown by the worker one-liners and its grid has a trailing column two of its children
+ * live in, none of which a session row has. What *is* shared is the gutter — `.m-dots` and
+ * the two dot classes above — because a dot's position is a thing a reader learns once and
+ * must find in the same place on every tab.
+ *
+ * Two columns, not three. There is no badge and no context percentage here: unread is a
+ * *team's* count of what its lead said while you were away, and an ordinary session is one
+ * you are in front of. The row's own height therefore comes from the two text lines and the
+ * 60px floor, exactly as the team row's does, so the two lists scroll at the same rhythm.
+ */
+.m-sess {
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+.m-sess-body {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  grid-template-columns: 0.9rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.15rem 0.65rem;
+  padding: 0.7rem 1rem;
+  min-height: 60px;
+}
+
+.m-sess-body:active { background: var(--surface-sunk); }
+
+.m-sess-name {
+  grid-column: 2;
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * `idle · alpha`. Ellipsised on one line, and the state word is first because it is the
+ * half that changes — a folder that gave way at 320px would be the same folder next time,
+ * a clipped state word would be the thing you opened the phone to read.
+ */
+.m-sess-meta {
+  grid-column: 2;
+  grid-row: 2;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The same red the team row's state word takes, and the same token as the dot above it —
+   one fact, one colour, whichever list it is read in. */
+.m-sess-state.is-blocked { color: var(--decision); }
+
 /* ========================================================== start sheet === */
 
 /*
