@@ -5299,6 +5299,168 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .panel-toast-close:hover { color: var(--ink); }
 
+/* =============================================== a folded side panel === */
+
+/*
+ * The shared chrome of a closed panel: the lead's team aside and a group room's pane both
+ * fold down to the same vertical strip, so the strip is written once here and the two
+ * halves only decide *when* to wear it. Nothing in this block is used until they do.
+ *
+ * A strip is a **door, not a window**. It carries a chevron, a rotated name or role, a
+ * badge or two and a stack of member dots — a name, counts and dots — and there is
+ * deliberately no rule below that could put message text or a preview in a strip.
+ * That is CLAUDE.md's "prefer showing nothing over showing something wrong" applied to the
+ * narrowest thing in the panel.
+ *
+ * `--shelf` and not `--surface-sunk`. The aside already *is* `--shelf`, and a room pane is
+ * `--ground`; painting the strip `--shelf` is what makes it read as a closed panel rather
+ * than as leftover frame. `--surface-sunk` is the row-hover tint (`tokens.css`' own note on
+ * `--shelf` says so) and borrowing it here would make a strip look permanently hovered.
+ */
+.fold-strip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.45rem 0;
+  overflow: hidden;
+  background: var(--shelf);
+  border-left: 1px solid var(--rule);
+  cursor: pointer;
+  /* Class-gated nowhere, because this one is the *hover* nudge rather than the fold — the
+     fold's own transition belongs to the host node (`.room-panel`, `.main`) and is added
+     and removed around the animation, so a grip drag stays instant. */
+  transition: width 120ms ease;
+}
+
+/* Three pixels wider under the cursor. Small on purpose: it says "this is a control"
+   without moving the column beside it enough to be read as the panel opening.
+
+   Two things the *host* has to allow, since this node fills whatever holds it and neither
+   host is written here. It has to leave room for the 3px — a host that pins all three of
+   `width`/`min-width`/`max-width` to `var(--strip)` (which the aside must, because
+   `min-width: 15rem` on `.room-panel` beats any width a fold sets) clips the nudge away, so
+   its own hover rule has to carry the same `calc`. And a host that already draws a left
+   rule — `.room-panel` does, a `.pane` does not — should drop one of the two, or the seam
+   draws twice. */
+.fold-strip:hover { width: calc(var(--strip) + 3px); }
+
+/* The chevron sits at the top, where the control that closed the panel was, so the eye
+   goes back to the same corner to reopen it. The whole strip is clickable; this is the
+   affordance that says so. */
+.fold-strip-chev {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1;
+  color: var(--ink-faint);
+}
+
+.fold-strip:hover .fold-strip-chev { color: var(--ink); }
+
+/*
+ * The name, turned on its side. `vertical-rl` rather than a `rotate()` because a rotated
+ * box keeps its horizontal size and would have to be laid out by hand; a real writing mode
+ * gives the flex column a real height to distribute, which is what makes the ellipsis
+ * below work at all.
+ *
+ * The ellipsis is the point: a room can be called anything and this column is `--strip` wide, so
+ * the name is clipped with a mark saying so rather than being allowed to push the badges
+ * off the bottom. `min-height: 0` is what lets a flex child shrink below its content.
+ */
+.fold-strip-label {
+  flex: 1;
+  min-height: 0;
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
+  color: var(--ink-muted);
+}
+
+/* A role chip on a strip is the rail's own chip stood on end — same token, same shape, so
+   a lead reads as a lead in both places. */
+.fold-strip-label.is-role {
+  flex: none;
+  writing-mode: vertical-rl;
+  border-radius: 2px;
+  padding: 0.3rem 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--surface);
+  background: var(--accent);
+}
+
+/* One dot per member, stacked. `.dot` and its status classes are the rail's, unchanged —
+   `gone` included, which is the outline shape a member with no live row gets. */
+.fold-strip-dots {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.28rem;
+  max-height: 30%;
+  overflow: hidden;
+}
+
+/*
+ * A count. The rail's `.unread-badge` shape — mono, tabular, a filled pill — mirrored
+ * rather than reused, because that class carries `grid-column: 3` for the session row's own
+ * grid and a strip is a flex column: sharing the class would let a future change to the
+ * rail's geometry reach in here for no reason. What is shared is what should be, the
+ * tokens.
+ */
+.fold-strip-badge {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--surface);
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 0.2rem 0.3rem;
+  min-width: 1.1rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tasks sitting in `review` — business the maintainer has not finished. `--working`, the
+   same amber `.session-team .team-review` uses on the rail row this strip is standing in
+   for, and no new token: the ruling of 2026-08-27 is that this signal comes from task
+   state, and the colour it comes in is already spelled. */
+.fold-strip-badge.is-review { background: var(--working); }
+
+/* Something arrived while the panel was shut. Two beats of the dot's own pulse and then
+   still — a folded panel that never stopped flashing would be a panel you fold once. */
+.fold-strip-badge.is-new { animation: pulse 1.4s ease-in-out 2; }
+
+/*
+ * Reduced motion, for the whole feature and not only for what this file already draws.
+ *
+ * The two rules naming classes that do not exist yet are deliberate and are inert until
+ * they do: the fold's transition lives on its **host** — the aside's own panel, and the
+ * split's grid — and is added around the animation by the halves that ship those. Writing
+ * the opt-out here is what stops each of them having to remember it, and a selector for a
+ * class nobody sets costs nothing.
+ *
+ * Note the consequence, because it is load-bearing rather than cosmetic: with motion off
+ * there is no transition, so **`transitionend` never fires**. Every fold needs a
+ * `setTimeout` backstop behind it or the sequencing after one simply never completes.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .fold-strip,
+  .room-panel.is-folding,
+  .app.is-folding .main {
+    transition: none;
+  }
+  .fold-strip-badge.is-new { animation: none; }
+}
+
 /* ============================================================= narrow === */
 
 @media (max-width: 52rem) {
