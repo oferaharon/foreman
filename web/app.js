@@ -8519,6 +8519,7 @@ function createPane(slot, host) {
     if (!btn) return;
     btn.disabled = false;
     if (panes.length > 1) {
+      btn.hidden = false;
       btn.textContent = 'close';
       btn.title = 'Close this pane (⌘\\)';
       btn.onclick = () => closePane(slot);
@@ -8527,12 +8528,15 @@ function createPane(slot, host) {
     btn.textContent = 'split';
     if (s?.isLead) {
       // A lead's pane is already two frames — the room owns the right half, and a third
-      // column would leave nothing readable. Decided in the spec, not a limitation.
-      btn.disabled = true;
+      // column would leave nothing readable. Decided in the spec, not a limitation — and
+      // a control nobody can press should not be drawn at all, so it is hidden rather
+      // than disabled. Cleared in the other two branches, since this button is reused
+      // across repaints rather than rebuilt.
+      btn.hidden = true;
       btn.onclick = null;
-      btn.title = 'A team lead pane holds the room on its right — split view is off here.';
       return;
     }
+    btn.hidden = false;
     btn.title = 'Open a second session beside this one (⌘\\)';
     btn.onclick = () => openSplit(); // never the click event — it now takes options
   }
