@@ -71,6 +71,14 @@ dir_size() {
 # without being spelled a second time in another language. Answers the empty string on
 # every failure — no node, no module, a module that throws — because each caller has its
 # own fallback and a backup must not abort over a label it could not look up.
+#
+# Three shapes, because the values it has to fetch are three shapes. A string comes back
+# as itself (`AGENT_LABEL`). An **array** comes back one item per line, each with its own
+# trailing newline — without that last newline `read` sees EOF and drops the final item,
+# which is the classic way a two-element list silently becomes one. A **function** is
+# called with no arguments and its answer is then read as one of the two above, which is
+# what lets a resolver that has to look at the disk (`existingBrewPlists`) live in the
+# module that owns it instead of being reimplemented here.
 read_export() {
   local module="$1" name="$2"
   [[ -f "$module" ]] || return 0
@@ -78,10 +86,28 @@ read_export() {
   node -e "
     const { pathToFileURL } = require('url');
     import(pathToFileURL(process.argv[1]).href)
-      .then((m) => process.stdout.write(m[process.argv[2]] || ''))
+      .then((m) => {
+        const named = m[process.argv[2]];
+        const value = typeof named === 'function' ? named() : named;
+        if (value === undefined || value === null) return;
+        process.stdout.write(
+          Array.isArray(value) ? value.map((item) => String(item) + '\n').join('') : String(value),
+        );
+      })
       .catch(() => {});
   " "$module" "$name" 2>/dev/null || true
   return 0
+}
+
+# Collect a read_export list into a named array. `|| [[ -n "$line" ]]` so a last line with
+# no newline is still kept; the array is emptied first so a caller can test its length.
+read_export_lines() {
+  local target="$1" module="$2" name="$3" line
+  eval "$target=()"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -n "$line" ]] || continue
+    eval "$target+=(\"\$line\")"
+  done < <(read_export "$module" "$name")
 }
 
 # `12.4 MB` — decimal, because that's what Finder and `ls -lh` say.
@@ -129,7 +155,10 @@ verify_archive() {
   total=$(echo "$listing" | grep -c . || true)
   echo "Total entries: $total"
   local prefix count
-  for prefix in "state-dir/" "claude-settings.json" "launchagent.plist" "claude.json" "repo/"; do
+  # `launchagents/` is where a plist goes now — one entry per launchd spelling this install
+  # really has. `launchagent.plist` is the single flat file older archives carry, kept in
+  # the list so --verify still reads them rather than reporting a plist that is right there.
+  for prefix in "state-dir/" "claude-settings.json" "launchagents/" "launchagent.plist" "claude.json" "repo/"; do
     count=$(echo "$listing" | grep -c "^${prefix}" || true)
     printf '  %-22s %s entries\n' "$prefix" "$count"
   done
@@ -246,19 +275,23 @@ CLAUDE_JSON="$HOME/.claude.json"
 # a git checkout" is the right answer when there is no checkout.
 REPO_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || REPO_DIR=""
 
-# The launchd label, which is the plist's basename — and there are **two of them**, one per
-# install, because two different things generate the plist.
+# The launchd plist — and which file that is depends on which install this is, because two
+# different things generate it, and on one of the two Homebrew has since renamed it.
 #
 # A checkout's plist is written by `install-agent.js` from `server/logs.js`'s AGENT_LABEL
-# (`dev.foreman.panel`, overridable by $FOREMAN_AGENT_LABEL). A Homebrew install's plist is
-# written by `brew services` from the formula's `service do` block, and launchd names it
-# after the formula: `homebrew.mxcl.<formula>`. Under Homebrew, `dev.foreman.panel.plist`
+# (`dev.foreman.panel`, overridable by $FOREMAN_AGENT_LABEL): exactly one file, exactly one
+# name. A Homebrew install's plist is written by `brew services` from the formula's
+# `service do` block, and launchd names it after the formula — `sh.brew.<formula>` on
+# current Homebrew, `homebrew.mxcl.<formula>` on older ones, with **both** possible at once
+# on a Mac whose upgrade left the old file behind. Under Homebrew, `dev.foreman.panel.plist`
 # names no file at all — so a backup asking for it captured nothing and said MISSING, with
-# nothing else on the run looking wrong. UNDER_HOMEBREW above is what chooses.
+# nothing else on the run looking wrong, and that is the same shape of nothing you get from
+# asking for the one brew spelling this Mac does not use. UNDER_HOMEBREW above chooses which
+# set of candidates; the *file's existence* chooses within it, because nothing else can.
 #
-# Note this is the *label*, and only the label. The panel's log basenames stay derived from
+# Note these are *labels*, and only labels. The panel's log basenames stay derived from
 # AGENT_LABEL in both installs, because the formula's own `service do` block spells
-# `foreman.log` / `foreman-error.log` — see the long note on BREW_LAUNCHD_LABEL in
+# `foreman.log` / `foreman-error.log` — see the long note on BREW_LAUNCHD_LABELS in
 # server/homebrew.js for what making AGENT_LABEL itself brew-aware would have cost.
 #
 # Both are read **beside this script**, never via git: `$SCRIPT_DIR/../server/*.js` is true
@@ -266,21 +299,41 @@ REPO_DIR="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null)" || REPO
 # answers nothing at all — and an empty answer there used to fall silently through to the
 # hardcoded default, which is the wrong label for any install that set one, and so the
 # wrong plist (or none) in the archive. The fallbacks stay for a copy of this script
-# carried off on its own; neither spells `foreman-panel` twice.
+# carried off on its own; none of them spells `foreman-panel` twice.
 LOGS_JS="$SCRIPT_DIR/../server/logs.js"
 HOMEBREW_JS="$SCRIPT_DIR/../server/homebrew.js"
 DEFAULT_AGENT_LABEL="dev.foreman.panel"
 
+# PLIST_CANDIDATES: every path this install could be using, newest spelling first — what
+# gets *named* when there is nothing to capture. PLIST_PATHS: the subset really on disk —
+# what gets captured. Both arrays, because the Homebrew case can genuinely be two files.
+PLIST_CANDIDATES=()
+PLIST_PATHS=()
+
 if [[ "$UNDER_HOMEBREW" -eq 1 ]]; then
-  AGENT_LABEL="$(read_export "$HOMEBREW_JS" BREW_LAUNCHD_LABEL)"
   # $FOREMAN_AGENT_LABEL is deliberately not consulted here: it renames the plist the
   # *checkout* installer writes, and renames nothing that `brew services` generated.
-  AGENT_LABEL="${AGENT_LABEL:-homebrew.mxcl.$BREW_FORMULA}"
+  read_export_lines PLIST_CANDIDATES "$HOMEBREW_JS" brewPlistPaths
+  read_export_lines PLIST_PATHS "$HOMEBREW_JS" existingBrewPlists
+  if [[ ${#PLIST_CANDIDATES[@]} -eq 0 ]]; then
+    # No node, or no module beside us: compose both spellings from the one name we carry,
+    # newest first, and do the resolver's own job here — which is a `-f` test and nothing
+    # more, precisely so this copy cannot drift from the module's answer.
+    PLIST_CANDIDATES=(
+      "$HOME/Library/LaunchAgents/sh.brew.$BREW_FORMULA.plist"
+      "$HOME/Library/LaunchAgents/homebrew.mxcl.$BREW_FORMULA.plist"
+    )
+    PLIST_PATHS=()
+    for candidate in "${PLIST_CANDIDATES[@]}"; do
+      if [[ -f "$candidate" ]]; then PLIST_PATHS+=("$candidate"); fi
+    done
+  fi
 else
   AGENT_LABEL="$(read_export "$LOGS_JS" AGENT_LABEL)"
   AGENT_LABEL="${AGENT_LABEL:-${FOREMAN_AGENT_LABEL:-$DEFAULT_AGENT_LABEL}}"
+  PLIST_CANDIDATES=("$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist")
+  if [[ -f "${PLIST_CANDIDATES[0]}" ]]; then PLIST_PATHS+=("${PLIST_CANDIDATES[0]}"); fi
 fi
-PLIST_PATH="$HOME/Library/LaunchAgents/${AGENT_LABEL}.plist"
 
 # ---------------------------------------------------------------------------
 # Destination
@@ -362,15 +415,31 @@ echo >> "$MANIFEST"
 # 3. The LaunchAgent plist
 # ---------------------------------------------------------------------------
 
-echo "3. LaunchAgent plist: $PLIST_PATH" >> "$MANIFEST"
-if [[ -f "$PLIST_PATH" ]]; then
-  cp "$PLIST_PATH" "$STAGE/launchagent.plist"
-  size=$(file_size "$PLIST_PATH")
-  echo "  captured   $(human_size "$size")" >> "$MANIFEST"
-  SUMMARY_LINES+=("$(printf '[captured] %-18s %-40s %s' 'LaunchAgent plist' "$PLIST_PATH" "$(human_size "$size")")")
+# Every captured plist keeps its own basename, under `launchagents/` — a mirror of the
+# directory launchd reads, filtered to the ones that are this panel's. The flat
+# `launchagent.plist` this used to write could only ever hold one file, and it threw away
+# the name you need in order to put it back; older archives still have it, which is why
+# --verify above still counts it.
+echo "3. LaunchAgent plist" >> "$MANIFEST"
+if [[ ${#PLIST_PATHS[@]} -gt 0 ]]; then
+  mkdir -p "$STAGE/launchagents"
+  for plist in "${PLIST_PATHS[@]}"; do
+    cp "$plist" "$STAGE/launchagents/$(basename "$plist")"
+    size=$(file_size "$plist")
+    printf '  %s\n    captured   %s\n' "$plist" "$(human_size "$size")" >> "$MANIFEST"
+    SUMMARY_LINES+=("$(printf '[captured] %-18s %-40s %s' 'LaunchAgent plist' "$plist" "$(human_size "$size")")")
+  done
+  # Both spellings on disk is a Homebrew upgrade that did not clean up after itself. Not an
+  # error and not this script's to fix — but say so, or an archive with two plists in it
+  # looks like a bug in the backup rather than a fact about the Mac.
+  if [[ ${#PLIST_PATHS[@]} -gt 1 ]]; then
+    echo "  (both launchd spellings are present — a Homebrew upgrade left the older plist behind; both captured)" >> "$MANIFEST"
+  fi
 else
-  echo "  MISSING" >> "$MANIFEST"
-  SUMMARY_LINES+=("$(printf '[missing]  %-18s %s' 'LaunchAgent plist' "$PLIST_PATH")")
+  for candidate in "${PLIST_CANDIDATES[@]}"; do
+    printf '  %s\n    MISSING\n' "$candidate" >> "$MANIFEST"
+    SUMMARY_LINES+=("$(printf '[missing]  %-18s %s' 'LaunchAgent plist' "$candidate")")
+  done
 fi
 echo >> "$MANIFEST"
 

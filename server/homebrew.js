@@ -38,6 +38,7 @@
  * touches anything. That is why this is nine lines of path arithmetic and not a probe.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,29 +51,86 @@ import { fileURLToPath } from 'node:url';
 export const FORMULA = 'foreman-panel';
 
 /**
- * The launchd label a `brew services` job runs under: `homebrew.mxcl.` + the formula name.
+ * The launchd labels a `brew services` job can be running under — **both of them**, newest
+ * first. There is no third, and there is no way to choose between these two except by
+ * looking at which plist is on disk.
  *
- * **This is not the panel's own label and must not be confused with it.** `logs.js` owns
+ * **These are not the panel's own label and must not be confused with it.** `logs.js` owns
  * `AGENT_LABEL` (`dev.foreman.panel` by default), which the checkout's `install-agent.js`
  * writes into the plist it generates *and* which the log basenames are derived from. Under
- * Homebrew nobody generates that plist: `brew services` writes
- * `~/Library/LaunchAgents/homebrew.mxcl.<formula>.plist` from the formula's `service do`
- * block, so `dev.foreman.panel.plist` names no file on disk — which is how
- * `scripts/backup-state.sh` came to look for a plist that was never there and report it
- * MISSING with nothing else wrong.
+ * Homebrew nobody generates that plist: `brew services` writes one into
+ * `~/Library/LaunchAgents/` from the formula's `service do` block, so
+ * `dev.foreman.panel.plist` names no file on disk — which is how `scripts/backup-state.sh`
+ * came to look for a plist that was never there and report it MISSING with nothing else
+ * wrong.
  *
- * So there are two labels, and exactly one thing may read this one: whatever needs to
- * *find the plist launchd is really using*. The log basenames stay derived from
+ * So there are two *kinds* of label, and exactly one kind may be read here: whatever needs
+ * to *find the plist launchd is really using*. The log basenames stay derived from
  * `AGENT_LABEL`, because the formula's `service do` block spells `foreman.log` /
- * `foreman-error.log` and a panel deriving them from this label instead would trim two
- * files nobody writes while the ones launchd appends to grow without bound — the exact
- * cascade `logs.js` already warns about, arriving from the other end.
+ * `foreman-error.log` and a panel deriving them from these instead would trim two files
+ * nobody writes while the ones launchd appends to grow without bound — the exact cascade
+ * `logs.js` already warns about, arriving from the other end.
  *
- * `homebrew.mxcl.` is Homebrew's own prefix, not ours; the half that is ours is `FORMULA`,
- * and it is spelled once. `scripts/backup-state.sh` reads this export rather than carrying
- * the composed string, the same way it reads `AGENT_LABEL` off `logs.js`.
+ * ## Why two, and why a list rather than a detector
+ *
+ * **Homebrew renamed its own prefix.** It used to write `homebrew.mxcl.<formula>`; current
+ * Homebrew writes `sh.brew.<formula>` — measured on 6.0.21 when the v0.4.0 formula was
+ * proved, and read straight out of the installed source on 6.0.22
+ * (`Library/Homebrew/service.rb`: `canonical_plist_name` is `sh.brew.`, `legacy_plist_name`
+ * is `homebrew.mxcl.`). A panel that knew only the old spelling looked for a plist that no
+ * longer exists — the same silent-MISSING bug the label fix was for in the first place,
+ * reopened by somebody else's rename. Swapping one hardcoded name for the other would only
+ * move the bug onto every Mac still running an older Homebrew.
+ *
+ * **Nothing tells you which one you have except the file.** Not the panel — it is not
+ * installed by Homebrew's code and sees none of its decisions. Not `brew --version` either,
+ * and deciding by it would be a version *number* standing in for a fact on disk: an install
+ * that predates the rename keeps its old plist through every upgrade, so the running
+ * Homebrew's version says nothing about the plist that is actually there. Homebrew itself
+ * does exactly this — its `plist_names` is `[canonical, legacy]`, a list of two it tries in
+ * order, because it has nothing to detect with either.
+ *
+ * **Both can exist at once.** An upgrade that wrote the new plist without removing the old
+ * one leaves two, which is why the resolver below answers a list and every caller is
+ * expected to handle more than one rather than take the first and move on.
+ *
+ * Both prefixes are Homebrew's, not ours; the half that is ours is `FORMULA`, and it is
+ * spelled once. `scripts/backup-state.sh` reads the resolvers below rather than carrying
+ * the composed strings, the same way it reads `AGENT_LABEL` off `logs.js`.
  */
-export const BREW_LAUNCHD_LABEL = `homebrew.mxcl.${FORMULA}`;
+export const BREW_LAUNCHD_LABELS = [`sh.brew.${FORMULA}`, `homebrew.mxcl.${FORMULA}`];
+
+/** Where launchd reads user agents from, for whichever home directory is in force. */
+function launchAgentsDir(home) {
+  return path.join(home, 'Library', 'LaunchAgents');
+}
+
+/**
+ * Every plist path a `brew services` job for this formula could be running under, newest
+ * first. Pure — it says nothing about what is on disk, and exists so a caller with nothing
+ * to capture can still *name* what it went looking for.
+ */
+export function brewPlistPaths(home = os.homedir()) {
+  return BREW_LAUNCHD_LABELS.map((label) => path.join(launchAgentsDir(home), `${label}.plist`));
+}
+
+/**
+ * The ones that are really there, newest first — none, one, or both.
+ *
+ * This is the resolver, and it is the only correct way to locate a `brew services` plist:
+ * the file's existence is the whole of the evidence, so nothing here consults a version, a
+ * marker, or `brew` itself. `home` is an argument rather than read once at module load
+ * because the tests run against a scratch `HOME`.
+ */
+export function existingBrewPlists(home = os.homedir()) {
+  return brewPlistPaths(home).filter((candidate) => {
+    try {
+      return fs.statSync(candidate).isFile();
+    } catch {
+      return false; // not this spelling — try the next
+    }
+  });
+}
 
 /** Tried in order when `$HOMEBREW_PREFIX` says nothing: Apple silicon, then Intel. */
 export const FALLBACK_PREFIXES = ['/opt/homebrew', '/usr/local'];
