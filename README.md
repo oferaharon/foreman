@@ -63,53 +63,77 @@ turn up.
 
 ## What it does
 
-Nine things, one line each. The full reference lives in [`docs/`](docs/) — [the
-panel](docs/panel.md), [the team](docs/team.md), [running it](docs/running.md).
+The full reference lives in [`docs/`](docs/) — [the panel](docs/panel.md), [the
+team](docs/team.md), [running it](docs/running.md).
+
+<table>
+<tr>
+<td width="50%" valign="middle">
 
 ### The rail, and the sessions that need you
-
-![The top of the rail: a pinned team lead with its worker nested under it, then a Needs you
-group holding one session stopped on a permission prompt and one carrying two unread
-replies, then a project heading with the open session under it.](docs/images/rail-inbox.png)
 
 Every live session on the Mac, grouped by folder, with a **Needs you** group at the top
 holding whatever is blocked or has replied while you weren't looking — sessions move into
 it rather than appearing twice, so it empties as you deal with it.
 [Docs →](docs/panel.md#unread-and-the-needs-you-queue)
 
-### Answering prompts, questions and plan boxes
+</td>
+<td width="50%">
 
-![A permission prompt as the panel draws it: the tool and the file at the top, the diff it
-wants to apply, the question, and the box's three real options as separate buttons. The
-second — a yes that also switches the session into accepting edits — is outlined rather
-than plain, and the composer below reads "answer the prompt above" with its send button
-showing queue.](docs/images/permission-card.png)
+<img src="docs/images/rail-inbox.png" alt="The top of the rail: the Foreman header with its two rate-limit gauges, the new-session and snapshot buttons, and live/busy/waiting/unread counts, followed by a pinned team lead with a worker nested underneath it carrying an unread badge." width="100%" />
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+<img src="docs/images/permission-card.png" alt="A permission prompt as the panel draws it: the tool and the file at the top, the diff it wants to apply, the question, and the box's three real options as separate buttons. The second — a yes that also switches the session into accepting edits — is outlined rather than plain, and the composer below reads &quot;answer the prompt above&quot; with its send button showing queue." width="100%" />
+
+</td>
+<td width="50%" valign="middle">
+
+### Answering prompts, questions and plan boxes
 
 Permission prompts, Claude's own `AskUserQuestion` boxes and the plan-approval screen are
 parsed off the pane and offered as real buttons — answered by the option's own digit,
 never positionally, and never sent if the label has changed since you saw it.
 [Docs →](docs/panel.md#permission-prompts)
 
-### The phone view
-
-![A phone-sized screen: the project name with a chat and tasks tab pair under it, then a
-lead's conversation — a message sent to it, two tool calls folded into one-line chips, and
-its answer — with a reply box at the bottom.](docs/images/phone.png)
-
-`/m/` is a phone-sized view of your leads and nothing else: read the conversation, see the
-tasks, answer what is blocking. [Docs →](docs/team.md)
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
 ### The team: a lead, its workers, and the room
-
-![The room, read top to bottom: a worker's report as a bubble, folded to five lines behind a
-quiet view more and tagged ready for review with its branch; four grey system cards — a PR
-opened, a task recorded pending, a merge, a task closed; the green line where the next
-worker was dispatched; that worker's own two bubbles, each named and timestamped and each
-folded; and a last grey card for the PR it opened.](docs/images/team-room.png)
 
 A lead scopes the work, dispatches workers into their own git worktrees, and reports back
 through a room you can read — and nothing merges, and nothing is killed, without your
 word. [Docs →](docs/team.md)
+
+</td>
+<td width="50%">
+
+<img src="docs/images/team-aside.png" alt="The team panel: a task list mixing dispatched and pending rows, and beneath it the read-only team room showing a task-closed system card, a dispatch line, a conflict warning, a worker's folded report card marked ready for review, and a PR-opened card." width="100%" />
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+<img src="docs/images/phone.png" alt="A phone-sized screen: the project name with a chat and tasks tab pair under it, then a lead's conversation — a message sent to it, two tool calls folded into one-line chips, and its answer — with a reply box at the bottom." width="100%" />
+
+</td>
+<td width="50%" valign="middle">
+
+### The phone view
+
+`/m/` is a phone-sized view of your leads and nothing else: read the conversation, see the
+tasks, answer what is blocking. [Docs →](docs/team.md)
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="middle">
 
 ### Rooms, for sessions that have to agree
 
@@ -118,30 +142,42 @@ writes it down and types a copy into every other member's terminal. Only you mak
 choose who is in it; a session gets three tools and none of them is *join*.
 [Docs →](docs/panel.md#rooms)
 
+</td>
+<td width="50%">
+
+<img src="docs/images/rooms.png" alt="A room named Introduction to Rooms with two members, showing two speech-bubble replies between them, each folded behind a view more and marked handed to the other member." width="100%" />
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+<img src="docs/images/split-view.png" alt="Two sessions side by side in split view, each with its own header, transcript and composer — one running a Bash tool call, the other showing its finished answer." width="100%" />
+
+</td>
+<td width="50%" valign="middle">
+
 ### Split view
 
 Two sessions side by side, each with its own header, transcript, composer, queue and
 prompt buttons — `split` in a pane header, or `⌘\`. A reload puts both back where they
 were. [Docs →](docs/panel.md#split-view)
 
-### Install it as an app, and be told when a session stops
+</td>
+</tr>
+</table>
 
-The panel and the phone view each ship their own web-app manifest, so either can leave the
-browser and become a window of its own; opt in to notifications and the Mac tells you the
-moment a session walks into something it cannot get past.
-[Docs →](docs/panel.md#installing-it-as-an-app)
+**Also in the box:**
 
-### Snapshot, restore, relaunch all
-
-`snapshot` saves the set of sessions you have open and puts it back after a reboot;
-`relaunch all…` closes each one and starts it again — same folders, names, groups and
-pins — for the day you update Claude Code. [Docs →](docs/panel.md#snapshot-and-restore)
-
-### It stays up on its own
-
-The panel meant to stay running is a LaunchAgent, installed by `npm run install-agent` or
-by `brew services` — surviving a crash, a reboot and the routine restart, and trimming its
-own logs at boot. [Docs →](docs/running.md#running-it-under-launchd)
+- **Install it as an app, and be told when a session stops** — the panel and the phone
+  view each ship their own web-app manifest, and notifications tell the Mac the moment a
+  session walks into something it cannot get past.
+  [Docs →](docs/panel.md#installing-it-as-an-app)
+- **Snapshot, restore, relaunch all** — save the set of sessions you have open and put it
+  back after a reboot, or close every one and start it again for the day you update Claude
+  Code. [Docs →](docs/panel.md#snapshot-and-restore)
+- **It stays up on its own** — the panel runs as a LaunchAgent, surviving a crash, a
+  reboot and the routine restart. [Docs →](docs/running.md#running-it-under-launchd)
 
 ---
 
