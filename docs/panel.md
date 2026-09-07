@@ -895,6 +895,45 @@ comes back stamped with the slot it belongs to. In the browser this meant liftin
 per-session state — selection, messages, the composer — out of module scope and into a
 `createPane` factory; two of everything, sharing one roster.
 
+### Folding the side panels
+
+With a team lead open and a room open beside it the window is four columns wide: the rail,
+the conversation you were reading, the room, and the lead's own team panel. Each earns its
+place on its own; together they squeeze the thing you were actually reading into a strip in
+the middle. So either side panel can be folded down to a narrow vertical strip, and they fold
+independently — both, one, or neither.
+
+**The lead's team panel** folds from the slim band down its left edge. That band is also the
+grip you have always dragged to set the panel's width: drag anywhere on it to resize, and
+click the fold icon pinned at its top to shut the panel. **A room in a pane** folds from a
+control in its own header, beside `archive` and `close`, and it is drawn only when there is a
+second column for the room to fold *beside* — a room alone in the frame folded to a strip
+would leave the panel with nothing in it. A folded panel reopens by clicking anywhere on its
+strip; the same fold icon sits at the top of it, mirrored.
+
+**A strip is a door, not a window.** The team panel's carries its `lead` chip on its side, its
+open-task count and its `N in review` count. A room's carries the room name on its side, one
+live status dot per member, and a badge for anything posted while the door was shut. Never a
+message, never a preview — a panel you can shut quietly is a panel that stops being
+trustworthy, so the numbers are the point.
+
+**A folded panel still counts what arrives**, and says so. A line landing in the team room, or
+a post landing in a room, raises the strip's badge and pulses it once. Nothing is marked read
+behind a shut door: a folded room pane stops telling the server you have seen it, so the count
+you come back to is the real one. Expanding spends it.
+
+**Opening a room folds the team panel out of the way — every time**, not just the first. The
+aside folds, and the room then slides in from the strip behind it: two steps of 200ms, in that
+order, so it is legible as one thing happening rather than two columns moving at once. The
+aside's own fold state is set exactly as if you had clicked its band icon, so pressing that
+icon afterwards behaves the way it looks like it should. Opening a room that is on screen but
+shut does the same. If the lead's pane is the one the room is about to replace, there is
+nothing to fold and the room simply slides in.
+
+Both folds are remembered **per browser**, one answer per panel, alongside the widths you have
+dragged — and a fold never writes a width, so the panel you dragged comes straight back at the
+size you left it. Under `prefers-reduced-motion` both steps are instant.
+
 ### Rooms
 
 A room is a named place where a handful of sessions coordinate on one thing — a feature
@@ -1004,8 +1043,9 @@ collapsed `archived · N`. The band's head and its `+ room` are in the rail even
 no rooms at all — a control that only appears once you have used it is a control nobody finds.
 
 **A room in a pane.** Click a row. The header carries the name (click it to rename), a chip per
-member with a live status dot, an `✕` to remove one and a `+` to add, and an archive control;
-every destructive one asks before it acts. Each post is a bubble with the speaker's colour on
+member with a live status dot, an `✕` to remove one and a `+` to add, an archive control and a
+fold (see [Folding the side panels](#folding-the-side-panels)); every destructive one asks
+before it acts. Each post is a bubble with the speaker's colour on
 its name pill — your own full-width with an accent edge, because those are the `| ` lines on the
 wire and they are a different kind of thing. Under each bubble is what became of it:
 

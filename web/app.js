@@ -751,6 +751,21 @@ function renderTaskLists() {
 }
 
 /**
+ * How long the aside's fold takes, in milliseconds.
+ *
+ * Spelled here and in `.room-panel.is-folding`'s transition. It is out here rather than
+ * inside the factory with the panel it times because **two** backstops read it: the one that
+ * takes `is-folding` off and runs the remeasure, inside `createPane`, and the auto-collapse's
+ * own, which is what starts a room sliding in when `transitionend` never arrives. A second
+ * spelling of a duration is what this file keeps refusing.
+ *
+ * 200 is not a fresh choice. It is the number this panel already animates a layout at — the
+ * settings fold before it, the room slot's `ROOM_FOLD_MS` after it — and a second duration
+ * beside them would read as a second mechanism.
+ */
+const ASIDE_FOLD_MS = 200;
+
+/**
  * Fold — or unfold — every lead aside on the page.
  *
  * `asideFolded` is one answer for the browser, `hideFinished`'s shape and `--aside`'s, so a
@@ -2982,27 +2997,69 @@ function openGroupRoom(id) {
    * makes those two statements consistent — without it, a room opened fresh would come back
    * folded after the next reload, which is the memory answering a question nobody asked.
    *
-   * Item 4 is what makes "open" an animation rather than a state: it mounts the pane with
-   * the fold class on, forces a reflow and takes it off, so the room slides out of the strip
-   * using this item's own mechanism rather than a second one.
+   * `slideRoomIn` is what makes "open" an animation rather than a state: it mounts the pane
+   * with the fold class on, forces a reflow and takes it off, so the room slides out of the
+   * strip using item 3's own mechanism rather than a second one.
    */
   roomFolded.set(false);
 
+  /*
+   * The auto-collapse, and the whole of it is which pane the room is about to take.
+   *
+   * `roomTarget` is asked here for **one** reason: an aside inside the pane that is about to
+   * be replaced is not in the way, it is going away with its pane, and folding it would be
+   * 200ms of animation on a panel nobody will see again. That is the branch a reader assumes
+   * away — two panes, the lead in the one you are *not* focused in — so it is named rather
+   * than left to fall out of the arithmetic.
+   *
+   * Everything else about the routing is re-derived on the other side of the fold, because a
+   * fold is 200ms and the frame can change inside it.
+   */
+  const inTheWay = asideInTheWay(roomTarget());
+  if (inTheWay) foldAsideThen(inTheWay, () => mountGroupRoom(id));
+  else mountGroupRoom(id);
+}
+
+/**
+ * Which pane a room is about to be put in — or `null` when there is not one yet, meaning a
+ * split is about to be made and the room goes in the new slot.
+ *
+ * One spelling of the routing rule, because two callers now ask it a beat apart:
+ * `openGroupRoom` asks *before* the aside's fold, only to know whether the aside in front of
+ * it is about to be replaced anyway, and `mountGroupRoom` asks again *after* it, which is
+ * what makes the answer honest across the 200ms in between.
+ */
+function roomTarget() {
   const holder = panes.find((p) => p.kind() !== 'session');
-  const madeSplit = !holder && panes.length < 2;
-  const target =
-    holder ||
-    (panes.length > 1
-      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
-      : openSplit({ adopt: false, focus: false }));
+  if (holder) return holder;
+  if (panes.length > 1) return panes.find((p) => p.slot !== focusedSlot) || panes[0];
+  return null;
+}
+
+/**
+ * Put the room in its slot, and slide it in.
+ *
+ * The second half of `openGroupRoom`, split off because the auto-collapse runs it either
+ * straight away or 200ms later on the far side of an aside's fold — and because everything
+ * in it has to be re-derived at the moment it runs rather than at the moment it was decided.
+ *
+ * `slideRoomIn` goes **last**, after `setFocus` and the repaints: `paintFocus` calls
+ * `paintFolds`, which re-derives the fold from `roomFolded` — false, because a room slides
+ * in open — and would take the seeded strip straight back off. Nothing paints in between, so
+ * the order costs nothing and getting it wrong costs the animation.
+ */
+function mountGroupRoom(id) {
+  const existing = roomTarget();
+  const target = existing || openSplit({ adopt: false, focus: false });
   if (!target) return;
-  if (madeSplit) threadSplit = true;
+  if (!existing) threadSplit = true;
   target.openGroup(id);
   // Put focus where a click will land, which after this is never the room.
   const keep = sessionPane();
   if (keep) setFocus(keep.slot);
   for (const p of panes) p.renderHead();
   renderRail();
+  slideRoomIn(target);
 }
 
 /**
@@ -7413,18 +7470,6 @@ function createPane(slot, host) {
    * panel does not make you wait for it.
    */
   const SETTINGS_FOLD_MS = 200;
-
-  /**
-   * How long the aside's own fold takes, in milliseconds — and the same 200 for the same
-   * reason. It is spelled here and in `.room-panel.is-folding`'s transition; this copy
-   * times the backstop that takes `is-folding` off and runs the remeasure, so the two
-   * drifting apart costs a remeasure taken slightly early rather than anything visible.
-   *
-   * 200 is not a fresh choice. It is the number this panel already animates a layout at,
-   * one heading up in the same column, and a second duration beside it would read as a
-   * second mechanism.
-   */
-  const ASIDE_FOLD_MS = 200;
 
   /**
    * The gear, drawn rather than typed — the same reasoning `bindingMark` carries.
@@ -12691,6 +12736,20 @@ function createPane(slot, host) {
      * nothing, which is why the fan-out can be unconditional. */
     foldAside: applyAsideFold,
     /*
+     * This pane's team aside, and **only while its door is actually open** — otherwise null.
+     * The auto-collapse asks it two questions in one: is there an aside in the way of a room
+     * about to open, and which node does that fold's `transitionend` arrive on.
+     *
+     * Asked of the panel's own class rather than of `asideFolded`, for `renderAsideStrip`'s
+     * reason one function up: mid-fold the preference and the panel disagree, and the panel
+     * is the one that is right. A pane with no lead in it has no panel and answers null,
+     * which is what lets the caller ask every pane unconditionally.
+     */
+    expandedAside: () =>
+      roomView.panelEl?.isConnected && !roomView.panelEl.classList.contains('is-strip')
+        ? roomView.panelEl
+        : null,
+    /*
      * The session this pane is showing, and **null while it is showing anything else** —
      * said explicitly rather than leaning on `view.selected` happening to be null. Three
      * things read this and every one of them means "which session is on screen": the rail's
@@ -13065,6 +13124,113 @@ function applyRoomFold(want) {
   roomFoldTimer = setTimeout(endRoomFold, ROOM_FOLD_MS + 60);
 }
 
+/* ------------------------------------------------- the auto-collapse --- */
+
+/**
+ * The team aside standing between the reader and a room about to open, or `null`.
+ *
+ * A lead's aside and a room are the two side panels this feature exists for, and having both
+ * open is the four-column state the maintainer asked to be rid of — so opening a room folds
+ * the aside out of the way first, **every time** rather than only the first, and the aside's
+ * remembered flag is set exactly as if the band's own icon had been pressed. No second
+ * state, no special case, nothing to explain to a reader who then presses the icon themselves.
+ *
+ * `skip` is the pane the room is about to be put in, or `null` when nothing is being
+ * replaced. An aside inside *that* pane is not in the way — it is going away with its pane —
+ * and folding it would animate a panel nobody will see again.
+ *
+ * The first one wins, and there is only ever one in practice: a lead is not opened in split
+ * (`decisions.md`, 2026-09-06). Two would both fold anyway — `foldAsides` fans the
+ * preference out to every aside on the page — and this is only picking the node whose
+ * `transitionend` the sequence waits on.
+ */
+function asideInTheWay(skip) {
+  for (const pane of panes) {
+    if (pane === skip) continue;
+    const panel = pane.expandedAside?.();
+    if (panel) return panel;
+  }
+  return null;
+}
+
+/**
+ * Fold that aside, then run `next` when it has stopped moving — **sequential, never
+ * overlapped**. 200ms of fold, then 200ms of slide: the maintainer described fold-then-slide
+ * and the two together are the whole of what a click on a room row does.
+ *
+ * Folding goes through `foldAsides`, which is the same path the band's icon presses, so the
+ * flag, the fan-out, the freeze, the spent counter and the remeasure all happen exactly once
+ * and in one place.
+ *
+ * **Three ways out, and the third is the one that is easy to leave off.** `transitionend`
+ * guarded on target *and* `propertyName === 'width'`, because this fold moves four properties
+ * at once and everything inside the panel is free to transition; a `setTimeout` backstop,
+ * because a fold interrupted or re-entered may never deliver the event; and the check
+ * *before* either, for the case where nothing is going to move at all. Under reduced motion
+ * `.room-panel.is-folding` is `transition: none`, so the aside is already shut by the time
+ * this line runs and waiting 260ms would be a dead beat with the room not yet on screen —
+ * a stall, which is the one thing reduced motion is asking not to have. The duration is read
+ * off the node the fold was just armed on, which is the stylesheet the animation itself
+ * obeys rather than a second spelling of the media query in JavaScript.
+ */
+function foldAsideThen(panel, next) {
+  asideFolded.set(true);
+  foldAsides();
+
+  const moving = getComputedStyle(panel)
+    .transitionDuration.split(',')
+    .some((d) => parseFloat(d) > 0);
+  if (!moving) {
+    next();
+    return;
+  }
+
+  let timer = null;
+  const done = () => {
+    clearTimeout(timer);
+    panel.removeEventListener('transitionend', onEnd);
+    next();
+  };
+  function onEnd(e) {
+    if (e.target === panel && e.propertyName === 'width') done();
+  }
+  panel.addEventListener('transitionend', onEnd);
+  timer = setTimeout(done, ASIDE_FOLD_MS + 60);
+}
+
+/**
+ * A room arriving in its slot, sliding out of the strip rather than appearing at full width.
+ *
+ * **Item 3's mechanism, not a second one.** The pane is put into the strip by the two calls
+ * that apply a fold with *no* animation — `setFolded` and `setFoldClasses`, which is what
+ * `paintFolds` does for a reload — and then `applyRoomFold(false)` runs the ordinary animated
+ * expand over it. So the slide is the same 200ms, the same easing and the same measure /
+ * freeze / arm / change / land sequence as a fold pressed by hand, and there is one animation
+ * in this feature rather than two that have to agree.
+ *
+ * `paintFolds` cannot do the seeding itself: it derives the fold from `roomFolded`, which
+ * `openGroupRoom` has just set to *false* because a room slides in **open**. So the two calls
+ * are made here directly — panes first and the frame second, which is `paintFolds`' own order
+ * and for its measurement: `setFolded` reads the pane's rect to pin the content, and a frame
+ * already on the strip's track list makes that rect 2.5rem.
+ *
+ * The reflow between them is `void offsetWidth`, never `requestAnimationFrame` — an automated
+ * Chrome window reports `visibilityState: 'hidden'` and Chrome suspends frame callbacks
+ * there. And nothing paints between the mount and this, so the first frame a reader sees is
+ * the strip: it is one synchronous task from the band row's click to here.
+ *
+ * It refuses on the two shapes item 3 refuses, and for its reason — the worst thing this can
+ * produce is a session pane 2.5rem wide, and the second worst a frame that is nothing but a
+ * strip. With one pane there is nothing to fold beside, so the room simply arrives open.
+ */
+function slideRoomIn(pane) {
+  if (!pane || panes.length < 2 || roomPane() !== pane) return;
+  pane.setFolded?.(true);
+  setFoldClasses(pane.slot);
+  void el.main.offsetWidth;
+  applyRoomFold(false);
+}
+
 /**
  * A press on a room the panel is already showing.
  *
@@ -13073,11 +13239,25 @@ function applyRoomFold(want) {
  * second press could reveal. **Folded**: the door opens, and stops there. Doing nothing
  * would be a band row that appears not to work, and the band row is the obvious place to
  * press for a room whose badge has just gone up.
+ *
+ * **The auto-collapse applies here too**, which is a decision rather than an omission: the
+ * reader has asked for this room, and an expanded aside is exactly as much in the way of a
+ * room being un-shut as it is of one being opened. Same rule, same sequence, same 200 + 200.
+ * Nothing is being replaced, so no pane is skipped.
+ *
+ * The flag moves with the geometry rather than ahead of it — it is set inside the callback,
+ * because `paintFolds` reads it and a `paintFolds` landing during the aside's 200ms would
+ * open the slot with no animation and take the slide away.
  */
 function revealOpenRoom() {
   if (!roomFolded.on) return;
-  roomFolded.set(false);
-  applyRoomFold(false);
+  const open = () => {
+    roomFolded.set(false);
+    applyRoomFold(false);
+  };
+  const inTheWay = asideInTheWay(null);
+  if (inTheWay) foldAsideThen(inTheWay, open);
+  else open();
 }
 
 /**
