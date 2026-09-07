@@ -185,6 +185,17 @@ test('the pin survives the expand and is dropped at its end, not at its start', 
   );
 });
 
+test('the bookkeeping folds the panes before the frame, or the freeze pins 2.5rem', () => {
+  // `setFolded` reads the pane's own rect to pin the content width, so the frame's class has
+  // to land *after* it — otherwise the rect it reads is already the strip's. Benched on a
+  // reload with the order the other way round: `--room-frozen` came back `40px`.
+  const paint = fn('paintFolds');
+  const panesAt = paint.indexOf('pane.setFolded');
+  const classAt = paint.indexOf('setFoldClasses(slot)');
+  assert.ok(panesAt >= 0 && classAt >= 0, 'both steps must be in `paintFolds`');
+  assert.ok(panesAt < classAt, 'the panes must be folded before the frame is');
+});
+
 test('the path that does not animate measures the freeze for itself', () => {
   // A fold applied by `paintFolds` — a reload's `adopt`, a slot changing hands — never went
   // through `applyRoomFold`, so nothing measured anything. It runs before the first paint,

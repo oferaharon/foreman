@@ -12914,8 +12914,20 @@ function setFoldClasses(slot) {
  */
 function paintFolds() {
   const slot = roomFoldSlot();
-  setFoldClasses(slot);
+  /*
+   * The panes first, the frame second, and the order is a measurement rather than a style.
+   *
+   * `setFolded` is the path that pins the content's width for a fold nothing animated — a
+   * reload's `adopt`, a slot changing hands — and it reads the pane's own rect to do it.
+   * Setting the frame's class first makes that rect **2.5rem**, so the content is frozen at
+   * the width it is about to be clipped to instead of the width it was measured at, and the
+   * room's five-line clamp then caches its answers against a strip. Benched on a reload:
+   * `--room-frozen` came back `40px` where it should read the open pane's width.
+   *
+   * Unfolding does not measure at all, so this order costs it nothing.
+   */
   for (const pane of panes) pane.setFolded?.(pane.slot === slot);
+  setFoldClasses(slot);
 }
 
 /**
@@ -12992,10 +13004,32 @@ function applyRoomFold(want) {
   // taken a line later against tracks that have moved.
   target.freezeGroupBody(slot === 'a' ? aW : bW);
 
+  /*
+   * **Two flushes, and the first one is not redundant — measured, and getting it wrong is
+   * the `1fr` trap reappearing one step earlier than the design expected it.**
+   *
+   * A transition's start value is the computed value as of the previous style change, and
+   * whether it starts at all is decided by the *after*-change style's `transition-property`.
+   * So arming `is-folding` in the same recalculation that first writes the px pair starts a
+   * transition **from the declarative value** — `var(--pane-a) 1fr` open, `1fr var(--strip)`
+   * folded — and a length does not interpolate with `1fr`: that track goes **discrete** and
+   * jumps at exactly half the duration while the other one eases past it. Setting the end
+   * pair a line later only retargets that same transition, so the px pair never rescues it.
+   *
+   * Benched at 1470px before this line existed: `grid-template-columns` read
+   * `799.86px 350.14px` at 59ms and `1007.37px 40px` at 107ms — one track still easing, the
+   * other already home, the pair summing to 1047 in a 1150px frame. That is a 100px hole of
+   * bare `--ground` opening between the two panes halfway through every fold.
+   *
+   * So the start pair is settled **unarmed** first, and only then is the transition armed at
+   * a value that is two lengths. Both flushes are `void offsetWidth` rather than a frame
+   * callback, for the reason above.
+   */
   el.main.style.gridTemplateColumns = `${start[0]}px ${start[1]}px`;
+  void el.main.offsetWidth; // the declarative track list is gone before anything is armed
   el.app.classList.add('is-folding');
   for (const pane of panes) pane.setFolding?.(true);
-  void el.main.offsetWidth; // the value both transitions start from
+  void el.main.offsetWidth; // …and now the armed state is settled, at two plain lengths
 
   el.main.style.gridTemplateColumns = `${end[0]}px ${end[1]}px`;
   setFoldClasses(want ? slot : null);
