@@ -42,6 +42,11 @@ import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.
 /* The one spelling of who may be shown as an ordinary session, shared with the desktop's
    room picker. See `standaloneRows`. */
 import { roomParticipants } from '../rooms-create.js';
+/* The one order a lead's workers are ever drawn in, shared with the desktop rail. Imported
+   rather than re-spelled for the reason its own header gives at length: every other order
+   in this panel is recency, and under a lead recency is wrong — a team is read as a block
+   and a worker is found where it was last time. See `workerLines`. */
+import { orderWorkers } from '../worker-order.js';
 import { mountLead, updateLead } from './lead.js';
 
 /* ------------------------------------------------------------- state --- */
@@ -609,11 +614,87 @@ function hasBox(s) {
  * worker rows are nested three lines under it; the phone has nothing else.
  */
 function teamWorkers(repo) {
-  return (state.sessions || []).filter((s) => s.workerOf === repo && s.team?.state !== 'review');
+  return allTeamWorkers(repo).filter((s) => s.team?.state !== 'review');
+}
+
+/**
+ * Every worker of this team with a live pane, `review` included.
+ *
+ * The one spelling of *whose worker is this*, and `teamWorkers` above is now this filtered
+ * — so the `review` exclusion the counts need is visibly a narrowing of this rather than a
+ * second, independently-written filter that could one day disagree about the join.
+ *
+ * Its own caller is the list of worker lines under a lead card, which shows the review
+ * workers the counts leave out. That is the maintainer's ruling of 2026-09-07, taken with
+ * the alternative in front of them: the list is allowed to read one longer than
+ * `· N workers` and the extra line says `review` on itself, because the other way round —
+ * a list matching the count exactly — hides the one worker that has finished and is waiting
+ * on them.
+ */
+function allTeamWorkers(repo) {
+  return (state.sessions || []).filter((s) => s.workerOf === repo);
 }
 
 function liveWorkers(repo) {
   return teamWorkers(repo).length;
+}
+
+/**
+ * What a worker line calls the worker.
+ *
+ * The branch first, and **not** the roster's `label`, which is the tempting field and is
+ * the wrong one here: `sessions.js` slices only the session prefix, so a worker's label
+ * arrives as `<folder>-<task>` — the folder included — and every line under a card already
+ * titled with that team would repeat it and then ellipsise away the half that identifies
+ * the worker. The branch is `agent/<task>`, it is what you would type into git, and it is
+ * the same chain the desktop rail's own worker line reads (`team.branch || team.task`).
+ * The label is kept as the last resort rather than dropped, because a row that arrived
+ * without a task join should still be named something rather than blank.
+ */
+function workerName(s) {
+  return s.team?.branch || s.team?.task || s.label || 'worker';
+}
+
+/**
+ * One word for what a worker is doing, and the only thing that decides its dot.
+ *
+ * `review` outranks everything because it is the fact this list exists to explain — a
+ * worker that has reported is waiting on the maintainer, it is deliberately not in
+ * `· N workers`, and without the word the list simply reads one line longer than the count
+ * for no visible reason.
+ *
+ * Under it, `hasBox` and `isWorking` — the card's own two, reused rather than re-derived,
+ * so a worker's line and the team's working dot can never disagree about the same session.
+ * Note this asks `hasBox` and **not** `needsKind`: `needsKind` carries the rail's worker
+ * quieting, which says a worker's prompt is its lead's business, and that is an attention
+ * policy rather than an answer to *what is this session doing*. The line states the fact;
+ * the quieting still holds everywhere it is about attention, including this tab's mark.
+ *
+ * Anything else falls through to the roster's own status word — `idle`, and the box shapes
+ * the panel will not answer — exactly as `stateWord` does for a lead. Showing the raw word
+ * beats inventing a friendlier one that could be wrong.
+ */
+function workerWord(s) {
+  if (s.team?.state === 'review') return 'review';
+  if (hasBox(s)) return 'waiting';
+  if (isWorking(s)) return 'working';
+  return s.status || 'unknown';
+}
+
+/**
+ * The lines under a lead card: `{name, word}` per live worker, in dispatch order.
+ *
+ * Two rendered strings and nothing else, because this rides in the home signature and the
+ * file's rule is that a signature carries what is on screen — never a raw stamp, which
+ * would differ on almost every roster frame and retire the guard. The dot is derived from
+ * `word` at paint time rather than being a third field, so there is no way for a line's
+ * colour and its word to describe different things.
+ */
+function workerLines(repo) {
+  return orderWorkers(allTeamWorkers(repo)).map((s) => ({
+    name: workerName(s),
+    word: workerWord(s),
+  }));
 }
 
 /**
@@ -673,6 +754,7 @@ function homeRow(team) {
       working: false,
       unread: 0,
       workers: 0,
+      workerList: [],
       review: 0,
       blocked: false,
       need: null,
@@ -710,6 +792,20 @@ function homeRow(team) {
     working,
     unread: lead.unread || 0,
     workers: liveWorkers(team.repo),
+
+    /*
+     * The team's workers as the card will draw them — `{name, word}` each, newest dispatch
+     * first — computed here for the reason `age` two fields down is computed here: the
+     * signature and the card have to agree about the *rendered* strings, or a worker
+     * appearing, changing state or going away moves nothing the guard can see and the list
+     * under the card silently stops repainting. One field, both readers.
+     *
+     * It is deliberately not the same set as `workers` above, which excludes `review` so
+     * the meta line's two numbers stay disjoint. This one includes them — see
+     * `allTeamWorkers` — so the list never hides a worker that is waiting on the
+     * maintainer, and a `review` line says so on itself.
+     */
+    workerList: workerLines(team.repo),
     review,
     /*
      * How full this lead's context is — the number that says which one is heading for a
@@ -974,6 +1070,11 @@ function leadsView(teams) {
         r.unread,
         r.workers,
         r.review,
+        // The worker lines exactly as they are drawn — names and state words, in order.
+        // Without them a worker appearing, changing state or going away leaves this string
+        // untouched and the list under the card never repaints; a silent failure, which is
+        // why it is the list itself in here and not its length.
+        r.workerList,
       ]),
     );
 
@@ -1268,7 +1369,88 @@ function teamNode(row) {
   }
 
   wrap.appendChild(body);
+
+  /*
+   * The team's workers, one line each, **outside the body and never inside it**.
+   *
+   * `.m-team-body` is a `<button>`, and this card has already paid for that once: a
+   * `<button>` inside a `<button>` is invalid markup whose disabled form swallows the
+   * child's clicks, which is why the old launch control had to leave the row. These lines
+   * are asked to be non-interactive, so it costs nothing to get right — they are siblings,
+   * they carry no listener, and they are not tap targets. If they ever become tappable the
+   * body has to stop being a button first.
+   *
+   * Nothing at all is appended for a lead with no workers: no container, no empty block,
+   * and therefore no gap under the card. Every count on this row already drops entirely at
+   * zero and this is the same rule with more of it.
+   */
+  if (row.workerList.length) wrap.appendChild(workerList(row));
+
   return wrap;
+}
+
+/** The block of worker lines under one card. Built only when there is at least one. */
+function workerList(row) {
+  const list = document.createElement('div');
+  list.className = 'm-team-workers';
+  for (const w of row.workerList) list.appendChild(workerLine(w));
+  return list;
+}
+
+/**
+ * One worker: a mark, its branch, and what it is doing.
+ *
+ * **One dot slot, not the card's two**, and that is not a departure from the gutter's rule.
+ * The card reserves two rows because a lone dot that *slid between them* would be a dot you
+ * have to read the row to interpret. Here the dot never moves — it is one fixed cell in a
+ * one-line grid — and the word beside it names the state in full, so there is nothing left
+ * to interpret. The vocabulary is the card's own: `m-dot-wait` for anything waiting on the
+ * maintainer, `m-dot-work` for anything running, and an unlit `.m-dot` for the rest, which
+ * is painted transparent rather than left out so the names stay in one column.
+ */
+function workerLine(w) {
+  const line = document.createElement('div');
+  line.className = 'm-team-worker';
+
+  const waiting = w.word === 'waiting' || w.word === 'review';
+  const working = w.word === 'working';
+  const kind = working ? 'm-dot-work' : 'm-dot-wait';
+  line.appendChild(slotDot(kind, waiting || working, workerDotTitle(w.word)));
+
+  const name = document.createElement('span');
+  name.className = 'm-team-worker-name';
+  name.textContent = w.name;
+  // The branch is the one thing on this line that can be too long for 320px, so the whole
+  // of it is on the node the ellipsis is applied to.
+  name.title = w.name;
+  line.appendChild(name);
+
+  const word = document.createElement('span');
+  // `review` and `waiting` take the colours the card already uses for those two facts —
+  // amber for a task in review, the decision red for a session holding a box — because one
+  // fact must not read as two colours between a card and the lines under it. Everything
+  // else stays the muted ink the whole block is drawn in.
+  const tone = w.word === 'review' ? ' is-review' : w.word === 'waiting' ? ' is-waiting' : '';
+  word.className = `m-team-worker-state${tone}`;
+  word.textContent = w.word;
+  line.appendChild(word);
+
+  return line;
+}
+
+/**
+ * What a worker's mark is about, in words — the sibling of `waitTitle` one card up.
+ *
+ * `review` and `waiting` are both the wait dot and they are not the same fact: one has
+ * finished and is waiting on a merge word, the other is holding a box that is its **lead's**
+ * to answer, and a phone that told the maintainer to go and answer it would be handing them
+ * the worker the rail deliberately quiets. `slotDot` only sets a title on a lit dot, so the
+ * idle case is never asked for.
+ */
+function workerDotTitle(word) {
+  if (word === 'review') return 'has reported — waiting on your merge word';
+  if (word === 'waiting') return 'holding a box — its lead answers it';
+  return 'this worker is working';
 }
 
 /**
