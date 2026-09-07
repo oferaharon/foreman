@@ -1,25 +1,47 @@
 /*
- * The mobile shell — item 5.
+ * The mobile shell.
  *
- * A second, much smaller front door at `/m` that shows **team leads only**: no ordinary
- * sessions, no worker sessions, no merge control, no room. The lead is already the thing
- * that decides what is worth the maintainer's attention, so leads-only makes that
- * architecture literal instead of building a second triage layer with less information than
- * the first.
+ * A second, much smaller front door at `/m`. It began as **team leads only** — the lead is
+ * already the thing that decides what is worth the maintainer's attention, so leads-only
+ * made that architecture literal instead of building a second triage layer with less
+ * information than the first. It has since opened up, on the maintainer's ruling of
+ * 2026-09-07: home is now **three tabs** — Leads, Standalones, Rooms — and the hash carries
+ * which one you are on.
  *
- * This file owns four things and nothing else: the websocket, the roster, a two-screen
- * hash router, and the home list with its launch button. The lead screen (item 6), the
- * answer cards (item 7) and the tasks tab (item 8) are separate modules behind a fixed
- * contract — see `mountLead` / `buildCard` / `mountTasks` in their stubs.
+ * What did **not** open up, and is a rule rather than an omission: **workers are never
+ * opened from the phone.** A worker's question is its lead's to answer. The Standalones list
+ * is an allow-list (`roomParticipants` minus the leads), never "not a worker" — kinds have
+ * grown once here already.
+ *
+ * This file owns five things and nothing else: the websocket, the roster, a hash router,
+ * the tab bar, and the home list with its launch button. The lead screen, the answer cards
+ * and the tasks tab are separate modules behind a fixed contract — see `mountLead` /
+ * `buildCard` / `mountTasks`.
  *
  * It shares the panel's websocket, its API and its five answering endpoints, and shares no
  * render code at all with `web/app.js`. That is deliberate: `app.js` is a shared shell plus
  * a per-pane factory built around split view, and a responsive squeeze of it would make
- * every future desktop change a phone change too.
+ * every future desktop change a phone change too. What it *does* share is the handful of
+ * pure modules under `web/` that hold a **rule** rather than a rendering — `prefs.js`,
+ * `notify.js`'s `needsKind`, `rooms-create.js`'s `roomParticipants` — because a rule spelled
+ * twice is a rule that will one day be two rules.
  */
 
-import { ghostSend } from '../prefs.js';
+/*
+ * `needsKind` is the panel's one answer to "is this session stuck on something a human has
+ * to do", and it is imported rather than re-spelled. The phone used to carry a second copy
+ * of that rule, which was equivalent for a lead and **did not ask the trust gate first** —
+ * so a session parked on the folder-trust screen read as an ordinary permission prompt here
+ * and as the gate on the desktop. One function, and the distinction comes free. It is pure (no
+ * DOM, no storage) and imports only `trust-gate.js`; none of the notification machinery
+ * beside it reaches this view, and none of it can.
+ */
+import { needsKind } from '../notify.js';
+import { ghostSend, PHONE_TABS, phoneTab } from '../prefs.js';
 import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.js';
+/* The one spelling of who may be shown as an ordinary session, shared with the desktop's
+   room picker. See `standaloneRows`. */
+import { roomParticipants } from '../rooms-create.js';
 import { mountLead, updateLead } from './lead.js';
 
 /* ------------------------------------------------------------- state --- */
@@ -47,6 +69,20 @@ const state = {
    * record at all. Nothing is drawn then — not a zero, not a grey placeholder.
    */
   rateLimits: null,
+  /**
+   * Every room, open and archived, as `list()` hands them over — or null until the first
+   * frame that carries the key.
+   *
+   * Null is not "there are no rooms". Most people are in none, so an empty array is the
+   * ordinary answer, and a client that could not tell the two apart would draw "no rooms"
+   * over a socket that has not spoken yet. `handle` therefore tests `'rooms' in msg` and
+   * never the value's truth — the server's own comment on `rosterFrame` says why, and
+   * `rateLimits` two fields up learned it the expensive way.
+   *
+   * It arrives on the socket only: `GET /api/sessions`, which paints the first frame before
+   * the socket lands, carries sessions and groups and not this.
+   */
+  rooms: null,
   connected: false,
 };
 
@@ -144,6 +180,9 @@ function handle(msg) {
     // `?? null` rather than `||`: the server sends the key on every roster frame and its
     // absence means an older panel, which reads the same as "no record yet" here.
     state.rateLimits = msg.rateLimits ?? null;
+    // `'rooms' in msg`, never `msg.rooms &&`: an empty array is a real answer and the most
+    // common one. See the field's own note in `state`.
+    if ('rooms' in msg) state.rooms = msg.rooms || [];
     onRoster();
   } else if (msg.type === 'rebound') {
     onRebound(msg);
@@ -156,29 +195,72 @@ function handle(msg) {
 /* ------------------------------------------------------------ router --- */
 
 /*
- * Two screens: `#/` and `#/lead/<sessionId>`. The hash is the whole route, so the phone's
- * back gesture works without any history bookkeeping of ours.
+ * Two kinds of screen — home and `#/lead/<sessionId>` — and home now carries which of its
+ * three tabs is on: `#/leads`, `#/standalones`, `#/rooms`. The hash is the whole route, so
+ * the phone's back gesture works without any history bookkeeping of ours, and a reload comes
+ * back to the tab it was on rather than to the top of the pile.
+ *
+ * `tab` is **sticky across a lead screen**. A hash naming a session says nothing about which
+ * list you came from, so `parseHash` answers `null` there and `navigate` leaves the field
+ * alone; the back control then returns you to the tab you left, not to Leads. It is also
+ * what `homeHash` reads.
  */
-const route = { kind: 'home', sessionId: null };
+const route = { kind: 'home', tab: 'leads', sessionId: null };
+
+/** The three tabs, in the order they are drawn. The keys are `web/prefs.js`'s — that file
+ *  has to check a stored value against them, so it owns the vocabulary and this owns only
+ *  the words on screen. */
+const TAB_LABELS = { leads: 'Leads', standalones: 'Standalones', rooms: 'Rooms' };
+const TABS = PHONE_TABS.map((key) => ({ key, label: TAB_LABELS[key] }));
+
+/** Where "back" goes from a session screen: the tab you were on, never a bare `#/`. */
+function homeHash() {
+  return `#/${route.tab}`;
+}
 
 /** The mounted screen's teardown, or null on the home screen. */
 let leadCtx = null;
 let leadEverSeen = false;
 let goneTimer = null;
 
+/**
+ * The hash, read.
+ *
+ * `tab: null` on a lead route means *unchanged*, not *leads* — see the note over `route`.
+ * On a home route an unrecognised or absent segment is `leads`, which is what makes a bare
+ * `#/`, a typo and a link from an older build all land somewhere that exists. The remembered
+ * tab is deliberately **not** consulted here: it is applied once at boot, and only when
+ * there is no hash at all (see the boot block), so a route somebody actually asked for is
+ * never overridden by one they asked for yesterday.
+ */
 function parseHash() {
-  const m = /^#\/lead\/(.+)$/.exec(location.hash || '#/');
-  if (m) return { kind: 'lead', sessionId: decodeURIComponent(m[1]) };
-  return { kind: 'home', sessionId: null };
+  const hash = location.hash || '#/';
+  const lead = /^#\/lead\/(.+)$/.exec(hash);
+  if (lead) return { kind: 'lead', sessionId: decodeURIComponent(lead[1]), tab: null };
+  const seg = /^#\/([a-z]+)\/?$/.exec(hash);
+  const tab = seg && TAB_LABELS[seg[1]] ? seg[1] : 'leads';
+  return { kind: 'home', sessionId: null, tab };
 }
 
 function navigate() {
   const next = parseHash();
-  if (next.kind === route.kind && next.sessionId === route.sessionId) return;
+  if (
+    next.kind === route.kind &&
+    next.sessionId === route.sessionId &&
+    (next.tab === null || next.tab === route.tab)
+  ) {
+    return;
+  }
 
   leaveRoute();
   route.kind = next.kind;
   route.sessionId = next.sessionId;
+  if (next.tab) {
+    route.tab = next.tab;
+    // Remembered here rather than in the tab's click handler, so a tab reached by a typed
+    // hash, a bookmark or the back gesture is remembered exactly as one reached by a tap.
+    phoneTab.set(next.tab);
+  }
 
   if (route.kind === 'lead') enterLead();
   else enterHome();
@@ -210,6 +292,21 @@ const app = document.getElementById('app');
 
 const el = {
   head: document.createElement('header'),
+  /*
+   * The header's first row. It exists so the tab bar can be the second one *inside* the same
+   * `<header>`: `enterLead` hides the shell header with `el.head.hidden` and the lead screen
+   * draws its own, so a bar appended as a sibling of the header would sit over it — a bug
+   * already caught on this screen once and recorded in `m.css`.
+   *
+   * `web/m/lead.js`'s `watchConnection` reaches across the module boundary with the literal
+   * selector `.m-app > .m-head .m-conn` to mirror the socket dot, deliberately, so there is
+   * never a second socket disagreeing with the first. That is a **descendant** combinator on
+   * the right, so wrapping the row's children like this keeps it matching. Break it and the
+   * session screen's dot reads `?` for ever, quietly. If `.m-head` ever stops being a direct
+   * child of `.m-app`, or `.m-conn` moves out of it, both files change in one commit.
+   */
+  headRow: document.createElement('div'),
+  tabs: document.createElement('nav'),
   title: document.createElement('div'),
   quota: document.createElement('button'),
   conn: document.createElement('span'),
@@ -219,8 +316,13 @@ const el = {
 };
 
 el.head.className = 'm-head';
+el.headRow.className = 'm-head-row';
 el.title.className = 'm-title';
-el.title.textContent = 'Leads';
+// The app's name, not the tab's — the tabs below say which list you are on. It was `Leads`
+// until this view stopped being about leads (the maintainer's ruling of 2026-09-07, which
+// also renamed the installed app); a title that named one of three tabs would now be wrong
+// two thirds of the time.
+el.title.textContent = 'Foreman';
 /*
  * The account's two rate-limit gauges live in the shell header, which means **home screen
  * only** — and that is a placement decision, not an accident of where the node was
@@ -272,11 +374,78 @@ el.refresh.type = 'button';
 el.refresh.textContent = '⟳';
 el.refresh.setAttribute('aria-label', 'Refresh');
 el.refresh.addEventListener('click', refresh);
-el.head.append(el.title, el.quota, el.conn, el.start, el.refresh);
+el.headRow.append(el.title, el.quota, el.conn, el.start, el.refresh);
+
+/* ------------------------------------------------------------- tabs --- */
+
+/*
+ * The three tabs, built once and then only ever repainted — never rebuilt.
+ *
+ * The rest of this screen is rebuilt from scratch on every roster frame behind a signature
+ * guard, which is right for a list whose rows come and go. These three never come or go, and
+ * a control that was replaced under a thumb on its way down is a control that eats the tap.
+ * So the nodes are permanent and `renderTabs` toggles two classes on each.
+ */
+const tabNodes = new Map();
+
+for (const { key, label } of TABS) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'm-nav-tab';
+  btn.dataset.tab = key;
+  btn.setAttribute('role', 'tab');
+
+  const text = document.createElement('span');
+  text.className = 'm-nav-label';
+  text.textContent = label;
+
+  /*
+   * The mark, and it is deliberately the gutter's own `.m-dot-wait` rather than a second
+   * vocabulary: on a team card that dot means *something in here wants you*, and on the tab
+   * it means the same thing about the whole list behind it. A tab that invented its own
+   * shape would be a second thing to learn for one fact.
+   *
+   * Always in the DOM, painted only when lit — the same rule as the card's gutter, and for
+   * the same reason: a mark that appears and disappears moves the label beside it, and a
+   * label that shifts when a session blocks is a label you have to re-find.
+   */
+  const dot = document.createElement('span');
+  dot.className = 'm-dot m-dot-wait m-nav-dot';
+
+  btn.append(text, dot);
+  btn.addEventListener('click', () => {
+    location.hash = `#/${key}`;
+  });
+
+  tabNodes.set(key, { btn, dot });
+  el.tabs.appendChild(btn);
+}
+
+el.tabs.className = 'm-nav';
+el.tabs.setAttribute('role', 'tablist');
+
+el.head.append(el.headRow, el.tabs);
 
 el.screen.className = 'm-screen';
 
 app.append(el.head, el.screen);
+
+/**
+ * Which tab is on, and which of the three is holding something.
+ *
+ * Called from inside `renderHome`'s signature guard, so it runs exactly when something a
+ * reader could see has moved — the marks and the active tab are both in that signature.
+ */
+function renderTabs(marks) {
+  for (const { key, label } of TABS) {
+    const { btn, dot } = tabNodes.get(key);
+    const on = key === route.tab;
+    btn.classList.toggle('is-on', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    dot.classList.toggle('is-on', Boolean(marks[key]));
+    btn.title = marks[key] ? `${label} — something here is waiting on you` : label;
+  }
+}
 
 function paintConn() {
   el.conn.classList.toggle('is-down', !state.connected);
@@ -401,21 +570,21 @@ function leadFor(repo) {
 }
 
 /**
- * Is this lead holding something that needs a human?
+ * Is there a box on this session's screen right now?
  *
- * Spelled out rather than taken from `needsYou`, and this is not style. `needsYou` folds
- * in `unread > 0`, and `unread` is the *panel viewer's* read state — a server-side
- * watermark cleared by `markRead` the moment anyone scrolls a transcript to the bottom on
- * any device. A team indicator keyed on it says "handled" because somebody looked, which
- * on 2026-08-27 hid a finished worker and a PR waiting on the maintainer's merge word.
+ * The **working** dot's negative half, and nothing else reads it. It is not `needsKind` and
+ * must not become it: `needsKind` carries the *attention* policy, including the rail's
+ * worker quieting — a worker holding a prompt its lead is meant to answer is deliberately
+ * not "needs you" — and whether a session is running is not an attention question. Applying
+ * the quieting here would let a blocked worker read as `working` on the card's second dot.
+ *
+ * `needs-decision` is not tested because it cannot be: this is only ever asked of a row that
+ * has already said `status === 'working'`, and the three box fields are what the hook can be
+ * a poll behind. That lag is the whole reason this exists — `sessions.js` already lets a box
+ * outrank the hook, but a box that has just appeared is on screen before the roster says so.
  */
-function isBlocked(lead) {
-  return (
-    Boolean(lead.prompt) ||
-    Boolean(lead.plan) ||
-    Boolean(lead.question) ||
-    lead.status === 'needs-decision'
-  );
+function hasBox(s) {
+  return Boolean(s.prompt) || Boolean(s.plan) || Boolean(s.question);
 }
 
 /**
@@ -450,15 +619,15 @@ function liveWorkers(repo) {
 /**
  * Is this session *running*, as opposed to waiting on somebody?
  *
- * The second dot's whole rule, and it is deliberately the negative of `isBlocked` rather
+ * The second dot's whole rule, and it is deliberately the negative of "a box is up" rather
  * than a list of the states that count. `status` is already the panel's own answer —
  * `sessions.js` lets a prompt, a plan or a picker outrank the hook precisely so that a
  * session holding a box never reads `working` — but the hook can still be a poll behind a
- * box that has just appeared, and `isBlocked` reads the box itself. Blocked is waiting; the
+ * box that has just appeared, and `hasBox` reads the box itself. Waiting is not working; the
  * top dot has it, and a row must never claim both about the same fact.
  */
 function isWorking(s) {
-  return Boolean(s) && s.status === 'working' && !isBlocked(s);
+  return Boolean(s) && s.status === 'working' && !hasBox(s);
 }
 
 /**
@@ -506,12 +675,24 @@ function homeRow(team) {
       workers: 0,
       review: 0,
       blocked: false,
+      need: null,
       ctx: null,
       age: '',
     };
   }
   const review = lead.team?.review || 0;
-  const blocked = isBlocked(lead);
+  /*
+   * `needsKind`, imported, and never `needsYou`. That field folds in `unread > 0`, which is
+   * the *panel viewer's* read state — a server-side watermark cleared by `markRead` the
+   * moment anyone scrolls a transcript to the bottom on any device — so a team indicator
+   * keyed on it says "handled" because somebody looked. On 2026-08-27 that hid a finished
+   * worker and a PR waiting on the maintainer's merge word.
+   *
+   * The kind is kept rather than reduced to a boolean here so the gutter and the state word
+   * can each ask what it is without asking twice.
+   */
+  const need = needsKind(lead);
+  const blocked = need != null;
   // The second dot, and a separate rule on purpose — the two are never folded into one
   // condition. The top slot always means *this wants you*; the bottom always means *this
   // is running*. A team can be both at once (a blocked lead over a working worker) and
@@ -523,6 +704,7 @@ function homeRow(team) {
     team,
     lead,
     blocked,
+    need,
     // The whole rule, and only this rule.
     dot: blocked || review > 0,
     working,
@@ -612,6 +794,53 @@ function partitionTeams() {
   };
 }
 
+/**
+ * Every ordinary session — the Standalones tab's list, and the source of its mark.
+ *
+ * `roomParticipants` is the allow-list, imported rather than restated: `interactive` and
+ * `team?.role` either absent or `lead`. Subtracting the leads then leaves exactly the
+ * sessions that belong to nobody's team. **Never written as "not a worker"** — kinds have
+ * grown here once already (`planner`), and a negative test would have silently started
+ * offering the next one. The desktop's room picker asks the same function, so the phone
+ * cannot end up showing a session the Mac would refuse to put in a room.
+ *
+ * `isLead` is the roster's own `team?.role === 'lead'`, written out once in `sessions.js` —
+ * one field, not a second opinion.
+ *
+ * Pane-only rows are **in**: a session opened and not yet spoken to carries a synthetic
+ * `pane-19` id and no transcript, and it is exactly the session you are about to type into.
+ * The maintainer's call, and the shell already follows the id when it first speaks
+ * (`onRebound`).
+ */
+function standaloneRows() {
+  return roomParticipants(state.sessions || []).filter((s) => !s.isLead);
+}
+
+/**
+ * Which of the three tabs is holding something that wants a human.
+ *
+ * One rule per tab, and each is the same rule the tab's own rows draw — a tab that lit on a
+ * different question from its list would be a mark you cannot find by opening it:
+ *
+ * - **Leads**: the card's own top dot, which is `needsKind(lead) != null || review > 0`.
+ *   `review` is in it because a worker that has reported is waiting on the maintainer's
+ *   merge word and the lead row is the only thing on this screen that says so.
+ * - **Standalones**: `needsKind` alone. There is no team behind an ordinary session, so
+ *   there is no second half.
+ * - **Rooms**: `unseen`, which the store increments only for a *session's* post
+ *   (`by !== null`) — the maintainer's own posts never badge a room, which is why a bench
+ *   that only posts from the phone will watch this stay dark and conclude it is broken.
+ *
+ * `live` is passed in rather than recomputed so one paint maps the teams once.
+ */
+function tabMarks(live) {
+  return {
+    leads: live.some((r) => r.dot),
+    standalones: standaloneRows().some((s) => needsKind(s) != null),
+    rooms: (state.rooms || []).some((r) => (r.unseen || 0) > 0),
+  };
+}
+
 function renderHome() {
   if (!homeList?.isConnected) return;
 
@@ -634,36 +863,85 @@ function renderHome() {
   const now = Date.now();
   const quota = quotaSignature(now);
 
+  // One pass over the teams for the whole paint: the marks need the lead rows and so does
+  // the Leads tab's own body. Two passes could not disagree today, but they are two places
+  // to change the day `homeRow` grows a field.
+  const teams = partitionTeams();
+  const marks = tabMarks(teams.live);
+  const view = tabView(teams);
+
+  /*
+   * Repaint only when something a reader could see has changed. The roster is broadcast on
+   * every real change and a list rebuilt under a thumb is a list that eats taps.
+   *
+   * Everything drawn is in here, the tab bar included: the active tab and all three marks,
+   * because those are painted from inside this guard and a mark left out of a signature is a
+   * mark that never lights. And every field is a **rendered string or a boolean**, never a
+   * raw timestamp — a `lastActivity` in here would differ on almost every frame and retire
+   * the guard entirely.
+   *
+   * Joined with real punctuation. `mergeSig` on the desktop once joined with what read in
+   * every editor as an empty string and was three literal control bytes, so two different
+   * lists could spell one signature.
+   */
+  const sig = [
+    quota,
+    route.tab,
+    marks.leads ? 1 : 0,
+    marks.standalones ? 1 : 0,
+    marks.rooms ? 1 : 0,
+    view.sig,
+  ].join('::');
+  if (sig === homeSignature) return;
+  homeSignature = sig;
+
+  renderQuota(now);
+  renderTabs(marks);
+  renderStartButton(view.startable);
+  // A thunk, not a list: nothing is built for a paint the guard above turned away.
+  homeList.replaceChildren(...view.nodes());
+}
+
+/**
+ * What the tab you are on puts in the list, and what a repaint turns on.
+ *
+ * Three fields and they travel together on purpose: `sig` is what the guard compares and
+ * `nodes` is what draws, so a body that changes what it renders cannot forget to say so.
+ * `startable` is the header's `+` — a Leads-tab control, hidden everywhere else, since
+ * "start a lead in a team that has none" is not an offer the other two lists can make.
+ *
+ * **Standalones and Rooms draw a placeholder for now** and that is deliberate rather than
+ * unfinished-looking: the lists themselves are later items, and this one's job is the frame
+ * they mount into. The counts are real — they come off the same rows the tab marks are
+ * computed from — so the plumbing is visible rather than asserted.
+ */
+function tabView(teams) {
+  if (route.tab === 'standalones') return standalonesView();
+  if (route.tab === 'rooms') return roomsView();
+  return leadsView(teams);
+}
+
+/** Today's home list, unchanged: the teams whose lead is running. */
+function leadsView(teams) {
   if (!state.teams || !state.sessions) {
-    const sig = `${quota}::loading`;
-    if (sig === homeSignature) return;
-    homeSignature = sig;
-    renderQuota(now);
-    renderStartButton(0);
-    const note = document.createElement('div');
-    note.className = 'm-note';
-    note.textContent = 'Loading teams…';
-    homeList.replaceChildren(note);
-    return;
+    return { sig: 'loading', startable: 0, nodes: () => [note('Loading teams…')] };
   }
 
   if (!state.teams.length) {
-    const sig = `${quota}::empty`;
-    if (sig === homeSignature) return;
-    homeSignature = sig;
-    renderQuota(now);
-    renderStartButton(0);
-    const note = document.createElement('div');
-    note.className = 'm-note';
-    note.textContent =
-      'No teams yet. A team directory is created the first time a lead is launched in a folder — do that once at the Mac and the folder appears here.';
-    homeList.replaceChildren(note);
-    return;
+    return {
+      sig: 'empty',
+      startable: 0,
+      nodes: () => [
+        note(
+          'No teams yet. A team directory is created the first time a lead is launched in a folder — do that once at the Mac and the folder appears here.',
+        ),
+      ],
+    };
   }
 
   /*
    * Only the teams whose lead is running. A team with no live lead is not on this screen at
-   * all — it is behind the header's `+`, which is the whole of this change: home answers
+   * all — it is behind the header's `+`, which is the whole of that change: home answers
    * *what is happening right now*, and *what I could start* is a different question that was
    * being answered in the same list.
    *
@@ -672,18 +950,15 @@ function renderHome() {
    * describes; a home list with every lead stopped draws no rows and no note, and the `+`
    * in the header is what it has to say.
    */
-  const { live, startable } = partitionTeams();
+  const { live, startable } = teams;
 
-  // Repaint only when something a reader could see has changed. The roster is broadcast on
-  // every real change and a list rebuilt under a thumb is a list that eats taps.
-  //
-  // `startable.length` rides in it because the header's `+` is painted from inside this
-  // guard and appears and vanishes with that number — without it the button would still be
-  // there after the last lead-less team gained a lead, opening onto nothing. The launching
-  // and error state of those teams deliberately is *not* in here any more: home no longer
+  // `startable.length` rides in the signature because the header's `+` is painted from
+  // inside the guard and appears and vanishes with that number — without it the button would
+  // still be there after the last lead-less team gained a lead, opening onto nothing. The
+  // launching and error state of those teams deliberately is *not* in here: home no longer
   // draws either, and the sheet keeps its own signature for exactly that.
   const sig =
-    `${quota}::${startable.length}::` +
+    `${startable.length}::` +
     JSON.stringify(
       live.map((r) => [
         r.team.repo,
@@ -692,6 +967,8 @@ function renderHome() {
         // The rendered string, not `lastActivity` — see the field's own note in `homeRow`.
         r.age,
         r.dot,
+        // What the dot *says* when it is touched, which the trust gate changes on its own.
+        r.need,
         r.working,
         r.ctx,
         r.unread,
@@ -699,12 +976,67 @@ function renderHome() {
         r.review,
       ]),
     );
-  if (sig === homeSignature) return;
-  homeSignature = sig;
 
-  renderQuota(now);
-  renderStartButton(startable.length);
-  homeList.replaceChildren(...live.map(teamNode));
+  return { sig, startable: startable.length, nodes: () => live.map(teamNode) };
+}
+
+/**
+ * The Standalones tab, until its list lands.
+ *
+ * The count is the real one — `standaloneRows` is the same call the tab mark asks — so what
+ * is missing here is the rendering and not the fact. Zero says so rather than drawing an
+ * empty box, the way every count on this screen drops entirely at zero.
+ */
+function standalonesView() {
+  if (!state.sessions) {
+    return { sig: 'sa:loading', startable: 0, nodes: () => [note('Loading sessions…')] };
+  }
+  const n = standaloneRows().length;
+  return {
+    sig: `sa:${n}`,
+    startable: 0,
+    nodes: () => [
+      note(
+        n === 0
+          ? 'No ordinary sessions running. Anything you start outside a team appears here.'
+          : `${n} ordinary ${n === 1 ? 'session' : 'sessions'} running. The list arrives in a later update — open them at the Mac for now.`,
+      ),
+    ],
+  };
+}
+
+/**
+ * The Rooms tab, until its list lands.
+ *
+ * `state.rooms` is `null` until the socket's first frame and that is a third answer, not a
+ * missing one: rooms ride on the roster frame only, so a phone that has painted from
+ * `GET /api/sessions` has sessions and no rooms yet. Saying "no rooms" there would be the
+ * panel showing something wrong.
+ */
+function roomsView() {
+  if (state.rooms === null) {
+    return { sig: 'rm:loading', startable: 0, nodes: () => [note('Loading rooms…')] };
+  }
+  const n = state.rooms.length;
+  return {
+    sig: `rm:${n}`,
+    startable: 0,
+    nodes: () => [
+      note(
+        n === 0
+          ? 'No rooms yet. A room is a named place a few sessions coordinate in — make one at the Mac.'
+          : `${n} ${n === 1 ? 'room' : 'rooms'}. The list arrives in a later update — open them at the Mac for now.`,
+      ),
+    ],
+  };
+}
+
+/** The screen's one sentence, in the one shape it has. */
+function note(text) {
+  const el = document.createElement('div');
+  el.className = 'm-note';
+  el.textContent = text;
+  return el;
 }
 
 /* --------------------------------------------------------------- quota --- */
@@ -888,7 +1220,7 @@ function teamNode(row) {
   const gutter = document.createElement('span');
   gutter.className = 'm-dots';
   gutter.append(
-    slotDot('m-dot-wait', row.dot, row.blocked ? 'holding a box' : 'a task is waiting on you'),
+    slotDot('m-dot-wait', row.dot, waitTitle(row)),
     slotDot('m-dot-work', row.working, 'this team is working'),
   );
   body.appendChild(gutter);
@@ -937,6 +1269,20 @@ function teamNode(row) {
 
   wrap.appendChild(body);
   return wrap;
+}
+
+/**
+ * What the top dot is about, in words.
+ *
+ * The trust gate gets its own sentence and that is the only reason `need` carries a *kind*
+ * rather than a boolean. That screen parses as a full, perfectly-readable permission box, so
+ * a dot that said "holding a box" would send a reader to a card the panel deliberately draws
+ * no button on — `web/notify.js`'s `trust` body says the same thing for the same reason.
+ * Every other kind is a box this view can actually answer.
+ */
+function waitTitle(row) {
+  if (row.need === 'trust') return 'on the folder-trust gate — answer it on the Mac';
+  return row.blocked ? 'holding a box' : 'a task is waiting on you';
 }
 
 /** One slot of the gutter. Off means unpainted, never absent — see `teamNode`. */
@@ -1353,9 +1699,11 @@ function showGone(reason = 'exited') {
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'm-back';
-  back.textContent = '‹ leads';
+  // The tab you left, named and returned to — not a bare `#/`, which would land on Leads
+  // however you got here.
+  back.textContent = `‹ ${TAB_LABELS[route.tab].toLowerCase()}`;
   back.addEventListener('click', () => {
-    location.hash = '#/';
+    location.hash = homeHash();
   });
   box.append(text, back);
   el.screen.appendChild(box);
@@ -1409,6 +1757,21 @@ function refresh() {
 window.addEventListener('hashchange', navigate);
 
 paintConn();
+
+/*
+ * The remembered tab, and the **only** place it is consulted.
+ *
+ * `location.hash` is empty exactly when the page was opened with no route — the Home Screen
+ * app's `start_url` is `/m/`, and so is a typed address. That is the moment the memory is
+ * for. An explicit `#/rooms`, a bookmark, a reload and the back gesture all carry a hash and
+ * are obeyed as written, so a route somebody asked for is never overridden by one they asked
+ * for yesterday; a bare `#/` is Leads, by `parseHash`, and stays so.
+ *
+ * `replaceState` rather than assigning `location.hash`: this runs before the first
+ * `navigate`, and a `hashchange` fired here would route twice on every cold open.
+ */
+if (!location.hash) history.replaceState(null, '', `#/${phoneTab.value}`);
+
 // No route yet, so `navigate` always mounts one — including a reload that landed straight
 // on `#/lead/<id>`, which has to come back to that lead rather than to the list.
 route.kind = null;

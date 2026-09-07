@@ -168,10 +168,18 @@ test('the two apps do not share an id', () => {
   // Two manifests on one origin with the same `id` are one app to a browser: installing the
   // phone view would silently replace the panel. `start_url` alone does not settle it —
   // an omitted `id` defaults to `start_url`, which is why both spell it out.
+  //
+  // **`short_name` is deliberately not pinned as different any more.** It was, and the pin
+  // was standing in for the id — the phone was `Leads`, the desktop `Foreman`, and the
+  // assertion read as though the names were what kept the two apart. They are not: `id` is,
+  // and it is asserted three lines up. The maintainer's ruling of 2026-09-07 renamed the
+  // phone to `Foreman` as well (this view stopped being about leads), so the two now share a
+  // name and are told apart by their ids and, on a Home Screen, by their icons. The cost —
+  // two tiles reading `Foreman` on one device — was put to him and accepted. Pinning the
+  // names apart here would only re-assert a thing that was never the mechanism.
   assert.equal(manifests['/'].id, '/');
   assert.equal(manifests['/m/'].id, '/m/');
   assert.notEqual(manifests['/'].id, manifests['/m/'].id);
-  assert.notEqual(manifests['/'].short_name, manifests['/m/'].short_name);
 });
 
 test('each app installs as a window of its own, scoped to itself', () => {

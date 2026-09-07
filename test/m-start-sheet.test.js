@@ -35,6 +35,20 @@ import { fileURLToPath } from 'node:url';
  *  - **The empty state is untouched and there is exactly one of them.** The maintainer was
  *    asked and is happy with the wording; a home list with every lead stopped draws no rows
  *    and no note, and the `+` is what it has to say.
+ *
+ * **Home became three tabs** (Leads | Standalones | Rooms) on the maintainer's ruling of
+ * 2026-09-07, and four of these pins moved with it rather than being retired. Every fact
+ * below is the one it always was; what changed is where the shape lives:
+ *
+ *  - `partitionTeams()` is called **once per paint** in `renderHome` and handed to the Leads
+ *    body, so the marks and the list map the teams once between them.
+ *  - The list's nodes come back from the active tab's body as a **thunk**, so nothing is
+ *    built for a paint the signature guard turns away.
+ *  - The `+` is a **Leads-tab control**: it is still in the shell header (which is what
+ *    hides it on a session screen for free), and its count now rides in on the body's own
+ *    `startable`, which the other two tabs answer `0` to.
+ *  - The header holds **two rows** — `.m-head-row` and the tab bar — so the `+` is appended
+ *    to the row rather than straight to the header. It is still inside `.m-head`.
  */
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -58,8 +72,21 @@ test('the partition is one pass over homeRow, and homeRow’s own `lead` is the 
 });
 
 test('the home list is built from the live half and nothing else', () => {
-  assert.match(app, /const \{ live, startable \} = partitionTeams\(\);/);
-  assert.match(app, /homeList\.replaceChildren\(\.\.\.live\.map\(teamNode\)\);/);
+  // One pass over the teams per paint, handed to whoever needs it: the tab marks read the
+  // lead rows and so does the Leads body, and two `partitionTeams()` calls would be two
+  // places to change the day `homeRow` grows a field.
+  assert.match(app, /const teams = partitionTeams\(\);/);
+  assert.equal(
+    app.match(/partitionTeams\(\)/g).length,
+    3,
+    'the definition, the home paint, and the sheet',
+  );
+  assert.match(app, /const \{ live, startable \} = teams;/);
+
+  // The nodes are a thunk so nothing is built for a paint the guard turns away, and what
+  // the Leads tab builds is still `live` and nothing else.
+  assert.match(app, /nodes: \(\) => live\.map\(teamNode\)/);
+  assert.match(app, /homeList\.replaceChildren\(\.\.\.view\.nodes\(\)\);/);
   assert.ok(
     !/homeList\.replaceChildren\(\.\.\.rows\.map/.test(app),
     'the old whole-list paint is gone',
@@ -83,7 +110,11 @@ test('a team with no live lead has no shape on the home list at all', () => {
 /* ─────────────────────────────────────────────────────── the header’s `+` ─── */
 
 test('the `+` is in the shell header, so the lead screen hides it for free', () => {
-  assert.match(app, /el\.head\.append\(el\.title, el\.quota, el\.conn, el\.start, el\.refresh\);/);
+  // Two rows inside one `<header>` since the tab bar landed: the `+` goes on the first, and
+  // the header is what `enterLead` hides. A control appended anywhere but under `.m-head`
+  // would sit over the lead screen's own header — a bug this screen has already had once.
+  assert.match(app, /el\.headRow\.append\(el\.title, el\.quota, el\.conn, el\.start, el\.refresh\);/);
+  assert.match(app, /el\.head\.append\(el\.headRow, el\.tabs\);/);
   assert.match(app, /el\.start\.addEventListener\('click', openStartSheet\);/);
   // A verb, not "add a team" — the panel cannot create one from a phone.
   assert.match(app, /el\.start\.setAttribute\('aria-label', 'Start a lead'\);/);
@@ -101,10 +132,21 @@ test('the `+` is drawn only when there is something behind it, and `hidden` alon
 });
 
 test('the count of startable teams is in the home signature, because the button is painted inside its guard', () => {
-  assert.match(app, /`\$\{quota\}::\$\{startable\.length\}::`/);
-  assert.match(app, /renderStartButton\(startable\.length\);/);
-  // Both early branches paint it too, or a `+` survives the teams list emptying.
-  assert.equal(app.match(/renderStartButton\(0\);/g).length, 2, 'the loading and no-teams branches');
+  // The count rides in on the active tab's own signature, which is folded into the home
+  // signature below — so the `+` cannot survive the last lead-less team gaining a lead.
+  assert.match(app, /const sig = \[\s*quota,\s*route\.tab,[\s\S]{0,200}?view\.sig,\s*\]\.join\('::'\);/);
+  assert.match(app, /`\$\{startable\.length\}::` \+/);
+  assert.match(app, /return \{ sig, startable: startable\.length, nodes: \(\) => live\.map\(teamNode\) \};/);
+
+  // One painter, reading the body's answer. The other two tabs answer `0` — "start a lead
+  // in a team that has none" is not an offer a list of ordinary sessions or rooms can make.
+  assert.equal(app.match(/renderStartButton\(/g).length, 2, 'the definition and its one caller');
+  assert.match(app, /renderStartButton\(view\.startable\);/);
+
+  // Both of the Leads tab's early branches answer 0 too, or a `+` survives the teams list
+  // emptying while a `Loading teams…` note is on screen.
+  assert.match(app, /sig: 'loading', startable: 0, nodes: \(\) => \[note\('Loading teams…'\)\]/);
+  assert.match(app, /sig: 'empty',\s*startable: 0,/);
 });
 
 /* ────────────────────────────────────────────────────────────── the sheet ─── */
@@ -169,11 +211,23 @@ test('a successful launch closes the sheet before it navigates', () => {
 test('the one empty state is unchanged, and no second one was added', () => {
   assert.ok(
     app.includes(
-      "'No teams yet. A team directory is created the first time a lead is launched in a folder — do that once at the Mac and the folder appears here.'",
+      'No teams yet. A team directory is created the first time a lead is launched in a folder — do that once at the Mac and the folder appears here.',
     ),
     'the maintainer was asked and is happy with this wording',
   );
-  // Two notes on this screen and only two: loading, and no teams at all. A home list with
-  // every lead stopped draws neither — the `+` is what it has to say.
-  assert.equal(app.match(/note\.className = 'm-note';/g).length, 2);
+
+  /*
+   * Two notes on the **Leads** tab and only two: loading, and no teams at all. A home list
+   * with every lead stopped draws neither — the `+` is what it has to say.
+   *
+   * Counted inside `leadsView` rather than across the file, because the other two tabs draw
+   * notes of their own now (their lists are later items) and a whole-file count would rise
+   * every time one of them gained a state. The `.m-note` class itself is written once, in
+   * the `note()` helper, which is what stops a third wording appearing on this tab by
+   * anything other than a third call here.
+   */
+  const leads = app.slice(app.indexOf('function leadsView('), app.indexOf('function standalonesView('));
+  assert.ok(leads.length > 200, 'leadsView must still exist, above standalonesView');
+  assert.equal(leads.match(/note\(/g).length, 2, 'loading, and no teams at all');
+  assert.equal(app.match(/el\.className = 'm-note';/g).length, 1, 'one place spells the class');
 });

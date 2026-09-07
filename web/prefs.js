@@ -65,11 +65,61 @@ function flag(key) {
   };
 }
 
+/**
+ * One stored value out of a fixed vocabulary, read once at import and remembered for the
+ * visit.
+ *
+ * A sibling of `flag` rather than a generalisation of it, and the guard is the same one for
+ * the same reason: `localStorage` is a getter that **throws** where a browser blocks site
+ * data, at module scope, before a row is drawn.
+ *
+ * What it adds over `flag` is the vocabulary. A stored value this version has never heard
+ * of — written by an older build, or by a hand in devtools — reads back as the fallback
+ * rather than as itself, because the one thing a remembered *route* must never do is send
+ * a reader to a screen that does not exist. The list is the caller's, so there is one place
+ * the words are spelled.
+ */
+function choice(key, allowed, fallback) {
+  const ok = (v) => allowed.includes(v);
+  const read = () => {
+    try {
+      const stored = localStorage.getItem(key);
+      return ok(stored) ? stored : fallback;
+    } catch {
+      /* private mode, or site data blocked — the fallback is a perfectly good answer */
+      return fallback;
+    }
+  };
+  let value = read();
+  return {
+    get value() {
+      return value;
+    },
+    /** Set it and remember it. A word outside the vocabulary is the fallback, never itself. */
+    set(next) {
+      value = ok(next) ? next : fallback;
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        /* storage blocked — this window still behaves, the answer just won't survive a reload */
+      }
+      return value;
+    },
+    /** Re-read from storage. For a test, and for a page that wants the current answer after
+     *  another tab has changed it. */
+    reload() {
+      value = read();
+      return value;
+    },
+  };
+}
+
 /** The keys. Named once, exported so a test can name the same ones. */
 export const GHOST_SEND_KEY = 'foreman.ghostSend';
 export const HIDE_FINISHED_KEY = 'foreman.hideFinished';
 export const ASIDE_FOLDED_KEY = 'foreman.asideFolded';
 export const ROOM_FOLDED_KEY = 'foreman.roomFolded';
+export const PHONE_TAB_KEY = 'foreman.m.tab';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -126,6 +176,30 @@ export const asideFolded = flag(ASIDE_FOLDED_KEY);
  * the room pane is restored from `state.opened`.
  */
 export const roomFolded = flag(ROOM_FOLDED_KEY);
+
+/**
+ * The three tabs of the phone's home screen, in the order they are drawn.
+ *
+ * Here rather than in `web/m/app.js` because the *stored* value has to be checked against
+ * them and the drawn list has to be built from them — two spellings of one vocabulary is
+ * how a remembered tab comes back pointing at a screen the shell no longer has. The phone
+ * maps these to labels; nothing else in the panel reads them.
+ */
+export const PHONE_TABS = ['leads', 'standalones', 'rooms'];
+
+/**
+ * Which of those three the phone was last looking at.
+ *
+ * Phone-only, and in this file all the same: `/` and `/m/` are one origin, and a key
+ * spelled once here is the only thing stopping a second spelling inside `web/m/app.js`
+ * being a setting that appears to work.
+ *
+ * It is consulted in exactly one place — a page opened with **no hash at all**, which is
+ * what the Home Screen app does. An explicit `#/leads` is obeyed as typed, and a bare `#/`
+ * is Leads; the memory is what a cold open lands on, never something that overrides a
+ * route somebody asked for.
+ */
+export const phoneTab = choice(PHONE_TAB_KEY, PHONE_TABS, 'leads');
 
 /**
  * What `hideFinished` hides: exactly the three closed states of `TASK_STATES`

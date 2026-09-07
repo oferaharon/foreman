@@ -1,8 +1,8 @@
 {
   "id": "/m/",
-  "name": "Foreman Leads",
-  "short_name": "Leads",
-  "description": "The leads view: what each team is doing, and what needs you.",
+  "name": "Foreman",
+  "short_name": "Foreman",
+  "description": "The phone view: every session, team and room, and what needs you.",
   "start_url": "/m/",
   "scope": "/m/",
   "display": "standalone",

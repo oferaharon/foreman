@@ -85,24 +85,137 @@ select {
   overflow: hidden;
 }
 
+/*
+ * The shell header is now **two rows**: the name and its controls, then the tab bar.
+ *
+ * A column, so the tab bar can live *inside* the same `<header>`. That is the whole reason
+ * it is shaped this way: `enterLead` hides this element outright and the lead screen draws
+ * its own header, so a tab bar appended as a sibling would sit over it — a bug already
+ * caught on this screen once. Inside, it inherits the right visibility with no branch of
+ * its own.
+ *
+ * The status-bar inset stays here, on the outer element, and the row below keeps the 0.7rem
+ * it always had — so the header's top padding is the same number it was before the split.
+ */
 .m-head {
   flex: none;
   display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.7rem 0.9rem;
+  flex-direction: column;
   /* The status bar on a notched phone lives in this inset. */
-  padding-top: calc(0.7rem + env(safe-area-inset-top));
-  padding-left: calc(0.9rem + env(safe-area-inset-left));
-  padding-right: calc(0.9rem + env(safe-area-inset-right));
+  padding-top: env(safe-area-inset-top);
   border-bottom: 1px solid var(--rule);
   background: var(--surface);
 }
 
 /* `display: flex` above is a class rule and beats the UA stylesheet's `[hidden]`, so the
    header stayed on screen on a route that had explicitly hidden it. Caught on the bench,
-   with the shell's "Leads" bar sitting over the lead screen's own. */
+   with the shell's own bar sitting over the lead screen's. */
 .m-head[hidden] { display: none; }
+
+/*
+ * Row one: the name, the gauges, the socket dot, `+` and `⟳` — exactly what `.m-head` held
+ * before the tab bar arrived, with the same padding and the same gap.
+ *
+ * `web/m/lead.js`'s `watchConnection` polls `.m-app > .m-head .m-conn` to mirror the socket
+ * dot on the session screen. That is a **descendant** combinator on the right, so wrapping
+ * these children in this row keeps it matching; a miss there leaves the session screen's dot
+ * reading `?` for ever, and it fails quietly. Do not move `.m-conn` out of `.m-head`, and do
+ * not stop `.m-head` being a direct child of `.m-app`, without changing both files together.
+ */
+.m-head-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  padding-left: calc(0.9rem + env(safe-area-inset-left));
+  padding-right: calc(0.9rem + env(safe-area-inset-right));
+}
+
+/* ============================================================== tabs === */
+
+/*
+ * Row two: Leads | Standalones | Rooms. The three tabs are the whole of home.
+ *
+ * Equal thirds rather than content-width, so the targets do not move when a label changes
+ * and a thumb learns where each one is. Each is at least 44px tall — Apple's own minimum,
+ * and the same floor `.m-icon-btn` sets one row up.
+ */
+.m-nav {
+  display: flex;
+  align-items: stretch;
+  padding: 0 0.5rem;
+  padding-left: calc(0.5rem + env(safe-area-inset-left));
+  padding-right: calc(0.5rem + env(safe-area-inset-right));
+}
+
+/* `display: flex` above is a class rule and beats the UA stylesheet's `[hidden]`. The
+   header, the quota block and the `+` have each paid for this trap once already on this one
+   screen; the bar is inside `.m-head` and so is hidden with it today, and this is what stops
+   the next reader who hides it on its own from watching it stay. */
+.m-nav[hidden] { display: none; }
+
+/*
+ * `.m-nav-tab` and not `.m-tab`, which is taken.
+ *
+ * `lead.css` already owns `.m-tab` for the lead screen's own chat/tasks pair, and
+ * `index.html` links it **after** this file — so the shell's tabs shipped with the lead
+ * screen's colours and its 34px height silently overriding half of these declarations, and
+ * this file's rules leaked back onto the lead screen's tabs in return. Caught on the bench
+ * by measuring a tab that was supposed to be 44px tall and reading back 34.
+ *
+ * The two are different controls in different headers and only ever one is on screen, which
+ * is exactly what makes a shared name cost nothing until it costs an hour. The shell's are
+ * `nav`, because that is what they are.
+ */
+
+/*
+ * The three metrics below are measured, not chosen: at **320px** — the narrowest phone this
+ * view is built for — `Standalones` in mono at 0.78rem overflows its third by 0.37px and
+ * ellipsises to `Standalon…`, which is a tab label you have to guess at. Nothing else
+ * breaks (no sideways scroll, the target stays 44px), so it fails the quiet way.
+ *
+ * 0.74rem with this gap and padding clears it by about 4px at 320 and by far more at 390.
+ * If a fourth tab is ever added, or one gains a longer word, re-measure at 320 rather than
+ * trusting that it still fits — the whole margin here is four pixels wide.
+ */
+.m-nav-tab {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0 0.15rem;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  letter-spacing: -0.02em;
+  color: var(--ink-faint);
+  /* Carried by every tab as transparent, never grown on the selected one alone: a border
+     that appeared under the active tab would step the label above it by two pixels every
+     time the selection moved. The rail's open row does the same thing for the same reason. */
+  border-bottom: 2px solid transparent;
+}
+
+.m-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-nav-tab.is-on {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+
+.m-nav-tab:active { background: var(--surface-sunk); }
+
+/*
+ * The mark, and it is the card gutter's own `.m-dot-wait` — `--decision`, 9px, the same
+ * shape in both places because it is the same fact one level up. Always in the DOM and
+ * simply unpainted when off, so lighting it never moves the label beside it.
+ */
+.m-nav-dot { flex: none; }
 
 .m-title {
   font-family: var(--mono);

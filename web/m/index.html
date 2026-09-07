@@ -10,8 +10,8 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" content="#111219" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#f5f5f8" media="(prefers-color-scheme: light)" />
-    <meta name="apple-mobile-web-app-title" content="Leads" />
-    <title>Leads · Foreman</title>
+    <meta name="apple-mobile-web-app-title" content="Foreman" />
+    <title>Foreman</title>
 
     <!--
       The palette, and *only* the palette. `web/styles.css` is deliberately not linked here:
@@ -32,10 +32,13 @@
     <link rel="stylesheet" href="/m/tasks.css" />
 
     <!--
-      Its own app, not the desktop panel's: `id` and `scope` are `/m/`, and the icon is the
-      leads variant of the same mark — one row with two indented under it — so the two sit
-      apart on a Home Screen rather than being told apart by their titles. `display:
-      standalone` in the manifest is what "Add to Home Screen" reads; the
+      Its own app, not the desktop panel's: `id` and `scope` are `/m/`, which is what a
+      browser keys an installed app on, so the two install and update separately even though
+      both are now called Foreman. That shared name is the maintainer's ruling of 2026-09-07
+      — this view stopped being about leads — and it means the **icon** is the whole of what
+      tells the two tiles apart on one device: the `leads` variant of the same mark, one row
+      with two indented under it. The files keep their `leads` names on disk, which nobody
+      sees. `display: standalone` in the manifest is what "Add to Home Screen" reads; the
       `apple-mobile-web-app-*` metas above and below are what older iOS reads for the same
       thing, which is why both are here.
 
