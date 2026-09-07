@@ -248,6 +248,44 @@ found and exits cleanly instead of starting a second panel.
 
 ### Under Homebrew
 
+**`foreman-panel setup` is the whole of it.** One command after `brew install`, which does
+in order the four things this section used to spell out separately, printing a line for
+each:
+
+1. **Checking prerequisites.** `claude` on the `PATH` — not a Homebrew dependency, because
+   Claude Code is not packaged there, so it is the one thing an otherwise perfect install
+   can be missing, and setup stops if it is. `tmux` likewise, which arrives with the
+   formula and so only ever fails on an install that is already broken. Then `gh auth
+   status`, which **warns and carries on**: a team on a GitHub-hosted repository needs
+   `gh auth login` and `gh auth setup-git`, and nothing else in the panel does.
+2. **Registering the status hook.** `install-hook`, unchanged — it backs up
+   `~/.claude/settings.json` beside itself first and prints where the backup went.
+3. **Wrapping the status line.** `install-statusline`, unchanged, and it is part of the
+   product rather than an option here: `foreman-panel uninstall-statusline` is the way out.
+   The gauges it feeds need a subscription account; an API-key account has no usage
+   percentage in the payload, so on one they simply never appear.
+4. **Starting the panel.** `brew services start foreman-panel`, then `http://127.0.0.1:<port>`
+   is knocked on until it answers — up to about ten seconds — so "done" means *reachable*
+   and not merely *launched*.
+5. **Done.** The URL, opened in your browser. If the probe timed out the URL is printed and
+   the browser is left alone, with a pointer at `brew services list` and `foreman-panel
+   logs`, because opening a page that will not load says nothing useful.
+
+**Running it twice is safe**, and each step says which it was. Both installers already
+refuse to rewrite an entry that is there, and the service is only started when nothing is
+already answering on the port — so a second run reports `already done` three times and
+changes nothing. The verdict is read from `settings.json`'s own bytes either side of each
+installer rather than from what the installer said, so it stays true if the wording moves.
+
+It starts no Claude Code session, touches no tmux session and answers nothing. The whole of
+what it changes is `~/.claude/settings.json`, through the two installers above, and the
+Homebrew service.
+
+**From a checkout it refuses**, because there is no `brew services` entry to start and the
+LaunchAgent is a different installer with different arguments: it says so and points at
+`npm run install-agent`. The subcommands below are unaffected and all still work on their
+own — `setup` is the order they go in, not a replacement for any of them.
+
 A Homebrew install runs under `brew services` instead of `install-agent`/`restart-panel` —
 same launchd underneath, different mechanism, and three things about it are worth knowing
 before you reach for a command that doesn't apply:

@@ -11,9 +11,13 @@
  * that hardcodes an interpreter and a path, in another repository, in another language.
  *
  * Nothing here re-implements anything. `serve` is one dynamic import; the hook commands
- * spawn the installer that already exists; `logs` prints what `logs.js` resolved. The
+ * spawn the installer that already exists; `logs` prints what `logs.js` resolved; `setup`
+ * is the order those commands go in, and it lives in `server/setup-command.js`. The
  * only judgement in the file is which advice to print, and that comes from
  * `server/homebrew.js`.
+ *
+ * Every import past `homebrew.js` is deliberately dynamic and inside its own `case`, so
+ * printing help costs one small module and reads nothing else on disk.
  *
  * ## Two things that would each be a bug
  *
@@ -41,6 +45,7 @@ const SERVER = path.resolve(HERE, '..', 'server');
 
 /** One row per subcommand: the help text is generated from this, so it cannot drift. */
 const COMMANDS = [
+  ['setup', 'the one command after `brew install`: hook, status line, service, open it'],
   ['serve', 'run the panel in this process (what the service runs; the twin of `npm start`)'],
   ['start', 'start the background service'],
   ['stop', 'stop the background service'],
@@ -106,6 +111,16 @@ function services(verb) {
 const [, , command, ...rest] = process.argv;
 
 switch (command) {
+  // The one command after `brew install`. Its body is `server/setup-command.js`, which
+  // spawns the same installers the subcommands below spawn — this is the order, not a
+  // second implementation. Imported rather than spawned because, unlike `install-hook.js`,
+  // it does nothing at import: `runSetup` is a function and the module has no bottom.
+  case 'setup': {
+    const { runSetup } = await import('../server/setup-command.js');
+    process.exit(await runSetup());
+    break;
+  }
+
   case 'serve':
     // One import and nothing else. Everything a boot does — the port probe, the log
     // rotation, the config seed, the listen — belongs to `index.js` and stays there.
