@@ -1,7 +1,8 @@
 # Running it
 
-Prerequisites in full, the module layout, configuration and the settings modal, the
-LaunchAgent, Homebrew, the browser guard, backing up state, and removing the hook.
+Prerequisites in full, working from a checkout, the module layout, configuration and the
+settings modal, the LaunchAgent, Homebrew, the browser guard, backing up state, and
+removing the hook.
 
 [README](../README.md) · [The panel](panel.md) · [The team](team.md) · **Running it**
 
@@ -55,6 +56,28 @@ written into your repositories. Beyond that:
   plist in that directory that starts a copy of this same panel under a label it no longer
   uses, after backing it up into the state dir; a plist that starts anything else is never
   touched.
+
+---
+
+## From a checkout
+
+Homebrew is the first path — `brew install`, then `foreman-panel setup`, which
+[refuses from a checkout](#under-homebrew). This is the second:
+
+```
+git clone https://github.com/oferaharon/foreman.git
+cd foreman
+npm install
+npm run install-hook        # once — registers the status hook, backs up settings.json
+npm run install-statusline  # optional, once — rate-limit gauges in the rail
+npm run install-agent       # once — runs the panel as a LaunchAgent → http://127.0.0.1:48770
+npm test                    # parsers, stores, binding, launch naming, and the team modules
+```
+
+There is no signed installer package and no bundled Node runtime, and that's deliberate:
+Homebrew owns the runtime and the dependency graph for the first path, and the second
+needs the same Node and tmux it always has. Revisit a `.pkg` only if non-Homebrew users
+turn up.
 
 ---
 
