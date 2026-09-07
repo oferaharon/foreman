@@ -607,6 +607,70 @@ select {
 .m-team-state.is-blocked { color: var(--decision); }
 
 /*
+ * The team's workers, one muted line each, under the card and outside its tap target.
+ *
+ * They sit in `.m-team` as siblings of `.m-team-body`, never inside it — the body is a
+ * `<button>` and a `<button>` inside a `<button>` is invalid markup whose disabled form
+ * swallows the child's clicks, which this card has already paid for once. Nothing here is
+ * pressable and nothing carries a listener, so there is no `:active`, no `min-height: 44px`
+ * and no cursor: a 44px target is a promise about something you can tap.
+ *
+ * The block is only in the DOM when there is at least one worker, so a lead with none has
+ * no lines and no gap — the same rule every count on the card above already follows.
+ */
+.m-team-workers {
+  padding: 0 1rem 0.55rem;
+}
+
+/*
+ * One line: the mark's column, the branch, and the state word.
+ *
+ * `padding-left: 1.55rem` puts the mark just right of the card's own gutter, so the
+ * worker's name starts a little inside the team's name above it — indented enough to read
+ * as belonging to that card, not so far that a branch has nowhere to go at 320px. The
+ * columns are the card's own arithmetic: 0.9rem for the dot, then the name, then whatever
+ * the word needs.
+ *
+ * `minmax(0, 1fr)` on the middle column is what actually makes the ellipsis work — a plain
+ * `1fr` floors at the content's own width, and `agent/<a long task name>` would then push
+ * the line wider than the screen and put the whole page into a horizontal scroll.
+ */
+.m-team-worker {
+  display: grid;
+  grid-template-columns: 0.9rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.16rem 0 0.16rem 1.55rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+}
+
+/* Centred in its column the way `.m-dots` centres the card's pair, so the marks read as one
+   column down the card rather than two that nearly line up. */
+.m-team-worker > .m-dot { justify-self: center; }
+
+.m-team-worker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The state word. Muted by default like the line it sits on; the two that mean something is
+ * waiting take the colours the card above already gives those exact facts — amber for a
+ * task in `review` (`.m-team-review`'s own token, the 2026-08-27 indicator) and the decision
+ * red for a session holding a box (`.m-team-state.is-blocked`). One fact, one colour, in
+ * both places.
+ */
+.m-team-worker-state {
+  white-space: nowrap;
+}
+
+.m-team-worker-state.is-review { color: var(--working); }
+.m-team-worker-state.is-waiting { color: var(--decision); }
+
+/*
  * The gutter: two slots, always both there.
  *
  * The top slot is the 2026-08-27 indicator and its rule has not moved — a box the lead is
