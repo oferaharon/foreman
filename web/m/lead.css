@@ -1,5 +1,10 @@
 /*
- * lead.css — item 6. The lead screen: header, tab strip, conversation, composer.
+ * lead.css — item 6. The conversation screen: header, tab strip, conversation, composer.
+ *
+ * One sheet, two routes. `#/lead/<id>` and `#/session/<id>` mount the same screen module and
+ * therefore the same classes; the tab strip is the only thing an ordinary session does not
+ * draw. The `lead` in every name here is kept on purpose — `web/m/lead.js`'s header says
+ * why, and `server/shared-room.js` records the same call.
  *
  * Scope: this sheet owns everything between the shell's frame and the answer card. The
  * card's own styles are `cards.css` (item 7) and the tasks tab's are `tasks.css` (item 8);
@@ -138,6 +143,17 @@
 .m-lead-conn.is-unknown { color: var(--ink-faint); border-color: var(--rule-strong); }
 
 /* Row 2: the two tabs, and the one control. */
+/*
+ * Row 2, and it holds **two or three** children depending on the route.
+ *
+ * A lead gets the tabs, the activity and the interrupt; an ordinary session gets the last
+ * two, because it has no team and therefore no tasks tab — `lead.js` builds the tabs rather
+ * than hiding them, so a tasks pane keyed on a folder that may belong to somebody else's
+ * team is simply not on the screen. Nothing here needs a branch for that: `.m-tabs` is a
+ * fixed basis, the activity is the only `flex: 1`, and the interrupt is `flex: none`, so
+ * removing the first leaves the other two exactly where they were. The row's height is the
+ * 44px interrupt button either way.
+ */
 .m-lead-bar {
   display: flex;
   align-items: center;

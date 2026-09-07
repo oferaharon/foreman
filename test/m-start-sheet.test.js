@@ -111,7 +111,7 @@ test('a team with no live lead has no shape on the home list at all', () => {
 
 test('the `+` is in the shell header, so the lead screen hides it for free', () => {
   // Two rows inside one `<header>` since the tab bar landed: the `+` goes on the first, and
-  // the header is what `enterLead` hides. A control appended anywhere but under `.m-head`
+  // the header is what `enterConversation` hides. A control appended anywhere but `.m-head`
   // would sit over the lead screen's own header — a bug this screen has already had once.
   assert.match(app, /el\.headRow\.append\(el\.title, el\.quota, el\.conn, el\.start, el\.refresh\);/);
   assert.match(app, /el\.head\.append\(el\.headRow, el\.tabs\);/);
@@ -166,9 +166,16 @@ test('the sheet repaints behind its own signature, never unconditionally', () =>
 });
 
 test('the sheet keeps the home list’s order and does not sort for itself', () => {
-  // `loadTeams` sorts by name, deliberately not by urgency, and `map`/`filter` preserve it.
-  assert.equal(app.match(/\.sort\(/g).length, 1, 'the one sort is in loadTeams');
+  /*
+   * Two sorts in the file and they belong to two different lists: `loadTeams` orders the
+   * teams by name — which is the order the Leads tab and this sheet both read — and
+   * `standaloneSorted` orders the ordinary sessions by folder then name. Neither list
+   * re-sorts for itself, which is what this test is about: the roster's own order is
+   * urgency-first and would move a row under a thumb the moment something else blocked.
+   */
+  assert.equal(app.match(/\.sort\(/g).length, 2, 'loadTeams, and the standalone order');
   assert.match(app, /state\.teams = \(data\.teams \|\| \[\]\)\s*\.slice\(\)\s*\.sort\(/);
+  assert.match(app, /function standaloneSorted\(\) \{\s*return standaloneRows\(\)\s*\.slice\(\)\s*\.sort\(/);
 });
 
 test('the sheet closes itself rather than growing an empty state of its own', () => {
