@@ -297,7 +297,10 @@ test('the band is the grip: one node, `resizer` unchanged, and the icon does not
 test('the band is painted inside the panel, and the content is padded off it by the same number', () => {
   // A painted band on the grip's old `left: -3px` would put three pixels of `--band` over
   // the transcript. One token, read twice, so the two cannot come apart.
-  const band = rule('.aside-band');
+  // `.pane-grip.grip-col` pins `width: 7px` at two classes, so a one-class `.aside-band`
+  // loses on specificity wherever it sits in the file — measured, the band came back 7px
+  // wide with `var(--band-w)` on the books. The whole block carries the extra class.
+  const band = rule('.pane-grip.aside-band');
   assert.match(band, /left: 0;/);
   assert.match(band, /width: var\(--band-w\);/);
   assert.match(band, /background: var\(--band\);/);
@@ -305,7 +308,7 @@ test('the band is painted inside the panel, and the content is padded off it by 
   // freeze's two-selector rule above it, so this reads the declaration where it sits — the
   // last one in that block, against the closing brace.
   assert.match(styles, /\n  padding-left: var\(--band-w\);\n\}/);
-  assert.match(styles, /\.aside-band:hover \{ background: var\(--accent-soft\); \}/);
+  assert.match(styles, /\.pane-grip\.aside-band:hover \{ background: var\(--accent-soft\); \}/);
   // Two rules, two different edges: the panel's own left border is the transcript boundary,
   // the band's right border is the content boundary. Neither is drawn twice.
   assert.match(band, /border-right: 1px solid var\(--rule\);/);
