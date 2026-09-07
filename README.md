@@ -80,7 +80,7 @@ it rather than appearing twice, so it empties as you deal with it.
 </td>
 <td width="50%">
 
-<img src="docs/images/rail-inbox.png" alt="The whole rail top to bottom: the Foreman header with its two rate-limit gauges, the buttons row, and the live/busy/waiting/unread counts; a pinned team lead with one worker nested under it; two collapsed groups; then the footer with the peer-messages row, the ROOMS band showing one open room and an archived fold, and the GitHub/version line." width="100%" />
+<img src="docs/images/rail-inbox.png" alt="The whole rail top to bottom: the Foreman header with its two rate-limit gauges, the buttons row, and the live/busy/waiting/unread counts; a pinned team lead with two workers nested under it, each carrying an unread badge; two collapsed groups; then the footer with the peer-messages row, the ROOMS band showing one open room and an archived fold, and the GitHub/version line." width="100%" />
 
 </td>
 </tr>
