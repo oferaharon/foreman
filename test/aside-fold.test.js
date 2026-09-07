@@ -169,13 +169,15 @@ test('the preference is one answer for the browser, fanned out, and never per-pa
   // animation, which measures, freezes, clears a counter and remeasures.
   assert.match(fn('foldAsides'), /for \(const pane of panes\) pane\.foldAside\?\.\(\);/);
   assert.match(app, /foldAside: applyAsideFold,/);
-  assert.match(app, /import \{ asideFolded, ghostSend, hideFinished, isFinishedState \} from '\.\/prefs\.js';/);
+  // `roomFolded` joined the same line with item 3; the shape being pinned is that both fold
+  // flags come from `prefs.js` and nowhere else.
+  assert.match(app, /import \{ asideFolded, ghostSend, hideFinished, isFinishedState, roomFolded \} from '\.\/prefs\.js';/);
 });
 
 /* ----------------------------------------------------------- the strip --- */
 
 test('the strip’s counts are `asideStripFacts`’ answer, not a second derivation', () => {
-  assert.match(app, /import \{ asideStripFacts \} from '\.\/panel-fold\.js';/);
+  assert.match(app, /import \{ asideStripFacts, foldTracks, roomStripFacts \} from '\.\/panel-fold\.js';/);
   assert.match(fn('renderAsideStrip'), /asideStripFacts\(current\(\)\?\.team\)/);
   // The rail row reads the same object. A second walk of `s.team` here is the `isLeadName`
   // lesson in one more costume.
