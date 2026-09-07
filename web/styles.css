@@ -1379,8 +1379,26 @@ body.row-dragging * { cursor: row-resize !important; }
  * one pins an icon at the top, level with the SETTINGS heading beside it, and the drag
  * mark goes in the middle by absolute position rather than by flex.
  *
- * **`--band-w` is 1.25rem — twenty pixels — against the grip's seven.** A drag target that
- * grew is the one part of this change that costs nothing to argue about.
+ * **A hairline at rest, `--band-w` under the cursor.** The band shipped 1.25rem wide all
+ * the time; the maintainer re-viewed the mock-ups and picked the variant that is a rule at
+ * rest and a column when you reach for it, so the aside's edge costs a hairline of ink
+ * while nobody is pointing at it. `--band-w-rest` is the resting width and `--band-w` is
+ * still the hovered one, which matters because **nothing else in the file had to change**:
+ * `.room-panel-body` is padded by one `--band-w` exactly as before, so the band widens into
+ * a gap that was already empty and the panel's content never moves. Neither does the
+ * transcript beside it — the panel's own width is `--aside` and the band lives inside it,
+ * so there is no push to accept and none is taken.
+ *
+ * **The width transition may stand permanently, unlike the panel's.** `.room-panel` gates
+ * its `width` transition behind `is-folding` because the band writes `--aside` on every
+ * pointer move and an eased panel would lag the cursor by a fifth of a second. The band's
+ * own width is written by nothing but these rules — a drag changes the panel, never the
+ * band — so there is no drag for it to lag.
+ *
+ * **`is-dragging` holds it open.** A drag begins with the cursor on the band, so `:hover`
+ * would normally keep it wide; a pointer capture is not a promise about hover, and a target
+ * that shrank to seven pixels under a cursor already dragging it is the one failure this
+ * costs nothing to rule out.
  *
  * **It is still a grip everywhere it is not the icon.** `cursor: col-resize` is on the
  * band; `.aside-band-fold` puts `pointer` back over its own box, which is the only place
@@ -1396,14 +1414,24 @@ body.row-dragging * { cursor: row-resize !important; }
  */
 .pane-grip.aside-band {
   left: 0;
-  width: var(--band-w);
+  width: var(--band-w-rest);
   flex-direction: column;
   justify-content: flex-start;
   padding-top: 0.45rem;
   background: var(--band);
   border-right: 1px solid var(--rule);
+  transition: width 160ms ease, background 120ms ease;
 }
-.pane-grip.aside-band:hover { background: var(--accent-soft); }
+/* `:focus-within` is the whole of the keyboard story, and it is why the fold below needs no
+   `tabindex` bookkeeping: tabbing to a button inside the band *is* the thing that opens the
+   band and fades the button in. A control that reveals itself when focus reaches it is
+   reachable; one taken out of the tab order to keep it hidden is not. */
+.pane-grip.aside-band:hover,
+.pane-grip.aside-band:focus-within,
+.pane-grip.aside-band.is-dragging {
+  width: var(--band-w);
+  background: var(--accent-soft);
+}
 
 /* `.pane-grip::before` is the hairline that lights up under the cursor — a grip's whole way
    of saying "this edge is live". The band says it with its own background, and a second
@@ -1414,12 +1442,19 @@ body.row-dragging * { cursor: row-resize !important; }
  * The drag mark: 2px x 1.6rem, `.pane-grip`'s own bar, at the band's vertical middle.
  *
  * **Absolute rather than flex-centred**, because the icon is a real flex item now and
- * centring the pseudo-element would centre the pair of them. And **hidden at rest**, which
- * is the one place this parts company with the other three grips: those are transparent
- * strips whose faint bar is the only thing on screen saying they exist, while this band is
- * a painted column that is plainly *something* — so the mark's job is narrower, and it is
- * to say which of the band's two jobs the cursor is over. Drawn all the time it would read
- * as a second control.
+ * centring the pseudo-element would centre the pair of them.
+ *
+ * **Drawn at rest**, which is a reversal of what the band shipped with and is the
+ * maintainer's own call on top of the mock-up — the variant hid the mark until hover and he
+ * asked for it always. The reasoning it reverses was sound while the band was a painted
+ * 20px column: something that plainly *is* a control does not need a second mark saying so,
+ * and one drawn permanently reads as a control of its own. A hairline is not plainly
+ * anything. At rest the mark is the only thing on the edge that says it can be grabbed, so
+ * it is exactly the job the other three grips' faint bars do, and it is drawn for the same
+ * reason they are.
+ *
+ * It has no opacity of its own to animate any more; it rides the band's width, which slides
+ * it the six pixels from the hairline's middle to the column's as the band opens.
  */
 .aside-band::after {
   position: absolute;
@@ -1429,19 +1464,13 @@ body.row-dragging * { cursor: row-resize !important; }
   width: 2px;
   height: 1.6rem;
   background: var(--rule-strong);
-  opacity: 0;
-  transition: opacity 120ms ease;
 }
-.aside-band:hover::after,
-.aside-band.is-dragging::after { opacity: 1; }
 /* `.pane-grip:hover::after` takes the shared mark to full `--ink`. This one is a hint about
-   an edge, not a control asking to be pressed, so it stays `--rule-strong` in both states
-   and only its presence changes. After the shared rule, so it wins. */
+   an edge, not a control asking to be pressed, so it stays `--rule-strong` in every state —
+   the band's own widening is what answers the cursor. After the shared rule, so it wins. */
+.aside-band::after,
 .aside-band:hover::after,
 .aside-band.is-dragging::after { background: var(--rule-strong); }
-@media (prefers-reduced-motion: reduce) {
-  .aside-band::after { transition: none; }
-}
 
 /*
  * The fold, pinned at the top of the band.
@@ -1450,6 +1479,19 @@ body.row-dragging * { cursor: row-resize !important; }
  * one column over — the aside's two icon controls read as one family. The hit area is the
  * band's full width, so there is no sliver of band beside the icon that looks pressable and
  * drags instead.
+ *
+ * **It is not drawn until the band has room for it.** A 15px glyph in a 7px column is not a
+ * smaller icon, it is a clipped one, so the reveal is delayed 60ms behind the widening —
+ * long enough that the band is most of the way open before the icon starts to arrive, short
+ * enough that it is not a second beat. Leaving reverses without the delay, because a control
+ * fading out of a column that is already closing does not need to be waited for.
+ *
+ * **`pointer-events: none` is what makes it un-clickable while hidden**, and it is the whole
+ * of the JS this design needed: the button is a real button in the tree at all times, so
+ * nothing toggles `tabindex` or `aria-hidden` on the roster beat, and keyboard focus lands
+ * on it and opens the band by `:focus-within` rather than being locked out of it. It also
+ * means a pointer over the hairline hits the *band* and starts a drag, which is what a
+ * hairline should do — the fold takes the pointer back only once it can be seen.
  */
 .aside-band-fold {
   flex: none;
@@ -1462,12 +1504,32 @@ body.row-dragging * { cursor: row-resize !important; }
   background: none;
   color: var(--ink-muted);
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.aside-band:hover > .aside-band-fold,
+.aside-band:focus-within > .aside-band-fold,
+.aside-band.is-dragging > .aside-band-fold {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 120ms ease 60ms, color 120ms ease;
 }
 .aside-band-fold svg {
   width: 0.95rem;
   height: 0.95rem;
 }
 .aside-band-fold:hover { color: var(--accent); }
+/* Both halves of the reveal go instant together. Two selectors rather than one because the
+   delay lives on the open state, and a `transition: none` that only reached the closed one
+   would leave the icon arriving 60ms late for a reader who asked for no motion at all. */
+@media (prefers-reduced-motion: reduce) {
+  .pane-grip.aside-band,
+  .aside-band-fold,
+  .aside-band:hover > .aside-band-fold,
+  .aside-band:focus-within > .aside-band-fold,
+  .aside-band.is-dragging > .aside-band-fold { transition: none; }
+}
 /* The Tasks/Room divider. It is a flex item rather than an overlay — there is no edge to
    hang it off, the two blocks simply meet — and the negative margins are what stop it
    costing seven pixels of the panel: -4 above and -3 below nets zero, and lands its
