@@ -30,6 +30,12 @@ import { foldTracks, roomStripFacts } from './panel-fold.js';
 // nothing to stop, so one control does both jobs and the rule for which is which is a thing
 // a node test can hold.
 import { ghostAction, ghostSig, INTERRUPT_TITLE } from './ghost-action.js';
+// The order a lead's nested workers are drawn in — by dispatch time, newest on top, and
+// never re-sorted after that. The one place in the rail that is not recency, which is why
+// it is a module and not a comparator inlined into `renderRail`: the rule that a team block
+// holds still is exactly the kind of thing that gets optimised back into `lastActivity` by
+// somebody tidying, and a node test is what stops that.
+import { orderWorkers } from './worker-order.js';
 // The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
@@ -3427,6 +3433,14 @@ function renderRail() {
     nestedWorkers.get(lead.id).push(s);
     return false;
   });
+
+  // They arrive in the roster's order, which is recency — right for every other list in
+  // this file and wrong here. A team is read as a block and a worker is found where it was
+  // the last time you looked, so the nested rows are ordered once by dispatch time, newest
+  // on top, and then hold still for as long as they run. `orderWorkers` is the whole rule;
+  // it never throws and never drops a row. Sorted here, once, rather than inside `rowsFor`:
+  // the answer must not depend on how many times a lead's row happens to be built.
+  for (const [leadId, workers] of nestedWorkers) nestedWorkers.set(leadId, orderWorkers(workers));
 
   /** A row plus, when it is a lead, its nested workers — always used in its place. */
   const rowsFor = (s) => {

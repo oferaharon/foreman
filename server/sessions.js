@@ -43,6 +43,45 @@ export function openTaskFor(tasks, tmuxSession) {
   return null;
 }
 
+/**
+ * The roster's `team` object for a worker row — the task record, shaped for the rail.
+ *
+ * It is here rather than inlined in `#team` for one reason: `#team` is private and reachable
+ * only through a poll that needs tmux, so nothing could pin what a worker row actually says.
+ * The *join* is still `openTaskFor` and nothing else — this shapes the answer, it does not
+ * find it, and there is deliberately no second way in here to decide which task a row owns.
+ *
+ * `stuck` is the watcher's, not the store's — elapsed time since the task last changed
+ * state — and it rides here rather than in a field of its own for the reason the lead's
+ * counts do: the rail must not be able to be told a row is a worker in one place and
+ * something else in another. `team` is already in `#diff`, so a worker going stuck repaints
+ * its row and its lead's on the next poll and nothing else.
+ *
+ * **`since` is when the worker was dispatched, and it is the one field here that never
+ * moves.** The rail sorts a lead's nested workers on it and then leaves them alone, which
+ * is the whole point — every other order in the rail is recency, and a team read top to
+ * bottom should not rearrange itself because somebody spoke to the middle one. So it is
+ * stamped once (`dispatchedAt`, written at the transition to `dispatched` and never again)
+ * and it costs no repaints: `team` goes through `#diff` as a whole via `JSON.stringify`, and
+ * a field that cannot change cannot make that string differ. `createdAt` is the fallback for
+ * a record that somehow reached a live session without a dispatch stamp; `null` if it has
+ * neither, which the client sorts last rather than guessing at.
+ *
+ * @param {object} task the open task record this row is working
+ * @param {boolean} stuck the watcher's verdict, already computed
+ */
+export function workerTeam(task, stuck = false) {
+  return {
+    role: 'worker',
+    repo: task.repo,
+    task: task.id,
+    branch: task.branch || null,
+    state: task.state,
+    stuck: Boolean(stuck),
+    since: task.dispatchedAt ?? task.createdAt ?? null,
+  };
+}
+
 /** Queue identity for change detection — which items, and whether any failed. */
 const queueSig = (items = []) => items.map((i) => `${i.id}:${i.error ? 1 : 0}`).join(',');
 
@@ -197,19 +236,7 @@ export class SessionRegistry extends EventEmitter {
     }
     const task = openTaskFor(all, tmuxSession);
     if (!task) return null;
-    // `stuck` is the watcher's, not the store's — it is elapsed time since the task last
-    // changed state, and it rides here rather than in a field of its own for the reason
-    // the two above do: the rail must not be able to be told a row is a worker in one
-    // place and something else in another. `team` is already in `#diff`, so a worker
-    // going stuck repaints its row and its lead's on the next poll and nothing else.
-    return {
-      role: 'worker',
-      repo: task.repo,
-      task: task.id,
-      branch: task.branch || null,
-      state: task.state,
-      stuck: this.stuckFor ? Boolean(this.stuckFor(task.id)) : false,
-    };
+    return workerTeam(task, this.stuckFor ? Boolean(this.stuckFor(task.id)) : false);
   }
 
   async #scanTranscripts() {
