@@ -3368,59 +3368,97 @@ body.row-dragging * { cursor: row-resize !important; }
 .composer textarea:focus { outline: none; border-color: var(--accent); }
 .composer textarea:disabled { color: var(--ink-faint); cursor: not-allowed; }
 
-/* The control strip above the box. It holds interrupt, and — on a lead's pane with PRs
-   waiting — the merge queue above it.
+/* The control strip above the box. It holds interrupt, the suggestion beside it, and — on a
+   lead's pane with PRs waiting — the merge queue above both.
    Right-aligned so interrupt sits over the send button's corner rather than over the text
    you are writing, and `:empty` so a read-only session — which has nothing to interrupt —
    doesn't leave `.composer-inner`'s gap behind as a phantom line. The same collapse
    `.composer-activity` uses, for the same reason.
 
-   `:empty` is load-bearing and is why `renderMergeQueue` appends and removes the block
-   rather than toggling `hidden` on a child that is always there: a permanent child would
-   stop this selector matching, and a read-only session would grow a phantom line it has
-   never had. With no PRs this rule set is exactly what it was before the merge queue
-   existed — one flex row, interrupt alone. */
+   `:empty` is load-bearing and is why `renderMergeQueue` and `renderGhostLine` append and
+   remove their blocks rather than toggling `hidden` on children that are always there: a
+   permanent child would stop this selector matching, and a read-only session would grow a
+   phantom line it has never had. With nothing beside it this rule set is exactly what it was
+   before either existed — one flex row, interrupt alone.
+
+   Wrapping rather than a column, which is what lets the suggestion share interrupt's row
+   while the merge block still takes one of its own: the block is the only thing here forced
+   to a full line, so everything else falls onto the next one together. `gap` is inert with a
+   single child, which is what keeps the interrupt-only layout byte-identical to the one this
+   replaced — and `align-items` is deliberately *not* set here for the same reason. Measured
+   on the bench: `align-items: center` left every rect identical to the subpixel and still
+   changed four antialiased pixels on the button's bottom-left corner radius, which is enough
+   to move a SHA-256. Cross-axis alignment is the suggestion's own business, so it is
+   `align-self` on the line and the container is left exactly as it was. */
 .composer-above {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .composer-above:empty { display: none; }
 
-/* With rows in it, it becomes a column: the block full width, interrupt still the last
-   child and still right-aligned. Class rather than `:has()` so the state is set in the
-   one function that decides it, beside the append that puts the block there. */
-.composer-above.has-merge {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.5rem;
+/* The one full-width row. `flex: 0 0 100%` rather than a column direction, because a column
+   would put the suggestion on a line of its own again — the thing this row exists to stop.
+   Still keyed on the class rather than on `:has()`, for the reason it always was: the state
+   is set in the one function that decides it, beside the append that puts the block there. */
+.composer-above.has-merge > .merge-queue { flex: 0 0 100%; }
+
+/* Interrupt, and the suggestion's button, and they are the same node.
+   Its design rule is that it never moves, and its word changes from nine characters to
+   three — on a right-aligned row, that would walk its left edge sideways every time a turn
+   ended. So the widest word is always in the box: `::before` carries `interrupt` hidden in
+   the same grid cell as the live label, the cell is as wide as the wider of the two, and the
+   button's rect is identical in all three states. Measured, not reasoned about: `ch` plus
+   letter-spacing arithmetic is exactly the kind of "it'll be fine" this project keeps a list
+   of, and the pseudo needs no font to be right.
+   `flex: none` so a long suggestion ellipsises instead of squeezing the control. */
+.composer-above > .ghost-btn {
+  display: grid;
+  flex: none;
+  justify-items: center;
 }
 
-.composer-above.has-merge > .ghost-btn { align-self: flex-end; }
-
-/* The ghost-text line needs the same column, for the same reason: it is full width and
-   interrupt has to stay the last thing on its own row at the right. Two classes rather than
-   one shared name because each is set by the function that decides it, beside the append
-   that puts its own block there — and either can be there without the other. */
-.composer-above.has-ghost {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.5rem;
+.composer-above > .ghost-btn::before {
+  content: 'interrupt';
+  grid-area: 1 / 1;
+  visibility: hidden;
 }
 
-.composer-above.has-ghost > .ghost-btn { align-self: flex-end; }
+.composer-above > .ghost-btn > .ghost-btn-label { grid-area: 1 / 1; }
 
 /* ---- the ghost-text suggestion ---- */
 
 /* Claude Code's own guess at the next prompt, in the panel's "present but not asking for
    anything" ink. Deliberately quiet: it is an offer that expires, it is a poll behind, and
    it must never read as loudly as a queued message or a prompt that is actually waiting.
-   No border and no fill — the tag and the ink are the whole of what marks it. */
+   No border and no fill — the tag and the ink are the whole of what marks it.
+   The tag and the text are all of it: the button that takes it up is the interrupt button
+   at the right of the same row, wearing `send` or `use` for as long as the offer stands. */
 .ghost-line {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
+  /* It shares interrupt's row and takes what is left of it.
+
+     `flex-basis: 0`, and that is the whole of what keeps this one row. The strip wraps, and
+     a wrapping flex container decides its lines from each item's *hypothetical* size before
+     it flexes anything — so with a basis of `auto` the line asks for its max-content width,
+     a two-hundred-character suggestion does not fit beside the button, and the button wraps
+     onto a row of its own. Measured: a 197-character suggestion took the full 832px and put
+     interrupt 27px lower, which is the one thing this whole change exists to stop.
+     `min-width: 0` is still needed beside it — that is what lets the text ellipsise once the
+     line is on the row — but it says nothing about where the line break goes.
+
+     `align-self` rather than `align-items` on the row above, so the line centres itself
+     against the taller button and the button's own painting is untouched — see there.
+     `overflow: hidden` is the floor under all of it: the tag does not shrink, so on a pane
+     narrow enough it is the tag that gets clipped rather than the button that gets pushed. */
+  flex: 1 1 0;
+  align-self: center;
   min-width: 0;
+  overflow: hidden;
   font-size: 0.76rem;
   color: var(--ink-faint);
 }
@@ -3444,23 +3482,6 @@ body.row-dragging * { cursor: row-resize !important; }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.ghost-line-use {
-  flex: none;
-  border: 1px solid var(--rule);
-  border-radius: 0.35rem;
-  background: transparent;
-  color: var(--ink-muted);
-  font: inherit;
-  font-size: 0.7rem;
-  padding: 0.1rem 0.45rem;
-  cursor: pointer;
-}
-
-.ghost-line-use:hover {
-  background: var(--surface-sunk);
-  color: var(--ink);
 }
 
 /* ---- the merge queue ---- */
