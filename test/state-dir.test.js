@@ -144,3 +144,56 @@ test('a real boot with neither directory present names ~/.foreman and creates on
   assert.ok(fs.existsSync(path.join(home, STATE_DIR_NAME)), 'the panel created the directory it named');
   assert.ok(!fs.existsSync(path.join(home, LEGACY_STATE_DIR_NAME)), 'and nothing under the older name');
 });
+
+/*
+ * And the shape that made a suite write into the *real* state dir while looking correct.
+ *
+ * A test that wants its own state dir sets `process.env.FOREMAN_STATE_DIR` at the top of
+ * the file — but **ESM hoists every static `import` above every statement**, so a static
+ * import of anything that reaches `config.js` evaluates it, and freezes `STATE_DIR`,
+ * before that assignment has run. Position in the file makes no difference: the comment
+ * saying "above the imports" is true of the source and false of the execution order.
+ * `base-branch.test.js` and `worktree.test.js` both had it, and both cut their scratch
+ * worktrees straight into `~/.foreman/worktrees/` beside real workers' — every `npm test`,
+ * silently, with the suite's own teardown removing only the empty temp dir it made.
+ *
+ * The scan is deliberately structural rather than a list of modules known to reach
+ * `config.js`: the import graph moves, and a module that is pure today reaches it tomorrow.
+ * So the rule is that a file which sets the variable at all loads *every* repo module with
+ * `await import()`, which is one line per import and always correct. Same reasoning as
+ * `session-launch.test.js` reading `server/index.js` and `logs.test.js` reading the shell
+ * script — a source-level scan is the only mechanism, because the defect is invisible at
+ * run time.
+ */
+const ASSIGNS_STATE_DIR = /^process\.env(?:\.FOREMAN_STATE_DIR|\['FOREMAN_STATE_DIR'\]|\["FOREMAN_STATE_DIR"\])\s*=/m;
+const STATIC_IMPORTS = [
+  /^import\s+[\s\S]*?\sfrom\s*['"]([^'"]+)['"]/gm, // import x from '…' / import { a, b } from '…'
+  /^import\s*['"]([^'"]+)['"]/gm, //                  import '…'  (side effect only)
+];
+
+test('a test that sets $FOREMAN_STATE_DIR loads repo modules dynamically, never statically', () => {
+  const dir = path.join(REPO, 'test');
+  const offenders = [];
+
+  for (const name of fs.readdirSync(dir).filter((f) => f.endsWith('.test.js')).sort()) {
+    const src = fs.readFileSync(path.join(dir, name), 'utf8');
+    const assignment = src.match(ASSIGNS_STATE_DIR);
+    if (!assignment) continue;
+
+    const line = src.slice(0, assignment.index).split('\n').length;
+    for (const re of STATIC_IMPORTS) {
+      re.lastIndex = 0;
+      for (const m of src.matchAll(re)) {
+        if (!m[1].startsWith('.')) continue; // node: and package imports cannot reach config.js
+        offenders.push(`${name}:${line} sets FOREMAN_STATE_DIR, then statically imports '${m[1]}'`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `these are hoisted above the assignment and resolve STATE_DIR against the real ~/.foreman — `
+      + `use \`const { … } = await import('…')\` after the assignment:\n  ${offenders.join('\n  ')}`,
+  );
+});

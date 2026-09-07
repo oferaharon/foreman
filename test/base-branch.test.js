@@ -7,13 +7,18 @@ import test from 'node:test';
 
 // Before anything imports `config.js`, which reads this once: `createWorktree` writes
 // under `STATE_DIR/worktrees`, and a suite pointed at the real state dir puts scratch
-// checkouts in among real workers' (CLAUDE.md — scratch state dir, every time). Same
-// idiom as `gc.test.js`, and it has to sit above the imports for the same reason.
+// checkouts in among real workers' (CLAUDE.md — scratch state dir, every time).
+//
+// The three server imports below are `await import()` and must stay that way. ESM hoists
+// every *static* import above every statement in the file, so a static
+// `import '../server/base-branch.js'` here would evaluate `config.js` — and freeze
+// `STATE_DIR` — before this assignment ever ran, however far up the file it sits. Same
+// idiom as `gc.test.js`; `test/state-dir.test.js` fails if this file goes back to static.
 process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-base-state-'));
 
-import { bareBase, detectBaseBranch, resetBaseBranchCache, resolveBaseBranch } from '../server/base-branch.js';
-import { mergedInto } from '../server/deployed.js';
-import { createWorktree, removeWorktree } from '../server/worktree.js';
+const { bareBase, detectBaseBranch, resetBaseBranchCache, resolveBaseBranch } = await import('../server/base-branch.js');
+const { mergedInto } = await import('../server/deployed.js');
+const { createWorktree, removeWorktree } = await import('../server/worktree.js');
 
 /*
  * Real git, throwaway repos — this whole module is a git wrapper, and stubbing git to test
