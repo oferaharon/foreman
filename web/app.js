@@ -24,6 +24,12 @@ import { asideStripFacts } from './panel-fold.js';
 // the split fold's arithmetic — the px pair a room slot animates between, kept out of here
 // so a node test can hold it.
 import { foldTracks, roomStripFacts } from './panel-fold.js';
+// Which of its two meanings the button above the composer is carrying, and the one repaint
+// key both halves of that row are guarded on. The tenth pure module under `web/`: a
+// suggestion exists only while the pane is idle and an idle session's `interrupt` has
+// nothing to stop, so one control does both jobs and the rule for which is which is a thing
+// a node test can hold.
+import { ghostAction, ghostSig, INTERRUPT_TITLE } from './ghost-action.js';
 // The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
@@ -10523,6 +10529,11 @@ function createPane(slot, host) {
      * a suggestion, so a session that is offering nothing is byte-identical to the layout
      * before this existed.
      *
+     * It carries the suggestion and nothing else now: the tag and the text. The button that
+     * takes the suggestion up is the interrupt button below, which is free to be it because
+     * a suggestion only exists while the pane is idle and an idle session's interrupt has
+     * nothing to stop — so the two are one row, and `ghost-line` is what flows left in it.
+     *
      * `ghost-line`, and note `ghost-btn` two lines below is something else entirely: that
      * is the panel's generic muted-button class, on the interrupt button and half the
      * controls in the app. Nothing here is one of those.
@@ -10531,11 +10542,25 @@ function createPane(slot, host) {
     ghost.className = 'ghost-line';
 
     let stop = null;
+    let stopLabel = null;
     if (s.interactive) {
       stop = document.createElement('button');
       stop.className = 'ghost-btn';
-      stop.textContent = 'interrupt';
-      stop.title = 'Stop what this session is doing (Escape)';
+      /*
+       * The word lives in a span rather than as the button's own text, and that is layout
+       * arithmetic rather than tidiness: the button holds two meanings and its whole design
+       * rule is that it never moves, so the widest of the three words (`interrupt`) is
+       * always in the box as a hidden `::before` and the live word sits on top of it in the
+       * same grid cell. Text straight in the button would be an *anonymous* grid item and
+       * could not be placed in that cell — it would auto-place onto a second row and make
+       * the button twice as tall. See `.composer-above > .ghost-btn` in `styles.css`.
+       */
+      stopLabel = document.createElement('span');
+      stopLabel.className = 'ghost-btn-label';
+      stopLabel.textContent = 'interrupt';
+      stop.append(stopLabel);
+      stop.dataset.act = 'interrupt';
+      stop.title = INTERRUPT_TITLE;
       stop.onclick = () => sendKey('interrupt');
       above.append(stop);
     }
@@ -10566,7 +10591,7 @@ function createPane(slot, host) {
     inner.append(queue, strip, above, ta, row);
 
     closeCompletion();
-    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, stop, autoGrow };
+    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, stop, stopLabel, autoGrow };
     lastComposerSig = composerSig(s);
     renderAttachments();
     renderQueue();
@@ -10603,6 +10628,13 @@ function createPane(slot, host) {
    *
    * Membership rather than `hidden`, like the merge block, because `.composer-above:empty`
    * is what collapses the strip for a read-only session.
+   *
+   * **And it has no button of its own.** It shares the interrupt button's row and the
+   * interrupt button, which is free to be it because the two can never both be live: a
+   * suggestion exists only while the pane is idle, and an idle session's interrupt has
+   * nothing to stop. So the row is the height it always was, the button is where it always
+   * was, and the word on it says which of the two things a press would do. `paintGhostButton`
+   * below is that swap; `web/ghost-action.js` is the rule.
    */
   function renderGhostLine() {
     if (!composerEl?.ghost) return;
@@ -10610,22 +10642,24 @@ function createPane(slot, host) {
     const { ghost, above, ta, stop } = composerEl;
 
     const text = s?.interactive && !ta.value.trim() ? s.ghost : null;
+    // The button first, and unconditionally, because it is the half that has to change back:
+    // the line is *removed* when there is no suggestion and can hold no state across that,
+    // while the button is there for the whole life of the composer and has to be reading
+    // `interrupt` again by the time this returns.
+    paintGhostButton(text);
     if (!text) {
       ghost.replaceChildren();
       ghost.remove();
-      above.classList.remove('has-ghost');
       return;
     }
     // Nothing to repaint if it already says this. The line sits directly above a textarea
     // somebody may be about to click into, and a `replaceChildren` on every roster frame
     // would drop a focused button out from under a press.
     //
-    // The auto-send flag is half the key, not decoration: it changes what the button says
-    // and what pressing it does, and a signature holding only the text would leave a button
-    // reading `use` behind a setting that now sends. Joined with a visible `|` for the
-    // reason `mergeSig` learned the hard way — three control bytes inside a pair of quotes
-    // read as an empty-string join in every editor there is.
-    const sig = `${ghostSend.on ? 'send' : 'use'}|${text}`;
+    // The auto-send flag is half the key, not decoration: it changes what the button beside
+    // this line says and what pressing it does. `ghostSig` is where that is spelled, once,
+    // for both halves of the row — see `web/ghost-action.js`.
+    const sig = ghostSig(text, ghostSend.on);
     if (ghost.dataset.sig === sig && ghost.isConnected) return;
     ghost.dataset.sig = sig;
 
@@ -10642,29 +10676,43 @@ function createPane(slot, host) {
     // the ellipsis is CSS and the whole of it is here for a reader who wants it.
     body.title = text;
 
-    const use = document.createElement('button');
-    use.className = 'ghost-line-use';
-    use.type = 'button';
-    /*
-     * The button says what pressing it does. With the setting on this is a one-press send
-     * into a live session, and a control that sends should not be labelled as though it
-     * fills a box — the setting picks the behaviour and the label follows it rather than
-     * hiding it.
-     */
-    use.textContent = ghostSend.on ? 'send' : 'use';
-    use.title = ghostSend.on
-      ? 'Send this to the session now — “send a suggestion straight away” is on for this browser'
-      : 'Put this in the box below, to edit or send';
-    use.onclick = () => useGhost(text);
-
-    ghost.append(tag, body, use);
-    // Before the interrupt button, never after it. Interrupt's whole design is that it
-    // never moves, and a line that came and went underneath it would shift it by its own
-    // height at the end of every turn — on the one control that gets pressed without
-    // looking. The merge block is prepended for the same reason, one step further up.
+    ghost.append(tag, body);
+    // Before the interrupt button, never after it — and now on the same row as it rather
+    // than above it. Interrupt's whole design is that it never moves, and this line flows
+    // into the space to its left instead of pushing it down: the row is the height it has
+    // always been, with or without a suggestion in it. The merge block is prepended one
+    // step further up and takes a line of its own.
+    // There is no `has-ghost` class any more and that is the point: the line shares the row
+    // rather than changing its shape, so nothing above needed telling. The merge block still
+    // carries its own, because it is still the one thing here that takes a whole line.
     if (stop && stop.parentNode === above) above.insertBefore(ghost, stop);
     else above.append(ghost);
-    above.classList.add('has-ghost');
+  }
+
+  /**
+   * The interrupt button, wearing whichever of its two meanings is live.
+   *
+   * One node, never two, and never rebuilt: the word and the title are swapped in place and
+   * the handler is reassigned. That is what makes a press landing across a swap safe —
+   * `onclick` and the visible word are set in the same synchronous pass, so a click can only
+   * ever run the handler the word in front of it was naming. The line's old button was a
+   * node that appeared and vanished, which is the shape the ghost line's own comment warns
+   * about: a `replaceChildren` under a finger already on its way down.
+   *
+   * The handler is reassigned on every paint rather than guarded — a property write is not a
+   * DOM mutation and disturbs nothing — because it closes over *this* suggestion, and a
+   * guard on the word alone would leave `use` bound to a suggestion that has since changed.
+   * Only the visible parts are guarded, on `data-act`.
+   */
+  function paintGhostButton(text) {
+    const { stop, stopLabel } = composerEl;
+    if (!stop) return;
+    const { act, title, suggests } = ghostAction(text, ghostSend.on);
+    stop.onclick = suggests ? () => useGhost(text) : () => sendKey('interrupt');
+    if (stop.dataset.act === act) return;
+    stop.dataset.act = act;
+    if (stopLabel) stopLabel.textContent = act;
+    stop.title = title;
   }
 
   /**
