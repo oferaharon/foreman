@@ -86,6 +86,25 @@
      it harder to read, which is the wrong trade for a heading. */
   --band-head: color-mix(in srgb, var(--ink) 8%, var(--surface));
 
+  /* The team aside's collapse band: the slim vertical strip down its left edge that both
+     folds the panel and drags its width. Two properties because the band is two facts —
+     what it is painted and how wide it is — and the width is spelled here for `--strip`'s
+     own reason: it is read in two places (the band itself, and the body's left padding that
+     keeps content out from under it), and a layout constant that lives in two places is one
+     that comes apart the first time somebody nudges one of them.
+
+     7% rather than a reuse of `--shelf` (4%) or `--band-head` (8%). The aside *is*
+     `--shelf`, so a band painted with it would be a 20px column of nothing; one step darker
+     is what makes it read as chrome attached to the panel's edge rather than as part of it.
+     And it is deliberately *not* `--band-head` — that token is a section **heading's** fill
+     and the two are unrelated jobs, so they are allowed to be near each other and must not
+     be collapsed into one the day the numbers happen to agree.
+
+     Hover is `--accent-soft` and is written in the stylesheet rather than here: it is a
+     state of one control, not a colour the design has anywhere else. */
+  --band: color-mix(in srgb, var(--ink) 7%, var(--surface));
+  --band-w: 1.25rem;
+
   /* The shared room's speaker ring — `web/session-colour.js`'s `colourFor` picks a slot,
      these are the slots. Seven, not the eight the plan started at: an eighth hue can still
      clear 7:1 against `--ground` here, but only by landing within a small ΔE2000 of an

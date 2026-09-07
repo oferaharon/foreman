@@ -123,8 +123,9 @@ button {
 
 /* The split's boundary. The fourth divider and the first that hangs off nothing — the two
    panes meet at a line the grid computes, so the grip is placed at that line from the same
-   variable the track is: `--pane-a` minus half the strip. `.rail-grip` and `.aside-grip`
-   can each sit on a border they overhang; this one has to be told where the border is.
+   variable the track is: `--pane-a` minus half the strip. `.rail-grip` sits on a border it
+   overhangs and `.aside-band` fills the inside of one; this one has to be told where the
+   border is.
 
    On screen only while there are two panes, which is `.app.split` — the same show/hide
    trade `.app.split .main` already makes, and what makes the handle appear and disappear
@@ -1357,8 +1358,116 @@ body.row-dragging * { cursor: row-resize !important; }
   background: var(--shelf);
   min-height: 0;
 }
-/* The aside's own edge, mirroring `.rail-grip`: the strip's centre on the border. */
-.aside-grip { left: -3px; }
+/*
+ * The aside's own edge — a band rather than an invisible strip, and the panel's collapse
+ * control rather than only its width grip.
+ *
+ * It replaced `.aside-grip`, which was a 7px transparent strip straddling the panel's
+ * border at `left: -3px` with a faint bar in the middle. Same `resizer`, same key, same
+ * bounds; what changed is that the edge is now *visible* and carries the fold. Four things
+ * about that:
+ *
+ * **It is inside the panel, not overhanging it.** A grip could sit on the border because
+ * it was transparent; a painted band on `left: -3px` would put three pixels of `--band`
+ * over the transcript. So `left: 0`, and `.room-panel-body` is padded by the same
+ * `--band-w` to keep the content out from under it. The panel's own `border-left` is still
+ * the boundary between transcript and aside, and the band's `border-right` is the boundary
+ * between the band and the panel's content — two rules, two different edges, neither
+ * doubled.
+ *
+ * **It is `flex-direction: column`, not centred.** `.pane-grip` centres its one mark; this
+ * one pins an icon at the top, level with the SETTINGS heading beside it, and the drag
+ * mark goes in the middle by absolute position rather than by flex.
+ *
+ * **`--band-w` is 1.25rem — twenty pixels — against the grip's seven.** A drag target that
+ * grew is the one part of this change that costs nothing to argue about.
+ *
+ * **It is still a grip everywhere it is not the icon.** `cursor: col-resize` is on the
+ * band; `.aside-band-fold` puts `pointer` back over its own box, which is the only place
+ * on the band that does not drag.
+ *
+ * **`.pane-grip.aside-band`, not `.aside-band`**, and that is not tidiness. `.pane-grip
+ * .grip-col` pins `width: 7px` at two classes; a bare `.aside-band` is one, so it loses on
+ * specificity no matter how far down the file it sits — measured, the band came back
+ * exactly 7px wide with its own `var(--band-w)` on the books and nothing anywhere saying
+ * why. The one property that has to beat a two-class rule is enough to make the whole block
+ * carry the extra class rather than leaving a reader to work out which of these seven
+ * declarations is the load-bearing one.
+ */
+.pane-grip.aside-band {
+  left: 0;
+  width: var(--band-w);
+  flex-direction: column;
+  justify-content: flex-start;
+  padding-top: 0.45rem;
+  background: var(--band);
+  border-right: 1px solid var(--rule);
+}
+.pane-grip.aside-band:hover { background: var(--accent-soft); }
+
+/* `.pane-grip::before` is the hairline that lights up under the cursor — a grip's whole way
+   of saying "this edge is live". The band says it with its own background, and a second
+   accent line three pixels in would be two answers to one question. */
+.aside-band::before { display: none; }
+
+/*
+ * The drag mark: 2px x 1.6rem, `.pane-grip`'s own bar, at the band's vertical middle.
+ *
+ * **Absolute rather than flex-centred**, because the icon is a real flex item now and
+ * centring the pseudo-element would centre the pair of them. And **hidden at rest**, which
+ * is the one place this parts company with the other three grips: those are transparent
+ * strips whose faint bar is the only thing on screen saying they exist, while this band is
+ * a painted column that is plainly *something* — so the mark's job is narrower, and it is
+ * to say which of the band's two jobs the cursor is over. Drawn all the time it would read
+ * as a second control.
+ */
+.aside-band::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 1.6rem;
+  background: var(--rule-strong);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.aside-band:hover::after,
+.aside-band.is-dragging::after { opacity: 1; }
+/* `.pane-grip:hover::after` takes the shared mark to full `--ink`. This one is a hint about
+   an edge, not a control asking to be pressed, so it stays `--rule-strong` in both states
+   and only its presence changes. After the shared rule, so it wins. */
+.aside-band:hover::after,
+.aside-band.is-dragging::after { background: var(--rule-strong); }
+@media (prefers-reduced-motion: reduce) {
+  .aside-band::after { transition: none; }
+}
+
+/*
+ * The fold, pinned at the top of the band.
+ *
+ * `--ink-muted` at rest and `--accent` under the cursor, which is `.room-head-gear`'s pair
+ * one column over — the aside's two icon controls read as one family. The hit area is the
+ * band's full width, so there is no sliver of band beside the icon that looks pressable and
+ * drags instead.
+ */
+.aside-band-fold {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.aside-band-fold svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+.aside-band-fold:hover { color: var(--accent); }
 /* The Tasks/Room divider. It is a flex item rather than an overlay — there is no edge to
    hang it off, the two blocks simply meet — and the negative margins are what stop it
    costing seven pixels of the panel: -4 above and -3 below nets zero, and lands its
@@ -5350,18 +5459,28 @@ body.row-dragging * { cursor: row-resize !important; }
    draws twice. */
 .fold-strip:hover { width: calc(var(--strip) + 3px); }
 
-/* The chevron sits at the top, where the control that closed the panel was, so the eye
-   goes back to the same corner to reopen it. The whole strip is clickable; this is the
-   affordance that says so. */
+/* The glyph sits at the top, where the control that closed the panel was, so the eye goes
+   back to the same corner to reopen it. The whole strip is clickable; this is the
+   affordance that says so.
+
+   It holds `foldIcon`'s SVG — the same drawing the control that shut the panel carries,
+   mirrored — rather than a typed `‹`, which is why this box sizes a child instead of
+   setting a font. `0.95rem` and the `--ink-muted` / `--accent` pair are the band's own, so
+   the two halves of one fold read as one control seen from either side. */
 .fold-strip-chev {
   flex: none;
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  line-height: 1;
-  color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-muted);
 }
 
-.fold-strip:hover .fold-strip-chev { color: var(--ink); }
+.fold-strip-chev svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.fold-strip:hover .fold-strip-chev { color: var(--accent); }
 
 /*
  * The name, turned on its side. `vertical-rl` rather than a `rotate()` because a rotated
@@ -5480,7 +5599,7 @@ body.row-dragging * { cursor: row-resize !important; }
  * panel already animates a layout at exactly that speed and two durations in one column
  * would read as two different mechanisms.
  *
- * Class-gated, and that is the rule rather than the tidiness: `.aside-grip` writes
+ * Class-gated, and that is the rule rather than the tidiness: `.aside-band` writes
  * `--aside` on every pointer move, and a transition standing on `width` permanently would
  * make a drag lag the cursor by a fifth of a second. `is-folding` is added around the
  * animation and taken off at its end.
@@ -5543,6 +5662,12 @@ body.row-dragging * { cursor: row-resize !important; }
    * on the visible bottom edge rather than scrolling off it.
    */
   overflow-y: auto;
+  /* The band is absolute at the panel's left edge, so nothing in the flow knows it is
+     there. One padding, the band's own width from the same token, is what keeps the
+     settings row, the task list and the room off it. Inside the frozen width above rather
+     than beside it, because `box-sizing` is `border-box` for everything in this file — so
+     the freeze still measures and pins one number. */
+  padding-left: var(--band-w);
 }
 
 /*
@@ -5601,17 +5726,16 @@ body.row-dragging * { cursor: row-resize !important; }
 .room-panel > .fold-strip > .fold-strip-badge.is-room { margin-top: auto; }
 
 /* A handle on an edge that will not move reads as broken — the split's own `split-fixed`
-   rule says so one file section over. It is back, and draggable, the moment the panel is. */
-.room-panel.is-strip > .aside-grip { display: none; }
+   rule says so one file section over. A folded panel has no width to drag and the strip is
+   the whole control, so the band goes; it is back, and draggable, the moment the panel is.
 
-/* The collapse control, in the SETTINGS heading beside the gear. It borrows
-   `.room-head-gear`'s box and its negative margins whole, because that is what keeps this
-   heading exactly as tall as `tasks` and `room` below it — and `.tasks-grip`'s hairline is
-   measured against those heights. Only the glyph's size differs. */
-.room-head-fold { font-size: 0.8rem; }
-/* Two controls at the right edge and a label that takes the rest, so `space-between` still
-   puts the cluster where the gear was. */
-.room-head.is-foldable > .room-head-label { flex: 1; }
+   The body's `padding-left` goes with it, because the strip is what fills the column now
+   and the band is not there to be left room for. It is under `is-strip` alone and not
+   `is-folding`: the body is frozen, clipped and fading out through the animation, and a
+   padding that changed mid-fold would re-wrap the very content the freeze exists to hold
+   still. */
+.room-panel.is-strip > .aside-band { display: none; }
+.room-panel.is-strip > .room-panel-body { padding-left: 0; }
 
 /*
  * Reduced motion, for the whole feature and not only for what this file already draws.
