@@ -221,8 +221,8 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .brand .link { color: var(--accent); }
 
-/* Their own row under the stats, so the head can hold two buttons (or three) without
-   crowding the title line. */
+/* Their own row under the quota gauges, so the head can hold two buttons (or three)
+   without crowding the title line. */
 .rail-actions {
   display: flex;
   gap: 0.4rem;
@@ -699,6 +699,8 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-faint);
 }
 
+/* Last line of the head, under the buttons — the same extra beat above the flex `gap`
+   that `.rail-quota` and `.rail-actions` each carry for the row they follow. */
 .rail-stat {
   font-family: var(--mono);
   font-size: 0.66rem;
@@ -708,6 +710,7 @@ body.row-dragging * { cursor: row-resize !important; }
   display: flex;
   gap: 0.8rem;
   flex-wrap: wrap;
+  margin-top: 0.15rem;
 }
 
 .rail-quota {

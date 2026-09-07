@@ -7092,7 +7092,7 @@ function createPane(slot, host) {
 
     const label = document.createElement('span');
     label.className = 'room-head-label';
-    label.textContent = 'settings';
+    label.textContent = 'team settings';
 
     /*
      * The control that folds the *whole aside* away, left of the gear.
@@ -7535,7 +7535,7 @@ function createPane(slot, host) {
 
     const label = document.createElement('span');
     label.className = 'room-head-label';
-    label.textContent = 'tasks';
+    label.textContent = 'team tasks';
 
     // What the filter is holding back, in the heading rather than down in the list: the
     // list cannot say it, because with the filter on the rows it would say it about are
