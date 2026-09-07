@@ -128,12 +128,26 @@ test('the strip still collapses to nothing when there is nothing above the compo
 test('the suggestion shares the row and only the merge block takes one of its own', () => {
   const css = read('web/styles.css');
   assert.match(css, /\.composer-above \{[^}]*flex-wrap: wrap;/);
+  // Measured: `align-items: center` on the row left every rect identical and still moved
+  // four antialiased pixels on the button's corner radius. The line centres itself instead.
+  assert.doesNotMatch(css, /\.composer-above \{[^}]*align-items:/);
+  assert.ok(css.includes('.ghost-line {'), 'the line rule is still there to carry it');
   assert.match(css, /\.composer-above\.has-merge > \.merge-queue \{ flex: 0 0 100%; \}/);
   // The old column rules put the line above the button; nothing may put it back.
   assert.doesNotMatch(css, /\.composer-above\.has-ghost/);
   assert.doesNotMatch(css, /\.composer-above\.has-merge \{[^}]*flex-direction: column;/);
-  // And the line itself flows into what is left of the row rather than filling it.
-  assert.match(css, /\.ghost-line \{[\s\S]*?flex: 1 1 auto;[\s\S]*?min-width: 0;/);
+  // And the line itself flows into what is left of the row rather than filling it. The
+  // basis is the load-bearing half: a wrapping flex container breaks its lines on each
+  // item's hypothetical size, so `auto` there asks for the whole suggestion's max-content
+  // width and puts the button on a row of its own - measured, at 197 characters.
+  // Bounded to the one rule block on purpose: an unbounded `[\s\S]*?` here reaches the next
+  // `flex:` anywhere in a 200KB stylesheet and proves nothing about this selector.
+  const line = css.slice(css.indexOf('.ghost-line {'));
+  const block = line.slice(0, line.indexOf('}'));
+  assert.match(block, /flex: 1 1 0;/);
+  assert.match(block, /min-width: 0;/);
+  assert.match(block, /align-self: center;/);
+  assert.doesNotMatch(block, /flex: 1 1 auto;/);
 });
 
 test('the line carries no button of its own any more', () => {
