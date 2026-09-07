@@ -391,12 +391,12 @@ const tabNodes = new Map();
 for (const { key, label } of TABS) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'm-tab';
+  btn.className = 'm-nav-tab';
   btn.dataset.tab = key;
   btn.setAttribute('role', 'tab');
 
   const text = document.createElement('span');
-  text.className = 'm-tab-label';
+  text.className = 'm-nav-label';
   text.textContent = label;
 
   /*
@@ -410,7 +410,7 @@ for (const { key, label } of TABS) {
    * label that shifts when a session blocks is a label you have to re-find.
    */
   const dot = document.createElement('span');
-  dot.className = 'm-dot m-dot-wait m-tab-dot';
+  dot.className = 'm-dot m-dot-wait m-nav-dot';
 
   btn.append(text, dot);
   btn.addEventListener('click', () => {
@@ -421,7 +421,7 @@ for (const { key, label } of TABS) {
   el.tabs.appendChild(btn);
 }
 
-el.tabs.className = 'm-tabbar';
+el.tabs.className = 'm-nav';
 el.tabs.setAttribute('role', 'tablist');
 
 el.head.append(el.headRow, el.tabs);

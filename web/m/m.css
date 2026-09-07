@@ -140,7 +140,7 @@ select {
  * and a thumb learns where each one is. Each is at least 44px tall — Apple's own minimum,
  * and the same floor `.m-icon-btn` sets one row up.
  */
-.m-tabbar {
+.m-nav {
   display: flex;
   align-items: stretch;
   padding: 0 0.5rem;
@@ -152,19 +152,43 @@ select {
    header, the quota block and the `+` have each paid for this trap once already on this one
    screen; the bar is inside `.m-head` and so is hidden with it today, and this is what stops
    the next reader who hides it on its own from watching it stay. */
-.m-tabbar[hidden] { display: none; }
+.m-nav[hidden] { display: none; }
 
-.m-tab {
+/*
+ * `.m-nav-tab` and not `.m-tab`, which is taken.
+ *
+ * `lead.css` already owns `.m-tab` for the lead screen's own chat/tasks pair, and
+ * `index.html` links it **after** this file — so the shell's tabs shipped with the lead
+ * screen's colours and its 34px height silently overriding half of these declarations, and
+ * this file's rules leaked back onto the lead screen's tabs in return. Caught on the bench
+ * by measuring a tab that was supposed to be 44px tall and reading back 34.
+ *
+ * The two are different controls in different headers and only ever one is on screen, which
+ * is exactly what makes a shared name cost nothing until it costs an hour. The shell's are
+ * `nav`, because that is what they are.
+ */
+
+/*
+ * The three metrics below are measured, not chosen: at **320px** — the narrowest phone this
+ * view is built for — `Standalones` in mono at 0.78rem overflows its third by 0.37px and
+ * ellipsises to `Standalon…`, which is a tab label you have to guess at. Nothing else
+ * breaks (no sideways scroll, the target stays 44px), so it fails the quiet way.
+ *
+ * 0.74rem with this gap and padding clears it by about 4px at 320 and by far more at 390.
+ * If a fourth tab is ever added, or one gains a longer word, re-measure at 320 rather than
+ * trusting that it still fits — the whole margin here is four pixels wide.
+ */
+.m-nav-tab {
   flex: 1;
   min-width: 0;
   min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.3rem;
-  padding: 0 0.25rem;
+  gap: 0.25rem;
+  padding: 0 0.15rem;
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   letter-spacing: -0.02em;
   color: var(--ink-faint);
   /* Carried by every tab as transparent, never grown on the selected one alone: a border
@@ -173,25 +197,25 @@ select {
   border-bottom: 2px solid transparent;
 }
 
-.m-tab-label {
+.m-nav-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.m-tab.is-on {
+.m-nav-tab.is-on {
   color: var(--ink);
   border-bottom-color: var(--accent);
 }
 
-.m-tab:active { background: var(--surface-sunk); }
+.m-nav-tab:active { background: var(--surface-sunk); }
 
 /*
  * The mark, and it is the card gutter's own `.m-dot-wait` — `--decision`, 9px, the same
  * shape in both places because it is the same fact one level up. Always in the DOM and
  * simply unpainted when off, so lighting it never moves the label beside it.
  */
-.m-tab-dot { flex: none; }
+.m-nav-dot { flex: none; }
 
 .m-title {
   font-family: var(--mono);
