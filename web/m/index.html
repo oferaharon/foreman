@@ -22,14 +22,23 @@
     <link rel="stylesheet" href="/tokens.css" />
 
     <!--
-      One stylesheet per scope, each owned by exactly one build item, all five linked here
-      once. This file is written by item 5 and no later item edits it — that is what stops
-      items 6, 7 and 8 colliding in a shared <head>.
+      One stylesheet per scope, each owned by exactly one build item, all of them linked
+      here once — that file-per-item split is what stops two items colliding in a shared
+      <head>.
+
+      The guarantee it buys is about **files, not names**, and the difference has already
+      cost an hour: `lead.css` owned `.m-tab` before the shell's tab bar wanted it, so the
+      shell's tabs came up wearing the lead screen's colours and its 34px height while
+      leaking their own declarations back the other way — and neither screen looked broken,
+      because only one of them is ever on screen at a time. A new class in any of these
+      sheets is grepped against the others before it is written; `rooms.css` is `.m-room-*`
+      throughout for exactly that reason.
     -->
     <link rel="stylesheet" href="/m/m.css" />
     <link rel="stylesheet" href="/m/lead.css" />
     <link rel="stylesheet" href="/m/cards.css" />
     <link rel="stylesheet" href="/m/tasks.css" />
+    <link rel="stylesheet" href="/m/rooms.css" />
 
     <!--
       Its own app, not the desktop panel's: `id` and `scope` are `/m/`, which is what a
