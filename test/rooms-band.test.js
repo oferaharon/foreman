@@ -531,7 +531,11 @@ test('both of the band’s ways out reach a real pane', () => {
    */
   const open = fn('openGroupRoom');
   assert.ok(!/console\.info/.test(open), 'the hook is built — a row must not merely log');
-  assert.match(open, /target\.openGroup\(id\);/);
+  // Item 4 split the mount off the decision, because the auto-collapse may run it 200ms
+  // later on the far side of an aside's fold. The row still ends in a room being put in a
+  // pane; it is one function along.
+  assert.match(open, /mountGroupRoom\(id\)/);
+  assert.match(fn('mountGroupRoom'), /target\.openGroup\(id\);/);
   // …and a row for a room that is on screen but **folded** opens the strip rather than
   // doing nothing, which is what the bare early return did before there was a fold. See
   // `revealOpenRoom` — hoisted rather than written inline, because a nested `}` at this

@@ -223,6 +223,10 @@ you to correct.
 
 **Room** — the log, below.
 
+The whole panel folds down to a narrow strip from the band on its left edge, which is also the
+grip you drag to set its width — see [Folding the side
+panels](panel.md#folding-the-side-panels).
+
 Split view is disabled for a lead, so the panel owns that half unconditionally. It is
 unchanged for every other session.
 

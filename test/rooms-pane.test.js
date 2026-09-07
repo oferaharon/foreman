@@ -739,9 +739,17 @@ test('a room replaces whatever non-session pane is open, and never takes focus',
   // The early return grew one branch with the fold — a room on screen but shut opens its
   // door — and `revealOpenRoom` is where that lives.
   assert.match(open, /if \(panes\.some\(\(p\) => p\.groupRoomId\(\) === id\)\) return revealOpenRoom\(\);/);
-  assert.match(open, /const holder = panes\.find\(\(p\) => p\.kind\(\) !== 'session'\);/);
-  assert.match(open, /const keep = sessionPane\(\);\n  if \(keep\) setFocus\(keep\.slot\);/);
-  assert.match(open, /openSplit\(\{ adopt: false, focus: false \}\)/);
+  // The routing is one spelling in `roomTarget` and the mount is `mountGroupRoom`, since
+  // item 4's auto-collapse asks the first before an aside's fold and runs the second after
+  // it. The rule itself is unchanged: a non-session pane first, then the pane you are not
+  // focused in, and focus never left on the room.
+  // `fn` above reads the pane factory's own indentation; these two are module-scope.
+  const top = (name) => app.match(new RegExp(`\\nfunction ${name}\\([\\s\\S]*?\\n\\}`))[0];
+  assert.match(top('roomTarget'), /const holder = panes\.find\(\(p\) => p\.kind\(\) !== 'session'\);/);
+  assert.match(top('roomTarget'), /panes\.find\(\(p\) => p\.slot !== focusedSlot\) \|\| panes\[0\]/);
+  const mount = top('mountGroupRoom');
+  assert.match(mount, /const keep = sessionPane\(\);\n  if \(keep\) setFocus\(keep\.slot\);/);
+  assert.match(mount, /openSplit\(\{ adopt: false, focus: false \}\)/);
 });
 
 test('the room is remembered as its own shape, and restored only if it is still there', () => {

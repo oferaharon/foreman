@@ -479,3 +479,122 @@ test('nothing about the fold joins `composerSig`', () => {
   }
   assert.match(fn('renderHead'), /renderGroupStrip\(\);[\s\S]{0,400}renderGroupFoldStrip\(\);/);
 });
+
+/* --------------------------------------------------- the auto-collapse --- */
+
+/*
+ * Item 4: opening a room folds the lead's team aside out of the way first, **every time**,
+ * and the room then slides in from the strip. What a two-step animation looks like is a pair
+ * of eyes and two sampled width series, and the report carries both. What is pinned here is
+ * the half that would break silently — a fold that stopped going through the aside's own
+ * toggle, a sequence that started overlapping, a slide that grew a second mechanism beside
+ * item 3's, a wait with no way out, and the one branch a reader assumes away.
+ */
+
+test('opening a room folds the aside through the aside’s own toggle, never a second path', () => {
+  const then = fn('foldAsideThen');
+  // The flag is set folded exactly as if the band's icon had been pressed — the maintainer's
+  // ruling, and the reason there is no second state to explain to a reader who then presses
+  // the icon himself.
+  assert.match(then, /asideFolded\.set\(true\);/);
+  assert.match(then, /foldAsides\(\);/);
+  // …and nothing here re-implements what that path does. The freeze, the classes, the spent
+  // counter and the remeasure all live in `applyAsideFold`, one call away.
+  for (const forbidden of ['is-strip', 'is-folding', '--aside-frozen', 'panelEl']) {
+    assert.ok(!strip(then).includes(forbidden), `the sequencer must not touch ${forbidden}`);
+  }
+});
+
+test('the two steps are sequential, and the room is mounted on the far side of the fold', () => {
+  const open = fn('openGroupRoom');
+  // Fold *then* mount, or mount straight away — never both, and never at once. 200 + 200,
+  // which is what the maintainer described.
+  assert.match(open, /if \(inTheWay\) foldAsideThen\(inTheWay, \(\) => mountGroupRoom\(id\)\);/);
+  assert.match(open, /else mountGroupRoom\(id\);/);
+  // The mount is not reachable any other way from here, or the two would race.
+  assert.equal((strip(open).match(/mountGroupRoom\(/g) || []).length, 2);
+});
+
+test('the wait is guarded on target AND property, and has a backstop and a short circuit', () => {
+  const then = fn('foldAsideThen');
+  // The aside's fold moves four properties at once and everything inside that panel is free
+  // to transition, so both halves of the guard are load-bearing — item 2's own lesson.
+  assert.match(then, /e\.target === panel && e\.propertyName === 'width'/);
+  // A fold that is interrupted or re-entered may never deliver the event at all.
+  assert.match(then, /setTimeout\(done, ASIDE_FOLD_MS \+ 60\)/);
+  assert.match(then, /panel\.removeEventListener\('transitionend', onEnd\);/);
+  // …and with motion off there is nothing to wait for, so waiting would be a dead beat with
+  // the room not yet on screen. The duration is read off the node the fold was armed on,
+  // which is the stylesheet the animation obeys — never a second spelling of the media query.
+  assert.match(then, /getComputedStyle\(panel\)\s*\.transitionDuration/);
+  assert.ok(!/prefers-reduced-motion|matchMedia/.test(then), 'the media query has one spelling, in CSS');
+});
+
+test('the duration is one number, in module scope, because two backstops read it', () => {
+  assert.equal(
+    app.split('\n').filter((l) => /^\s*const ASIDE_FOLD_MS = /.test(l)).length,
+    1,
+    'ASIDE_FOLD_MS must be declared exactly once',
+  );
+  assert.match(app, /\nconst ASIDE_FOLD_MS = 200;/);
+  assert.equal(rule('.room-panel.is-folding').match(/200ms/g).length, 3);
+});
+
+test('an aside going away with its own pane is not folded — the branch a reader assumes away', () => {
+  // Two panes, the lead in the one you are *not* focused in: the room replaces that pane, so
+  // the aside is not in the way, it is leaving. Folding it would animate a panel nobody will
+  // see again.
+  assert.match(fn('asideInTheWay'), /if \(pane === skip\) continue;/);
+  assert.match(fn('openGroupRoom'), /asideInTheWay\(roomTarget\(\)\)/);
+  // Nothing is replaced by opening a room that is already on screen, so nothing is skipped.
+  assert.match(fn('revealOpenRoom'), /asideInTheWay\(null\)/);
+  // Asked of the panel's own class rather than of the flag — mid-fold the two disagree and
+  // the panel is the one that is right, which is `renderAsideStrip`'s own rule.
+  assert.match(app, /expandedAside: \(\) =>\n\s*roomView\.panelEl\?\.isConnected && !roomView\.panelEl\.classList\.contains\('is-strip'\)/);
+});
+
+test('a room on screen but shut takes the same rule and the same sequence', () => {
+  const reveal = fn('revealOpenRoom');
+  assert.match(reveal, /if \(inTheWay\) foldAsideThen\(inTheWay, open\);/);
+  assert.match(reveal, /else open\(\);/);
+  // The flag moves *with* the geometry, not ahead of it: `paintFolds` reads it, and one
+  // landing during the aside's 200ms would open the slot with no animation at all.
+  assert.match(reveal, /const open = \(\) => \{\n\s*roomFolded\.set\(false\);\n\s*applyRoomFold\(false\);\n\s*\};/);
+});
+
+test('the slide is item 3’s mechanism, seeded shut and expanded — not a second one', () => {
+  const slide = fn('slideRoomIn');
+  // Panes first, then the frame — `paintFolds`' own order, and for its measurement: the
+  // freeze reads the pane's rect, and a frame already on the strip's track list makes that
+  // rect 2.5rem.
+  assert.match(
+    slide,
+    /pane\.setFolded\?\.\(true\);\n\s*setFoldClasses\(pane\.slot\);\n\s*void el\.main\.offsetWidth;\n\s*applyRoomFold\(false\);/,
+  );
+  // Nothing here writes a track list, a duration or a class of its own: the animated expand
+  // is `applyRoomFold`'s, so there is one animation in this feature rather than two that have
+  // to agree.
+  for (const forbidden of ['gridTemplateColumns', 'is-folding', 'foldTracks', 'setTimeout']) {
+    assert.ok(!strip(slide).includes(forbidden), `the slide must not spell ${forbidden}`);
+  }
+  assert.ok(!/requestAnimationFrame/.test(strip(slide)), 'never a frame callback');
+  // It fails open on the two shapes item 3 refuses, and for its reason.
+  assert.match(slide, /panes\.length < 2 \|\| roomPane\(\) !== pane/);
+});
+
+test('the slide runs last, after the focus repaint that would undo it', () => {
+  // `setFocus` → `paintFocus` → `paintFolds`, which re-derives the fold from `roomFolded` —
+  // false, because a room slides in open — and would take the seeded strip straight back off.
+  // Nothing paints in between, so the order costs nothing and getting it wrong costs the
+  // animation.
+  const mount = fn('mountGroupRoom');
+  assert.match(mount, /if \(keep\) setFocus\(keep\.slot\);[\s\S]*renderRail\(\);\n\s*slideRoomIn\(target\);\n\}/);
+});
+
+test('the auto-collapse is the only thing besides the two controls that folds an aside', () => {
+  // Three writers, all of them a person pressing something or the rule the maintainer asked
+  // for. A fourth would be a hidden second state, which is exactly what "every time, not
+  // first-only" was chosen to avoid.
+  const writes = app.split('\n').filter((l) => /asideFolded\.set\(/.test(l) && !/^\s*(\*|\/\/)/.test(l));
+  assert.equal(writes.length, 3, 'the band icon, the strip, and the auto-collapse');
+});
