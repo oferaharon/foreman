@@ -5,7 +5,12 @@ import { step, alertText } from './notify.js';
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
 // that file's header.
-import { ghostSend, hideFinished, isFinishedState } from './prefs.js';
+import { asideFolded, ghostSend, hideFinished, isFinishedState } from './prefs.js';
+// What a closed side panel has room to say. The ninth pure module under `web/`, shipped by
+// item 1 of this feature with nothing wired to it; the lead's aside is the first half to
+// wear it. `asideStripFacts` reads the same `s.team` object `teamLine` reads, which is what
+// stops the strip and the rail row disagreeing about a team a reader can see twice at once.
+import { asideStripFacts } from './panel-fold.js';
 // The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
@@ -730,6 +735,23 @@ function pinRooms() {
  */
 function renderTaskLists() {
   for (const pane of panes) pane.renderTasks?.();
+}
+
+/**
+ * Fold — or unfold — every lead aside on the page.
+ *
+ * `asideFolded` is one answer for the browser, `hideFinished`'s shape and `--aside`'s, so a
+ * chevron pressed in one aside has to reach the other or two panes disagree about a fact
+ * neither of them owns. This is `renderTaskLists`' shape one preference over, and it asks
+ * each pane rather than walking `.room-panel` nodes for the same reason: the fold has to run
+ * through the pane's own animation, which measures, freezes a body, clears a counter and
+ * remeasures at the end — none of which is readable off a class name.
+ *
+ * Module scope holds the *preference* and this fan-out. The applied class lives on each
+ * pane's own node, which is the rule about per-pane state in module scope, one level up.
+ */
+function foldAsides() {
+  for (const pane of panes) pane.foldAside?.();
 }
 
 /* --------------------------------------------------------- rail footer --- */
@@ -4713,6 +4735,38 @@ function createPane(slot, host) {
     // — `prefers-reduced-motion`, where the duration is 0 and the event never fires at all.
     // pinRoom is idempotent, so both firing costs nothing.
     settingsPinTimer: null,
+    /* ---- the fold. Everything below is per pane, because two leads can be open at once
+     * and only the *preference* is one answer for the browser (`asideFolded`). ---- */
+    // The panel itself, and the wrapper the freeze acts on. Held rather than looked up:
+    // `renderMain` rebuilds this whole aside on every `transcript` frame, so a query
+    // selector run later could be answering about a node that is no longer in the document.
+    panelEl: null,
+    bodyEl: null,
+    // The strip's own nodes. Patched on the roster beat rather than rebuilt, which is what
+    // lets the pulse below survive a repaint that has nothing to do with it — a replaced
+    // node loses a running animation mid-beat.
+    stripEl: null,
+    stripRoleEl: null,
+    stripTasksEl: null,
+    stripReviewEl: null,
+    stripRoomEl: null,
+    // What arrived in the team room while this aside was shut.
+    //
+    // `unseen` two fields down cannot answer for it: it counts only while `follow` is
+    // false — "arrived while you were scrolled up" — and a folded aside is still following
+    // its room, so behind a shut door that counter stays at zero forever. There is no
+    // server-side unread for the team room either (`server/room.js` keeps none), so this
+    // is the only count a folded strip has.
+    foldedUnseen: 0,
+    // Has it gone *up* since the strip was last painted? The badge pulses twice and stops,
+    // so the pulse has to be re-armed by an arrival rather than by a paint — the strip
+    // repaints on the roster beat, and a badge that restarted its animation every two
+    // seconds would be a panel you fold once.
+    foldedPulse: false,
+    // Backstop for the end of the fold, where `transitionend` never arrives: reduced
+    // motion, where the duration is 0 and no event is emitted at all. It is what takes
+    // `is-folding` back off and what runs the remeasure, so it is not optional.
+    foldTimer: null,
     follow: true, // is the room list pinned to its newest line? see renderRoom
     unseen: 0, // entries that arrived while you were reading further up
     painted: 0, // how many were on screen last paint — the diff is what `unseen` counts
@@ -4766,6 +4820,11 @@ function createPane(slot, host) {
     roomView.follow = true; // a room you have just opened is one you are following
     roomView.unseen = 0;
     roomView.painted = 0;
+    // Another team's lines are not lines you missed in this one. Reset beside `unseen` and
+    // for the same reason, or a folded strip carries a number about a room it is no longer
+    // standing in front of.
+    roomView.foldedUnseen = 0;
+    roomView.foldedPulse = false;
     roomView.expanded.clear(); // another team's seqs mean nothing here
     roomView.merge = null;
     roomView.mergeSig = '';
@@ -6677,6 +6736,11 @@ function createPane(slot, host) {
       // two paints below, or the Tasks block would take its five-row cut against a height
       // it is about to stop having. This also prunes the previous aside's pair.
       applyResizers();
+      // …and the fold's own measurement, which needs a rect for the same reason the two
+      // ceilings above do. The class is already on (`buildRoomPanel` applies it before the
+      // mount, so the rebuild never animates); this is what pins the frozen body width to
+      // a real number rather than the stylesheet's fallback. No paint has happened yet.
+      syncAsideFold();
       // Paint the panel's lists NOW, after the aside is in the document — inside
       // buildRoomPanel the isConnected guards skip them, and a quiet room has no
       // incoming post to repaint it after a rebuild. Found on the harness lead: seven
@@ -6940,6 +7004,18 @@ function createPane(slot, host) {
   const SETTINGS_FOLD_MS = 200;
 
   /**
+   * How long the aside's own fold takes, in milliseconds — and the same 200 for the same
+   * reason. It is spelled here and in `.room-panel.is-folding`'s transition; this copy
+   * times the backstop that takes `is-folding` off and runs the remeasure, so the two
+   * drifting apart costs a remeasure taken slightly early rather than anything visible.
+   *
+   * 200 is not a fresh choice. It is the number this panel already animates a layout at,
+   * one heading up in the same column, and a second duration beside it would read as a
+   * second mechanism.
+   */
+  const ASIDE_FOLD_MS = 200;
+
+  /**
    * The gear, drawn rather than typed — the same reasoning `bindingMark` carries.
    *
    * `⚙` was a font glyph: it sits on a baseline rather than in its own box, so it never
@@ -7018,6 +7094,36 @@ function createPane(slot, host) {
     label.className = 'room-head-label';
     label.textContent = 'settings';
 
+    /*
+     * The control that folds the *whole aside* away, left of the gear.
+     *
+     * Here rather than in the pane header, and that is a measurement rather than a
+     * preference: the header already carries pin / thinking / images / split / reveal /
+     * attach / forge and CLAUDE.md records it overflowing at plain half-and-half on any
+     * window under about 1400px. This row is already a two-control cluster and a third
+     * costs no vertical line — which matters in a column that has been measured squeezing
+     * at an 879px viewport.
+     *
+     * It borrows `.room-head-gear`'s box whole, negative margins included, because those
+     * margins are what keep this heading exactly as tall as `tasks` and `room` below it,
+     * and `.tasks-grip`'s hairline is measured against those heights.
+     *
+     * `stopPropagation` for the gear's own reason: the header line behind it toggles the
+     * settings block, and without this a press here would fold the aside *and* open the
+     * settings inside it, which the reader would then find open the next time they opened
+     * the door.
+     */
+    const fold = document.createElement('button');
+    fold.className = 'room-head-gear room-head-fold';
+    fold.setAttribute('aria-label', 'Fold the team panel away');
+    fold.title = 'Fold the team panel down to a strip. It still counts what arrives in it.';
+    fold.textContent = '›';
+    fold.onclick = (e) => {
+      e.stopPropagation();
+      asideFolded.set(true);
+      foldAsides();
+    };
+
     // The gear is what the maintainer was promised, so it is a real button with its own hit
     // area and its own title. The header line toggling too is a courtesy, not the control.
     const gear = document.createElement('button');
@@ -7030,7 +7136,7 @@ function createPane(slot, host) {
     };
     roomView.settingsGearEl = gear;
 
-    head.append(label, gear);
+    head.append(label, fold, gear);
     head.onclick = () => toggleSettings();
     return head;
   }
@@ -7714,6 +7820,23 @@ function createPane(slot, host) {
     const panel = document.createElement('aside');
     panel.className = 'room-panel';
     /*
+     * The accurate end of a fold. Wired once here rather than per toggle, the settings
+     * fold's own shape a few lines down — a listener added on each press would stack.
+     *
+     * Both halves of the guard are load-bearing and both are that fold's lessons. `target`,
+     * because everything inside this panel is free to transition and a control finishing
+     * its own would otherwise remeasure the whole aside; `propertyName`, because this fold
+     * moves four properties at once — `width`, `min-width`, `max-width` and the
+     * cross-fade's `opacity` — and `transitionend` fires once per property, so an unguarded
+     * listener would run the end of the fold four times. `width` is the one that decides.
+     *
+     * And it is not the only path out: under reduced motion the duration is zero and this
+     * never fires at all, which is what the timer in `applyAsideFold` is for.
+     */
+    panel.addEventListener('transitionend', (e) => {
+      if (e.target === panel && e.propertyName === 'width') endAsideFold();
+    });
+    /*
      * The one plain heading left in this column — `settings` and `tasks` both
      * carry controls and are built by hand. It is banded (`is-band`) because it is the
      * heading the tasks list runs straight into: everything here sits on `--shelf`, and a
@@ -7933,19 +8056,261 @@ function createPane(slot, host) {
     // growing inside it would let a drag squeeze the room below its own floor.
     // The block above the room still calls `pinRoom` when its own fetch lands, so the room
     // still opens on its newest line rather than 454px short of it.
+    /*
+     * One wrapper around everything that is *in the flow*, and it exists for the fold.
+     *
+     * While the panel is narrowing to a strip its content must keep the width it was
+     * measured at and be clipped, rather than re-wrapping through forty intermediate
+     * widths. That is not tidiness: `capTaskList` writes a px `max-height` read off row
+     * rects and the room's clamp caches `scrollHeight > clientHeight` per entry, and both
+     * go on running while the panel is folded because `isConnected` is still true. A
+     * measurement taken at 2.5rem is wrong and it is *cached onto the DOM*. So the fold
+     * pins this box to the panel's measured expanded width (`--aside-frozen`) and the
+     * panel clips it; the remeasure on expand is the backstop behind that.
+     *
+     * The two absolute children stay on the panel and out of the wrapper, because the
+     * panel is the box they were positioned against: the "new below" pill hangs off the
+     * room's bottom edge, and `.aside-grip` sits on the panel's left border. `.tasks-grip`
+     * is in the flow and goes inside, and its ceiling still reads
+     * `panel.getBoundingClientRect().bottom`, which the wrapper does not move.
+     */
+    const body = document.createElement('div');
+    body.className = 'room-panel-body';
+    body.append(settingsHead, settingsFold, tasksHead, tasksList, tasksGrip, roomHead, list);
+    roomView.bodyEl = body;
+    roomView.panelEl = panel;
+
     // The aside's own grip goes last so it paints over everything it overhangs.
-    panel.append(
-      settingsHead,
-      settingsFold,
-      tasksHead,
-      tasksList,
-      tasksGrip,
-      roomHead,
-      list,
-      hint,
-      asideGrip,
-    );
+    panel.append(body, buildAsideStrip(), hint, asideGrip);
+
+    /*
+     * The fold is applied **at build time**, from the preference, on a node that is not in
+     * the document yet — and that is what stops the animation running on a rebuild.
+     * `renderMain` rebuilds this whole aside on every `transcript` frame (a subscribe, a
+     * `/clear` rotation, an `earlier` fetch, an error), and a transition fires on a value
+     * change to an element that is already laid out. A panel that is *born* folded has
+     * never had another width, so there is nothing for the transition to run between.
+     */
+    panel.classList.toggle('is-strip', asideFolded.on);
+    body.inert = asideFolded.on;
+    renderAsideStrip();
     return panel;
+  }
+
+  /**
+   * The strip: what this aside says with its door shut.
+   *
+   * Built once with the panel and **patched** from then on, never rebuilt. Two reasons and
+   * the second is the sharp one: the badges repaint on the roster beat, so replacing the
+   * nodes would take a running pulse away half a beat after it started, and the pulse is
+   * the whole of how a folded panel says something arrived.
+   *
+   * A strip is a door, not a window — a role, three numbers, and no message text ever. It
+   * is a `<button>` because it is one: the whole column is the control that reopens the
+   * panel, and the chevron at the top is the affordance that says so. Being a button also
+   * settles the focus ring for free — Chrome draws `:focus-visible` for a keyboard, and
+   * nothing for the mouse press that the pane's own `mousedown` focus handler is about to
+   * see anyway.
+   */
+  function buildAsideStrip() {
+    const strip = document.createElement('button');
+    strip.className = 'fold-strip';
+    strip.type = 'button';
+    strip.title = 'Open the team panel';
+    strip.setAttribute('aria-label', 'Open the team panel');
+    strip.onclick = () => {
+      asideFolded.set(false);
+      foldAsides();
+    };
+
+    const chev = document.createElement('span');
+    chev.className = 'fold-strip-chev';
+    chev.textContent = '‹';
+
+    // The rail's own chip stood on end. Both class pairs, deliberately: `.fold-strip-label
+    // .is-role` is the vertical box, `.role-chip.is-<role>` is the rail's spelling of what
+    // the word means — and only a lead has an aside today, so `is-role`'s own fill is the
+    // lead's fill. The role is carried through from `asideStripFacts` rather than written
+    // as `lead` here, so the chip on the strip and the chip on the rail row cannot come to
+    // disagree about what this session is.
+    const role = document.createElement('span');
+    role.className = 'fold-strip-label is-role';
+
+    const badge = (cls, title) => {
+      const b = document.createElement('span');
+      b.className = cls;
+      b.title = title;
+      b.hidden = true;
+      return b;
+    };
+    const tasks = badge('fold-strip-badge', 'Open tasks on this team');
+    const review = badge('fold-strip-badge is-review', 'Tasks in review — waiting on you');
+    // The room's own count sits at the *bottom* of the strip, where the room sits in the
+    // open panel — settings and tasks above, room below. Two of these three badges are the
+    // same accent (the tasks count, and this one, which is the rail's own unread colour),
+    // so position is what tells them apart at a glance: the pair at the top is the tasks
+    // block, the one at the foot is the room. `is-room` is scoped to this host rather than
+    // added to item 1's shared chrome — a room pane's strip is one column of one thing and
+    // has no such split to express.
+    const room = badge('fold-strip-badge is-room', 'New lines in the team room since you folded this away');
+
+    roomView.stripEl = strip;
+    roomView.stripRoleEl = role;
+    roomView.stripTasksEl = tasks;
+    roomView.stripReviewEl = review;
+    roomView.stripRoomEl = room;
+
+    strip.append(chev, role, tasks, review, room);
+    return strip;
+  }
+
+  /**
+   * Repaint the strip's counts.
+   *
+   * Off `asideStripFacts`, which is the same `s.team` object the rail row reads — so a
+   * folded aside and the rail row standing for the same session cannot come back with two
+   * different numbers. Zero draws nothing, which is that module's rule and the rail's: a
+   * `· 0` is furniture.
+   *
+   * Called from `renderHead` on the roster beat, and **never from `composerSig`** — the
+   * merge block's rule two functions down, for its reason. A count changing must not tear
+   * the textarea down under whoever is typing.
+   */
+  function renderAsideStrip() {
+    const strip = roomView.stripEl;
+    if (!strip) return;
+    const facts = asideStripFacts(current()?.team);
+
+    const role = roomView.stripRoleEl;
+    if (role) {
+      role.hidden = !facts;
+      // The rail's own class for this role, kept in step with the word: a role this panel
+      // has never met draws the generic chip rather than a lead's filled one.
+      role.className = `fold-strip-label is-role role-chip is-${facts?.role || 'lead'}`;
+      role.textContent = facts?.role || '';
+      role.title = facts?.role === 'lead' ? 'Team lead' : facts?.role || '';
+    }
+
+    const set = (el, n) => {
+      if (!el) return;
+      el.hidden = !n;
+      if (n) el.textContent = String(n);
+      // A spent badge drops the pulse with the number. It is hidden either way, so this
+      // changes nothing on screen — it stops a class that means "this just arrived" riding
+      // along on a node that is about to be shown again for a different arrival.
+      else el.classList.remove('is-new');
+    };
+    set(roomView.stripTasksEl, facts?.tasks || 0);
+    set(roomView.stripReviewEl, facts?.review || 0);
+    set(roomView.stripRoomEl, roomView.foldedUnseen || 0);
+
+    // The pulse, re-armed by an arrival and never by a paint. Removing the class, forcing
+    // a synchronous reflow and putting it back is what actually restarts a CSS animation
+    // — assigning the same class name again does nothing, and `requestAnimationFrame`
+    // never fires in an automated Chrome window, which is where this has to be provable.
+    if (roomView.foldedPulse && roomView.stripRoomEl) {
+      roomView.foldedPulse = false;
+      roomView.stripRoomEl.classList.remove('is-new');
+      void roomView.stripRoomEl.offsetWidth;
+      roomView.stripRoomEl.classList.add('is-new');
+    }
+  }
+
+  /**
+   * Put this aside where the preference says, animating if it has to move.
+   *
+   * The whole of the fold, in one function, because every step of it depends on the one
+   * before and splitting them would be four places that have to agree about the order.
+   *
+   * **Measure, freeze, force a reflow, then change the value.** The freeze is
+   * `--aside-frozen`, the panel's own measured expanded width, and the reflow is
+   * `void panel.offsetWidth` — never `requestAnimationFrame`, which an automated Chrome
+   * window reports `visibilityState: 'hidden'` for and never fires; this repo has already
+   * lost an hour to that once.
+   *
+   * Expanding, the width to animate *to* is the stylesheet's answer and not something this
+   * function may compute — `--aside` clamped by a floor and a ceiling that depend on the
+   * pane's own width. So it is measured the only honest way: take `is-strip` off, read the
+   * rect, put it straight back, all inside one synchronous block, so no frame ever paints
+   * the expanded panel without its transition armed.
+   *
+   * `--aside` is never written here, in either direction. That is what makes the dragged
+   * width come back on expand rather than being restored from something this feature
+   * remembered — and it is why `foreman.asideWidth` is untouched by a fold.
+   */
+  function applyAsideFold() {
+    const panel = roomView.panelEl;
+    const body = roomView.bodyEl;
+    if (!panel || !panel.isConnected || !body) return;
+    const want = asideFolded.on;
+    if (panel.classList.contains('is-strip') === want) return;
+
+    if (want) {
+      panel.style.setProperty('--aside-frozen', `${panel.getBoundingClientRect().width}px`);
+    } else {
+      // Off, read, on — one synchronous block, so this never reaches a paint.
+      panel.classList.remove('is-strip');
+      const w = panel.getBoundingClientRect().width;
+      panel.classList.add('is-strip');
+      void panel.offsetWidth;
+      panel.style.setProperty('--aside-frozen', `${w}px`);
+      // Expanding gives the reader the panel back, so the counter is spent and the pulse
+      // disarmed *before* the animation, not after it — the badge is fading out through
+      // the whole 200ms and a number that changed at the end of that would be a flicker.
+      roomView.foldedUnseen = 0;
+      roomView.foldedPulse = false;
+      renderAsideStrip();
+    }
+
+    panel.classList.add('is-folding');
+    void panel.offsetWidth; // the value the transition starts from
+    panel.classList.toggle('is-strip', want);
+    // Tab must not walk into a column that is 2.5rem wide and clipped. `inert` is what the
+    // SETTINGS fold two functions up uses for the same thing, and for its reason: a block
+    // hidden by `overflow` is invisible and still focusable, and still read out.
+    body.inert = want;
+
+    clearTimeout(roomView.foldTimer);
+    roomView.foldTimer = setTimeout(() => endAsideFold(), ASIDE_FOLD_MS + 60);
+  }
+
+  /**
+   * The end of a fold, from either the event or the backstop, and safe to run twice.
+   *
+   * The remeasure is the part that is not optional. `capTaskList` and the room's five-line
+   * clamp both cache what they measured onto the DOM, and both kept running while the
+   * panel was folded — the freeze above stops them measuring a 2.5rem column, and this is
+   * what puts the honest numbers back once the panel has stopped moving. They are the same
+   * three calls the aside's own dividers make when they change this panel's shape, for the
+   * same reason.
+   */
+  function endAsideFold() {
+    const panel = roomView.panelEl;
+    if (!panel) return;
+    clearTimeout(roomView.foldTimer);
+    panel.classList.remove('is-folding');
+    if (panel.classList.contains('is-strip')) return;
+    panel.style.removeProperty('--aside-frozen');
+    recapTaskLists();
+    renderTasks();
+    pinRoom();
+  }
+
+  /**
+   * Put a freshly mounted aside into the state the preference asks for, without animating.
+   *
+   * `buildRoomPanel` applies the class before the node is in the document; this is the half
+   * that needs a rect, and it runs straight after the mount and before the first paint, so
+   * the fallback in `--aside-frozen`'s `var()` covers a gap nobody can see. Measured the
+   * same off-read-on way `applyAsideFold` measures, and for the same reason.
+   */
+  function syncAsideFold() {
+    const panel = roomView.panelEl;
+    if (!panel || !panel.isConnected || !panel.classList.contains('is-strip')) return;
+    panel.classList.remove('is-strip');
+    const w = panel.getBoundingClientRect().width;
+    panel.classList.add('is-strip');
+    panel.style.setProperty('--aside-frozen', `${w}px`);
   }
 
   function renderRoom() {
@@ -8906,6 +9271,11 @@ function createPane(slot, host) {
     if (roomView.repo) {
       refreshTasks();
       refreshMerge();
+      // The folded strip's counts ride the same beat and for the same reason: they come off
+      // `s.team`, which is a roster fact, and they must not join `composerSig` — a task
+      // reaching `review` would otherwise tear the textarea down under whoever is typing.
+      // It is cheap when the aside is open: three `hidden` flags on nodes nobody can see.
+      renderAsideStrip();
     }
 
     const sig = composerSig(s);
@@ -11717,6 +12087,21 @@ function createPane(slot, host) {
         if (msg.repo !== roomView.repo) return;
         roomView.entries.push(msg.entry);
         roomView.cursor = msg.entry.seq;
+        /*
+         * A line arrived. If this aside is shut, it is the *only* thing that will say so:
+         * `roomView.unseen` below counts only while `follow` is false — "arrived while you
+         * were scrolled up" — and a folded aside is still following, so it stays at zero
+         * behind a shut door. The team room has no server-side unread either.
+         *
+         * Asked of the panel's own class rather than of `asideFolded`, because the class is
+         * what is true on screen: mid-fold, and for a pane that has not caught up with the
+         * preference yet, the flag and the panel disagree and the panel is right.
+         */
+        if (roomView.panelEl?.classList.contains('is-strip')) {
+          roomView.foldedUnseen += 1;
+          roomView.foldedPulse = true;
+          renderAsideStrip();
+        }
         renderRoom();
         return;
       case 'error':
@@ -11856,6 +12241,11 @@ function createPane(slot, host) {
      * that changes it — the `hide finished` filter — is one answer for the browser and
      * lives outside every pane. See `renderTaskLists`. */
     renderTasks,
+    /* Put this pane's aside where `asideFolded` says. Exposed for the same reason again:
+     * the fold is one answer for the browser and a press in one aside has to reach the
+     * other. See `foldAsides`. A pane with no lead in it has no panel and answers by doing
+     * nothing, which is why the fan-out can be unconditional. */
+    foldAside: applyAsideFold,
     /*
      * The session this pane is showing, and **null while it is showing anything else** —
      * said explicitly rather than leaning on `view.selected` happening to be null. Three
