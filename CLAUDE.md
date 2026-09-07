@@ -1472,6 +1472,23 @@ the label, and the same test file pins those too. The boot prints `State: <dir> 
 because a resolver that quietly picked the other directory is indistinguishable from a panel
 whose tasks, room and rulings have vanished.
 
+**…and a test that sets `FOREMAN_STATE_DIR` above its imports is still pointed at the real
+one, because ESM hoists.** Every static `import` is evaluated before *any* statement in the
+file, so `process.env.FOREMAN_STATE_DIR = mkdtempSync(...)` on line 12 runs after
+`config.js` has already frozen `STATE_DIR` on line 14 — and the comment above it saying
+"above the imports" is true of the source and false of the execution order, which is why it
+survived review twice. `base-branch.test.js` and `worktree.test.js` both had it: every
+`npm test` cut scratch worktrees (`repo-first-task`, `no-main-nope`) straight into the
+maintainer's own `~/.foreman/worktrees/` beside live workers', and the suites' teardown
+removed only the empty temp dir they had made, so nothing was ever left behind to notice.
+Caught by polling the real directory during a run. The fix is `const { … } = await
+import('…')` after the assignment — test files are ESM, top-level await is fine — and the
+guard in `test/state-dir.test.js` is a source scan that refuses **any** static relative
+import in a file that sets the variable, rather than a list of modules known to reach
+`config.js`: the import graph moves, and a module that is pure today reaches it tomorrow.
+Do not answer this by making `config.js` re-read the env lazily; the running panel resolves
+once at boot on purpose.
+
 **Plist backups go to the state dir, not beside the original.** A second file in
 `~/Library/LaunchAgents` carrying the same `Label` as the live plist is a duplicate job
 waiting for the next login, so `install-agent.js` backs up into `STATE_DIR` — the same

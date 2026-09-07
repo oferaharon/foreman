@@ -10,9 +10,15 @@ import test from 'node:test';
 // workers' — where a failed assertion leaves one behind, registered against a repo in
 // `/tmp` that the next run has already deleted. That is exactly how this line came to be
 // written (CLAUDE.md: scratch state dir, every time).
+//
+// The server import below is `await import()` and must stay that way. ESM hoists every
+// *static* import above every statement in the file, so a static
+// `import '../server/worktree.js'` here would evaluate `config.js` — and freeze
+// `STATE_DIR` — before this assignment ever ran, however far up the file it sits.
+// `test/state-dir.test.js` fails if this file goes back to static.
 process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-worktree-state-'));
 
-import { createWorktree, removeWorktree, tidyLabel } from '../server/worktree.js';
+const { createWorktree, removeWorktree, tidyLabel } = await import('../server/worktree.js');
 
 /*
  * Real git, throwaway repo. The module shells out to `git worktree`, and stubbing git to
