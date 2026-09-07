@@ -1878,6 +1878,19 @@ which is `.team-toggle-row`'s own precedent. **The same exposure is still live o
 rather than fixed because it was out of that task's scope, and it is the next person's to
 take.
 
+**The phone loads five stylesheets into one `<head>`, so a class the shell shares with a
+screen is a class the screen wins.** `web/m/index.html` links `m.css` then `lead.css`, and
+each is owned by a different build item precisely so they never collide in that head — but
+the guarantee is about *files*, not about *names*. `lead.css` already owned `.m-tab` for the
+lead screen's own chat/tasks pair, so a tab bar added to the shell under the same name came
+up wearing the lead screen's colours and its 34px height, while the shell's own declarations
+leaked back onto the lead screen's tabs in return. Neither screen looked broken: only one of
+them is ever on screen at a time, which is exactly what makes this cost nothing until it
+costs an hour. Caught by measuring a target written `min-height: 44px` and reading back 34.
+The shell's controls are `.m-nav-*` for that reason, and the general rule is that a new class
+in `m.css` is grepped against the four sheets below it before it is written — the cascade,
+not the file split, is what decides.
+
 **`$TMUX` is set inside a worker, and it defeats `TMUX_TMPDIR`.** A worker session runs
 *inside* tmux, so `$TMUX` is already in its environment — and tmux prefers it, ignoring the
 `TMUX_TMPDIR` a bench sets to get its own server. One worker's first bench attempt therefore
