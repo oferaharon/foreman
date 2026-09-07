@@ -20,11 +20,20 @@ const text = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const app = text('web/app.js');
 const styles = text('web/styles.css');
+const tokens = text('web/tokens.css');
 
 /** One CSS rule by its exact selector list, braces and all. */
 const rule = (selector) => {
   const i = styles.indexOf(`${selector} {`);
   assert.ok(i >= 0, `\`${selector}\` must exist in web/styles.css`);
+  return styles.slice(i, styles.indexOf('}', i) + 1);
+};
+
+/** One CSS rule by the *last* selector of a multi-line list — `rule()` keys off
+ *  `<selector> {`, which a list spanning lines does not spell anywhere. */
+const listRule = (last) => {
+  const i = styles.indexOf(`${last} {`);
+  assert.ok(i >= 0, `\`${last} {\` must exist in web/styles.css`);
   return styles.slice(i, styles.indexOf('}', i) + 1);
 };
 
@@ -302,32 +311,97 @@ test('the band is painted inside the panel, and the content is padded off it by 
   // wide with `var(--band-w)` on the books. The whole block carries the extra class.
   const band = rule('.pane-grip.aside-band');
   assert.match(band, /left: 0;/);
-  assert.match(band, /width: var\(--band-w\);/);
   assert.match(band, /background: var\(--band\);/);
+  // The padding is one `--band-w` — the *hovered* width, not the resting one, which is what
+  // makes the widening cost nothing: the band opens into a gap the padding already left, so
+  // neither the aside's content nor the transcript beside it moves when the cursor arrives.
   // `rule()` takes the first `<selector> {` and `.room-panel-body` is also the tail of the
   // freeze's two-selector rule above it, so this reads the declaration where it sits — the
   // last one in that block, against the closing brace.
   assert.match(styles, /\n  padding-left: var\(--band-w\);\n\}/);
-  assert.match(styles, /\.pane-grip\.aside-band:hover \{ background: var\(--accent-soft\); \}/);
   // Two rules, two different edges: the panel's own left border is the transcript boundary,
   // the band's right border is the content boundary. Neither is drawn twice.
   assert.match(band, /border-right: 1px solid var\(--rule\);/);
   assert.match(rule('.room-panel'), /border-left: 1px solid var\(--rule\);/);
 });
 
-test('the drag mark is hidden at rest and appears under the cursor, at the band’s middle', () => {
-  // The other three grips are transparent strips whose faint bar is the only thing saying
-  // they exist. This band is plainly *something* already, so the mark's narrower job is to
-  // say which of its two verbs the cursor is over — drawn always, it would read as a second
-  // control. Absolute rather than flex-centred, because the icon is a real flex item.
+test('the band is a hairline at rest and a column under the cursor, and a drag holds it open', () => {
+  // Two widths, two tokens, and `--band-w` stays the hovered one so every other reader of it
+  // — the body's padding above all — keeps meaning what it meant.
+  const band = rule('.pane-grip.aside-band');
+  assert.match(band, /width: var\(--band-w-rest\);/);
+  assert.match(band, /transition: width 160ms ease, background 120ms ease;/);
+  const open = listRule('.pane-grip.aside-band.is-dragging');
+  assert.match(open, /width: var\(--band-w\);/);
+  assert.match(open, /background: var\(--accent-soft\);/);
+  // `:focus-within` is the keyboard half — tabbing to the fold is what opens the band — and
+  // `is-dragging` is the one that matters most: a pointer capture is not a promise about
+  // hover, and a target that shrank to a hairline mid-drag is the failure this rules out.
+  assert.match(
+    styles,
+    /\.pane-grip\.aside-band:hover,\n\.pane-grip\.aside-band:focus-within,\n\.pane-grip\.aside-band\.is-dragging \{/,
+  );
+  // The resting width is the old `.pane-grip.grip-col` strip, so the drag target at rest is
+  // the one the other three dividers still offer rather than a number picked by eye.
+  assert.match(tokens, /--band-w-rest: 0\.45rem;/);
+  assert.match(rule('.pane-grip.grip-col'), /width: 7px;/);
+});
+
+test('the fold is not drawn, and cannot be pressed, until the band has room for it', () => {
+  // A 15px glyph in a 7px column is a clipped icon, not a smaller one.
+  const fold = rule('.aside-band-fold');
+  assert.match(fold, /opacity: 0;/);
+  // `pointer-events` is the whole of the JS this needed: the button stays a real button in
+  // the tree, nothing toggles `tabindex` or `aria-hidden`, and a pointer on the hairline
+  // reaches the *band* and starts a drag instead of pressing an icon nobody can see.
+  assert.match(fold, /pointer-events: none;/);
+  assert.ok(
+    !/aria-hidden|tabIndex|tabindex/.test(fn('buildAsideBand')),
+    'the hidden state is CSS; the builder must not toggle focusability',
+  );
+  const shown = listRule('.aside-band.is-dragging > .aside-band-fold');
+  assert.match(shown, /opacity: 1;/);
+  assert.match(shown, /pointer-events: auto;/);
+  // Delayed behind the widening on the way in, and not on the way out.
+  assert.match(shown, /transition: opacity 120ms ease 60ms, color 120ms ease;/);
+  assert.match(fold, /transition: opacity 120ms ease, color 120ms ease;/);
+  assert.match(
+    styles,
+    /\.aside-band:hover > \.aside-band-fold,\n\.aside-band:focus-within > \.aside-band-fold,\n\.aside-band\.is-dragging > \.aside-band-fold \{/,
+  );
+  // Both halves of the reveal go instant together: a `transition: none` that reached only
+  // the closed state would leave the icon arriving 60ms late for a reader who asked for no
+  // motion at all.
+  const after = styles.slice(styles.indexOf('.aside-band-fold:hover { color: var(--accent); }'));
+  const at = after.indexOf('@media (prefers-reduced-motion: reduce) {');
+  assert.ok(at >= 0, 'the band needs a reduced-motion block after the fold rules');
+  const block = after.slice(at, after.indexOf('}', after.indexOf('transition: none;', at)) + 1);
+  for (const sel of [
+    '.pane-grip.aside-band',
+    '.aside-band-fold',
+    '.aside-band:hover > .aside-band-fold',
+    '.aside-band:focus-within > .aside-band-fold',
+    '.aside-band.is-dragging > .aside-band-fold',
+  ]) assert.ok(block.includes(sel), `reduced motion must name ${sel}`);
+});
+
+test('the drag mark is drawn at rest, at the band’s middle, and never lights up', () => {
+  // The maintainer's call on top of the mock-up, which hid it until hover. It reverses the
+  // reasoning the band shipped with — something that plainly *is* a control needs no second
+  // mark — because a hairline is not plainly anything: at rest this is the only thing on the
+  // edge saying it can be grabbed, which is the job the other three grips' bars already do.
+  // Absolute rather than flex-centred, because the icon is a real flex item.
   const mark = rule('.aside-band::after');
   assert.match(mark, /position: absolute;/);
   assert.match(mark, /top: 50%;/);
   assert.match(mark, /width: 2px;/);
   assert.match(mark, /height: 1\.6rem;/);
   assert.match(mark, /background: var\(--rule-strong\);/);
-  assert.match(mark, /opacity: 0;/);
-  assert.match(styles, /\.aside-band:hover::after,\n\.aside-band\.is-dragging::after \{ opacity: 1; \}/);
+  assert.ok(!/opacity/.test(mark), 'no opacity of its own — it rides the band\u2019s width');
+  assert.ok(
+    !/\.aside-band:hover::after,\n\.aside-band\.is-dragging::after \{ opacity/.test(styles),
+    'the reveal-on-hover rule is gone',
+  );
   // `.pane-grip::before` is the shared hairline that lights accent under the cursor; the
   // band says the same thing with its own background, and both would be two answers.
   assert.match(rule('.aside-band::before'), /display: none;/);

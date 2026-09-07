@@ -105,6 +105,18 @@
   --band: color-mix(in srgb, var(--ink) 7%, var(--surface));
   --band-w: 1.25rem;
 
+  /* …and what it is at rest, because the band is now a hairline until the cursor is on it.
+     `--band-w` is the *hovered* width and stays the number everything else reads: the body's
+     left padding is still one `--band-w`, so the content sits where it always did and the
+     band widens into the gap that padding already leaves rather than pushing anything.
+
+     0.45rem — a shade over seven pixels — is not a taste pick either. It is the width of
+     `.pane-grip.grip-col`, the invisible strip this edge was before it was painted, so the
+     drag target at rest is exactly the one the other three dividers still offer and the one
+     this edge itself had until PR #100 widened it. A hairline that reads as a rule rather
+     than as a column, and a grab that is no harder than every other grip in the panel. */
+  --band-w-rest: 0.45rem;
+
   /* The shared room's speaker ring — `web/session-colour.js`'s `colourFor` picks a slot,
      these are the slots. Seven, not the eight the plan started at: an eighth hue can still
      clear 7:1 against `--ground` here, but only by landing within a small ΔE2000 of an
