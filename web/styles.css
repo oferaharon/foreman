@@ -5483,33 +5483,6 @@ body.row-dragging * { cursor: row-resize !important; }
 .fold-strip:hover .fold-strip-chev { color: var(--accent); }
 
 /*
- * The fold control's mark, and it is **shared by both panels** — the lead's team aside and a
- * group room's slot, on the strip that opens one and on the control that shuts it. Four
- * uses, one drawing (`foldGlyph` in `web/app.js`) and one rule here, for that function's own
- * reason: a reader learns this mark once, and two spellings of it would drift the first time
- * either was adjusted.
- *
- * Sized from a single length because the drawing is a 24-unit box scaled by CSS, and
- * coloured through `currentColor` so the tone lives here rather than in the DOM. `display:
- * block` because an inline SVG sits on the text baseline and leaves descender space under
- * it, which inside a `.ghost-btn` makes the control a pixel taller than `archive` beside it.
- */
-.fold-glyph {
-  flex: none;
-  display: block;
-  width: 0.95rem;
-  height: 0.95rem;
-  color: var(--ink-muted);
-}
-
-/* The hover, written once against the glyph rather than once per host — a control that lit
-   up in one panel and not in the other would read as one of them being broken. */
-button:hover > .fold-glyph,
-button:hover .fold-glyph {
-  color: var(--accent);
-}
-
-/*
  * The name, turned on its side. `vertical-rl` rather than a `rotate()` because a rotated
  * box keeps its horizontal size and would have to be laid out by hand; a real writing mode
  * gives the flex column a real height to distribute, which is what makes the ellipsis
@@ -5922,18 +5895,41 @@ button:hover .fold-glyph {
    the pane has none to lend it. */
 .app.split .pane + .pane > .fold-strip { border-left: 0; }
 
-/* The collapse control, first in the room header's cluster. It borrows `.ghost-btn` whole —
-   the same box, the same hit area and the same hover as `archive` and `close` beside it —
-   and holds `foldGlyph` instead of a word. The padding is trimmed and `line-height` zeroed
-   so a 0.95rem drawing sits in a box the same height as the two words beside it; a mark that
-   made its own button taller would put a step in a row of three. */
+/*
+ * The collapse control, first in the room header's cluster. It borrows `.ghost-btn` whole —
+ * the same box, the same hit area and the same hover as `archive` and `close` beside it —
+ * and holds `foldIcon('collapse')` instead of a word.
+ *
+ * The two size rules are this host's rather than the icon's, and that is `foldIcon`'s own
+ * arrangement: it sets no width, no height and no colour, so a caller that wants a different
+ * ink or a different box says so in CSS. `.fold-strip-chev svg` is the same pair one column
+ * over, which is why the strip's own mark needs nothing here.
+ *
+ * The padding is trimmed and `line-height` zeroed so a 0.95rem drawing sits in a box the
+ * same height as the two words beside it; a mark that made its own button taller would put a
+ * step in a row of three.
+ */
 .room-fold-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* `align-self`, not a padding computed to match. `.head-meta` centres its items, so a
+     button holding a 0.95rem drawing comes out shorter than the two holding 0.68rem
+     uppercase words — measured, 24px against 27 — and a step in a row of three reads as one
+     of them being broken. Stretching takes the row's own height, which stays right if the
+     words beside it ever change size. */
+  align-self: stretch;
   line-height: 0;
-  padding: 0.2rem 0.35rem;
+  padding: 0 0.4rem;
+  color: var(--ink-muted);
 }
+
+.room-fold-btn svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.room-fold-btn:hover { color: var(--accent); }
 
 /*
  * Reduced motion, for the whole feature and not only for what this file already draws.

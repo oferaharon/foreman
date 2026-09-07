@@ -5,7 +5,12 @@ import { step, alertText } from './notify.js';
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
 // that file's header.
-import { asideFolded, ghostSend, hideFinished, isFinishedState, roomFolded } from './prefs.js';
+import { asideFolded, ghostSend, hideFinished, isFinishedState } from './prefs.js';
+// …and the room slot's own fold flag, on a line of its own rather than folded into the one
+// above. `test/aside-fold.test.js` pins that import verbatim, and this item may not edit the
+// aside's test — two lines from one module is the cheap half of that trade, and collapsing
+// them is a one-line change for whoever touches these imports next.
+import { roomFolded } from './prefs.js';
 // What a closed side panel has room to say. The ninth pure module under `web/`, shipped by
 // item 1 of this feature with nothing wired to it; the lead's aside is the first half to
 // wear it. `asideStripFacts` reads the same `s.team` object `teamLine` reads, which is what
@@ -13,7 +18,12 @@ import { asideFolded, ghostSend, hideFinished, isFinishedState, roomFolded } fro
 // `roomStripFacts` is the same trade one panel over, and `foldTracks` is the split fold's
 // own arithmetic — the px pair a room slot animates between, kept out of here so a node
 // test can hold it.
-import { asideStripFacts, foldTracks, roomStripFacts } from './panel-fold.js';
+import { asideStripFacts } from './panel-fold.js';
+// The room slot's two, on their own line for the reason the line above `roomFolded` gives.
+// `roomStripFacts` is `asideStripFacts`' opposite number one panel over, and `foldTracks` is
+// the split fold's arithmetic — the px pair a room slot animates between, kept out of here
+// so a node test can hold it.
+import { foldTracks, roomStripFacts } from './panel-fold.js';
 // The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
@@ -2650,72 +2660,6 @@ const BINDING_MARK = {
 };
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
-
-/**
- * The fold control's glyph: a panel with one narrow column, and a chevron saying which way
- * that panel is about to move.
- *
- * **One drawing, four uses, and that is the whole reason it is here** rather than inside
- * either host. The lead's team aside and a group room's slot are two different panels with
- * two different geometries, each with a control to shut it and a strip to open it again —
- * and a reader has to be able to learn the mark once. Two hand-drawn spellings of it would
- * drift the first time either was adjusted, which is the `isLeadName` lesson in yet another
- * costume: this is the one place either of them may get it from.
- *
- * Two independent axes rather than one mirror, because the four cases are not two pairs.
- * `column` says which edge the panel lives on — the narrow track in the drawing — and
- * `chevron` says which way it will go when pressed. A folded room in slot `b` is a right
- * column that opens leftwards; its own collapse control is the same right column closing
- * rightwards. Mirroring the whole glyph would flip both together and could only ever reach
- * half of them.
- *
- * A drawing rather than `‹` or `›`, and that is a ruling rather than a preference: a bare
- * chevron in a row of words reads as punctuation and says nothing about what it acts on.
- * The panel is the subject and the chevron is the verb.
- *
- * 24-unit box at 1.8 stroke — Feather's proportions, which is what the rest of this file's
- * line art is drawn to — so the whole thing scales from one CSS length. Colour is
- * `currentColor` throughout, so a host sets the tone and its hover in the stylesheet and
- * this function never has an opinion about either.
- *
- * @param {{column: 'left'|'right', chevron: 'left'|'right'}} o
- */
-function foldGlyph({ column, chevron }) {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('class', 'fold-glyph');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.8');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-
-  const frame = document.createElementNS(SVG_NS, 'rect');
-  frame.setAttribute('x', '3');
-  frame.setAttribute('y', '4');
-  frame.setAttribute('width', '18');
-  frame.setAttribute('height', '16');
-  frame.setAttribute('rx', '2.5');
-  svg.append(frame);
-
-  // The divider at a third of the way in from whichever edge the panel is on, which is what
-  // makes the narrow track read as a *side panel* rather than as a column in a table.
-  const at = column === 'left' ? 9 : 15;
-  const line = document.createElementNS(SVG_NS, 'path');
-  line.setAttribute('d', `M${at} 4 V20`);
-  svg.append(line);
-
-  // …and the chevron in the wide half, where there is room for it without crowding the
-  // divider. Centred on that half rather than on the box, or it sits on the line.
-  const cx = column === 'left' ? 15 : 9;
-  const dx = chevron === 'left' ? 1.6 : -1.6;
-  const mark = document.createElementNS(SVG_NS, 'path');
-  mark.setAttribute('d', `M${cx + dx} 9 L${cx - dx} 12 L${cx + dx} 15`);
-  svg.append(mark);
-
-  return svg;
-}
 
 /**
  * Whether an attachment is a text file, asked of the name the server saved it under.
@@ -6003,12 +5947,12 @@ function createPane(slot, host) {
      * and `archive` and nothing else, unlike a session pane's, which CLAUDE.md records
      * overflowing at plain half and half on any window under about 1400px.
      *
-     * `foldGlyph` rather than a word or a bare chevron, and rather than a drawing of its
-     * own: the strip's own control is the same mark with the chevron the other way round,
-     * and the lead's aside wears it too, so a reader learns it once. Both axes come off the
-     * slot — a room in slot `a` is a left column that closes leftwards, one in `b` a right
-     * column that closes rightwards — and a pane's slot never changes, so this is decided
-     * once and never repainted.
+     * `foldIcon('collapse')` rather than a word or a bare chevron, and rather than a
+     * drawing of its own: it is the mark the lead's team aside wears on its own band, and
+     * the strip below draws its `'expand'` twin, so a reader learns one control and finds it
+     * in both panels. The word is the *action* rather than a direction on screen, which is
+     * what lets one drawing serve a room in either slot — and `test/aside-fold.test.js` pins
+     * that `foldIcon` has exactly one definition, so a local copy here is not an option.
      *
      * `renderGroupHead` hides it while there is only one pane. A room alone in the frame has
      * nothing to fold beside it, and a frame that was nothing but a strip would be a panel
@@ -6018,7 +5962,7 @@ function createPane(slot, host) {
      */
     const fold = document.createElement('button');
     fold.className = 'ghost-btn room-fold-btn';
-    fold.append(foldGlyph({ column: slot === 'a' ? 'left' : 'right', chevron: slot === 'a' ? 'left' : 'right' }));
+    fold.append(foldIcon('collapse'));
     fold.title = 'Fold this room down to a strip. It still counts what arrives in it.';
     fold.setAttribute('aria-label', 'Fold this room away');
     fold.onclick = () => {
@@ -6554,12 +6498,13 @@ function createPane(slot, host) {
     };
 
     // Pinned at the top, where the control that shut the panel was, so the eye goes back to
-    // the same corner to reopen it. The same mark that closed it, with the chevron the other
-    // way round: a room in slot `a` opens rightwards, one in `b` opens leftwards. The column
-    // half is unchanged, because which edge the room lives on is not what a press changes.
+    // the same corner to reopen it — and it is the header control's own mark with the
+    // chevron the other way round, which is the pair the lead's aside already draws. The box
+    // and the ink are `.fold-strip-chev`'s, shared with that aside, so nothing about the size
+    // or the colour is spelled twice.
     const chev = document.createElement('span');
     chev.className = 'fold-strip-chev';
-    chev.append(foldGlyph({ column: slot === 'a' ? 'left' : 'right', chevron: slot === 'a' ? 'right' : 'left' }));
+    chev.append(foldIcon('expand'));
 
     const label = document.createElement('span');
     label.className = 'fold-strip-label';

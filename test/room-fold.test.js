@@ -278,7 +278,11 @@ test('the cleanup is unconditional, so a slot given a session is never 2.5rem wi
 /* ------------------------------------------------------------- the strip --- */
 
 test('the strip’s facts are `roomStripFacts`’ answer, not a second derivation', () => {
-  assert.match(app, /import \{ asideStripFacts, foldTracks, roomStripFacts \} from '\.\/panel-fold\.js';/);
+  // On a line of its own beside `asideStripFacts`', because `test/aside-fold.test.js` pins
+  // that import verbatim and this item may not edit the aside's test. Two lines from one
+  // module is the cheap half of that trade; collapsing them is a one-line change.
+  assert.match(app, /import \{ foldTracks, roomStripFacts \} from '\.\/panel-fold\.js';/);
+  assert.match(app, /import \{ asideStripFacts \} from '\.\/panel-fold\.js';/);
   assert.match(fn('renderGroupFoldStrip'), /roomStripFacts\(room, state\.sessions\)/);
   // One call site. `memberRow`'s rung order is mirrored from the server's own resolution and
   // a second walk of it here is the `isLeadName` lesson in one more costume.
@@ -376,56 +380,40 @@ test('the collapse control is in the room header, and it is hidden with nothing 
   const head = fn('buildGroupHead');
   assert.match(head, /fold\.className = 'ghost-btn room-fold-btn';/);
   assert.match(head, /meta\.append\(fold, close\);/);
-  // Both axes come off the slot: a room in `a` is a left column that closes leftwards, one
-  // in `b` a right column that closes rightwards. A pane's slot never changes, so it is
-  // decided once and never repainted.
-  assert.match(
-    head,
-    /fold\.append\(foldGlyph\(\{ column: slot === 'a' \? 'left' : 'right', chevron: slot === 'a' \? 'left' : 'right' \}\)\);/,
-  );
+  assert.match(head, /fold\.append\(foldIcon\('collapse'\)\);/);
   // A room alone in the frame has nothing to fold beside it, and a frame that was nothing but
   // a strip would be a panel with no content and no obvious way back.
   assert.match(fn('renderGroupHead'), /if \(els\.fold\) els\.fold\.hidden = panes\.length < 2;/);
 });
 
-test('one drawing, four uses — the mark is `foldGlyph`’s and neither host draws its own', () => {
+test('the mark is `foldIcon`’s, and this item draws none of its own', () => {
   /*
-   * A reader learns this mark once: it is on the strip that opens a panel, on the control
-   * that shuts it, and it is the lead aside's too. Two hand-drawn spellings would drift the
-   * first time either was adjusted — the `isLeadName` lesson in one more costume — so this
-   * pins that both of this item's controls come from the one helper, and that the helper
-   * takes its two directions independently.
+   * One drawing for both panels, and it lives in `web/app.js` at module scope where the
+   * team aside's band put it. Three copies of an eight-coordinate icon would not break
+   * anything — they would simply drift, and a reader would find two panels in one window
+   * whose collapse controls do not match. `test/aside-fold.test.js` pins that it has exactly
+   * one definition; this pins that this item is not the second.
    */
-  const glyph = fn('foldGlyph');
-  assert.match(glyph, /function foldGlyph\(\{ column, chevron \}\)/);
-  // Mirroring the whole drawing would flip the column and the chevron together and could
-  // only ever reach half of the four cases — a right column that opens leftwards and the
-  // same right column that closes rightwards are not mirrors of each other.
-  assert.match(glyph, /const at = column === 'left' \? 9 : 15;/);
-  assert.match(glyph, /const dx = chevron === 'left' \? 1\.6 : -1\.6;/);
-  // `currentColor` throughout, so a host sets the tone and its hover in the stylesheet and
-  // the drawing never has an opinion about either.
-  assert.match(glyph, /setAttribute\('stroke', 'currentColor'\)/);
-  assert.match(glyph, /setAttribute\('stroke-width', '1\.8'\)/);
-  assert.ok(!/var\(--/.test(glyph), 'the drawing must name no token');
-  // Two call sites in this item — the strip and the header — and no third drawing anywhere.
-  const calls = app
-    .split('\n')
-    .filter((l) => /foldGlyph\(\{/.test(l) && !/^\s*(\*|\/\/)/.test(l) && !/^function /.test(l));
-  assert.equal(calls.length, 2, `exactly two call sites, found ${calls.length}`);
-  // One rule for its size and its colour, shared by both panels for the same reason.
-  const css = rule('.fold-glyph');
-  assert.match(css, /color: var\(--ink-muted\);/);
-  assert.match(css, /width: 0\.95rem;/);
-  assert.match(rule('button:hover > .fold-glyph,\nbutton:hover .fold-glyph'), /color: var\(--accent\);/);
+  assert.equal(
+    app.split('\n').filter((l) => /^function foldIcon\(/.test(l)).length,
+    1,
+    'exactly one definition of the fold mark, and it is not this item’s',
+  );
+  assert.ok(!/foldGlyph/.test(app), 'no local drawing may survive beside it');
+  // The word is the *action*, not a direction on screen — which is what lets one drawing
+  // serve a room in either slot without a second axis.
+  assert.match(fn('buildGroupHead'), /foldIcon\('collapse'\)/);
+  assert.match(fn('buildGroupFoldStrip'), /foldIcon\('expand'\)/);
+  // `foldIcon` sets no size and no colour, so each host says both. The strip's are shared
+  // with the aside (`.fold-strip-chev svg`); the header's are this section's own.
+  assert.match(rule('.room-fold-btn svg'), /width: 0\.95rem;/);
+  assert.match(rule('.room-fold-btn'), /color: var\(--ink-muted\);/);
+  assert.match(rule('.room-fold-btn:hover'), /color: var\(--accent\);/);
 });
 
 test('the strip’s own control is the same mark, at the top, pointing the other way', () => {
   const build = fn('buildGroupFoldStrip');
-  assert.match(
-    build,
-    /chev\.append\(foldGlyph\(\{ column: slot === 'a' \? 'left' : 'right', chevron: slot === 'a' \? 'right' : 'left' \}\)\);/,
-  );
+  assert.match(build, /chev\.append\(foldIcon\('expand'\)\);/);
   // First child of a column flex, which is what puts it at the top — where the control that
   // shut the panel was, so the eye goes back to the same corner to reopen it.
   assert.match(build, /strip\.append\(chev, label, dots, badge\);/);
@@ -464,7 +452,10 @@ test('a room slides in open every time, so opening one clears the memory', () =>
 });
 
 test('the preference is one flag in `prefs.js`, and the only module-scope state here', () => {
-  assert.match(app, /import \{ asideFolded, ghostSend, hideFinished, isFinishedState, roomFolded \} from '\.\/prefs\.js';/);
+  assert.match(app, /import \{ roomFolded \} from '\.\/prefs\.js';/);
+  // …and the aside's own line is left exactly as it was, which is what lets that panel's
+  // test go on pinning it while this one adds what it needs.
+  assert.match(app, /import \{ asideFolded, ghostSend, hideFinished, isFinishedState \} from '\.\/prefs\.js';/);
   // Everything per-pane lives inside `createPane` — the strip's nodes, the seen count, the
   // frozen width. Module scope holds the preference, the geometry (there is one `.main`) and
   // one timer for it.
