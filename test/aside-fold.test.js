@@ -108,10 +108,10 @@ test('the freeze is what protects the two cached measurements, so the remeasure 
 });
 
 test('the wrapper holds what is in the flow and neither of the two absolute children', () => {
-  // `.room-hint` hangs off the room's bottom edge and `.aside-grip` sits on the panel's
-  // left border; both were positioned against `.room-panel` and must stay its children.
+  // `.room-hint` hangs off the room's bottom edge and `.aside-band` sits on the panel's
+  // left edge; both are positioned against `.room-panel` and must stay its children.
   assert.match(app, /body\.append\(settingsHead, settingsFold, tasksHead, tasksList, tasksGrip, roomHead, list\);/);
-  assert.match(app, /panel\.append\(body, buildAsideStrip\(\), hint, asideGrip\);/);
+  assert.match(app, /panel\.append\(body, buildAsideStrip\(\), hint, asideBand\);/);
 });
 
 /* ------------------------------------------------------ the animation's ends --- */
@@ -257,19 +257,97 @@ test('the fold is applied at build time, so a rebuild never re-runs the animatio
   assert.match(fn('renderMain'), /applyResizers\(\);[\s\S]{0,400}syncAsideFold\(\);/);
 });
 
-test('the collapse control is in the SETTINGS heading, not the pane header', () => {
-  // The pane header already carries pin / thinking / images / split / reveal / attach /
-  // forge and CLAUDE.md records it overflowing below about 1400px at plain half and half.
+test('the collapse control is the band on the aside’s left edge, and nowhere else', () => {
+  // It was a `›` in the SETTINGS heading for one review and the maintainer rejected it: a
+  // third knob in a settings header, for a thing about the panel's edge. The heading is
+  // back to label + gear, and the pane header — already carrying pin / thinking / images /
+  // split / reveal / attach / forge, and recorded overflowing below about 1400px — never
+  // grew one either.
   const settings = fn('buildSettingsHead');
-  assert.match(settings, /fold\.className = 'room-head-gear room-head-fold';/);
-  assert.match(settings, /head\.append\(label, fold, gear\);/);
-  // The header line behind it toggles the settings block; without this a press would fold
-  // the aside *and* open the settings inside it.
-  assert.match(settings, /fold\.onclick = \(e\) => \{\s*\n\s*e\.stopPropagation\(\);/);
-  assert.ok(!/room-head-fold/.test(fn('buildHead')), 'the pane header must not grow this control');
-  // It borrows the gear's box whole, which is what keeps this heading as tall as the two
-  // below it — `.tasks-grip`'s hairline is measured against those heights.
+  assert.match(settings, /head\.append\(label, gear\);/);
+  for (const where of ['buildSettingsHead', 'buildHead']) {
+    assert.ok(!/room-head-fold/.test(fn(where)), `${where} must not carry a fold control`);
+    assert.ok(!/asideFolded\.set/.test(fn(where)), `${where} must not fold the aside`);
+  }
+  assert.ok(!/room-head-fold/.test(styles), '`.room-head-fold` must be gone from the stylesheet');
+  // The gear's box is still what keeps this heading as tall as `tasks` and `room` below it
+  // — `.tasks-grip`'s hairline is measured against those heights.
   assert.match(rule('.room-head-gear'), /margin: -0\.35rem -0\.2rem -0\.35rem 0;/);
+});
+
+test('the band is the grip: one node, `resizer` unchanged, and the icon does not start a drag', () => {
+  const band = fn('buildAsideBand');
+  // `paneGrip` builds it, so the separator ARIA stays in the one place all four dividers
+  // read it from — a hand-rolled div here would be a second spelling of that.
+  assert.match(band, /paneGrip\('x', 'Panel width'/);
+  assert.match(band, /band\.classList\.add\('aside-band'\);/);
+  // And it is the handle the width resizer is wired to, with the storage key and the
+  // bounds untouched.
+  const panel = fn('buildRoomPanel');
+  assert.match(panel, /const asideBand = buildAsideBand\(\);/);
+  assert.match(panel, /handle: asideBand,\s*\n\s*axis: 'x',\s*\n\s*storageKey: 'foreman\.asideWidth',/);
+  // `resizer` listens on the handle, so a `pointerdown` on a button inside it would begin a
+  // width drag — and the pointer capture that follows means the `click` never lands. The
+  // handle's double-click reset is the second event that has to be stopped.
+  assert.match(band, /fold\.addEventListener\('pointerdown', \(e\) => e\.stopPropagation\(\)\);/);
+  assert.match(band, /fold\.addEventListener\('dblclick', \(e\) => e\.stopPropagation\(\)\);/);
+  assert.match(band, /asideFolded\.set\(true\);/);
+});
+
+test('the band is painted inside the panel, and the content is padded off it by the same number', () => {
+  // A painted band on the grip's old `left: -3px` would put three pixels of `--band` over
+  // the transcript. One token, read twice, so the two cannot come apart.
+  const band = rule('.aside-band');
+  assert.match(band, /left: 0;/);
+  assert.match(band, /width: var\(--band-w\);/);
+  assert.match(band, /background: var\(--band\);/);
+  // `rule()` takes the first `<selector> {` and `.room-panel-body` is also the tail of the
+  // freeze's two-selector rule above it, so this reads the declaration where it sits — the
+  // last one in that block, against the closing brace.
+  assert.match(styles, /\n  padding-left: var\(--band-w\);\n\}/);
+  assert.match(styles, /\.aside-band:hover \{ background: var\(--accent-soft\); \}/);
+  // Two rules, two different edges: the panel's own left border is the transcript boundary,
+  // the band's right border is the content boundary. Neither is drawn twice.
+  assert.match(band, /border-right: 1px solid var\(--rule\);/);
+  assert.match(rule('.room-panel'), /border-left: 1px solid var\(--rule\);/);
+});
+
+test('the drag mark is hidden at rest and appears under the cursor, at the band’s middle', () => {
+  // The other three grips are transparent strips whose faint bar is the only thing saying
+  // they exist. This band is plainly *something* already, so the mark's narrower job is to
+  // say which of its two verbs the cursor is over — drawn always, it would read as a second
+  // control. Absolute rather than flex-centred, because the icon is a real flex item.
+  const mark = rule('.aside-band::after');
+  assert.match(mark, /position: absolute;/);
+  assert.match(mark, /top: 50%;/);
+  assert.match(mark, /width: 2px;/);
+  assert.match(mark, /height: 1\.6rem;/);
+  assert.match(mark, /background: var\(--rule-strong\);/);
+  assert.match(mark, /opacity: 0;/);
+  assert.match(styles, /\.aside-band:hover::after,\n\.aside-band\.is-dragging::after \{ opacity: 1; \}/);
+  // `.pane-grip::before` is the shared hairline that lights accent under the cursor; the
+  // band says the same thing with its own background, and both would be two answers.
+  assert.match(rule('.aside-band::before'), /display: none;/);
+});
+
+test('the fold glyph is one drawing, mirrored, and both halves of the fold read it from there', () => {
+  // Three call sites and counting — the band, the aside's strip, and a group room pane's
+  // strip. Three copies of an eight-coordinate drawing would not break; they would drift,
+  // and a reader would find two panels in one window whose collapse controls do not match.
+  const icon = fn('foldIcon');
+  assert.match(icon, /\['x', '3'\], \['y', '4\.5'\], \['width', '18'\], \['height', '15'\], \['rx', '2\.5'\]/);
+  assert.match(icon, /divider\.setAttribute\('d', 'M15 4\.5V19\.5'\);/);
+  // Collapse points right, expand points left, and only the chevron moves — the frame is
+  // what the icon is *about*.
+  assert.match(icon, /dir === 'expand' \? 'M11 9\.5 L8\.5 12 L11 14\.5' : 'M8 9\.5 L10\.5 12 L8 14\.5'/);
+  assert.match(icon, /stroke', 'currentColor'/);
+  assert.match(icon, /stroke-width', '1\.8'/);
+  assert.match(fn('buildAsideBand'), /foldIcon\('collapse'\)/);
+  assert.match(fn('buildAsideStrip'), /foldIcon\('expand'\)/);
+  // One definition. A second `createElementNS(SVG_NS, 'svg')` that draws this shape is the
+  // whole thing this test exists to refuse.
+  const defs = app.split('\n').filter((l) => /^function foldIcon\(/.test(l));
+  assert.equal(defs.length, 1, `exactly one definition, found ${defs.length}`);
 });
 
 test('the strip is a button, so the focus ring is the browser’s own and not a ring on a 2.5rem column', () => {
@@ -282,7 +360,11 @@ test('the strip is a button, so the focus ring is the browser’s own and not a 
 });
 
 test('a handle on an edge that will not move is not drawn', () => {
-  assert.match(rule('.room-panel.is-strip > .aside-grip'), /display: none;/);
+  assert.match(rule('.room-panel.is-strip > .aside-band'), /display: none;/);
+  // …and the padding that kept content off the band goes with it, under `is-strip` alone.
+  // Not `is-folding`: the body is frozen and clipped through the animation, and a padding
+  // that changed mid-fold would re-wrap the content the freeze exists to hold still.
+  assert.match(styles, /\.room-panel\.is-strip > \.room-panel-body \{ padding-left: 0; \}/);
 });
 
 test('a folded column is not walked into by Tab', () => {

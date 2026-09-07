@@ -2669,6 +2669,59 @@ function shortBytes(n) {
 }
 
 /**
+ * The fold glyph, in the one place it is spelled — a panel with its right region shut, and
+ * a chevron saying which way it is about to go.
+ *
+ * **One function, two directions, three call sites and counting.** The team aside's band
+ * draws `collapse`, the aside's folded strip draws `expand`, and a group room pane's strip
+ * draws `expand` too. Three copies of an eight-coordinate drawing is the `isLeadName`
+ * lesson in its smallest costume: nothing would break, the three would simply drift, and a
+ * reader would find two panels in one window whose collapse controls do not match. So the
+ * geometry is here and the callers pass a word.
+ *
+ * `dir` is `'collapse'` (chevron pointing right — "shut the right-hand panel") or
+ * `'expand'` (pointing left — "open it again"). It is the same drawing mirrored about the
+ * chevron alone: the frame and its divider do not move, because the *panel* is what the
+ * icon is about and only the direction of travel changes.
+ *
+ * `currentColor` and no size attributes, deliberately. The stylesheet owns both — the band
+ * paints `--ink-muted` and takes `--accent` under the cursor, and the strip does the same
+ * one column over — so a caller that wants a different ink or a different size sets it in
+ * CSS rather than being handed a second argument here.
+ */
+function foldIcon(dir) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+
+  // The panel: a rounded frame with a divider three-quarters across, which is the shape of
+  // this layout — a wide reading column and a narrow one beside it. A `rect` rather than a
+  // path of its own, so the four numbers on it are the four numbers the design names.
+  const frame = document.createElementNS(SVG_NS, 'rect');
+  for (const [k, v] of [['x', '3'], ['y', '4.5'], ['width', '18'], ['height', '15'], ['rx', '2.5']]) {
+    frame.setAttribute(k, v);
+  }
+  svg.append(frame);
+
+  const divider = document.createElementNS(SVG_NS, 'path');
+  divider.setAttribute('d', 'M15 4.5V19.5');
+  svg.append(divider);
+
+  // The chevron, inside the *left* region — the wide one — because that is the space the
+  // right-hand panel is about to give back or take away.
+  const chev = document.createElementNS(SVG_NS, 'path');
+  chev.setAttribute('d', dir === 'expand' ? 'M11 9.5 L8.5 12 L11 14.5' : 'M8 9.5 L10.5 12 L8 14.5');
+  svg.append(chev);
+
+  return svg;
+}
+
+/**
  * A page with a folded corner, in `--ink-faint`, where an image chip has its thumbnail.
  *
  * Drawn rather than fetched: asking `/api/image/<name>` for a `.md` as an `<img>` would
@@ -7095,34 +7148,12 @@ function createPane(slot, host) {
     label.textContent = 'settings';
 
     /*
-     * The control that folds the *whole aside* away, left of the gear.
-     *
-     * Here rather than in the pane header, and that is a measurement rather than a
-     * preference: the header already carries pin / thinking / images / split / reveal /
-     * attach / forge and CLAUDE.md records it overflowing at plain half-and-half on any
-     * window under about 1400px. This row is already a two-control cluster and a third
-     * costs no vertical line — which matters in a column that has been measured squeezing
-     * at an 879px viewport.
-     *
-     * It borrows `.room-head-gear`'s box whole, negative margins included, because those
-     * margins are what keep this heading exactly as tall as `tasks` and `room` below it,
-     * and `.tasks-grip`'s hairline is measured against those heights.
-     *
-     * `stopPropagation` for the gear's own reason: the header line behind it toggles the
-     * settings block, and without this a press here would fold the aside *and* open the
-     * settings inside it, which the reader would then find open the next time they opened
-     * the door.
+     * Nothing else on this line. The control that folds the whole aside away was here for
+     * one review — a small `›` left of the gear — and it read as a third knob in a
+     * settings header rather than as the panel's own edge. It is the band down the aside's
+     * left edge now (`buildAsideBand`), which is where the eye already goes for a boundary
+     * and where the width grip had been living all along.
      */
-    const fold = document.createElement('button');
-    fold.className = 'room-head-gear room-head-fold';
-    fold.setAttribute('aria-label', 'Fold the team panel away');
-    fold.title = 'Fold the team panel down to a strip. It still counts what arrives in it.';
-    fold.textContent = '›';
-    fold.onclick = (e) => {
-      e.stopPropagation();
-      asideFolded.set(true);
-      foldAsides();
-    };
 
     // The gear is what the maintainer was promised, so it is a real button with its own hit
     // area and its own title. The header line toggling too is a courtesy, not the control.
@@ -7136,7 +7167,7 @@ function createPane(slot, host) {
     };
     roomView.settingsGearEl = gear;
 
-    head.append(label, fold, gear);
+    head.append(label, gear);
     head.onclick = () => toggleSettings();
     return head;
   }
@@ -7946,8 +7977,7 @@ function createPane(slot, host) {
     // shared `resizer`; both re-pin the room while they move, because both change the
     // shape of the box the reader is scrolled inside — the settings fold's own lesson,
     // one and two elements over.
-    const asideGrip = paneGrip('x', 'Panel width', "Drag to set the panel's width · double-click to reset");
-    asideGrip.classList.add('aside-grip');
+    const asideBand = buildAsideBand();
     const roomHead = section(
       'Team room (read only)',
       'Workers and the lead coordinate here. View only — talk to the lead in the composer.',
@@ -7959,7 +7989,7 @@ function createPane(slot, host) {
     tasksGrip.classList.add('tasks-grip');
 
     resizer({
-      handle: asideGrip,
+      handle: asideBand,
       axis: 'x',
       storageKey: 'foreman.asideWidth',
       min: ASIDE_MIN,
@@ -7969,10 +7999,10 @@ function createPane(slot, host) {
       // stylesheet enforces the same floor and ceiling per aside — see `.room-panel` —
       // because `--aside` is one number for the whole browser and the other pane may be
       // narrower than this one.
-      ceiling: () => (asideGrip.closest('.lead-cols')?.clientWidth ?? window.innerWidth) / remPx() - LEAD_LEFT_MIN,
+      ceiling: () => (asideBand.closest('.lead-cols')?.clientWidth ?? window.innerWidth) / remPx() - LEAD_LEFT_MIN,
       // The aside is flush with the pane's right edge, so what the pointer is asking for
       // is the distance from that edge back to the cursor.
-      measure: (e) => (asideGrip.closest('.lead-cols')?.getBoundingClientRect().right ?? window.innerWidth) - e.clientX,
+      measure: (e) => (asideBand.closest('.lead-cols')?.getBoundingClientRect().right ?? window.innerWidth) - e.clientX,
       apply: (rem) => setRootVar('--aside', rem),
       onMove: pinRoom,
     });
@@ -7981,7 +8011,7 @@ function createPane(slot, host) {
      * The room's own height — the third thing this task was asked for, and it is this
      * divider rather than a new one.
      *
-     * **Which grip owns which edge.** `asideGrip` owns the aside's left edge and answers
+     * **Which grip owns which edge.** `asideBand` owns the aside's left edge and answers
      * for its width. This one owns the aside's *only* internal horizontal boundary. The
      * room's other edge is the panel's own bottom, with nothing under it to trade against,
      * so there is no second edge for a third grip to sit on — two controls on one line is
@@ -8070,7 +8100,7 @@ function createPane(slot, host) {
      *
      * The two absolute children stay on the panel and out of the wrapper, because the
      * panel is the box they were positioned against: the "new below" pill hangs off the
-     * room's bottom edge, and `.aside-grip` sits on the panel's left border. `.tasks-grip`
+     * room's bottom edge, and `.aside-band` sits on the panel's left edge. `.tasks-grip`
      * is in the flow and goes inside, and its ceiling still reads
      * `panel.getBoundingClientRect().bottom`, which the wrapper does not move.
      */
@@ -8080,8 +8110,8 @@ function createPane(slot, host) {
     roomView.bodyEl = body;
     roomView.panelEl = panel;
 
-    // The aside's own grip goes last so it paints over everything it overhangs.
-    panel.append(body, buildAsideStrip(), hint, asideGrip);
+    // The band goes last so it paints over everything it overlaps.
+    panel.append(body, buildAsideStrip(), hint, asideBand);
 
     /*
      * The fold is applied **at build time**, from the preference, on a node that is not in
@@ -8095,6 +8125,52 @@ function createPane(slot, host) {
     body.inert = asideFolded.on;
     renderAsideStrip();
     return panel;
+  }
+
+  /**
+   * The band: the aside's left edge, doing both of the jobs that edge has.
+   *
+   * **One control, two verbs, and that is the design rather than an economy.** This edge
+   * has always been draggable — it was `.aside-grip`, a 7px invisible strip straddling the
+   * panel's border with a faint bar in the middle of it — and item 2 then put the *fold* in
+   * the SETTINGS heading, which is a different corner of the panel for a thing about the
+   * panel's edge. The maintainer looked at that and said no. So both live here: the band
+   * **is** the grip, dragging anywhere on it sets the width exactly as before, and the
+   * icon pinned at its top folds. Nothing about `resizer` changed — same storage key, same
+   * floor, same live ceiling, same double-click reset.
+   *
+   * **The icon has to stop the drag from starting under it.** `resizer` listens on the
+   * handle, and a `pointerdown` on a button inside the handle bubbles to it — so pressing
+   * the fold would begin a width drag, and the pointer capture that follows means the
+   * `click` never lands. Three events are stopped rather than one: `pointerdown` (the
+   * drag), and `dblclick` (the handle's reset-to-default, which two quick presses on the
+   * fold would otherwise fire). `click` is left to bubble to nothing — the band has no
+   * click handler — which keeps the button's own `onclick` the only thing that folds.
+   *
+   * **`paneGrip` builds it**, so the `role="separator"` / `aria-orientation` /
+   * `aria-label` spelling stays in the one place all four dividers read it from; the band's
+   * own class is what changes the shape and the paint. The title says both jobs, because a
+   * control that does two things and admits to one is worse than either.
+   */
+  function buildAsideBand() {
+    const band = paneGrip('x', 'Panel width', "Collapse the team panel · drag to resize");
+    band.classList.add('aside-band');
+
+    const fold = document.createElement('button');
+    fold.className = 'aside-band-fold';
+    fold.type = 'button';
+    fold.setAttribute('aria-label', 'Collapse the team panel');
+    fold.title = 'Collapse the team panel · drag to resize';
+    fold.append(foldIcon('collapse'));
+    fold.addEventListener('pointerdown', (e) => e.stopPropagation());
+    fold.addEventListener('dblclick', (e) => e.stopPropagation());
+    fold.onclick = () => {
+      asideFolded.set(true);
+      foldAsides();
+    };
+
+    band.append(fold);
+    return band;
   }
 
   /**
@@ -8123,9 +8199,14 @@ function createPane(slot, host) {
       foldAsides();
     };
 
+    // The band's own glyph, mirrored — the chevron points *left*, back at the transcript
+    // this panel is about to take room from. Same drawing, from `foldIcon`, so the control
+    // that shut this panel and the control that reopens it cannot come to disagree about
+    // what a fold looks like. It sits at the top of the strip, where the band's icon was,
+    // so the eye goes back to the same corner.
     const chev = document.createElement('span');
     chev.className = 'fold-strip-chev';
-    chev.textContent = '‹';
+    chev.append(foldIcon('expand'));
 
     // The rail's own chip stood on end. Both class pairs, deliberately: `.fold-strip-label
     // .is-role` is the vertical box, `.role-chip.is-<role>` is the rail's spelling of what
