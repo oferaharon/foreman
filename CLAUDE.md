@@ -1459,6 +1459,24 @@ crash and starts the job straight back up, so `--takeover`'s SIGTERM is a fight 
 The sweep runs *before* the port refusal, deliberately — the orphan may be the thing holding
 the port, and refusing there would leave the very plist the step exists to remove.
 
+**Homebrew renamed its own launchd label prefix, so the brew plist has two names and the
+panel carries both.** `brew services` used to write `homebrew.mxcl.<formula>.plist`; it now
+writes `sh.brew.<formula>.plist` — measured on 6.0.21 while the v0.4.0 formula was being
+proved, and read out of the installed source on 6.0.22, where `canonical_plist_name` is the
+new spelling and `legacy_plist_name` the old. `BREW_LAUNCHD_LABEL` was one hardcoded string
+of the old shape, so on a current Homebrew `scripts/backup-state.sh` went looking for a file
+that does not exist and skipped it silently: the same class of bug the label fix was for in
+the first place, reopened by somebody else's rename. `BREW_LAUNCHD_LABELS` is now a **list of
+two, newest first**, and `existingBrewPlists` (`server/homebrew.js`) answers whichever of
+them is really in `~/Library/LaunchAgents` — none, one, or **both**, since an upgrade can
+write the new plist and leave the old one behind. A list rather than a detector because there
+is nothing to detect it from except the file's own existence: the panel is not installed by
+Homebrew's code, and `brew --version` would be a version number standing in for a fact on
+disk — an install predating the rename keeps its old plist through every upgrade. Homebrew
+reaches the same answer, its `plist_names` being `[canonical, legacy]`. Swapping one
+hardcoded name for the other would only have moved the bug onto every older install; the
+backup now captures every plist that is there, each under its own basename in the archive.
+
 **The state dir is resolved on four rungs, and the third is the only place the old spelling
 survives in this code.** `$FOREMAN_STATE_DIR` → `~/.foreman` if it exists → the directory an
 older build used if *that* exists → `~/.foreman`. It is a **path**, not a name anything reads

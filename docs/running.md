@@ -291,13 +291,20 @@ same launchd underneath, different mechanism, and three things about it are wort
 before you reach for a command that doesn't apply:
 
 - **`brew services restart foreman-panel` is both restart and reinstall.** It's `stop` then
-  `start`, and `start` regenerates `~/Library/LaunchAgents/homebrew.mxcl.foreman-panel.plist`
-  from the formula — the one command covers what `restart-panel` and `install-agent` are two
-  separate commands for in a checkout.
+  `start`, and `start` regenerates the plist under `~/Library/LaunchAgents` from the formula
+  — the one command covers what `restart-panel` and `install-agent` are two separate
+  commands for in a checkout.
+- **The plist's name depends on how old your Homebrew is, and both names are live.**
+  Current Homebrew writes `sh.brew.foreman-panel.plist`; before it renamed its own label
+  prefix it wrote `homebrew.mxcl.foreman-panel.plist`, and an install that predates the
+  rename keeps that file until the service is next `start`ed. A Mac can even have both, if
+  an upgrade wrote the new one and left the old one behind. Nothing distinguishes them
+  except which file is there, so anything here that has to find the plist —
+  `scripts/backup-state.sh` — tries both and takes whatever exists.
 - **A non-default port or state dir goes in an `.env` file, not the plist.**
   `~/.homebrew/services/foreman-panel.env` (`KEY=value` per line, mode `600` — Homebrew
-  skips a group- or world-writable file and only warns), not
-  `~/Library/LaunchAgents/homebrew.mxcl.foreman-panel.plist`.
+  skips a group- or world-writable file and only warns), not the plist under
+  `~/Library/LaunchAgents`.
 - **`brew upgrade` does not restart the service.** The new version lands on disk; the old
   process keeps running until you `brew services restart foreman-panel` yourself.
 
