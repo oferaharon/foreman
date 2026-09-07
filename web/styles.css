@@ -1367,13 +1367,25 @@ body.row-dragging * { cursor: row-resize !important; }
  * bounds; what changed is that the edge is now *visible* and carries the fold. Four things
  * about that:
  *
- * **It is inside the panel, not overhanging it.** A grip could sit on the border because
- * it was transparent; a painted band on `left: -3px` would put three pixels of `--band`
- * over the transcript. So `left: 0`, and `.room-panel-body` is padded by the same
- * `--band-w` to keep the content out from under it. The panel's own `border-left` is still
- * the boundary between transcript and aside, and the band's `border-right` is the boundary
- * between the band and the panel's content — two rules, two different edges, neither
- * doubled.
+ * **At rest it is inside the panel, not overhanging it.** A grip could sit on the border
+ * because it was transparent; a painted hairline at `left: -3px` would put its own pixels
+ * over the transcript before anyone had asked for anything. So at rest `left: 0`, and
+ * `.room-panel-body` is padded by the band's *resting* width, `--band-w-rest`, to keep the
+ * content off it. The panel's own `border-left` is still the boundary between transcript
+ * and aside, and the band's `border-right` is the boundary between the band and the panel's
+ * content — two rules, two different edges, neither doubled.
+ *
+ * **On hover it overhangs the other way.** The band first shipped widening *into* the
+ * aside — `.room-panel-body` reserved a full `--band-w` of padding at rest so the hover
+ * width had somewhere to grow — and the maintainer reversed that on seeing it: the gap
+ * between the hairline and the `TEAM ROOM` heading's own darker fill read as a notch,
+ * invisible on the other two headings only because they share the aside's plain
+ * background. So the reserved padding is gone (the body now sits flush against the
+ * hairline) and the hover width grows *left* instead: `left` moves negative by exactly what
+ * `width` gains, which pins the band's own right edge where the hairline left it and sends
+ * the new pixels over `.lead-left` rather than into the aside. `.lead-left` never changes
+ * width for this — overlap, not push — which is why the band needs a `z-index` clear of
+ * everything in that pane, transcript scrollbar included.
  *
  * **It is `flex-direction: column`, not centred.** `.pane-grip` centres its one mark; this
  * one pins an icon at the top, level with the SETTINGS heading beside it, and the drag
@@ -1383,17 +1395,14 @@ body.row-dragging * { cursor: row-resize !important; }
  * the time; the maintainer re-viewed the mock-ups and picked the variant that is a rule at
  * rest and a column when you reach for it, so the aside's edge costs a hairline of ink
  * while nobody is pointing at it. `--band-w-rest` is the resting width and `--band-w` is
- * still the hovered one, which matters because **nothing else in the file had to change**:
- * `.room-panel-body` is padded by one `--band-w` exactly as before, so the band widens into
- * a gap that was already empty and the panel's content never moves. Neither does the
- * transcript beside it — the panel's own width is `--aside` and the band lives inside it,
- * so there is no push to accept and none is taken.
+ * still the hovered one — both `width` and `left` read them, so the two tokens still agree
+ * on how wide the column gets even though neither one is padding any more.
  *
- * **The width transition may stand permanently, unlike the panel's.** `.room-panel` gates
- * its `width` transition behind `is-folding` because the band writes `--aside` on every
- * pointer move and an eased panel would lag the cursor by a fifth of a second. The band's
- * own width is written by nothing but these rules — a drag changes the panel, never the
- * band — so there is no drag for it to lag.
+ * **The width and left transitions may stand permanently, unlike the panel's.**
+ * `.room-panel` gates its `width` transition behind `is-folding` because the band writes
+ * `--aside` on every pointer move and an eased panel would lag the cursor by a fifth of a
+ * second. The band's own `width` and `left` are written by nothing but these rules — a drag
+ * changes the panel, never the band — so there is no drag for either to lag.
  *
  * **`is-dragging` holds it open.** A drag begins with the cursor on the band, so `:hover`
  * would normally keep it wide; a pointer capture is not a promise about hover, and a target
@@ -1415,12 +1424,16 @@ body.row-dragging * { cursor: row-resize !important; }
 .pane-grip.aside-band {
   left: 0;
   width: var(--band-w-rest);
+  /* Clear of everything `.lead-left` can draw — its transcript, its composer, its own
+     scrollbar — none of which carries a z-index of its own, so this only has to beat the
+     handful of overlay z-indexes elsewhere in this file (5 is already one of them). */
+  z-index: 5;
   flex-direction: column;
   justify-content: flex-start;
   padding-top: 0.45rem;
   background: var(--band);
   border-right: 1px solid var(--rule);
-  transition: width 160ms ease, background 120ms ease;
+  transition: width 160ms ease, left 160ms ease, background 120ms ease;
 }
 /* `:focus-within` is the whole of the keyboard story, and it is why the fold below needs no
    `tabindex` bookkeeping: tabbing to a button inside the band *is* the thing that opens the
@@ -1429,6 +1442,10 @@ body.row-dragging * { cursor: row-resize !important; }
 .pane-grip.aside-band:hover,
 .pane-grip.aside-band:focus-within,
 .pane-grip.aside-band.is-dragging {
+  /* The right edge is `left + width`; holding it at `--band-w-rest` while `width` grows to
+     `--band-w` is what sends the new pixels left, over `.lead-left`, instead of right into
+     the aside's own content. */
+  left: calc(var(--band-w-rest) - var(--band-w));
   width: var(--band-w);
   background: var(--accent-soft);
 }
@@ -1453,8 +1470,10 @@ body.row-dragging * { cursor: row-resize !important; }
  * it is exactly the job the other three grips' faint bars do, and it is drawn for the same
  * reason they are.
  *
- * It has no opacity of its own to animate any more; it rides the band's width, which slides
- * it the six pixels from the hairline's middle to the column's as the band opens.
+ * It has no opacity of its own to animate any more; it rides the band's own box, which is
+ * both wider and shifted left on open — `left: 50%` re-centres in whatever width and
+ * position the box currently has, so the mark still tracks the column's own middle as both
+ * numbers move, sliding left with the band rather than staying where the hairline had it.
  */
 .aside-band::after {
   position: absolute;
@@ -1668,9 +1687,17 @@ body.row-dragging * { cursor: row-resize !important; }
  * 16px and pushed 178px *below* this panel's own bottom edge — fifteen entries in it, none
  * on screen, and no scrollbar anywhere to say so. The folds are `flex: 0 0 auto` and could
  * not give, `.room-list` was `min-height: 0` and gave everything. The floor below is the
- * first half of the answer; this is the second, and it is the honest one: when the floors
- * genuinely do not fit, the aside scrolls and you can see that it does. */
-.room-panel { overflow-y: auto; }
+ * first half of the answer; the vertical scroll this bug wanted now lives on
+ * `.room-panel-body` instead (below it in this file) — when the floors genuinely do not
+ * fit, that box scrolls and you can see that it does.
+ *
+ * So this panel's own overflow is `visible`, not `auto`: the maintainer wants the band's
+ * hover width to overhang *left*, over `.lead-left`, and `overflow-y: auto` alone used to
+ * compute `overflow-x` to `auto` as well — a scroll container's negative-going overflow is
+ * unreachable in LTR, so that clipped the overhang exactly where it needed to show.
+ * `.room-panel.is-strip` / `.is-folding` still win back `overflow: hidden` below, both more
+ * specific and later in the file, so the fold's own clip is untouched. */
+.room-panel { overflow: visible; }
 
 .room-list {
   /* The room takes whatever the folds and the tasks block above it leave — until the
@@ -5733,7 +5760,8 @@ body.row-dragging * { cursor: row-resize !important; }
    * The aside's scroll moved one box in, and the visible behaviour is unchanged: when the
    * floors genuinely do not fit, this scrolls and you can see that it does — which is the
    * honest half of the fix that `.room-panel { overflow-y: auto }` two sections up was
-   * added for. The panel keeps that rule and simply stops needing it.
+   * added for. The panel's own rule is `overflow: visible` now, for the band's hover
+   * overhang; this box is what actually does the scrolling it used to do.
    *
    * It has to be here rather than left on the panel. `flex: 1` with `min-height: 0` makes
    * this box exactly the panel's height, so the panel never overflows and would never
@@ -5746,11 +5774,15 @@ body.row-dragging * { cursor: row-resize !important; }
    */
   overflow-y: auto;
   /* The band is absolute at the panel's left edge, so nothing in the flow knows it is
-     there. One padding, the band's own width from the same token, is what keeps the
-     settings row, the task list and the room off it. Inside the frozen width above rather
-     than beside it, because `box-sizing` is `border-box` for everything in this file — so
-     the freeze still measures and pins one number. */
-  padding-left: var(--band-w);
+     there. One padding, the band's *resting* width, is what keeps the settings row, the
+     task list and the room off the hairline. It used to be the full `--band-w` — room
+     reserved for the hovered width too — and that reserved gap is exactly what read as a
+     notch beside the `TEAM ROOM` heading's own darker fill; the hover width now overhangs
+     `.lead-left` instead (see `.pane-grip.aside-band`'s hover rule), so nothing here needs
+     to make room for it. Inside the frozen width above rather than beside it, because
+     `box-sizing` is `border-box` for everything in this file — so the freeze still measures
+     and pins one number. */
+  padding-left: var(--band-w-rest);
 }
 
 /*

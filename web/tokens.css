@@ -89,9 +89,9 @@
   /* The team aside's collapse band: the slim vertical strip down its left edge that both
      folds the panel and drags its width. Two properties because the band is two facts —
      what it is painted and how wide it is — and the width is spelled here for `--strip`'s
-     own reason: it is read in two places (the band itself, and the body's left padding that
-     keeps content out from under it), and a layout constant that lives in two places is one
-     that comes apart the first time somebody nudges one of them.
+     own reason: it is read in more than one place (the band itself, and the calc that pulls
+     its hover state left by the gap between the two widths), and a layout constant that
+     lives in two places is one that comes apart the first time somebody nudges one of them.
 
      7% rather than a reuse of `--shelf` (4%) or `--band-head` (8%). The aside *is*
      `--shelf`, so a band painted with it would be a 20px column of nothing; one step darker
@@ -106,9 +106,13 @@
   --band-w: 1.25rem;
 
   /* …and what it is at rest, because the band is now a hairline until the cursor is on it.
-     `--band-w` is the *hovered* width and stays the number everything else reads: the body's
-     left padding is still one `--band-w`, so the content sits where it always did and the
-     band widens into the gap that padding already leaves rather than pushing anything.
+     `--band-w` is still the hovered width; the body's own left padding now reads
+     `--band-w-rest` instead, so the content sits flush against the hairline and the hover
+     width overhangs `.lead-left` — the transcript's own column — rather than growing into a
+     gap reserved for it here. That reserved gap was the shipped design and was reversed on
+     the maintainer's own word: it read as a notch beside the `TEAM ROOM` heading's darker
+     fill, invisible on the aside's other two headings only because they share its plain
+     background.
 
      0.45rem — a shade over seven pixels — is not a taste pick either. It is the width of
      `.pane-grip.grip-col`, the invisible strip this edge was before it was painted, so the
