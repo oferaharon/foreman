@@ -185,3 +185,85 @@ test('the three names are the server\'s own, and review is open on both sides', 
     assert.equal(CLOSED_TASK_STATES.has('review'), false, 'the filter must never take review');
   });
 });
+
+/*
+ * The two fold flags — the lead's team aside, and a group room's pane.
+ *
+ * Driven through the same three states as `ghostSend` above, because the interesting half
+ * is the *default* rather than the storage: `flag()` answers `false` for nothing-stored and
+ * `false` for a store that throws, and both of those have to mean **expanded**. A panel
+ * folded shut by a preference nobody set, in a window that cannot remember being told to
+ * unfold it, would be a panel that had quietly deleted a column.
+ */
+
+test('both folds are off — expanded — with nothing stored', async () => {
+  await withStorage(fakeStore(), ({ asideFolded, roomFolded }) => {
+    assert.equal(asideFolded.on, false);
+    assert.equal(roomFolded.on, false);
+  });
+});
+
+test('the fold keys are named once, and are the names the browser stores', async () => {
+  const store = fakeStore();
+  await withStorage(store, ({ asideFolded, roomFolded, ASIDE_FOLDED_KEY, ROOM_FOLDED_KEY }) => {
+    assert.equal(ASIDE_FOLDED_KEY, 'foreman.asideFolded');
+    assert.equal(ROOM_FOLDED_KEY, 'foreman.roomFolded');
+    assert.equal(asideFolded.set(true), true);
+    assert.equal(store.map.get(ASIDE_FOLDED_KEY), '1');
+    assert.equal(roomFolded.set(true), true);
+    assert.equal(store.map.get(ROOM_FOLDED_KEY), '1');
+    asideFolded.set(false);
+    assert.equal(store.map.get('foreman.asideFolded'), '0');
+  });
+});
+
+test('a browser that has been told so comes back folded', async () => {
+  await withStorage(
+    fakeStore({ 'foreman.asideFolded': '1', 'foreman.roomFolded': '1' }),
+    ({ asideFolded, roomFolded }) => {
+      assert.equal(asideFolded.on, true);
+      assert.equal(roomFolded.on, true);
+    },
+  );
+});
+
+test('the two panels fold independently, and neither key answers for the other', async () => {
+  // One key would make "both open, one, or neither" impossible to express, which is the
+  // whole shape of the feature.
+  await withStorage(fakeStore({ 'foreman.roomFolded': '1' }), ({ asideFolded, roomFolded, ghostSend, hideFinished }) => {
+    assert.equal(roomFolded.on, true);
+    assert.equal(asideFolded.on, false);
+    assert.equal(ghostSend.on, false);
+    assert.equal(hideFinished.on, false, 'four keys, four answers');
+  });
+});
+
+test('a store that throws leaves both panels expanded and the page standing', async () => {
+  await withStorage(deniedStore, ({ asideFolded, roomFolded }) => {
+    // The read is the one that used to take a page down. It must answer, not throw — and
+    // the answer it gives has to be the safe one, because this window cannot be told twice.
+    assert.equal(asideFolded.on, false);
+    assert.equal(roomFolded.on, false);
+    assert.equal(asideFolded.set(true), true, 'this visit still behaves');
+    assert.equal(roomFolded.set(true), true);
+  });
+});
+
+test('no localStorage at all leaves both expanded, not a crash', async () => {
+  await withStorage(undefined, ({ asideFolded, roomFolded }) => {
+    assert.equal(asideFolded.on, false);
+    assert.equal(roomFolded.on, false);
+    assert.doesNotThrow(() => asideFolded.set(true));
+    assert.doesNotThrow(() => roomFolded.set(true));
+  });
+});
+
+test('anything other than the stored "1" is expanded', async () => {
+  await withStorage(
+    fakeStore({ 'foreman.asideFolded': 'true', 'foreman.roomFolded': 'yes' }),
+    ({ asideFolded, roomFolded }) => {
+      assert.equal(asideFolded.on, false);
+      assert.equal(roomFolded.on, false);
+    },
+  );
+});

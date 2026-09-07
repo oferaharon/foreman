@@ -41,6 +41,19 @@
      width is ever stored; the second takes what is left. */
   --pane-a: 50%;
 
+  /* The folded width of both side panels — the lead's team aside and a group room's pane —
+     when either is closed down to a vertical strip. Spelled **once**, here, for the reason
+     `--rail` / `--aside` / `--pane-a` are: a default that lives in two places is a default
+     that comes apart. Both halves of the fold read this one line — the stylesheet through
+     `var(--strip)`, and `foldTracks` (`web/panel-fold.js`) through the `stripW` its caller
+     measures off a node wearing it — so the CSS and the animation's arithmetic cannot
+     disagree about how wide a closed panel is.
+
+     2.5rem is a chevron, a rotated name and a badge with room to breathe, and it is
+     deliberately not narrower: a strip has to read as a *closed panel* rather than as a
+     seam, or nobody finds the thing that reopens it. */
+  --strip: 2.5rem;
+
   /* An open group's block, lifted off the rail. Mixed rather than hard-coded so it tracks
      both themes from one line — 4% of the ink colour darkens white and lightens the dark
      surface, which is "slightly different" either way round. Deliberately not

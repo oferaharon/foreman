@@ -68,6 +68,8 @@ function flag(key) {
 /** The keys. Named once, exported so a test can name the same ones. */
 export const GHOST_SEND_KEY = 'foreman.ghostSend';
 export const HIDE_FINISHED_KEY = 'foreman.hideFinished';
+export const ASIDE_FOLDED_KEY = 'foreman.asideFolded';
+export const ROOM_FOLDED_KEY = 'foreman.roomFolded';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -89,6 +91,41 @@ export const ghostSend = flag(GHOST_SEND_KEY);
  * looking at.
  */
 export const hideFinished = flag(HIDE_FINISHED_KEY);
+
+/**
+ * Whether the lead's team aside is folded down to a strip.
+ *
+ * Off — expanded — by default, and the default is doing two jobs at once. It is what a
+ * browser that has never been told anything answers, and it is what a browser whose storage
+ * is blocked answers, because `flag()`'s guard returns `false` from both. Both are the right
+ * way round here: a panel folded shut by a preference nobody set, in a window that cannot
+ * remember being told to unfold it, would be a panel that had quietly deleted a column.
+ *
+ * **One answer for the whole browser, not one per pane**, which is `hideFinished`'s own
+ * shape and `--aside`'s. The cost is stated rather than hidden: with two leads open in
+ * split view, folding one aside folds the other. The alternative is two answers to a
+ * question about a browser preference, keyed on a slot that changes what it holds — and
+ * per-pane state in module scope is the thing CLAUDE.md says will work perfectly until
+ * somebody opens a second pane.
+ *
+ * A fold hides nothing. A folded panel still counts what arrives in it and still says so;
+ * that is the feature's own rule, not this flag's, and it is why a remembered fold is
+ * affordable at all.
+ */
+export const asideFolded = flag(ASIDE_FOLDED_KEY);
+
+/**
+ * Whether a group room's pane is folded down to a strip.
+ *
+ * The same shape and the same default as `asideFolded`, and a second key rather than one
+ * shared flag because the two panels fold **independently** — you can have both open, one,
+ * or neither, and a single key would make that impossible to express.
+ *
+ * What it does *not* decide: whether opening a room opens it folded. A room slides in open
+ * every time it is opened; this remembers only what a **reload** should come back to, when
+ * the room pane is restored from `state.opened`.
+ */
+export const roomFolded = flag(ROOM_FOLDED_KEY);
 
 /**
  * What `hideFinished` hides: exactly the three closed states of `TASK_STATES`
