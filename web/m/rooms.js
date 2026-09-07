@@ -731,12 +731,24 @@ function renderLog() {
   renderComposer();
 }
 
+/**
+ * The sentence an empty log stands under, and there are three of them because there are
+ * three ways to be empty.
+ *
+ * The archived one is not decoration: the ordinary sentence ends *"or anything you type
+ * below"*, and an archived room has no box below — caught on the bench, drawing an offer
+ * over a composer that had correctly refused to exist.
+ */
+export function quietText(room, { answered = true } = {}) {
+  if (answered && !room) return 'There is no room with that id. It may have been opened from a stale link.';
+  if (room?.archivedAt) return 'Nothing was said in here before it was archived, and nothing more can be.';
+  return 'Nothing said in here yet. Anything a member posts — or anything you type below — is typed into every other member’s terminal.';
+}
+
 function quiet() {
   const box = document.createElement('div');
   box.className = 'm-room-quiet';
-  box.textContent = view.answered && !view.room
-    ? 'There is no room with that id. It may have been opened from a stale link.'
-    : 'Nothing said in here yet. Anything a member posts — or anything you type below — is typed into every other member’s terminal.';
+  box.textContent = quietText(view.room, { answered: view.answered });
   return box;
 }
 

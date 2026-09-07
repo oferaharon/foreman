@@ -9,6 +9,7 @@ import {
   composerRefusal,
   memberNames,
   memberStrip,
+  quietText,
   roomsListView,
   roomsSig,
 } from '../web/m/rooms.js';
@@ -230,6 +231,21 @@ test('an archived room gets no composer, and the sentence says why', () => {
   assert.match(refusal, /archived/);
   assert.match(refusal, /still readable/);
   assert.match(refusal, /the room/, 'the room is named');
+});
+
+test('an empty archived room does not offer the box it has not got', () => {
+  /*
+   * Found on the bench. The ordinary empty-log sentence ends *"or anything you type below"*
+   * — and an archived room has no box below, because `composerRefusal` has correctly taken
+   * it away. Two functions describing one screen, disagreeing about whether it can be typed
+   * into.
+   */
+  assert.match(quietText(room()), /anything you type below/);
+  assert.doesNotMatch(quietText(room({ archivedAt: 5 })), /type below/);
+  assert.match(quietText(room({ archivedAt: 5 })), /nothing more can be/);
+  assert.match(quietText(null, { answered: true }), /no room with that id/);
+  // Before the server has answered, nothing is claimed either way.
+  assert.match(quietText(null, { answered: false }), /Nothing said in here yet/);
 });
 
 test('an id that names nothing is a third answer, not an empty room', () => {
