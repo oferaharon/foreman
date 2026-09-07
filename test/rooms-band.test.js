@@ -532,6 +532,11 @@ test('both of the band’s ways out reach a real pane', () => {
   const open = fn('openGroupRoom');
   assert.ok(!/console\.info/.test(open), 'the hook is built — a row must not merely log');
   assert.match(open, /target\.openGroup\(id\);/);
+  // …and a row for a room that is on screen but **folded** opens the strip rather than
+  // doing nothing, which is what the bare early return did before there was a fold. See
+  // `revealOpenRoom` — hoisted rather than written inline, because a nested `}` at this
+  // indent is where `fn`'s own walk above stops.
+  assert.match(open, /return revealOpenRoom\(\);/);
   assert.match(fn('renderRoomsBand'), /onOpen: openGroupRoom/);
   assert.match(code, /el\.roomsAdd\.onclick = openCreateRoom;/);
 });

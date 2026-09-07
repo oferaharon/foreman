@@ -721,15 +721,24 @@ test('every way out of a room gives the subscription back', () => {
 });
 
 test('opening a room marks it read, and so does a line arriving at the bottom', () => {
-  assert.match(fn('openGroup'), /send\(\{ type: 'markGroupRoomRead', roomId: id, slot \}\)/);
+  // Through `markGroupSeen` rather than a second `send` of its own, and that is the fold's
+  // doing: the mark has one more condition on it now — not while the pane is folded — and a
+  // direct send here would be a second spelling that has never heard of it. A **reload**
+  // comes back through `adopt` straight into `openGroup`, and it comes back folded if it was
+  // folded, so this is a live path rather than a hypothetical one.
+  const open = fn('openGroup');
+  assert.match(open, /paintFolds\(\);\n[\s\S]{0,400}markGroupSeen\(\);/);
   assert.match(code, /if \(view\.groupFollow !== false\) markGroupSeen\(\);/);
-  // …and only ever from the pane actually holding it.
+  // …and only ever from the pane actually holding it, and only while it can be seen.
   assert.match(fn('markGroupSeen'), /if \(view\.kind !== 'group-room' \|\| !view\.groupRoom\?\.id\) return;/);
+  assert.match(fn('markGroupSeen'), /if \(host\.classList\.contains\('is-strip'\)\) return;/);
 });
 
 test('a room replaces whatever non-session pane is open, and never takes focus', () => {
   const open = app.match(/\nfunction openGroupRoom\(id\) \{[\s\S]*?\n\}/)[0];
-  assert.match(open, /if \(panes\.some\(\(p\) => p\.groupRoomId\(\) === id\)\) return;/);
+  // The early return grew one branch with the fold — a room on screen but shut opens its
+  // door — and `revealOpenRoom` is where that lives.
+  assert.match(open, /if \(panes\.some\(\(p\) => p\.groupRoomId\(\) === id\)\) return revealOpenRoom\(\);/);
   assert.match(open, /const holder = panes\.find\(\(p\) => p\.kind\(\) !== 'session'\);/);
   assert.match(open, /const keep = sessionPane\(\);\n  if \(keep\) setFocus\(keep\.slot\);/);
   assert.match(open, /openSplit\(\{ adopt: false, focus: false \}\)/);

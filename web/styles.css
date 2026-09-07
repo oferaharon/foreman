@@ -5737,6 +5737,200 @@ body.row-dragging * { cursor: row-resize !important; }
 .room-panel.is-strip > .aside-band { display: none; }
 .room-panel.is-strip > .room-panel-body { padding-left: 0; }
 
+/* ------------------------------------------- a room's slot, folded --- */
+
+/*
+ * The second host for item 1's strip, and the geometry is nothing like the first one's. The
+ * aside is a box inside a pane and folds by having its own width pinned; a room is a **grid
+ * track** of `.main` and folds by the frame's track list changing under it.
+ *
+ * **Classes, never `--pane-a`.** `applyResizers()` re-applies the stored split width on
+ * every `window.resize`, so a fold expressed through the variable the split resizer owns
+ * would be silently undone by a window drag — and the dragged width would be gone with it.
+ * These two beat `.app.split .main` on specificity and leave `--pane-a` exactly as the
+ * reader last dropped it, which is why `foreman.paneWidth` is untouched by a fold.
+ *
+ * **A room can be in slot `a`.** `openGroupRoom` puts it in the pane you are *not* focused
+ * in, which is the first column half the time, so both directions are real and neither is
+ * the special case.
+ */
+.app.split.fold-a .main { grid-template-columns: var(--strip) 1fr; }
+.app.split.fold-b .main { grid-template-columns: 1fr var(--strip); }
+
+/*
+ * The 3px hover nudge, which this host has to carry on the **track** because the track is
+ * what decides how wide the column is. The strip inside it grows with it, so the pair moves
+ * as one thing and the nudge reads as the column leaning towards the cursor rather than as
+ * a node overhanging its own column.
+ *
+ * Scoped to a *folded room's own* strip by a direct-child chain, and that is not
+ * decoration: a lead's aside in the other pane draws a `.fold-strip` too, and an unscoped
+ * `:has(.fold-strip:hover)` would nudge this room's track every time the cursor crossed
+ * that one. While the fold is in flight `.main` carries an inline track list, which beats
+ * both of these — so a hover mid-animation cannot fight it.
+ */
+.app.split.fold-a .main:has(> .pane.is-strip > .fold-strip:hover) {
+  grid-template-columns: calc(var(--strip) + 3px) 1fr;
+}
+.app.split.fold-b .main:has(> .pane.is-strip > .fold-strip:hover) {
+  grid-template-columns: 1fr calc(var(--strip) + 3px);
+}
+.pane.is-strip > .fold-strip:hover { width: calc(var(--strip) + 3px); }
+
+/*
+ * The fold itself: 200ms ease, the aside's number one panel over and the settings fold's
+ * before that, because a second duration in the same frame would read as a second
+ * mechanism.
+ *
+ * Class-gated, and that is the rule rather than the tidiness: the split grip writes
+ * `--pane-a` on every pointer move, and a transition standing on the track list permanently
+ * would make a drag lag the cursor by a fifth of a second. `is-folding` is added around the
+ * animation and taken off at its end.
+ *
+ * `1fr` does not interpolate with a length, so the animation itself never runs between these
+ * two declarative pairs — `applyRoomFold` puts an explicit px pair inline for the length of
+ * the fold and drops it at the end. This rule is what makes that pair animate.
+ */
+.app.is-folding .main { transition: grid-template-columns 200ms ease; }
+
+/* A handle on a boundary that will not move reads as broken — `split-fixed` says so at the
+   top of this file and this is the same refusal for a different reason. Hidden while the
+   fold is in flight too, or the grip would sit at `calc(var(--pane-a) - 3px)` while the
+   boundary it marks slides away from it. Back, and draggable, the moment the room is. */
+.app.split.fold-a .split-grip,
+.app.split.fold-b .split-grip,
+.app.split.is-folding .split-grip {
+  display: none;
+}
+
+/* The wrapper around everything in the flow — the head, the room and the composer. It is
+   what the three of them used to be as direct children of `.pane`, byte for byte: the same
+   column flex, growing into the pane and shrinking to nothing. It exists so the fold has one
+   box to pin and clip rather than three. */
+.group-pane-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * Nothing may re-wrap on the way through.
+ *
+ * `renderGroup`'s clamp pass caches `scrollHeight > clientHeight` per entry and keeps
+ * running while the pane is folded, because `isConnected` is still true — a measurement
+ * taken at 2.5rem is wrong and it is cached onto the DOM. So the flow is pinned to the
+ * pane's measured expanded width for the length of the fold and while it is shut, and the
+ * pane clips it: the content keeps the width it was measured at and slides out of view,
+ * rather than reflowing through forty intermediate widths and settling on numbers taken at
+ * 2.5rem. The remeasure on expand is the backstop behind that and is not optional.
+ *
+ * The fallback in the `var()` is for one frame that never paints: a pane put back folded by
+ * a reload has never been measured, and `100%` is the honest guess for that gap.
+ */
+.pane.is-strip,
+.pane.is-folding {
+  overflow: hidden;
+}
+
+.pane.is-strip > .group-pane-body,
+.pane.is-folding > .group-pane-body {
+  width: var(--room-frozen, 100%);
+}
+
+/*
+ * The cross-fade. The frame's track is what animates; the two things inside the pane swap by
+ * opacity, so neither ever draws at a width it was not built for.
+ *
+ * The strip is absolute at the pane's own left edge and `var(--strip)` wide from the first
+ * frame — pinned rather than filling, so its chevron and its rotated name are in their final
+ * position before the animation starts and do not slide across the column as it closes.
+ * Letting it take the animating box's width is the thing that looks like a reveal instead of
+ * a fold.
+ *
+ * `:has()` rather than a class on the host, so the positioning follows the strip's actual
+ * presence: only a pane that is holding a room has one, and `.pane` is shared with every
+ * session pane — giving *that* a position would re-anchor anything else ever absolutely
+ * placed in one, which the room's own `N new below` pill was bitten by once already.
+ */
+.pane:has(> .fold-strip) { position: relative; }
+
+.pane > .fold-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--strip);
+  height: auto;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  /* Item 1's own `transition: width 120ms ease` is for a strip that carries the hover nudge
+     itself. This host does not — the *track* nudges, and the strip follows it in the same
+     recalculation — so that transition has nothing left to animate here and one thing it
+     would: the 1px the strip's own border is worth, easing at the end of every fold. The
+     fade below is added back under `is-folding`. */
+  transition: none;
+}
+
+.pane.is-strip > .fold-strip {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pane.is-strip > .group-pane-body { opacity: 0; }
+
+/* The fade is class-gated for the reason the track's own transition is: a pane put back
+   folded by a reload, or one that has finished, must not carry a live transition into a
+   grip drag. Both directions get it, because `is-folding` is on for both. */
+.pane.is-folding > .fold-strip,
+.pane.is-folding > .group-pane-body {
+  transition: opacity 160ms ease;
+}
+
+/* The seam, drawn once. `.pane` carries a transparent left border and the *second* pane in a
+   split colours it, so a room folded into slot `b` would otherwise show the pane's rule and
+   the strip's own 1px hard against each other. The strip keeps its rule in slot `a`, where
+   the pane has none to lend it. */
+.app.split .pane + .pane > .fold-strip { border-left: 0; }
+
+/*
+ * The collapse control, first in the room header's cluster. It borrows `.ghost-btn` whole —
+ * the same box, the same hit area and the same hover as `archive` and `close` beside it —
+ * and holds `foldIcon('collapse')` instead of a word.
+ *
+ * The two size rules are this host's rather than the icon's, and that is `foldIcon`'s own
+ * arrangement: it sets no width, no height and no colour, so a caller that wants a different
+ * ink or a different box says so in CSS. `.fold-strip-chev svg` is the same pair one column
+ * over, which is why the strip's own mark needs nothing here.
+ *
+ * The padding is trimmed and `line-height` zeroed so a 0.95rem drawing sits in a box the
+ * same height as the two words beside it; a mark that made its own button taller would put a
+ * step in a row of three.
+ */
+.room-fold-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* `align-self`, not a padding computed to match. `.head-meta` centres its items, so a
+     button holding a 0.95rem drawing comes out shorter than the two holding 0.68rem
+     uppercase words — measured, 24px against 27 — and a step in a row of three reads as one
+     of them being broken. Stretching takes the row's own height, which stays right if the
+     words beside it ever change size. */
+  align-self: stretch;
+  line-height: 0;
+  padding: 0 0.4rem;
+  color: var(--ink-muted);
+}
+
+.room-fold-btn svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.room-fold-btn:hover { color: var(--accent); }
+
 /*
  * Reduced motion, for the whole feature and not only for what this file already draws.
  *
@@ -5759,6 +5953,11 @@ body.row-dragging * { cursor: row-resize !important; }
      rule and one selector short of enforcing it. */
   .room-panel.is-folding > .fold-strip,
   .room-panel.is-folding > .room-panel-body,
+  /* …and the room slot's, for the same reason one section down. With motion off the frame's
+     track list snaps correctly and these two would go on fading for 160ms — the block being
+     right about the rule and two selectors short of enforcing it. */
+  .pane.is-folding > .fold-strip,
+  .pane.is-folding > .group-pane-body,
   .app.is-folding .main {
     transition: none;
   }

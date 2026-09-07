@@ -6,11 +6,24 @@ import { step, alertText } from './notify.js';
 // the same keys, and two spellings of one setting is a setting that appears to work — see
 // that file's header.
 import { asideFolded, ghostSend, hideFinished, isFinishedState } from './prefs.js';
+// …and the room slot's own fold flag, on a line of its own rather than folded into the one
+// above. `test/aside-fold.test.js` pins that import verbatim, and this item may not edit the
+// aside's test — two lines from one module is the cheap half of that trade, and collapsing
+// them is a one-line change for whoever touches these imports next.
+import { roomFolded } from './prefs.js';
 // What a closed side panel has room to say. The ninth pure module under `web/`, shipped by
 // item 1 of this feature with nothing wired to it; the lead's aside is the first half to
 // wear it. `asideStripFacts` reads the same `s.team` object `teamLine` reads, which is what
 // stops the strip and the rail row disagreeing about a team a reader can see twice at once.
+// `roomStripFacts` is the same trade one panel over, and `foldTracks` is the split fold's
+// own arithmetic — the px pair a room slot animates between, kept out of here so a node
+// test can hold it.
 import { asideStripFacts } from './panel-fold.js';
+// The room slot's two, on their own line for the reason the line above `roomFolded` gives.
+// `roomStripFacts` is `asideStripFacts`' opposite number one panel over, and `foldTracks` is
+// the split fold's arithmetic — the px pair a room slot animates between, kept out of here
+// so a node test can hold it.
+import { foldTracks, roomStripFacts } from './panel-fold.js';
 // The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
@@ -2958,9 +2971,22 @@ function toggleArchivedRooms() {
  */
 function openGroupRoom(id) {
   if (!id) return;
-  // Already on screen. Doing nothing is the whole answer — taking focus to it is the bug
-  // above, and there is nothing else a second press could reveal.
-  if (panes.some((p) => p.groupRoomId() === id)) return;
+  // Already on screen. `revealOpenRoom` is the whole answer and it is usually nothing at
+  // all — see there for the one case where it is not.
+  if (panes.some((p) => p.groupRoomId() === id)) return revealOpenRoom();
+
+  /*
+   * A room **slides in open, every time**, which is the maintainer's ruling and is why the
+   * remembered fold has exactly one job left: a reload, where `adopt` puts the pane back
+   * from `state.opened` and it comes back the way it was. Clearing the flag here is what
+   * makes those two statements consistent — without it, a room opened fresh would come back
+   * folded after the next reload, which is the memory answering a question nobody asked.
+   *
+   * Item 4 is what makes "open" an animation rather than a state: it mounts the pane with
+   * the fold class on, forces a reflow and takes it off, so the room slides out of the strip
+   * using this item's own mechanism rather than a second one.
+   */
+  roomFolded.set(false);
 
   const holder = panes.find((p) => p.kind() !== 'session');
   const madeSplit = !holder && panes.length < 2;
@@ -4694,6 +4720,24 @@ function createPane(slot, host) {
     groupHeadEl: null,
     groupStripEl: null,
     groupErrEl: null,
+    /* ---- the fold. Per pane, because a room can be in either slot and the *preference*
+     * (`roomFolded`) is the only part of it that is one answer for the browser. ---- */
+    // The wrapper holding everything that is in the flow — the head, the list and the
+    // composer — so the fold can pin it to a measured width and clip it rather than let it
+    // re-wrap through forty intermediate ones. Held rather than looked up, because
+    // `renderGroupPane` rebuilds the whole pane and a selector run later could be answering
+    // about a node that has left the document.
+    groupBodyEl: null,
+    // The strip's own nodes. Patched on the roster beat rather than rebuilt, which is what
+    // lets the badge's pulse survive a repaint that has nothing to do with it — a replaced
+    // node loses a running animation mid-beat.
+    groupFoldEls: null,
+    // The unseen count the strip last drew, so the pulse can be armed by the number going
+    // *up* rather than by a paint. It is the **server's** number (`room.unseen` off the
+    // roster) and never `groupUnseen` above: that one counts only while the reader is
+    // scrolled up, and a folded pane is still following its room, so behind a shut door it
+    // stays at zero forever.
+    groupFoldSeen: 0,
     // The `+` popover's own node, held so the roster beat can repaint what is in it without
     // rebuilding the strip around it.
     groupAddPopEl: null,
@@ -4916,6 +4960,11 @@ function createPane(slot, host) {
     send({ type: 'subscribe', sessionId: id, slot });
     renderRail();
     renderMain();
+    // This slot has stopped holding a room, so it has stopped being foldable. Derived
+    // rather than remembered — `paintFolds` re-asks every pane what it holds, which is
+    // what takes the class off a slot that would otherwise stay 2.5rem wide with a
+    // session in it. The worst thing this feature can produce, so it fails open.
+    paintFolds();
   }
 
   /* ------------------------------------------------------------ shared --- */
@@ -4955,6 +5004,11 @@ function createPane(slot, host) {
     send({ type: 'markSharedRead' });
     renderRail();
     renderMain();
+    // This slot has stopped holding a room, so it has stopped being foldable. Derived
+    // rather than remembered — `paintFolds` re-asks every pane what it holds, which is
+    // what takes the class off a slot that would otherwise stay 2.5rem wide with a
+    // session in it. The worst thing this feature can produce, so it fails open.
+    paintFolds();
   }
 
   /**
@@ -5573,11 +5627,23 @@ function createPane(slot, host) {
     // here, and `adopt` restores it off the stored entry before it calls this.
     rememberOpenGroup(slot, id, threadSplit);
     send({ type: 'subscribe-group-room', roomId: id, slot });
-    // Nothing in it is new any more. Server-side, the same shape `markSharedRead` has: the
-    // count is one number for the machine, not one per browser.
-    send({ type: 'markGroupRoomRead', roomId: id, slot });
     renderRail();
     renderMain();
+    /*
+     * The fold's bookkeeping, and it runs **before** the mark below rather than after it.
+     *
+     * A room opened from the band always arrives open (`openGroupRoom` says so by clearing
+     * the preference first), but a *reload* comes back through `adopt` straight into here,
+     * and it comes back folded if it was folded. Whether this room's count is spent depends
+     * on whether the reader can actually see it — so the classes have to be on the panes
+     * before `markGroupSeen` is asked, or a reload behind a shut door would zero the very
+     * number the strip exists to carry.
+     */
+    paintFolds();
+    // Nothing in it is new any more — unless it is folded, in which case nothing has been
+    // read and `markGroupSeen` refuses on its own. Server-side either way, the same shape
+    // `markSharedRead` has: the count is one number for the machine, not one per browser.
+    markGroupSeen();
   }
 
   /**
@@ -5618,6 +5684,12 @@ function createPane(slot, host) {
     view.groupHeadEl = null;
     view.groupStripEl = null;
     view.groupErrEl = null;
+    // The fold's own nodes and its counter. The counter goes with them: another room's
+    // lines are not lines you missed in this one, and a strip carrying a number about a
+    // room it is no longer standing in front of would be the panel lying quietly.
+    view.groupBodyEl = null;
+    view.groupFoldEls = null;
+    view.groupFoldSeen = 0;
     view.groupAddPopEl = null;
     view.groupFollowH = null;
     view.groupOpenKeys.clear();
@@ -5657,6 +5729,11 @@ function createPane(slot, host) {
     // close. Repaint into the empty state instead.
     if (!view.selected) renderMain();
     renderRail();
+    // This slot has stopped holding a room, so it has stopped being foldable. Derived
+    // rather than remembered — `paintFolds` re-asks every pane what it holds, which is
+    // what takes the class off a slot that would otherwise stay 2.5rem wide with a
+    // session in it. The worst thing this feature can produce, so it fails open.
+    paintFolds();
   }
 
   /**
@@ -5681,7 +5758,27 @@ function createPane(slot, host) {
     view.groupArchivedDrawn = archived;
 
     host.replaceChildren();
-    host.append(buildGroupHead());
+    /*
+     * One wrapper around everything that is *in the flow* — the head, the list and the
+     * composer — and it exists for the fold.
+     *
+     * While the pane is narrowing to a strip its content must keep the width it was
+     * measured at and be clipped, rather than re-wrapping through forty intermediate ones.
+     * That is not tidiness: `renderGroup`'s clamp pass caches `scrollHeight >
+     * clientHeight` per entry, and it goes on running while the pane is folded because
+     * `isConnected` is still true — a measurement taken at 2.5rem is wrong and it is
+     * *cached onto the DOM*. So the fold pins this box to the pane's measured expanded
+     * width (`--room-frozen`) and the pane clips it; the remeasure on expand is the
+     * backstop behind that.
+     *
+     * The strip is the wrapper's sibling rather than its child, because the two of them
+     * cross-fade: the wrapper's opacity is what goes to zero, and a strip inside it would
+     * go with it.
+     */
+    const flow = document.createElement('div');
+    flow.className = 'group-pane-body';
+    view.groupBodyEl = flow;
+    flow.append(buildGroupHead());
 
     const wrap = document.createElement('div');
     wrap.className = 'group-room';
@@ -5743,7 +5840,7 @@ function createPane(slot, host) {
     body.append(wrap, hint);
 
     view.groupEl = { wrap, inner };
-    host.append(body);
+    flow.append(body);
 
     if (archived) {
       // Said where the composer would have been, because that is where a reader looks for
@@ -5753,7 +5850,7 @@ function createPane(slot, host) {
       shut.className = 'group-shut';
       shut.textContent =
         'This room is archived. Everything in it is still here to read; nothing more is typed into anyone.';
-      host.append(shut);
+      flow.append(shut);
     } else {
       /*
        * The composer goes **beside** `.group-body`, not inside it, and that is a placement
@@ -5762,8 +5859,22 @@ function createPane(slot, host) {
        * added as a third child of that frame would put the pill 1rem above the *composer's*
        * bottom edge, floating over the textarea instead of over the words it is about.
        */
-      host.append(buildGroupComposer());
+      flow.append(buildGroupComposer());
     }
+
+    /*
+     * The fold is applied **at build time**, from what is already on the host, on children
+     * that are not in the document yet — which is what stops a rebuild re-running the
+     * animation. `renderGroupPane` runs again whenever the room is archived from another
+     * browser, and every transition in this fold is gated on `is-folding`, which only
+     * `applyRoomFold` adds; a pane rebuilt folded has never had another width and there is
+     * nothing for a transition to run between.
+     */
+    host.append(flow, buildGroupFoldStrip());
+    // Tab must not walk into a column that is 2.5rem wide and clipped. `inert` is what the
+    // aside's own fold uses one panel over, for its reason: a block hidden by `overflow` is
+    // invisible and still focusable, and still read out.
+    flow.inert = host.classList.contains('is-strip');
 
     renderGroup();
     // Sizing needs the textarea in the document — `scrollHeight` is 0 before that, so a
@@ -5829,6 +5940,37 @@ function createPane(slot, host) {
     view.groupHeadEl = { name, stat, meta };
     head.append(stat);
 
+    /*
+     * The control that folds this whole slot away, first in the cluster.
+     *
+     * Here rather than anywhere else because this header has the room — it carries `close`
+     * and `archive` and nothing else, unlike a session pane's, which CLAUDE.md records
+     * overflowing at plain half and half on any window under about 1400px.
+     *
+     * `foldIcon('collapse')` rather than a word or a bare chevron, and rather than a
+     * drawing of its own: it is the mark the lead's team aside wears on its own band, and
+     * the strip below draws its `'expand'` twin, so a reader learns one control and finds it
+     * in both panels. The word is the *action* rather than a direction on screen, which is
+     * what lets one drawing serve a room in either slot — and `test/aside-fold.test.js` pins
+     * that `foldIcon` has exactly one definition, so a local copy here is not an option.
+     *
+     * `renderGroupHead` hides it while there is only one pane. A room alone in the frame has
+     * nothing to fold beside it, and a frame that was nothing but a strip would be a panel
+     * with no content and no obvious way back — `roomFoldSlot` refuses that case too, which
+     * is the same refusal said twice on purpose: once where a reader can see it, once where
+     * the geometry is decided.
+     */
+    const fold = document.createElement('button');
+    fold.className = 'ghost-btn room-fold-btn';
+    fold.append(foldIcon('collapse'));
+    fold.title = 'Fold this room down to a strip. It still counts what arrives in it.';
+    fold.setAttribute('aria-label', 'Fold this room away');
+    fold.onclick = () => {
+      roomFolded.set(true);
+      applyRoomFold(true);
+    };
+    view.groupHeadEl.fold = fold;
+
     // The room never offers to split — it is already the second thing on screen, and a panel
     // showing one room twice is not a state worth being able to reach. What `close` *does* is
     // decided when it is pressed and never here: this head is drawn once, and the other pane
@@ -5838,7 +5980,7 @@ function createPane(slot, host) {
     close.textContent = 'close';
     close.title = 'Close this room';
     close.onclick = closeGroup;
-    meta.append(close);
+    meta.append(fold, close);
     head.append(meta);
     box.append(head);
 
@@ -5890,6 +6032,12 @@ function createPane(slot, host) {
     const n = view.groupEntries.length;
     const members = room.members?.length || 0;
     els.stat.textContent = `${n} message${n === 1 ? '' : 's'} · ${members} member${members === 1 ? '' : 's'}`;
+
+    // A room alone in the frame has nothing to fold beside it, so the control is not drawn
+    // — a control nobody can press should not be drawn is this panel's own rule, and it is
+    // why the disabled `split` button came off a lead's header. Re-asked on the roster beat
+    // because the second pane can be opened and closed under this head.
+    if (els.fold) els.fold.hidden = panes.length < 2;
 
     /*
      * The archive control, beside `close`.
@@ -6294,11 +6442,221 @@ function createPane(slot, host) {
     hint.title = 'Jump to the newest message and follow the room again.';
   }
 
-  /** Tell the server this room's count is spent. Only from this pane, and only while it is
-   *  actually the room on screen — the count is one number for the machine. */
+  /**
+   * Tell the server this room's count is spent. Only from this pane, only while it is
+   * actually the room on screen — the count is one number for the machine — and **never
+   * while the pane is folded**.
+   *
+   * That last clause is the one that is easy to leave out and it mutes the room in two
+   * places at once. The rail band deliberately draws no count for a room a pane is holding
+   * (`patchBand`, on the rule that two counters saying different things about one box is
+   * worse than one saying it in the right place), so behind a shut door the strip's badge is
+   * the *only* thing counting — and marking read here would zero the server's number the
+   * badge is drawn from. A folded room would then be a room the panel had quietly silenced,
+   * which is exactly what this feature is not allowed to do.
+   *
+   * Asked of the pane's own class rather than of `roomFolded`, because the class is what is
+   * true on screen: mid-fold, and for a pane the preference has not reached yet, the two
+   * disagree and the pane is right.
+   */
   function markGroupSeen() {
     if (view.kind !== 'group-room' || !view.groupRoom?.id) return;
+    if (host.classList.contains('is-strip')) return;
     send({ type: 'markGroupRoomRead', roomId: view.groupRoom.id, slot });
+  }
+
+  /* --------------------------------------------------------- the fold --- */
+
+  /**
+   * The strip: what this room says with its door shut.
+   *
+   * Built with the pane and **patched** from then on, never rebuilt on the roster beat.
+   * Two reasons and the second is the sharp one: the member dots carry `.dot.working`'s
+   * pulse and the badge carries its own, so replacing the nodes every couple of seconds
+   * would take a running animation away half a beat after it started — and the badge's
+   * pulse is the whole of how a folded panel says something arrived.
+   *
+   * A strip is a door, not a window: a name, a dot per member, and a count. No message
+   * text, ever, which is `roomStripFacts`' own rule one module over and CLAUDE.md's
+   * "prefer showing nothing over showing something wrong" underneath it.
+   *
+   * It is a `<button>` because it is one — the whole column is the control that reopens the
+   * room, and the chevron at the top is the affordance that says so. Being a button also
+   * settles the focus ring for free: Chrome draws `:focus-visible` for a keyboard and
+   * nothing for a mouse press, and `addPane`'s own `mousedown` handler is taught to leave a
+   * press on a strip alone.
+   */
+  function buildGroupFoldStrip() {
+    const strip = document.createElement('button');
+    strip.className = 'fold-strip';
+    strip.type = 'button';
+    strip.title = 'Open this room';
+    strip.setAttribute('aria-label', 'Open this room');
+    strip.onclick = () => {
+      roomFolded.set(false);
+      applyRoomFold(false);
+    };
+
+    // Pinned at the top, where the control that shut the panel was, so the eye goes back to
+    // the same corner to reopen it — and it is the header control's own mark with the
+    // chevron the other way round, which is the pair the lead's aside already draws. The box
+    // and the ink are `.fold-strip-chev`'s, shared with that aside, so nothing about the size
+    // or the colour is spelled twice.
+    const chev = document.createElement('span');
+    chev.className = 'fold-strip-chev';
+    chev.append(foldIcon('expand'));
+
+    const label = document.createElement('span');
+    label.className = 'fold-strip-label';
+
+    const dots = document.createElement('span');
+    dots.className = 'fold-strip-dots';
+
+    const badge = document.createElement('span');
+    badge.className = 'fold-strip-badge';
+    badge.hidden = true;
+
+    view.groupFoldEls = { strip, label, dots, badge };
+    strip.append(chev, label, dots, badge);
+    renderGroupFoldStrip();
+    return strip;
+  }
+
+  /**
+   * Repaint the strip's name, its dots and its badge.
+   *
+   * Off `roomStripFacts`, which resolves each member through `memberRow` — the same rung
+   * order `server/rooms-line.js` uses, imported rather than re-spelled, so a live dot never
+   * appears beside a member the fan-out will record as unreachable.
+   *
+   * **The number is the server's**, off `room.unseen` on the roster, and deliberately not
+   * `view.groupUnseen`: that one is incremented only while the reader is scrolled up, and a
+   * folded pane is still following its room, so it stays at zero behind a shut door and a
+   * badge built on it would never appear at all.
+   *
+   * Called from `renderHead` on the roster beat and **never from `composerSig`** — a count
+   * changing must not tear a textarea down under whoever is typing.
+   */
+  function renderGroupFoldStrip() {
+    const els = view.groupFoldEls;
+    if (!els) return;
+    const room = groupLive();
+    const facts = roomStripFacts(room, state.sessions);
+
+    els.label.textContent = facts.name;
+    els.label.title = facts.name;
+
+    // The dots are reused rather than replaced, and only added or removed when the
+    // membership itself changes: `.dot.working` carries an animation, and a rebuild every
+    // couple of seconds would restart it on every beat.
+    const want = facts.dots.length;
+    while (els.dots.childElementCount > want) els.dots.lastElementChild.remove();
+    while (els.dots.childElementCount < want) els.dots.append(document.createElement('span'));
+    facts.dots.forEach((status, i) => {
+      els.dots.children[i].className = `dot ${status}`;
+    });
+
+    els.badge.hidden = facts.unseen === '';
+    els.badge.textContent = facts.unseen;
+    els.badge.title = facts.unseen ? 'New in this room since you folded it away' : '';
+
+    // The pulse, armed by the number going *up* and never by a paint. Removing the class,
+    // forcing a synchronous reflow and putting it back is what actually restarts a CSS
+    // animation — re-assigning the same class name does nothing, and `requestAnimationFrame`
+    // never fires in an automated Chrome window, which is where this has to be provable.
+    const now = Math.max(0, Number(room?.unseen) || 0);
+    if (now > (view.groupFoldSeen || 0)) {
+      els.badge.classList.remove('is-new');
+      void els.badge.offsetWidth;
+      els.badge.classList.add('is-new');
+    } else if (!now) {
+      // A spent badge drops the pulse with the number, so a class meaning "this just
+      // arrived" never rides along on a node about to be shown for a different arrival.
+      els.badge.classList.remove('is-new');
+    }
+    view.groupFoldSeen = now;
+  }
+
+  /** How wide `--strip` actually is, in px, measured off the node wearing it rather than
+   *  converted from a token — `tokens.css`' own note says this is how `foldTracks`' `stripW`
+   *  is meant to be resolved, so the stylesheet and the animation's arithmetic cannot come
+   *  to disagree about how wide a closed panel is. */
+  function stripWidth() {
+    return view.groupFoldEls?.strip.getBoundingClientRect().width || 0;
+  }
+
+  /** Pin the flow content to the width it was measured at, for the length of the fold.
+   *  The measurement is the caller's, taken while the expanded geometry was still in force
+   *  — a rect read a line later would be read against tracks that have already moved. */
+  function freezeGroupBody(w) {
+    if (w > 0) host.style.setProperty('--room-frozen', `${w}px`);
+  }
+
+  /** Arm (or disarm) this pane's half of the cross-fade. Class-gated for the reason the
+   *  grid's own transition is: a pane that carried one at rest would fade its content every
+   *  time the split grip moved. */
+  function setGroupFolding(on) {
+    host.classList.toggle('is-folding', Boolean(on));
+  }
+
+  /**
+   * Put this pane where the fold says, with no animation of its own.
+   *
+   * Unconditional cleanup in the `false` direction, and that is deliberate: a pane that has
+   * just been given a session must lose the class and the frozen width whether or not it
+   * ever held a room, or a slot that was a strip a moment ago stays 2.5rem wide with a
+   * transcript in it. That is the worst thing this feature can produce, so every uncertainty
+   * lands here.
+   */
+  function setGroupFolded(want) {
+    const on = Boolean(want) && view.kind === 'group-room';
+    if (host.classList.contains('is-strip') === on) return;
+    /*
+     * The freeze, for the path that does not animate.
+     *
+     * `applyRoomFold` measures the width itself and hands it to `freezeGroupBody` while the
+     * open geometry is still in force, so on that path this finds one already set and leaves
+     * it — reading a rect *here* would force layout after the tracks have moved and pin the
+     * content at 2.5rem, which is the one number the freeze exists to keep it away from. But
+     * a fold applied by `paintFolds` — a reload's `adopt`, a slot changing hands — never went
+     * through that function at all, and it runs before the first paint, so the pane is still
+     * at its open width and this is the honest moment to read it.
+     */
+    if (on && !host.style.getPropertyValue('--room-frozen')) {
+      freezeGroupBody(host.getBoundingClientRect().width);
+    }
+    host.classList.toggle('is-strip', on);
+    if (view.groupBodyEl) view.groupBodyEl.inert = on;
+    if (!on) {
+      // The door is open, so the count is spent — fired at the *start* of the expand so the
+      // round trip overlaps the animation rather than following it, and the badge is fading
+      // out through the whole 200ms either way. `markGroupSeen` reads the class this line
+      // has just changed, which is why the order matters.
+      markGroupSeen();
+      // The pin stays for the length of an animated expand — the content has to keep the
+      // width it will land at while the pane grows into it, or it re-wraps through every
+      // intermediate one and `endGroupFold`'s remeasure is remeasuring nothing. `endGroupFold`
+      // is what drops it there. With no animation in flight this *is* the end.
+      if (!host.classList.contains('is-folding')) host.style.removeProperty('--room-frozen');
+    }
+  }
+
+  /**
+   * The end of a fold, from either the event or the backstop, and safe to run twice.
+   *
+   * The remeasure is the part that is not optional. `renderGroup`'s clamp pass caches
+   * `scrollHeight > clientHeight` per entry and kept running while the pane was folded — the
+   * freeze stops it measuring a 2.5rem column, and this is what puts the honest answers back
+   * once the pane has stopped moving. `pinGroup` follows it for the room aside's own reason:
+   * the box changed height, so a room that was on its newest line is no longer on it.
+   */
+  function endGroupFold() {
+    setGroupFolding(false);
+    if (host.classList.contains('is-strip')) return;
+    host.style.removeProperty('--room-frozen');
+    if (view.kind !== 'group-room') return;
+    renderGroup();
+    pinGroup();
   }
 
   /**
@@ -9318,6 +9676,11 @@ function createPane(slot, host) {
     if (view.kind === 'group-room') {
       renderGroupHead();
       renderGroupStrip();
+      // …and the folded strip's own three facts, which are roster facts too — the name off
+      // the record, a dot per member, and the server's unseen count. Cheap while the room is
+      // open: a textContent, a handful of class names and a `hidden` flag on nodes nobody can
+      // see. Here rather than in `composerSig`, for the rule one function down.
+      renderGroupFoldStrip();
       return;
     }
 
@@ -12354,8 +12717,23 @@ function createPane(slot, host) {
      *  *which* pane, the way `openSharedRoom` does. */
     openGroup,
     /** The group room this pane is holding, or null — the same question `sharedOpen` asks
-     *  from the other side, and what the rail's band reads to mark a row open. */
+     *  from the other side, and what the rail's band reads to mark a row open. It is also
+     *  what `roomPane` asks, which is how the fold's bookkeeping stays derived rather than
+     *  stored: a slot that has stopped holding a room answers `null` and loses its class in
+     *  the same beat. */
     groupRoomId: () => (view.kind === 'group-room' ? view.groupRoom?.id ?? null : null),
+    /* ---- the fold's five hooks. Exposed for `renderTasks`' own reason: the geometry lives
+     * on `.main`, which is one box for the whole frame, while everything it moves is per
+     * pane. `applyRoomFold` measures through `stripWidth`, pins through `freezeGroupBody`,
+     * arms through `setFolding`, changes the value through `setFolded` and lands through
+     * `endFold` — five steps in a fixed order, which is why they are five names rather than
+     * one. Every one is a no-op for a pane holding anything else, which is what lets the
+     * fan-out say them unconditionally. ---- */
+    stripWidth,
+    freezeGroupBody,
+    setFolding: setGroupFolding,
+    setFolded: setGroupFolded,
+    endFold: endGroupFold,
   };
   return api;
 }
@@ -12439,9 +12817,31 @@ function addPane(slot) {
   const host = document.createElement('section');
   host.className = 'pane';
   host.dataset.slot = slot;
-  // Focus follows the click rather than a control, because every click in a pane is
-  // already a statement about which one you are working in.
-  host.addEventListener('mousedown', () => setFocus(slot), true);
+  /*
+   * Focus follows the click rather than a control, because every click in a pane is
+   * already a statement about which one you are working in — with one exception, and it is
+   * the fold's.
+   *
+   * A press on a folded panel's strip is a press on a *door*: it says "open this", not
+   * "this is the pane I am working in". Without the guard the focus ring would draw on a
+   * 2.5rem column, and the ring is on `.main-head`'s top border, which is inside the very
+   * content the strip is standing in front of. Harmless beyond the ring today —
+   * `sessionPane()` sends a rail click to a pane that can hold a session regardless — and
+   * `sessionPane` is deliberately left alone: this is a fact about one control, not about
+   * how the rail routes.
+   *
+   * The listener is in the **capture** phase, so it runs before anything inside the pane and
+   * `stopPropagation` on the strip could never reach it. Asking what was pressed is the only
+   * thing that can.
+   */
+  host.addEventListener(
+    'mousedown',
+    (e) => {
+      if (e.target instanceof Element && e.target.closest('.fold-strip')) return;
+      setFocus(slot);
+    },
+    true,
+  );
   host.addEventListener('focusin', () => setFocus(slot));
   el.main.append(host);
 
@@ -12462,7 +12862,253 @@ function paintFocus() {
     pane.host.classList.toggle('focused', panes.length > 1 && pane.slot === focusedSlot);
   }
   el.app.classList.toggle('split', panes.length > 1);
+  // The fold's own bookkeeping rides the same beat, and it is derived from what the panes
+  // hold rather than remembered — see `paintFolds`. Here because focus changes are one of
+  // the two ways the shape of the frame moves; the four kind-changing entry points are the
+  // other, and each calls it for itself.
+  paintFolds();
 }
+
+/* ------------------------------------------------- the room slot, folded --- */
+
+/**
+ * How long a room slot's fold takes, in milliseconds.
+ *
+ * Spelled here and in `.app.is-folding .main`'s transition; this copy times the backstop
+ * that drops the inline track pair and remeasures, so the two drifting apart costs a
+ * remeasure taken slightly early rather than anything visible. 200 is the aside's number
+ * one panel over and the settings fold's before that — a second duration in the same frame
+ * would read as a second mechanism.
+ */
+const ROOM_FOLD_MS = 200;
+
+/** The backstop for the end of a fold. Module scope, because the thing that animates is
+ *  `.main` and there is exactly one of it. */
+let roomFoldTimer = null;
+
+/**
+ * Which slot holds a group room, or `null`.
+ *
+ * Asked of the pane rather than of anything stored, which is the whole of this feature's
+ * bookkeeping rule: a slot that no longer holds a room cannot stay folded, because the
+ * question is re-asked every time the frame's shape moves. **A room can be in slot `a`** —
+ * `openGroupRoom` puts it in the pane you are *not* focused in, which is `panes[0]` when
+ * focus is on `b`, so any design that assumes the room is the second column is wrong half
+ * the time.
+ */
+function roomPane() {
+  return panes.find((p) => p.groupRoomId()) || null;
+}
+
+/**
+ * Which slot should be folded right now — `'a'`, `'b'` or `null`.
+ *
+ * Three conditions and every one of them fails **open**, because the worst thing this
+ * feature can produce is a 2.5rem *session* pane and the second worst is a frame that is
+ * nothing but a strip. There has to be a room on screen, the preference has to say folded,
+ * and there has to be a second pane for the room to fold *beside* — a room alone in the
+ * frame folded to a strip would leave the panel with no content at all and no obvious way
+ * back, which is why the fold control is not drawn in that state either.
+ */
+function roomFoldSlot() {
+  if (panes.length < 2 || !roomFolded.on) return null;
+  return roomPane()?.slot ?? null;
+}
+
+/** The two geometry classes, set together so they can never both be on. On `.app` rather
+ *  than on `.main`, because `.app.split` is already the switch the track list keys off and
+ *  a fold is that switch with one more word on it. */
+function setFoldClasses(slot) {
+  el.app.classList.toggle('fold-a', slot === 'a');
+  el.app.classList.toggle('fold-b', slot === 'b');
+}
+
+/**
+ * Put the frame where the preference says, **without animating**.
+ *
+ * Beside `paintFocus` and called from it, and from each of the four kind-changing entry
+ * points (`open`, `openShared`, `openGroup`, `closeGroup`/`closePane`) — everywhere a slot
+ * can start or stop holding a room. Nothing here is stored: the answer is re-derived from
+ * `panes` every time, so a slot that has been given a session loses the class in the same
+ * beat it stops being a room.
+ *
+ * It does not animate and must not. Every transition in this fold is gated on
+ * `is-folding`, which only `applyRoomFold` adds — so a class applied here, on a reload's
+ * `adopt` or on a pane being closed, simply *is* the layout, with nothing for a transition
+ * to run between. That is the same guarantee item 2 bought by building its aside folded,
+ * arrived at from the other side.
+ */
+function paintFolds() {
+  const slot = roomFoldSlot();
+  /*
+   * The panes first, the frame second, and the order is a measurement rather than a style.
+   *
+   * `setFolded` is the path that pins the content's width for a fold nothing animated — a
+   * reload's `adopt`, a slot changing hands — and it reads the pane's own rect to do it.
+   * Setting the frame's class first makes that rect **2.5rem**, so the content is frozen at
+   * the width it is about to be clipped to instead of the width it was measured at, and the
+   * room's five-line clamp then caches its answers against a strip. Benched on a reload:
+   * `--room-frozen` came back `40px` where it should read the open pane's width.
+   *
+   * Unfolding does not measure at all, so this order costs it nothing.
+   */
+  for (const pane of panes) pane.setFolded?.(pane.slot === slot);
+  setFoldClasses(slot);
+}
+
+/**
+ * Fold the room's slot down to a strip, or open it again — animated.
+ *
+ * The whole of it in one function, because every step depends on the one before it and
+ * splitting them would be four places that have to agree about an order.
+ *
+ * **Why it cannot be a class swap.** The resting layouts are declarative — `var(--pane-a)
+ * 1fr` open, `var(--strip) 1fr` folded — and `1fr` does not interpolate with a length:
+ * `50% 1fr` → `2.5rem 1fr` animates and `50% 1fr` → `1fr 2.5rem` does not. So the fold runs
+ * through an explicit px pair (`foldTracks`, which is the arithmetic and is tested in node)
+ * and only lands on the declarative class at the end.
+ *
+ * **And why it cannot be `--pane-a`.** `applyResizers()` re-applies the stored width on
+ * every `window.resize`, so a fold expressed through the variable the split resizer owns
+ * would be silently undone by a window drag. The classes beat `.app.split .main` on
+ * specificity instead, and `foreman.paneWidth` comes back untouched on expand.
+ *
+ * **Measure, freeze, arm, then change the value** — and the reflow is `void offsetWidth`,
+ * never `requestAnimationFrame`: an automated Chrome window reports `visibilityState:
+ * 'hidden'` and Chrome suspends frame callbacks there, which this repo has lost an hour to
+ * more than once.
+ *
+ * Expanding, the width to animate *to* is the stylesheet's answer and not something this
+ * function may compute — `var(--pane-a)`, or half and half where `splitFits` refuses it. So
+ * it is measured the only honest way: classes off, read both rects, classes straight back
+ * on, all inside one synchronous block, so no frame ever paints the open frame without its
+ * transition armed.
+ */
+function applyRoomFold(want) {
+  const target = roomPane();
+  const slot = target?.slot ?? null;
+  const folded = el.app.classList.contains('fold-a') || el.app.classList.contains('fold-b');
+  // Nothing to animate: no room on screen, no second pane to fold beside, or the frame is
+  // already where it is being asked to go. The bookkeeping still runs — the preference may
+  // have moved even where the geometry cannot.
+  if (!slot || panes.length < 2 || folded === Boolean(want)) {
+    paintFolds();
+    return;
+  }
+
+  const widthOf = (s) => panes.find((p) => p.slot === s)?.host.getBoundingClientRect().width || 0;
+  const stripW = target.stripWidth();
+  const frameW = el.main.getBoundingClientRect().width;
+  // A strip with no rect is a pane that has not been laid out, not a strip of zero width —
+  // and animating to a zero track would fold the room to nothing and then jump to `--strip`
+  // when the declarative class landed. The bookkeeping still applies the fold; only the
+  // animation is skipped, which is the same thing reduced motion gets.
+  if (!stripW || !frameW) {
+    paintFolds();
+    return;
+  }
+
+  let aW;
+  let bW;
+  if (want) {
+    aW = widthOf('a');
+    bW = widthOf('b');
+  } else {
+    // Off, read, on — one synchronous block, so this never reaches a paint.
+    setFoldClasses(null);
+    aW = widthOf('a');
+    bW = widthOf('b');
+    setFoldClasses(slot);
+    void el.main.offsetWidth;
+  }
+  const { from, to } = foldTracks({ frameW, aW, bW, stripW, fold: slot });
+  const start = want ? from : to;
+  const end = want ? to : from;
+
+  // The content's own width, pinned while the expanded geometry is still in force. Read
+  // here rather than inside the pane so it is one measurement rather than a second rect
+  // taken a line later against tracks that have moved.
+  target.freezeGroupBody(slot === 'a' ? aW : bW);
+
+  /*
+   * **Two flushes, and the first one is not redundant — measured, and getting it wrong is
+   * the `1fr` trap reappearing one step earlier than the design expected it.**
+   *
+   * A transition's start value is the computed value as of the previous style change, and
+   * whether it starts at all is decided by the *after*-change style's `transition-property`.
+   * So arming `is-folding` in the same recalculation that first writes the px pair starts a
+   * transition **from the declarative value** — `var(--pane-a) 1fr` open, `1fr var(--strip)`
+   * folded — and a length does not interpolate with `1fr`: that track goes **discrete** and
+   * jumps at exactly half the duration while the other one eases past it. Setting the end
+   * pair a line later only retargets that same transition, so the px pair never rescues it.
+   *
+   * Benched at 1470px before this line existed: `grid-template-columns` read
+   * `799.86px 350.14px` at 59ms and `1007.37px 40px` at 107ms — one track still easing, the
+   * other already home, the pair summing to 1047 in a 1150px frame. That is a 100px hole of
+   * bare `--ground` opening between the two panes halfway through every fold.
+   *
+   * So the start pair is settled **unarmed** first, and only then is the transition armed at
+   * a value that is two lengths. Both flushes are `void offsetWidth` rather than a frame
+   * callback, for the reason above.
+   */
+  el.main.style.gridTemplateColumns = `${start[0]}px ${start[1]}px`;
+  void el.main.offsetWidth; // the declarative track list is gone before anything is armed
+  el.app.classList.add('is-folding');
+  for (const pane of panes) pane.setFolding?.(true);
+  void el.main.offsetWidth; // …and now the armed state is settled, at two plain lengths
+
+  el.main.style.gridTemplateColumns = `${end[0]}px ${end[1]}px`;
+  setFoldClasses(want ? slot : null);
+  for (const pane of panes) pane.setFolded?.(Boolean(want) && pane.slot === slot);
+
+  clearTimeout(roomFoldTimer);
+  roomFoldTimer = setTimeout(endRoomFold, ROOM_FOLD_MS + 60);
+}
+
+/**
+ * A press on a room the panel is already showing.
+ *
+ * **Open**: nothing at all, which is what `openGroupRoom` did before there was a fold —
+ * taking focus to it is the bug that ate a thread once (#36), and there is nothing else a
+ * second press could reveal. **Folded**: the door opens, and stops there. Doing nothing
+ * would be a band row that appears not to work, and the band row is the obvious place to
+ * press for a room whose badge has just gone up.
+ */
+function revealOpenRoom() {
+  if (!roomFolded.on) return;
+  roomFolded.set(false);
+  applyRoomFold(false);
+}
+
+/**
+ * The end of a fold, from either the event or the backstop, and safe to run twice.
+ *
+ * Dropping the inline pair is what lands the frame on the declarative class, so a window
+ * resize after a fold recomputes the tracks rather than holding px taken at the old width.
+ * The remeasure inside each pane is the part that is not optional: the room's five-line
+ * clamp caches `scrollHeight > clientHeight` per entry and goes on running while the pane
+ * is folded, because `isConnected` is still true.
+ */
+function endRoomFold() {
+  clearTimeout(roomFoldTimer);
+  el.main.style.removeProperty('grid-template-columns');
+  el.app.classList.remove('is-folding');
+  for (const pane of panes) pane.endFold?.();
+}
+
+/*
+ * The accurate end of a fold. Wired once, here, because there is exactly one `.main`.
+ *
+ * Both halves of the guard are load-bearing and both are the aside's lessons one panel
+ * over. `target`, because everything inside this frame is free to transition and a control
+ * finishing its own would otherwise remeasure two panes; `propertyName`, because
+ * `transitionend` fires once per property and the one that means *done* here is the track
+ * list. And it is not the only path out — under reduced motion the duration is zero and
+ * this never fires at all, which is what the timer in `applyRoomFold` is for.
+ */
+el.main.addEventListener('transitionend', (e) => {
+  if (e.target === el.main && e.propertyName === 'grid-template-columns') endRoomFold();
+});
 
 /**
  * Open the second pane.
