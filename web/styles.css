@@ -5439,6 +5439,177 @@ body.row-dragging * { cursor: row-resize !important; }
    still — a folded panel that never stopped flashing would be a panel you fold once. */
 .fold-strip-badge.is-new { animation: pulse 1.4s ease-in-out 2; }
 
+/* ------------------------------------------- the team aside, folded --- */
+
+/*
+ * The host half of the strip, for the lead's own aside. Item 1 wrote the strip's chrome
+ * and said what a host has to supply; this is that, and nothing here is shared — a room
+ * pane is a grid slot and will want its own three rules.
+ *
+ * **All three of `width` / `min-width` / `max-width`, every time.** `.room-panel` carries
+ * `min-width: 15rem`, which beats any `width` a fold sets, so a rule that moved only
+ * `width` would produce a panel that is 15rem wide and claims to be 2.5. And all three
+ * have to *transition* together, or the used width snaps to the floor while the one that
+ * is easing slides past it — the animation would run and nothing on screen would move.
+ *
+ * `--aside` is never written here and never written by the fold's JS. The dragged width is
+ * `--aside`'s business and it comes straight back on expand precisely because nothing in
+ * this feature touched it.
+ */
+.room-panel.is-strip {
+  width: var(--strip);
+  min-width: var(--strip);
+  max-width: var(--strip);
+}
+
+/* The 3px hover nudge, which the host has to carry because the host is what pins the
+   width. `.fold-strip:hover`'s own rule (item 1) cannot widen a node inside a box that is
+   pinned to `var(--strip)` on all three axes — so the *panel* is what nudges, and the
+   strip inside it fills whatever it is given. */
+.room-panel.is-strip:hover {
+  width: calc(var(--strip) + 3px);
+  min-width: calc(var(--strip) + 3px);
+  max-width: calc(var(--strip) + 3px);
+}
+
+/*
+ * The fold itself: 200ms ease, the settings fold's own number one block up, because this
+ * panel already animates a layout at exactly that speed and two durations in one column
+ * would read as two different mechanisms.
+ *
+ * Class-gated, and that is the rule rather than the tidiness: `.aside-grip` writes
+ * `--aside` on every pointer move, and a transition standing on `width` permanently would
+ * make a drag lag the cursor by a fifth of a second. `is-folding` is added around the
+ * animation and taken off at its end.
+ */
+.room-panel.is-folding {
+  transition: width 200ms ease, min-width 200ms ease, max-width 200ms ease;
+}
+
+/*
+ * Nothing may re-wrap on the way through.
+ *
+ * The aside's content is measured and the measurements are *cached onto the DOM* —
+ * `capTaskList` writes a px `max-height` read off row rects, and the room's five-line
+ * clamp caches `scrollHeight > clientHeight` per entry. Both keep running while the panel
+ * is folded, because `isConnected` is still true. So the body is pinned to the panel's
+ * measured expanded width for the length of the fold and while it is shut, and the panel
+ * clips it: the content keeps the width it was measured at and slides out of view, rather
+ * than reflowing through forty intermediate widths and settling on numbers taken at 2.5rem.
+ *
+ * The fallback in the `var()` is for one frame that never paints: a panel built folded is
+ * not in the document yet, so there is nothing to measure until `syncAsideFold` runs after
+ * the mount. `--aside` is the honest guess for that gap and the measurement replaces it.
+ */
+.room-panel.is-strip,
+.room-panel.is-folding {
+  overflow: hidden;
+}
+
+.room-panel.is-strip > .room-panel-body,
+.room-panel.is-folding > .room-panel-body {
+  width: var(--aside-frozen, var(--aside));
+}
+
+/* The wrapper the freeze acts on. It holds the seven blocks that are in the flow and not
+   the two that are absolute — the "new below" pill and the aside's own grip both hang off
+   `.room-panel`, which is the box they were positioned against.
+
+   `flex: 1 0 auto` is what keeps this transparent: it grows to fill the panel, and it
+   refuses to shrink below its content, so when the floors genuinely do not fit the body is
+   taller than the panel and the panel scrolls — byte for byte what the nine children did
+   as direct items. */
+.room-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  /*
+   * The aside's scroll moved one box in, and the visible behaviour is unchanged: when the
+   * floors genuinely do not fit, this scrolls and you can see that it does — which is the
+   * honest half of the fix that `.room-panel { overflow-y: auto }` two sections up was
+   * added for. The panel keeps that rule and simply stops needing it.
+   *
+   * It has to be here rather than left on the panel. `flex: 1` with `min-height: 0` makes
+   * this box exactly the panel's height, so the panel never overflows and would never
+   * scroll again; `flex: 1 0 auto` would let it grow instead, but a column flex item's
+   * `auto` basis is a content measurement, and the content here is a room list with a
+   * `flex: 1` of its own — which is a sizing question with no stable answer.
+   *
+   * The two absolute children are on the panel, not in here, so the "new below" pill stays
+   * on the visible bottom edge rather than scrolling off it.
+   */
+  overflow-y: auto;
+}
+
+/*
+ * The cross-fade. The panel's width is what animates; the two things inside it swap by
+ * opacity, so neither ever draws at a width it was not built for.
+ *
+ * The strip is absolute at the panel's *left edge* and `var(--strip)` wide from the first
+ * frame — pinned rather than filling, so its chevron and its rotated label are in their
+ * final position before the animation starts and do not slide across the column as it
+ * closes. At rest it fills the panel, which is the same thing plus the hover nudge.
+ */
+.room-panel > .fold-strip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 100%;
+  height: auto;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  /* `.room-panel` already draws a left rule. Item 1's note: one of the two goes, or the
+     seam draws twice. */
+  border-left: 0;
+  /* Item 1's own `transition: width 120ms ease` is for a strip that carries the hover
+     nudge itself. This host does not — the *panel* nudges, because the panel is what pins
+     all three width axes — so that transition has nothing left to animate here and one
+     thing it would: measured, the 1px between `var(--strip)` and `100%` of a bordered
+     panel eased over 120ms at the end of every fold, and a stray transition on a node
+     inside a box a grip drags is the thing this feature is not allowed to leave lying
+     about. The fade below is added back under `is-folding`. */
+  transition: none;
+}
+
+.room-panel.is-strip > .fold-strip {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* In flight, in either direction, the strip holds its final width rather than the panel's
+   current one. After the `is-strip` rule above, so it wins while both are set. */
+.room-panel.is-folding > .fold-strip { width: var(--strip); }
+
+.room-panel.is-strip > .room-panel-body { opacity: 0; }
+
+/* The fade is class-gated for the reason the width is: a panel built folded, or one that
+   has finished, must not carry a live transition into a drag. Both directions get it
+   because `is-folding` is on for both. */
+.room-panel.is-folding > .fold-strip,
+.room-panel.is-folding > .room-panel-body {
+  transition: opacity 160ms ease;
+}
+
+/* See `buildAsideStrip`: the pair at the top is the tasks block, the one at the foot is the
+   room, which is the order they are in when the panel is open. */
+.room-panel > .fold-strip > .fold-strip-badge.is-room { margin-top: auto; }
+
+/* A handle on an edge that will not move reads as broken — the split's own `split-fixed`
+   rule says so one file section over. It is back, and draggable, the moment the panel is. */
+.room-panel.is-strip > .aside-grip { display: none; }
+
+/* The collapse control, in the SETTINGS heading beside the gear. It borrows
+   `.room-head-gear`'s box and its negative margins whole, because that is what keeps this
+   heading exactly as tall as `tasks` and `room` below it — and `.tasks-grip`'s hairline is
+   measured against those heights. Only the glyph's size differs. */
+.room-head-fold { font-size: 0.8rem; }
+/* Two controls at the right edge and a label that takes the rest, so `space-between` still
+   puts the cluster where the gear was. */
+.room-head.is-foldable > .room-head-label { flex: 1; }
+
 /*
  * Reduced motion, for the whole feature and not only for what this file already draws.
  *
@@ -5455,6 +5626,12 @@ body.row-dragging * { cursor: row-resize !important; }
 @media (prefers-reduced-motion: reduce) {
   .fold-strip,
   .room-panel.is-folding,
+  /* The aside's cross-fade, added by the half that ships it. Measured before this line
+     existed: with motion off the panel's own width snapped correctly and the two opacity
+     transitions went on running for 160ms, which is the block above being right about the
+     rule and one selector short of enforcing it. */
+  .room-panel.is-folding > .fold-strip,
+  .room-panel.is-folding > .room-panel-body,
   .app.is-folding .main {
     transition: none;
   }
