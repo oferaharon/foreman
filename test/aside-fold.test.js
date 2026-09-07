@@ -303,7 +303,7 @@ test('the band is the grip: one node, `resizer` unchanged, and the icon does not
   assert.match(band, /asideFolded\.set\(true\);/);
 });
 
-test('the band is painted inside the panel, and the content is padded off it by the same number', () => {
+test('the band is painted inside the panel, and the content is padded off it by the resting width', () => {
   // A painted band on the grip's old `left: -3px` would put three pixels of `--band` over
   // the transcript. One token, read twice, so the two cannot come apart.
   // `.pane-grip.grip-col` pins `width: 7px` at two classes, so a one-class `.aside-band`
@@ -312,13 +312,14 @@ test('the band is painted inside the panel, and the content is padded off it by 
   const band = rule('.pane-grip.aside-band');
   assert.match(band, /left: 0;/);
   assert.match(band, /background: var\(--band\);/);
-  // The padding is one `--band-w` — the *hovered* width, not the resting one, which is what
-  // makes the widening cost nothing: the band opens into a gap the padding already left, so
-  // neither the aside's content nor the transcript beside it moves when the cursor arrives.
+  // The padding is the *resting* width, not the hovered one: content sits flush against the
+  // hairline, and the hover width overhangs `.lead-left` instead of growing into a reserved
+  // gap here — the reserved-padding design read as a notch beside `TEAM ROOM`'s own darker
+  // fill and was reversed for it.
   // `rule()` takes the first `<selector> {` and `.room-panel-body` is also the tail of the
   // freeze's two-selector rule above it, so this reads the declaration where it sits — the
   // last one in that block, against the closing brace.
-  assert.match(styles, /\n  padding-left: var\(--band-w\);\n\}/);
+  assert.match(styles, /\n  padding-left: var\(--band-w-rest\);\n\}/);
   // Two rules, two different edges: the panel's own left border is the transcript boundary,
   // the band's right border is the content boundary. Neither is drawn twice.
   assert.match(band, /border-right: 1px solid var\(--rule\);/);
@@ -326,11 +327,11 @@ test('the band is painted inside the panel, and the content is padded off it by 
 });
 
 test('the band is a hairline at rest and a column under the cursor, and a drag holds it open', () => {
-  // Two widths, two tokens, and `--band-w` stays the hovered one so every other reader of it
-  // — the body's padding above all — keeps meaning what it meant.
+  // Two widths, two tokens — `--band-w-rest` is what the body pads off now, and `--band-w`
+  // is still what the band grows to under the cursor.
   const band = rule('.pane-grip.aside-band');
   assert.match(band, /width: var\(--band-w-rest\);/);
-  assert.match(band, /transition: width 160ms ease, background 120ms ease;/);
+  assert.match(band, /transition: width 160ms ease, left 160ms ease, background 120ms ease;/);
   const open = listRule('.pane-grip.aside-band.is-dragging');
   assert.match(open, /width: var\(--band-w\);/);
   assert.match(open, /background: var\(--accent-soft\);/);
@@ -345,6 +346,25 @@ test('the band is a hairline at rest and a column under the cursor, and a drag h
   // the one the other three dividers still offer rather than a number picked by eye.
   assert.match(tokens, /--band-w-rest: 0\.45rem;/);
   assert.match(rule('.pane-grip.grip-col'), /width: 7px;/);
+});
+
+test('the band overhangs the transcript on hover rather than growing into the aside', () => {
+  // The right edge is what has to hold still: `left` moves negative by exactly what `width`
+  // gains, so the new pixels land on `.lead-left`'s side of the hairline and the aside's own
+  // content — padded off at the resting width now — never moves.
+  const open = listRule('.pane-grip.aside-band.is-dragging');
+  assert.match(open, /left: calc\(var\(--band-w-rest\) - var\(--band-w\)\);/);
+  // Clear of `.lead-left`'s own content and its transcript's scrollbar — nothing in that
+  // pane carries a z-index this high.
+  const band = rule('.pane-grip.aside-band');
+  assert.match(band, /z-index: 5;/);
+  // `.room-panel` must not clip the overhang: its own overflow is `visible`, not the
+  // `overflow-y: auto` that used to compute `overflow-x` to `auto` as a side effect (a
+  // scroll container's negative-going overflow is unreachable in LTR). It is its own
+  // one-line rule — `rule()` keys off the first `.room-panel {` in the file, which is the
+  // unrelated width/border block above, so this reads the literal declaration instead. The
+  // fold states still win back `overflow: hidden` on top of this, unrelated to the band.
+  assert.match(styles, /\n\.room-panel \{ overflow: visible; \}/);
 });
 
 test('the fold is not drawn, and cannot be pressed, until the band has room for it', () => {
