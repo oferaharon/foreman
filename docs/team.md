@@ -58,8 +58,11 @@ names all four things at once:
 
 So a worker reads like any other session in that repo, because it is named like one.
 Workers nest under their lead in the rail, indented with a thin connecting rule, so a
-team reads as one unit — but a worker that is blocked or unread is still hoisted into the
-inbox, because the one thing the rail must never do is hide something you need to see.
+team reads as one unit — in the order they were dispatched, newest on top, and they stay
+in it: everything else in the rail re-sorts itself by what moved last, and a block you
+read top to bottom should not rearrange because somebody spoke to the middle one. But a
+worker that is blocked or unread is still hoisted into the inbox, because the one thing
+the rail must never do is hide something you need to see.
 
 Which is why a team session gets a **third line**, and nothing else does: hoisted into the
 inbox or pinned to the top, a worker has left its lead behind and the indent no longer says

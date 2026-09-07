@@ -118,6 +118,11 @@ you group holding one session stopped on a permission prompt and one carrying tw
 replies, then a project heading with the open session under
 it.](images/rail-inbox.png)
 
+Workers nested under a lead are the one list here that isn't recency: they sit in the order
+they were **dispatched**, newest on top, and stay there — speak to one and its row doesn't
+move, because a team is read as a block and a worker should be where it was the last time
+you looked.
+
 The badge clears only when the newest message is genuinely on screen; scrolling back
 through history is reading the past, not catching up.
 

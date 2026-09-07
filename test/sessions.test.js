@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { rememberFooter, openTaskFor, SessionRegistry } from '../server/sessions.js';
+import { rememberFooter, openTaskFor, workerTeam, SessionRegistry } from '../server/sessions.js';
 
 /*
  * Model and `ctx:` are scraped off the composer footer, which a question box, a permission
@@ -119,6 +119,63 @@ test('a session with no tmux name matches nothing', () => {
 test('no task store at all is not an error', () => {
   assert.equal(openTaskFor(null, 'voice-repo-x'), null);
   assert.equal(openTaskFor([], 'voice-repo-x'), null);
+});
+
+/*
+ * `workerTeam` shapes that record into the row the rail draws. The join above is still the
+ * only thing that decides *which* task a session owns — this only says what the row says
+ * about it — and the one field worth pinning is `since`, because a whole ordering rule
+ * rests on it never moving.
+ */
+
+test('a worker row carries the task it is working, plus the watcher’s verdict', () => {
+  const t = task('add-a-search-index', 'working', { createdAt: 100, dispatchedAt: 200 });
+  assert.deepEqual(workerTeam(t, false), {
+    role: 'worker',
+    repo: '/repo',
+    task: 'add-a-search-index',
+    branch: 'agent/add-a-search-index',
+    state: 'working',
+    stuck: false,
+    since: 200,
+  });
+  assert.equal(workerTeam(t, true).stuck, true, 'stuck is the watcher’s, passed in');
+  assert.equal(workerTeam(t).stuck, false, 'and a row nobody has judged yet is quiet');
+});
+
+/*
+ * The rail sorts a lead's nested workers on `since` and then leaves them alone, which only
+ * works because the stamp is written once — `dispatchedAt` at the transition to
+ * `dispatched`, never again. Reading anything that moves here (`updatedAt` is the obvious
+ * one, and it is next to it on the record) would put recency back under a field named for
+ * the dispatch.
+ */
+test('`since` is the dispatch stamp, not anything that moves', () => {
+  const t = task('static-order', 'working', {
+    createdAt: 100,
+    dispatchedAt: 200,
+    updatedAt: 999_999,
+  });
+  assert.equal(workerTeam(t).since, 200);
+});
+
+test('a record that reached a session without a dispatch stamp falls back to when it was made', () => {
+  const t = task('promoted', 'working', { createdAt: 100, dispatchedAt: null });
+  assert.equal(workerTeam(t).since, 100, 'still orderable, and still in the right place');
+
+  const neither = task('ancient', 'working');
+  assert.equal(workerTeam(neither).since, null, 'and null rather than a guess');
+});
+
+test('a stamp of 0 is a stamp', () => {
+  // `??` and not `||`: the epoch is a real millisecond, and `0 || createdAt` would quietly
+  // take the wrong field for it.
+  assert.equal(workerTeam(task('epoch', 'working', { dispatchedAt: 0, createdAt: 5 })).since, 0);
+});
+
+test('a worker with no branch yet says so rather than inventing one', () => {
+  const t = task('queued-one', 'queued', { branch: null, dispatchedAt: 7 });
+  assert.equal(workerTeam(t).branch, null);
 });
 
 /*
