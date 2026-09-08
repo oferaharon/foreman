@@ -1,5 +1,20 @@
 # Foreman
 
+<div align="center">
+
+<img src="web/icons/icon-512.png" alt="Foreman logo" width="200" />
+
+**One panel for every Claude Code session on your Mac.**
+
+[![release](https://img.shields.io/github/v/release/oferaharon/foreman)](https://github.com/oferaharon/foreman/releases)
+![license](https://img.shields.io/badge/license-MIT-blue.svg)
+![platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
+[![homebrew](https://img.shields.io/badge/homebrew-oferaharon%2Ftap%2Fforeman--panel-orange.svg)](https://github.com/oferaharon/homebrew-tap)
+
+**[Documentation](docs/panel.md)** · **[Running it](docs/running.md)** · **[Releases](https://github.com/oferaharon/foreman/releases)**
+
+</div>
+
 **Foreman** is one local web panel for every Claude Code session running on your Mac. It discovers the sessions you already have open, and can start new sessions or whole teams from the browser.
 
 Every session is in front of you at once: see which are working, which are idle and which are waiting on you, type back into any of them, or queue a message for one that is busy.  
