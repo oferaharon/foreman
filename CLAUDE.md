@@ -1626,7 +1626,7 @@ regex, in new clothes: an invisible character in source lasts until the next car
 
 **Two manifests on one origin with the same `id` are one app, and the second one installed
 replaces the first.** `/manifest.webmanifest` and `/m/manifest.webmanifest` are two
-installable apps — the panel and the phone's leads view — and `id` is what a browser keys an
+installable apps — the panel and the phone view — and `id` is what a browser keys an
 installed app on. Omitted, it **defaults to `start_url`**, which reads like it would settle
 it and does not always: a browser matching on the resolved id would see two apps whose
 scopes differ but whose identity was never stated. Both spell `id` out, `/` and `/m/`, and

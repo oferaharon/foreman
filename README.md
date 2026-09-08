@@ -111,8 +111,8 @@ word. [Docs →](docs/team.md)
 
 ### The phone view
 
-`/m/` is a phone-sized view of your leads and nothing else: read the conversation, see the
-tasks, answer what is blocking. [Docs →](docs/team.md)
+`/m/` is a phone-sized view of everything the panel shows — leads, ordinary sessions and
+rooms, across three tabs — with a mark on whatever's waiting for you. [Docs →](docs/panel.md#the-phone-view)
 
 </td>
 <td width="50%">
