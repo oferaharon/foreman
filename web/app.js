@@ -9032,14 +9032,49 @@ function createPane(slot, host) {
   }
 
   /**
+   * What kind of thing an entry is, in one word, beside who said it.
+   *
+   * **Read off the record's own fields, never off the sentence.** `report`, `plan` and
+   * `kind` are what the poster said the entry *is*; the text is a message to a human and
+   * will be reworded, and the day it is, a sentence-matched tag turns off silently and the
+   * room goes on looking fine. Same rule the machinery colours already keep — and the
+   * reason `about` cannot be used for any of this: it is the task id, which every
+   * task-scoped entry carries.
+   *
+   * Three words today. A `plan` report and a `review` report are one field apart and are
+   * genuinely different things to a reader — one is a page to read, the other a branch to
+   * merge — so they get different words rather than one `review` covering both. The room's
+   * two loud shapes (an escalation, an alert) have tags of their own coming with tier 3;
+   * they are deliberately not squeezed in here, where they would land on a card that has
+   * not yet been rebuilt to hold them.
+   */
+  function roomTag(e) {
+    const tag = (word, mod) => {
+      const s = document.createElement('span');
+      s.className = `room-tag ${mod}`;
+      s.textContent = word;
+      return s;
+    };
+    if (e.kind === 'answer') return tag('answer', 'is-answer');
+    if (e.report === 'review') return e.plan ? tag('plan', 'is-plan') : tag('review', 'is-review');
+    return null;
+  }
+
+  /**
    * The identity row over a bubble or card: sender always, recipient only when the
    * message is explicitly addressed. `to: 'lead'` is the room's default destination —
    * a worker bubble in the left lane already says it — but everything a lead or the
    * panel aims at a task id (or `all`) shows both ends.
    *
+   * Four slots now — `who · [→ to] · [tag] · time` — and the tag is the new one. It sits
+   * between the recipient and the stamp so the row reads as a sentence left to right: who,
+   * to whom, about what, when. The other three slots are unchanged in this pass; what
+   * fills them, and in what colour, is the talk tier's business.
+   *
    * A link entry is the one shape whose sender is a project rather than a role, so it
    * takes its own pill and never draws the `to` half: both ends of a link are leads, and
-   * `lead → lead` says nothing the pill has not already said better.
+   * `lead → lead` says nothing the pill has not already said better. It carries no tag
+   * either — a link is a remark, and none of the three words is ever true of one.
    */
   function roomMeta(e) {
     const meta = document.createElement('div');
@@ -9059,6 +9094,8 @@ function createPane(slot, host) {
       arrow.textContent = '→';
       meta.append(arrow, roomPill(e.to));
     }
+    const tag = roomTag(e);
+    if (tag) meta.append(tag);
     if (e.ts) meta.append(roomStamp(e.ts)); // the date lives on hover — no wall of stamps
 
     return meta;

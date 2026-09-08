@@ -1748,9 +1748,42 @@ body.row-dragging * { cursor: row-resize !important; }
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  font-size: 0.82rem;
+  /* **The type scale, and the container is what carries it.**
+   *
+   * Three sizes, each with a job — down from the nine this block had accumulated (0.62,
+   * 0.64, 0.66, 0.68, 0.70, 0.74, 0.78, 0.80 and 0.82rem, measured across one 340px column):
+   *
+   *   0.74  body     what an entry *says* — a machinery sentence, a bubble, an escalation
+   *   0.68  evidence a self-merge's `reasons`
+   *   0.64  chrome   pills, times, tags, keywords, `view more`, a report's reference
+   *
+   * A bubble's words and a machinery line's sentence are both "what this entry says", and
+   * drawing them at 0.82 against 0.74 made the bubble read as a different *kind* of text
+   * rather than a louder one. Loudness is carried by shape — a gutter rule, a bubble, a
+   * tinted frame — never by a step in the scale.
+   *
+   * So the size and the face live here and **nothing below restates them**. Three elements
+   * agreeing by repetition is three places a later change has to find, and it is exactly how
+   * nine sizes accumulated in the first place. The serif is spelled out rather than left to
+   * `body`, because three tiers agreeing by inheritance-from-somewhere-else is how a face
+   * drifts.
+   *
+   * `--ink-faint` is likewise out of this list entirely. It was the timestamp's colour, and
+   * measured off the rendered element in dark it is **3.17:1 on `--shelf`** (the list's own
+   * ground, where a bubble's stamp sits) and **3.48:1 on `--surface`** (a machinery card) —
+   * under AA both ways, on the one field every single entry carries. `--ink-muted` in the
+   * same two places is **5.18** and **5.69**, and the accent pill beside it **5.80** on
+   * `--shelf`. Dark only, per the 2026-08-27 ruling; the light figures are in the plan and
+   * are not measured here. Note every number in this block names the ground it was taken
+   * on — the tokens move under you otherwise. */
+  font-family: var(--serif);
+  font-size: 0.74rem;
 }
+/* Shared with the tasks block above the room, which is why the size stays here rather than
+   being dropped with the rest: `.team-tasks` carries its own body size and this line has to
+   keep answering to it. Inside the room it takes the room's, like everything else. */
 .room-quiet { color: var(--ink-muted); font-size: 0.8rem; }
+.room-list > .room-quiet { font-size: inherit; }
 /* "Keep it quiet" — the maintainer's condition. Muted ink on the surface, no accent, no motion;
    it sits over the room's bottom edge so it never reflows the list under the reader. */
 .room-hint {
@@ -1798,7 +1831,7 @@ body.row-dragging * { cursor: row-resize !important; }
   border: 0;
   background: none;
   font-family: var(--mono);
-  font-size: 0.66rem;
+  font-size: 0.64rem; /* chrome — the one size every control in this list shares */
   color: var(--ink-muted);
   cursor: pointer;
 }
@@ -1819,7 +1852,8 @@ body.row-dragging * { cursor: row-resize !important; }
   padding: 0.28rem 0.45rem;
   background: var(--surface);
   color: var(--ink-muted);
-  font-size: 0.74rem;
+  /* No size of its own: the machinery sentence *is* the body size, and `.room-list` carries
+     it for every tier at once. */
   line-height: 1.35;
 }
 /* The card is still a row (text, then the stamp on its first baseline); the text and its
@@ -1936,15 +1970,23 @@ body.row-dragging * { cursor: row-resize !important; }
   overflow-wrap: anywhere;
 }
 
+/* The identity row, and it now has four slots rather than three: `who · [→ to] · [tag] ·
+   time`. The tag is the new one — `review`, `plan`, `answer` — and it is drawn from the
+   entry's own fields (`report`, `plan`, `kind`), never from the sentence, the same rule the
+   machinery colours already keep.
+   It wraps rather than shrinking past legibility: at the aside's 240px minimum a lead→worker
+   line is a pill, an arrow, a second pill, a tag and a stamp, and a second line is a better
+   answer than five half-read words. */
 .room-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 0.3rem;
-  padding: 0 0.1rem 0.12rem;
+  gap: 0.35rem;
+  padding: 0 0.1rem 0.15rem;
 }
 .room-pill {
   font-family: var(--mono);
-  font-size: 0.62rem;
+  font-size: 0.64rem;
   letter-spacing: 0.04em;
   border: 1px solid var(--rule-strong);
   border-radius: 999px;
@@ -1969,8 +2011,36 @@ body.row-dragging * { cursor: row-resize !important; }
   max-width: 9rem;
 }
 .room-pill.is-project.is-human { color: var(--accent); border-color: currentColor; background: none; }
-.room-arrow { color: var(--ink-faint); font-size: 0.7rem; flex: none; }
-.room-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
+/* A separator between two pills, not a word — so it is the one thing in this row below the
+   chrome size, and it is mono so it sits on the pills' own baseline rather than the serif's. */
+.room-arrow { color: var(--ink-muted); font-family: var(--mono); font-size: 0.6rem; flex: none; }
+.room-time { color: var(--ink-muted); font-size: 0.64rem; font-family: var(--mono); flex: none; }
+/* What kind of thing this entry is, in one word: `review`, `plan`, `answer`. It replaces
+   nothing yet — the accent bubble edge and the accent mono ready-line it is meant to take
+   over from are still drawn — because a tag has to exist before anything can be retired
+   against it. Accent for all three: they are the same idea, an entry whose *substance* is a
+   decision or a deliverable rather than a remark. */
+.room-tag {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  flex: none;
+}
+.room-tag.is-review, .room-tag.is-plan, .room-tag.is-answer { color: var(--accent); }
+/* The machinery keyword — `dispatch`, `conflict`, `pending`, `self-merge` — which tier 1
+   puts inline in a log row's author line. Nothing draws one yet; the rule is here so the
+   gutter's colour and the keyword's colour come out of the same custom property when it
+   does, rather than as two spellings of one decision. `--mark` is what a log row will set;
+   until then the fallback is the row's own muted ink, which is what a plain line keeps
+   anyway. */
+.room-key {
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  color: var(--mark, var(--ink-muted));
+  text-transform: lowercase;
+}
 
 /* Escalations stay loud — the one thing in the room that needs the maintainer. Full width,
    decision-coloured, deliberately nothing like a bubble that scrolls past unread. */
@@ -1982,9 +2052,12 @@ body.row-dragging * { cursor: row-resize !important; }
   line-height: 1.35;
 }
 .room-escalation > .room-text { font-weight: 600; }
-.room-esc-opt { padding-left: 0.6rem; font-size: 0.78rem; }
-.room-esc-rec { padding-left: 0.6rem; font-size: 0.78rem; font-weight: 600; }
-.room-grounds { font-size: 0.74rem; color: var(--ink-muted); }
+/* An escalation's own words, at the room's one body size — see `.room-list`. Weight and
+   indent are the hierarchy here; a size step would say this card is a different kind of
+   text from the bubble above it, which it is not. */
+.room-esc-opt { padding-left: 0.6rem; }
+.room-esc-rec { padding-left: 0.6rem; font-weight: 600; }
+.room-grounds { color: var(--ink-muted); }
 /* A stuck or looping worker — a system line drawn at escalation volume. */
 .room-alert {
   border: 1px solid color-mix(in srgb, var(--decision) 45%, transparent);
