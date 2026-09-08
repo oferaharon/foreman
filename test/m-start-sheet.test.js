@@ -113,7 +113,7 @@ test('the `+` is in the shell header, so the lead screen hides it for free', () 
   // Two rows inside one `<header>` since the tab bar landed: the `+` goes on the first, and
   // the header is what `enterConversation` hides. A control appended anywhere but `.m-head`
   // would sit over the lead screen's own header — a bug this screen has already had once.
-  assert.match(app, /el\.headRow\.append\(el\.title, el\.quota, el\.conn, el\.start, menuWrap\);/);
+  assert.match(app, /el\.headRow\.append\(el\.brand, el\.quota, el\.conn, el\.start, menuWrap\);/);
   assert.match(app, /el\.head\.append\(el\.headRow, el\.tabs\);/);
   assert.match(app, /el\.start\.addEventListener\('click', openStartSheet\);/);
   // A verb, not "add a team" — the panel cannot create one from a phone.
