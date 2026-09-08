@@ -34,9 +34,15 @@ const styles = text('web/styles.css');
 const tokens = text('web/tokens.css');
 
 test('the team room’s section says what it is, and says it only on screen', () => {
-  assert.match(app, /section\(\s*'Team room \(read only\)',/);
-  // The hint sentence is unchanged — the heading was the ask, not the copy under it.
-  assert.match(app, /'Workers and the lead coordinate here\. View only — talk to the lead in the composer\.',/);
+  // Built by hand since the room grew its `clear` / `show all` control — the `section()`
+  // helper this used to assert on is gone, and with it the last plain heading in the aside.
+  // The contract is unchanged and is the reason this line moved rather than went: the room's
+  // heading says what the room is, in those words, and says it on screen only.
+  assert.match(app, /label\.textContent = 'Team room \(read only\)';/);
+  // The hint sentence is unchanged — the heading was the ask, not the copy under it. It is
+  // the heading's `title` now rather than the helper's second argument; same sentence, same
+  // place a reader meets it.
+  assert.match(app, /'Workers and the lead coordinate here\. View only — talk to the lead in the composer\.'/);
 
   // Display text only. Every one of these is the team room's word in code and none of them
   // moved: two spellings of a name is the `isLeadName` lesson, and this file's rename is
@@ -58,7 +64,10 @@ test('the heading’s band is a background and nothing else, because the grip is
   }
   // The grip's own numbers, pinned beside it so a change to either is a change to a test.
   assert.match(styles, /\.tasks-grip \{[^}]*margin: -4px 0 -3px;/);
-  assert.match(app, /head\.className = 'room-head is-band';/);
+  // `has-controls` joined it with the slate button — TASKS' own line, and flex/gap only.
+  // `is-band` is what this test is about and it is still there: the paint stays, the box
+  // does not change, and the grip above still meets the rule it was measured to.
+  assert.match(app, /head\.className = 'room-head is-band has-controls';/);
 });
 
 test('`--band-head` is a mix off the palette, so one line answers for both themes', () => {

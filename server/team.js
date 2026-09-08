@@ -121,6 +121,24 @@ const DEFAULTS = {
    * permission.
    */
   humanReviewPaths: [],
+  /**
+   * Where the team room's visible slate starts — the `seq` of the `event: 'clear'` divider
+   * the maintainer last pressed, or `null` for "show all".
+   *
+   * **A pointer, never a deletion.** `room.jsonl` is append-only and stays that way: this
+   * decides what the panel *draws*, and `show all` puts every line back. It is here rather
+   * than in `localStorage` because the panel is used as an installed app on more than one
+   * device and a slate cleared on one has to be cleared on the other — the maintainer's
+   * ruling (2026-09-08). Nothing else reads it: the lead's `room_read`, `team_status`, the
+   * unread counters and the transcript all see the whole log, which is the point.
+   *
+   * Deliberately top-level rather than inside `ui`, whose one key is a fold this browser
+   * happens to be in. This is a fact about the room, written by two endpoints of its own,
+   * and it survives a settings PATCH because that handler rebuilds `next` from `readTeam`.
+   * Absent reads as `null` through the merge below, so a team.json written before this
+   * existed shows its whole room.
+   */
+  slate: null,
   // Panel chrome, not policy. Nothing that dispatches, watches or scans reads this — it
   // lives here for the same reason a group's collapse lives in groups.json rather than
   // localStorage: two windows should agree, and a reload shouldn't reopen what you
@@ -419,6 +437,26 @@ export function plannerStance({ repo, worktree, plans, worktreesRoot = null }) {
     ],
     allow: [pathRule('Edit', plans)],
   };
+}
+
+/**
+ * Move the team room's slate, or clear it — the write half of `slate` above.
+ *
+ * A named helper rather than another `writeFile` beside the config PATCH, for the reason
+ * that handler's own comment gives: `team.json` is rewritten wholesale from `readTeam`'s
+ * merged answer, so every writer has to be one that keeps every other key. Two of them
+ * spelled differently is how a key starts disappearing on one path and not the other.
+ *
+ * `seq` is a positive integer (the divider's own seq) or `null`/anything else, which is
+ * `show all`. Returns what was stored, or `null` when the repo has no team at all —
+ * there is nothing to clear in a room that does not exist.
+ */
+export function setSlate(repo, seq) {
+  const team = readTeam(repo);
+  if (!team) return null;
+  const slate = Number.isInteger(seq) && seq > 0 ? seq : null;
+  fs.writeFileSync(path.join(teamDir(repo), 'team.json'), JSON.stringify({ ...team, slate }, null, 2));
+  return slate;
 }
 
 /** Read without seeding — null when the repo has no team. */

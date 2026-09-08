@@ -9,7 +9,7 @@ import test from 'node:test';
  */
 process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'foreman-team-'));
 const {
-  decisionsPreamble, ensureTeam, readTeam, teamKey, teamDir, leadSettings, mergeRule,
+  decisionsPreamble, ensureTeam, readTeam, setSlate, teamKey, teamDir, leadSettings, mergeRule,
   normalizeReviewPaths, pathRule, plannerStance, plansDir, planPath,
   MAX_REVIEW_PATHS, MAX_REVIEW_PATH_LENGTH,
 } = await import('../server/team.js');
@@ -76,6 +76,62 @@ test('the panel fold is remembered per team, and stays out of the dials', () => 
   fs.writeFileSync(configFile, JSON.stringify({ ui: { settingsOpen: true } }));
   assert.equal(readTeam(repo).ui.settingsOpen, true);
   assert.equal(ensureTeam(repo).config.ui.settingsOpen, true, 'and ensure does not reset it');
+});
+
+test('the room slate is absent until it is pressed, and a file without it reads as “show all”', () => {
+  const repo = '/Users/x/Code/Slate';
+  const { config, configFile } = ensureTeam(repo);
+  assert.equal(config.slate, null, 'a fresh team shows its whole room');
+
+  // The shape of every team.json written before this key existed: no `slate` at all. It
+  // must read as "show all" rather than as `undefined` deciding what the room draws.
+  fs.writeFileSync(configFile, JSON.stringify({ maxWorkers: 4 }));
+  assert.equal(readTeam(repo).slate, null, 'a missing key is no slate, not an unknown one');
+  assert.equal(ensureTeam(repo).config.slate, null, 'and ensure does not invent one');
+});
+
+test('setSlate moves the pointer and unsets it, and keeps every other key', () => {
+  const repo = '/Users/x/Code/SlateWrite';
+  const { configFile } = ensureTeam(repo);
+  // A hand-added key this version has never heard of, beside a tuned one. `team.json` is
+  // rewritten wholesale by every writer here, so the thing worth pinning is that a slate
+  // press is not how somebody's file loses a line.
+  fs.writeFileSync(configFile, JSON.stringify({ maxWorkers: 7, triggers: [{ id: 'x', match: '^go$' }], mystery: 42 }));
+
+  assert.equal(setSlate(repo, 12), 12);
+  let team = readTeam(repo);
+  assert.equal(team.slate, 12);
+  assert.equal(team.maxWorkers, 7, 'a tuned value survives the write');
+  assert.deepEqual(team.triggers, [{ id: 'x', match: '^go$' }], 'and a hand-edited list does too');
+  assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf8')).mystery, 42, 'and a key this version never heard of');
+
+  // Moving it is one more write, not a special case: pressing `clear` twice is exactly this.
+  assert.equal(setSlate(repo, 30), 30);
+  assert.equal(readTeam(repo).slate, 30);
+
+  // `show all`.
+  assert.equal(setSlate(repo, null), null);
+  assert.equal(readTeam(repo).slate, null);
+});
+
+test('a slate is a positive integer or it is nothing', () => {
+  const repo = '/Users/x/Code/SlateJunk';
+  ensureTeam(repo);
+  // Every one of these reads as "show all" rather than being stored as itself. The wrong
+  // answer here is silent both ways — a `0` or a `"12"` in the file would either hide
+  // nothing or compare a string against a seq, and the room would look fine doing it.
+  for (const junk of [0, -1, 1.5, '12', null, undefined, NaN, {}]) {
+    assert.equal(setSlate(repo, junk), null, `${JSON.stringify(junk) ?? String(junk)} is not a slate`);
+    assert.equal(readTeam(repo).slate, null);
+  }
+});
+
+test('a repo with no team has nothing to clear', () => {
+  // Fails closed rather than seeding a team dir: the endpoints 404 before they get here,
+  // and a write that created a team as a side effect of a button press would be worse
+  // than the refusal.
+  assert.equal(setSlate('/Users/x/Code/NoTeamAtAll', 4), null);
+  assert.equal(readTeam('/Users/x/Code/NoTeamAtAll'), null, 'and no team was made on the way');
 });
 
 test('a repo with no team reads as null', () => {
