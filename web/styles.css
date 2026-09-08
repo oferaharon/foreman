@@ -1892,11 +1892,26 @@ body.row-dragging * { cursor: row-resize !important; }
    at this", and a third would make them worth less by arithmetic. Only `border-style`
    changes, so contrast is untouched. */
 .room-system.is-pending { border-left-style: dashed; }
-/* An entry with no `event` on the record gets no keyword at all, and a keyword that is not
-   one of the four coloured kinds must not take the gutter's own `--rule-strong` — that is
-   a rule colour, and it is nowhere near legible as text. `is-plain` is set by
-   `roomEntryNode` on exactly the rows no modifier above claimed. */
-.room-system.is-plain .room-key { color: var(--ink-muted); }
+/* **An uncoloured keyword is `--ink-muted`, and that is both of them.** An entry with no
+   `event` on the record gets no keyword at all; one that has an `event` but is none of the
+   three coloured kinds must not take the gutter's own `--rule-strong`, which is a rule
+   colour and is nowhere near legible as text. `is-plain` is set by `roomEntryNode` on
+   exactly the rows no modifier above claimed.
+
+   `is-pending` is in this selector too, and it is **the one place this block departs from
+   the signed-off mock-up** — so the reason is here rather than in a commit message somebody
+   would have to go looking for. The mock-up scopes this rule to `is-plain` alone, which
+   leaves the word `pending` inheriting `--mark`: measured off the rendered row in dark on
+   `--shelf`, **1.47:1**, the only text in the room under AA — in the same change that
+   evicts `--ink-faint` (3.17:1) from this list for exactly that reason. The plan's own
+   per-shape table says a pending line's colour is "none", and an uncoloured keyword is this
+   ink, like every other uncoloured keyword; the plan's contrast table never lists this one,
+   which is what an oversight looks like rather than a decision. Ruled by the maintainer's
+   team on 2026-09-08. **The dashed gutter stays the whole signal** — that is what makes the
+   line quieter than the default, and nothing here spends a colour on it. Measured after:
+   **5.18:1**, the same as the machinery sentence beside it. */
+.room-system.is-plain .room-key,
+.room-system.is-pending .room-key { color: var(--ink-muted); }
 .room-system-text { max-width: 100%; overflow-wrap: anywhere; }
 
 /* What the verdict actually checked, under the sentence that announces it. A step smaller

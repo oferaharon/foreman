@@ -215,6 +215,24 @@ test('tier 1 is a gutter rule, not a frame', () => {
   assert.match(styles, /\.room-system\.is-pending \{ border-left-style: dashed; \}/);
 });
 
+test('an uncoloured keyword is muted ink, pending included', () => {
+  // **The one place the room departs from the signed-off mock-up**, so it is pinned rather
+  // than left to a comment somebody may tidy back. The mock-up scopes this rule to
+  // `is-plain`, which leaves the word `pending` inheriting the gutter's `--rule-strong` —
+  // measured on the rendered row in dark on `--shelf`, 1.47:1, the only text in the room
+  // under AA, in the same change that evicts `--ink-faint` (3.17) for exactly that reason.
+  // Ruled 2026-09-08: an uncoloured keyword is `--ink-muted` like every other uncoloured
+  // keyword, and the dashed gutter stays the whole signal. Reverting this selector is a
+  // silent contrast regression on one word, which is why it is a test and not a comment.
+  const rule = styles.match(/\.room-system\.is-plain \.room-key,\n\.room-system\.is-pending \.room-key \{[^}]*\}/);
+  assert.ok(rule, 'both uncoloured kinds take the keyword rule');
+  assert.match(rule[0], /color: var\(--ink-muted\)/);
+  // …and the dash is still the whole of what makes a pending line quieter.
+  assert.match(styles, /\.room-system\.is-pending \{ border-left-style: dashed; \}/);
+  const pending = styles.match(/\.room-system\.is-pending \{[^}]*\}/)[0];
+  assert.doesNotMatch(pending, /--mark/, 'and it still spends no colour of its own');
+});
+
 test('tier 2 has no lane and no max-width', () => {
   // A lane is a two-sided idea and a team room is one lead, several workers and a reader who
   // is neither. Full width is what puts a bubble's outer edges on the same column the
