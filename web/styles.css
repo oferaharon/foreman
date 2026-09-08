@@ -222,6 +222,18 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .brand .link { color: var(--accent); }
 
+/* The mark sits on a baseline row with the wordmark and the dot — both text, so the row
+   stays `align-items: baseline` for them and the image opts itself out with `align-self`.
+   Its own tile carries a fixed dark background (see mark.svg), so it reads the same in
+   both themes without a token, matching the phone header's treatment (PR #126). */
+.brand-logo {
+  align-self: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+}
+
 /* Their own row under the quota gauges, so the head can hold two buttons (or three)
    without crowding the title line. */
 .rail-actions {
