@@ -132,7 +132,10 @@ test('the suggestion shares the row and only the merge block takes one of its ow
   // four antialiased pixels on the button's corner radius. The line centres itself instead.
   assert.doesNotMatch(css, /\.composer-above \{[^}]*align-items:/);
   assert.ok(css.includes('.ghost-line {'), 'the line rule is still there to carry it');
-  assert.match(css, /\.composer-above\.has-merge > \.merge-queue \{ flex: 0 0 100%; \}/);
+  // …and it carries `min-width: 0` beside the basis. Making this strip a row is what gave
+  // the block a content-based automatic minimum, which beat `100%` and sent it out over the
+  // rail; `test/merge-block-width.test.js` is where that measurement lives.
+  assert.match(css, /\.composer-above\.has-merge > \.merge-queue \{ flex: 0 0 100%; min-width: 0; \}/);
   // The old column rules put the line above the button; nothing may put it back.
   assert.doesNotMatch(css, /\.composer-above\.has-ghost/);
   assert.doesNotMatch(css, /\.composer-above\.has-merge \{[^}]*flex-direction: column;/);
