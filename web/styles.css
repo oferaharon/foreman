@@ -3582,8 +3582,30 @@ body.row-dragging * { cursor: row-resize !important; }
 /* The one full-width row. `flex: 0 0 100%` rather than a column direction, because a column
    would put the suggestion on a line of its own again — the thing this row exists to stop.
    Still keyed on the class rather than on `:has()`, for the reason it always was: the state
-   is set in the one function that decides it, beside the append that puts the block there. */
-.composer-above.has-merge > .merge-queue { flex: 0 0 100%; }
+   is set in the one function that decides it, beside the append that puts the block there.
+
+   `min-width: 0` is not tidiness beside it — without it `flex: 0 0 100%` is a promise this
+   rule cannot keep. The strip is a *row* container now, so the block's main axis is
+   horizontal and its `min-width: auto` becomes a content-based minimum, which floors the
+   item at its own min-content width and beats the basis outright. And min-content here is
+   large for a reason that reads like it should not be: `.merge-title` is `white-space:
+   nowrap`, so its min-content *is* the whole one-line brief — `min-width: 0` there lets it
+   shrink while it is being flexed, and says nothing about what it contributes when an
+   ancestor is asked for its intrinsic size. `.merge-rows` does not stop it either, its
+   `overflow-y: auto` notwithstanding.
+
+   Then `justify-content: flex-end` decides which way the overflow goes, and it goes *left*:
+   the block's right edge stays on the composer's and the rest of it runs out over the
+   transcript and the rail, which is what the maintainer photographed. Measured in a static
+   harness at a 1901px viewport, one review row whose title is an ordinary one-line brief:
+   `.composer-above` 832px, the block **1521px** starting at **-164** — a byte of it under
+   the rail. With this line: block 832, flush with the strip, title ellipsised.
+
+   It is the same `min-width: 0` `.ghost-line` carries one rule down, for the same reason, on
+   the same row. This one was missed when the strip stopped being a column — before that the
+   block's main axis was vertical, `min-width: auto` computed to 0, and there was nothing to
+   floor it. Nothing about the merge block itself ever changed. */
+.composer-above.has-merge > .merge-queue { flex: 0 0 100%; min-width: 0; }
 
 /* Interrupt, and the suggestion's button, and they are the same node.
    Its design rule is that it never moves, and its word changes from nine characters to
