@@ -1780,7 +1780,11 @@ function pickRow(row) {
         say(capRefusal(maxMembers), true);
         return;
       }
-      s.picked = [...s.picked, row.id];
+      // Guarded against a second push of one id. A tap cannot do it — `change` fires only
+      // when the state actually moves — but a duplicate would reach `POST /api/rooms` and
+      // come back as a 400 about duplicate members, which is a refusal nobody could explain
+      // from what is on screen.
+      if (!s.picked.includes(row.id)) s.picked = [...s.picked, row.id];
     } else {
       s.picked = s.picked.filter((id) => id !== row.id);
     }

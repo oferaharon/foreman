@@ -744,6 +744,19 @@ test('the ninth tick goes back off rather than being left on over a refusal', ()
   assert.match(pick, /tick\.checked = false;\s*\n\s*say\(capRefusal\(maxMembers\), true\);/);
 });
 
+test('one id is picked once, however the change arrives', () => {
+  /*
+   * A tap cannot push an id twice — `change` fires only when the box's state actually moves
+   * — but a duplicate reaching `POST /api/rooms` comes back as a 400 about duplicate
+   * members, which is a refusal nobody could explain from what is on screen. Found on the
+   * bench, where a synthetic `change` on an already-ticked box read `4 of 8` over three
+   * rows.
+   */
+  assert.match(fn('pickRow', roomsCode), /if \(!s\.picked\.includes\(row\.id\)\) s\.picked = \[\.\.\.s\.picked, row\.id\];/);
+  assert.deepEqual(keepPicked(['a', 'a', 'b'], [sess('a'), sess('b')]), ['a', 'a', 'b'],
+    'and `keepPicked` is a filter, not a de-duplicator — it is not the guard');
+});
+
 test('the button and the tally are one function, so a press cannot beat the rule', () => {
   const sync = fn('syncCreate', roomsCode);
   assert.match(sync, /countLine\(s\.picked\.length, maxMembers\)/);
