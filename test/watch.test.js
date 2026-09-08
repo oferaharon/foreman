@@ -53,8 +53,9 @@ function harness({ team = null, human = null } = {}) {
     return rows[rows.length - 1];
   };
   const roomTexts = () => room.read(repo).entries.map((e) => e.text);
+  const roomEvents = () => room.read(repo).entries.map((e) => e.event);
   const nudges = () => queue.list('%L').filter((i) => i.text.startsWith(NUDGE_MARK));
-  return { repo, tasks, queue, room, rows, watch, worker, roomTexts, nudges };
+  return { repo, tasks, queue, room, rows, watch, worker, roomTexts, roomEvents, nudges };
 }
 
 test('dispatched → working advances the task, posts, and nudges the lead', () => {
@@ -67,6 +68,34 @@ test('dispatched → working advances the task, posts, and nudges the lead', () 
   assert.deepEqual(h.roomTexts(), ['Worker t1 started working.']);
   assert.equal(h.tasks.get('t1').state, 'working');
   assert.equal(h.nudges().length, 1);
+
+  // The keyword the room draws beside `panel` comes off this field and off nothing else.
+  // `about` cannot separate this line from the dispatch line that precedes it — both carry
+  // the task id — and the sentence is a message to a human that will be reworded, at which
+  // point a text-matched keyword turns off in silence. This is what makes that a failure.
+  assert.deepEqual(h.roomEvents(), ['started']);
+});
+
+test('every other transition is left unlabelled — a keyword is a category, not a caption', () => {
+  // `postSystem` says a great many one-off things and only one of them is a shape the room
+  // has a word for. An `event` on all of them would be a second spelling of the sentence,
+  // and the room would grow a keyword per phrasing — which is the sentence-matching this
+  // whole design refuses, arrived at from the other end.
+  const h = harness();
+  const live = h.worker('t2', 'working', { status: 'working' });
+  h.watch.tick({ now: T0 });
+  live.status = 'needs-decision';
+  h.watch.tick({ now: T0 + 1_000 });
+  live.status = 'working';
+  h.watch.tick({ now: T0 + 2_000 });
+  live.status = 'idle';
+  h.watch.tick({ now: T0 + 3_000 });
+  assert.deepEqual(h.roomTexts(), [
+    'Worker t2 is blocked on a permission prompt.',
+    'Worker t2 is unblocked and running again.',
+    'Worker t2 went idle — possibly finished, and it has not reported. Check its tail.',
+  ]);
+  assert.deepEqual(h.roomEvents(), [undefined, undefined, undefined]);
 });
 
 test('a question box and a bare needs-decision both read as blocked', () => {

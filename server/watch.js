@@ -50,10 +50,16 @@ export function createTeamWatch({ registry, tasks, room, queue, readTeam, human 
     }
   }
 
-  function postSystem(repo, about, text, { now = Date.now(), alert = false } = {}) {
+  function postSystem(repo, about, text, { now = Date.now(), alert = false, event = null } = {}) {
     try {
       const entry = { from: 'panel', to: 'lead', kind: 'system', about, text };
       if (alert) entry.alert = true; // stuck/loop lines — the room renders these loud
+      // `event` names the machinery so the room can give the line a keyword without
+      // reading the sentence — and `about` cannot do that job here of all places: the
+      // dispatch line and this transition both carry the task id and are identical by it.
+      // Optional, because most of what this poller says is one-off prose nobody has a word
+      // for; a line with no `event` gets no keyword, which is correct.
+      if (event) entry.event = event;
       room.post(repo, entry, { now });
     } catch {
       /* a room post must never take the poller down */
@@ -136,7 +142,7 @@ export function createTeamWatch({ registry, tasks, room, queue, readTeam, human 
         postSystem(t.repo, t.id, `${who(t)} ${t.id} went idle — possibly finished, and it has not reported. Check its tail.`, { now });
       } else if (t.state === 'dispatched' && status === 'working') {
         tasks.update(t.id, { state: 'working' }, { now });
-        postSystem(t.repo, t.id, `${who(t)} ${t.id} started working.`, { now });
+        postSystem(t.repo, t.id, `${who(t)} ${t.id} started working.`, { now, event: 'started' });
       }
     }
     // A task that left the watched states takes its records with it — the old string

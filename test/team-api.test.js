@@ -240,6 +240,24 @@ test('the room line is keyed on `event`, so a reword can never turn its colour o
   assert.match(planner.text, /^Planner shape-it recorded as pending/);
 });
 
+test('the PR line the lead writes carries `event: \'pr\'`, so it gets its keyword too', async () => {
+  // The lead's one write on this PATCH. It is machinery — the panel recording what the lead
+  // did — and until this stamp existed it was one of the four commonest unlabelled shapes in
+  // the room (188 lines here), drawn as a bare grey sentence beside a dispatch that had a
+  // word. `about` is the task id and every task-scoped line carries one, so nothing but
+  // `event` could tell it apart.
+  await api('POST', '/api/team/tasks', { folder: repo, label: 'pr-line', body: 'an idea' });
+  const res = await api('PATCH', '/api/team/tasks/pr-line', { pr: 'https://example.invalid/pull/9' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.task.pr, 'https://example.invalid/pull/9');
+
+  const entry = roomLines(repo).findLast((e) => e.about === 'pr-line' && e.event === 'pr');
+  assert.ok(entry, 'the line is there and it is labelled');
+  assert.equal(entry.kind, 'system');
+  assert.equal(entry.from, 'panel');
+  assert.equal(entry.text, 'PR opened for pr-line: https://example.invalid/pull/9');
+});
+
 test('a backlog does not fill the cap — the regression guard for the whole feature', async () => {
   // Five recorded ideas against a default cap of three. If `pending` ever reaches
   // `ACTIVE`, every dispatch on this repo is refused with no worker running at all.
@@ -406,6 +424,20 @@ test('modelReason is stored on an ordinary dispatch, not only posted to the room
   assert.equal(task.startedBy, null, 'nothing was promoted — this one was started directly');
 });
 
+test('the non-default model line is stamped `event: \'model\'` at its call site', () => {
+  // The one of the four this file cannot reach over HTTP. Both room posts on the dispatch
+  // path sit *past* the worktree and the setup command, and every dispatch here stops at
+  // `Setup failed` by design (the fixture is not a checkout a real launch would survive) —
+  // so getting a request as far as this line would mean launching a real tmux session and a
+  // real Claude Code process inside the suite. The source is read instead, the
+  // `test/logs.test.js` idiom: a fact that lives in exactly one place, held by the only
+  // mechanism there is for it.
+  const src = fs.readFileSync(path.join(ROOT, 'server', 'index.js'), 'utf8');
+  const block = src.match(/if \(!model\.isDefault\) \{[\s\S]*?\n    \}/)[0];
+  assert.match(block, /event: 'model'/, 'the departure line says what it is');
+  assert.match(block, /not the default \$\{model\.defaultModel\}/, 'and this is that line');
+});
+
 test('a promotion at cap is refused like any other dispatch, and stays pending', async () => {
   // `pending` is outside `ACTIVE` so a backlog cannot fill the cap — which means starting
   // one moves a task *into* the counted set, and the cap has to see it coming.
@@ -476,7 +508,11 @@ test('dropping a pending task marks it abandoned and says so, without claiming a
   assert.equal(entry.kind, 'system');
   assert.equal(entry.text, 'Pending task drop-me dropped before it started.');
   assert.doesNotMatch(entry.text, /worktree/, 'nothing to claim was removed');
-  assert.equal(entry.event, undefined, 'grey, not a colour — the drop is not the dispatch green');
+  // A *different* call site from the close line below it, and deliberately left unstamped:
+  // that guard exists because a pending task never ran, and the sentence it posts says so in
+  // words no keyword improves. Stamping it `closed` would be an extra fact this task did not
+  // ask for; the assertion is here so the absence reads as a decision.
+  assert.equal(entry.event, undefined, 'the pending drop is its own line and carries no event');
 });
 
 /*
@@ -1594,9 +1630,15 @@ test('on a team with the toggle off, the done line is exactly the line it has al
 
   const res = await gateApi('POST', '/api/team/tasks/off-team/close', { outcome: 'done' });
   assert.equal(res.status, 200);
-  const text = gateRoom().at(-1).text;
-  assert.equal(text, 'Task off-team is done — merged and cleaned up. (http://box/pulls/72)');
-  assert.doesNotMatch(text, /judgment|merge decision/, 'no clause at all, not an empty one');
+  const entry = gateRoom().at(-1);
+  assert.equal(entry.text, 'Task off-team is done — merged and cleaned up. (http://box/pulls/72)');
+  assert.doesNotMatch(entry.text, /judgment|merge decision/, 'no clause at all, not an empty one');
+
+  // One `event` for every way this line can read — it names what the panel did, not how it
+  // came out. `done`, `abandoned` and `failed` all close a task, all say which in the
+  // sentence, and a keyword per outcome would put that fact in two places and make the room
+  // grow a word every time the wording moves.
+  assert.equal(entry.event, 'closed');
 });
 
 test('with the toggle on, a merge the lead decided says so, and names when it checked', async () => {

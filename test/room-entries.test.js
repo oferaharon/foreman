@@ -125,6 +125,26 @@ test('a machinery keyword is read off `event` and `kind`, never off the sentence
   assert.equal(keyword({ kind: 'system', event: 'self-merge', allowed: false }), 'merge-check');
 });
 
+test('the four server-stamped events come back as their own word, and take no colour', () => {
+  // `closed`, `pr`, `started` and `model` are stamped at the source in `server/index.js` and
+  // `server/watch.js` — the four commonest machinery shapes in this room, 543 lines between
+  // them. There is deliberately no case for any of them in `roomKeyword`: it returns the
+  // event verbatim, so a fifth stamp needs no client change at all.
+  assert.equal(keyword({ kind: 'system', event: 'closed', text: 'Task x is done.' }), 'closed');
+  assert.equal(keyword({ kind: 'system', event: 'pr', text: 'PR opened for x: …' }), 'pr');
+  assert.equal(keyword({ kind: 'system', event: 'started', text: 'Worker x started working.' }), 'started');
+  assert.equal(keyword({ kind: 'system', event: 'model', text: 'Worker x launched on …' }), 'model');
+
+  // And none of the four is in the modifier list, so all four draw the plain gutter and a
+  // muted keyword. A hue in this column means *look at this*; a task closing cleanly, a PR
+  // opening and a worker starting are the opposite of that, and spending a colour on them
+  // would cost the two that already mean something.
+  const branch = app.match(/if \(kind === 'system' \|\| kind === 'conflict'\) \{[\s\S]*?is-plain'\);/)[0];
+  for (const event of ['closed', 'pr', 'started', 'model']) {
+    assert.doesNotMatch(branch, new RegExp(`e\\.event === '${event}'`), `${event} takes no modifier`);
+  }
+});
+
 test('an `event`-less line gets no keyword, whatever its sentence says', () => {
   // 577 machinery lines in this repo's own room carry no `event` and never will — the log is
   // append-only. Stamping four of those shapes is an additive server change; guessing from

@@ -9032,9 +9032,14 @@ function createPane(slot, host) {
    * already keep.
    *
    * So a line with no `event` on the record gets **no keyword at all** rather than a guess.
-   * 577 machinery lines in this repo's own room carry none and always will (the log is
-   * append-only); giving four of those shapes a keyword is an additive server change, and
-   * deliberately not this one.
+   * 577 machinery lines in this repo's own room carry none and always will — the log is
+   * append-only, and nothing goes back to fill them in. The four commonest of those shapes
+   * (`closed`, `pr`, `started`, `model`) are stamped at the source now, in `server/index.js`
+   * and `server/watch.js`, so lines written from that point on say what they are; every line
+   * written before stays plain, which is correct rather than a gap to paper over. Note there
+   * is no case for them here and there must not be one: this returns the event verbatim, so
+   * a fifth stamp needs no client change at all, and the day one wants a *colour* it is
+   * `roomEntryNode`'s modifier list that grows, not this.
    *
    * The single derived word is `merge-check`: a refused self-merge carries the same `event`
    * as an allowed one and is the panel doing its job rather than a decision taken, so it says
@@ -9318,7 +9323,9 @@ function createPane(slot, host) {
       else if (e.event === 'self-merge' && e.allowed) row.classList.add('is-self-merge');
       // A row no modifier claimed. The class exists so its keyword takes the row's muted ink
       // rather than the gutter's `--rule-strong`, which is a rule colour and is nowhere near
-      // legible as text.
+      // legible as text. The four server-stamped events — `closed`, `pr`, `started`,
+      // `model` — land here deliberately: they get a keyword and no colour, because a hue
+      // here means *look at this*, and a task closing cleanly is the opposite of that.
       else row.classList.add('is-plain');
       if (e.ts) row.append(roomStamp(e.ts), document.createTextNode(' '));
       // `panel` on every machinery line, which is new and was the "some with, some without"
