@@ -1596,10 +1596,12 @@ app.post('/api/team/dispatch', async (req, res) => {
     });
     // A departure from the team default is said out loud, with the lead's why — so the
     // maintainer can see when the lead has called it wrong. The default going out silently
-    // is the point of it being the default.
+    // is the point of it being the default. `event: 'model'` is the same additive stamp the
+    // dispatch line above carries: the keyword comes off the record, never off the sentence,
+    // which is what lets this line be reworded without a keyword turning off in silence.
     if (!model.isDefault) {
       room.post(repo, {
-        from: 'panel', to: 'lead', kind: 'system', about: label,
+        from: 'panel', to: 'lead', kind: 'system', about: label, event: 'model',
         text: `Worker ${label} launched on ${model.model}, not the default ${model.defaultModel} — ${modelReason}`,
       });
     }
@@ -1918,9 +1920,11 @@ app.patch('/api/team/tasks/:id', async (req, res) => {
     if (!/^https?:\/\//.test(pr)) return res.status(400).json({ error: 'A PR is recorded by its URL.' });
     tasks.update(task.id, { pr });
     // Machinery, not speech: the lead did it, the panel is recording it, and it renders
-    // as a framed system line like every other state change in the room.
+    // as an inline log line like every other state change in the room. `event: 'pr'` is
+    // what gives it its keyword — `about` is the task id and every task-scoped line carries
+    // one, so it can tell this apart from nothing.
     room.post(task.repo, {
-      from: 'panel', to: 'lead', kind: 'system', about: task.id,
+      from: 'panel', to: 'lead', kind: 'system', about: task.id, event: 'pr',
       text: `PR opened for ${task.id}: ${pr}`,
     });
     broadcastRoster();
@@ -2161,8 +2165,12 @@ app.post('/api/team/tasks/:id/close', async (req, res) => {
     groups.retireWorktree(task.worktree);
   }
   tasks.update(task.id, { state: task.state === 'failed' ? 'failed' : done ? 'done' : 'abandoned' });
+  // One `event` for every way this line can read. It names what the *panel* did — the task
+  // was closed — and never the outcome, which is `done`, `abandoned` or `failed` and is
+  // already in the sentence for a human. Splitting it into three keywords would put the
+  // outcome in two places, and the room's keyword is a category, not a verdict.
   room.post(task.repo, {
-    from: 'panel', to: 'lead', kind: 'system', about: task.id,
+    from: 'panel', to: 'lead', kind: 'system', about: task.id, event: 'closed',
     text: done
       ? task.kind === 'plan'
         // Worth saying out loud: closing a plan task removes its worktree and branch and
