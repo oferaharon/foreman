@@ -63,7 +63,7 @@ import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
 import { collectQueue, composition, mergeLine, prName, prNumber } from './merge-queue.js';
 import { mergeVerdict } from './merge-check.js';
 import { resolveSetup } from './setup-detect.js';
-import { resolveForge, credentialKeys, READINGS } from './forge.js';
+import { resolveForge, credentialKeys, READINGS, forgeSummary } from './forge.js';
 import { resolveBaseBranch, bareBase } from './base-branch.js';
 import { createTeamWatch } from './watch.js';
 import { createConflictScanner } from './conflicts.js';
@@ -1277,20 +1277,34 @@ app.get('/api/teams', async (_req, res) => {
   } catch {
     return res.json({ teams: [] });
   }
-  const teams = [];
+  const repos = [];
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     try {
       const stored = JSON.parse(await fsp.readFile(path.join(TEAMS_DIR, entry.name, 'team.json'), 'utf8'));
       if (!stored?.repo) continue;
-      teams.push({ repo: stored.repo, name: path.basename(stored.repo) });
+      repos.push(stored.repo);
     } catch {
       /* no team.json, or unparseable — skip */
     }
   }
+  // Parallel, not a `for` of awaits: each entry costs a `git remote get-url` (see
+  // `resolveForge`), and a sequential walk would make the home screen wait on N of those
+  // in a row instead of the slowest one.
+  const teams = await Promise.all(repos.map((repo) => teamListEntry(repo)));
   teams.sort((a, b) => a.name.localeCompare(b.name));
   res.json({ teams });
 });
+
+/**
+ * One row of `GET /api/teams`: the repo, its folder name for display, and the forge link
+ * for the phone's Leads tab. `forgeSummary` (`server/forge.js`) carries `webUrl: null` for
+ * `push only` / `no remote`, and is `null` outright only when resolution itself throws —
+ * the mark is decoration, never worth failing the whole list over.
+ */
+async function teamListEntry(repo) {
+  return { repo, name: path.basename(repo), forge: await forgeSummary(repo) };
+}
 
 /*
  * Dispatch — the machinery the team lead drives. No UI calls this: a worker exists

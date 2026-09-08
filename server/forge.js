@@ -374,3 +374,20 @@ export async function resolveForge(repo, deps = {}) {
 export function resetForgeCache() {
   cache.clear();
 }
+
+/**
+ * `{reading, webUrl}` for one repo — everything `GET /api/teams` needs to draw the phone's
+ * Leads-tab forge link — or `null` when resolution itself throws. Its own export rather
+ * than inlined at the call site so a test can inject `deps` (the same seam `detectForge`
+ * takes) without booting the whole server the way an HTTP-level test of that route would
+ * have to: `server/index.js` calls `server.listen` at import time, so `resolveForge`'s
+ * actual `gh`/MCP detection is the only piece of this reachable without a child process.
+ */
+export async function forgeSummary(repo, deps = {}) {
+  try {
+    const resolved = await resolveForge(repo, deps);
+    return { reading: resolved.reading, webUrl: resolved.webUrl };
+  } catch {
+    return null;
+  }
+}

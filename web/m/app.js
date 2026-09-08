@@ -48,6 +48,7 @@
  * DOM, no storage) and imports only `trust-gate.js`; none of the notification machinery
  * beside it reaches this view, and none of it can.
  */
+import { forgeMarkupFor } from '../forge-mark.js';
 import { needsKind } from '../notify.js';
 import { ghostSend, PHONE_TABS, phoneTab } from '../prefs.js';
 import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.js';
@@ -1271,6 +1272,12 @@ function leadsView(teams) {
         // untouched and the list under the card never repaints; a silent failure, which is
         // why it is the list itself in here and not its length.
         r.workerList,
+        // The forge link, exactly as `leadForgeLink` reads it. Only `loadTeams` (page load
+        // or a manual refresh) ever changes this, but without it here a repo whose remote
+        // changed would keep the stale link — or none — until something else in the row
+        // moved too.
+        r.team.forge?.webUrl || '',
+        r.team.forge?.reading || '',
       ]),
     );
 
@@ -1498,6 +1505,44 @@ function quotaGauge(win, now, age) {
   return gauge;
 }
 
+/**
+ * The forge's mark beside a lead card's name — the desktop's own link
+ * (`syncForgeLink`/`forgeLink` in `web/app.js`) drawn here from the same
+ * `web/forge-mark.js` glyphs, opening the repository's own web page in the phone's
+ * default browser rather than the installed PWA (`target="_blank"` plus `rel="noopener"`
+ * is what gets an installed app to hand a link to the system browser on iOS and Android).
+ *
+ * `webUrl` is the whole test, same as the desktop: the server has already refused it for
+ * `push only` and `no remote`, so there is nothing left to re-decide here.
+ *
+ * A child of `.m-team-body`, which is a `<button>` — the card's tap target already covers
+ * this whole row, so the mark's own `click` calls `stopPropagation` to keep opening the
+ * repo from also routing to the lead underneath it. Padding rather than a bigger glyph
+ * gets the tap target to 44px; the matching negative margin keeps the row's own height and
+ * the name's baseline exactly where they were without it.
+ */
+function leadForgeLink(forge) {
+  const a = document.createElement('a');
+  a.className = 'm-lead-forge';
+  a.href = forge.webUrl;
+  a.target = '_blank';
+  a.rel = 'noopener';
+  // `owner/repo` off the link's own path rather than a second field from the server: one
+  // source for the address means the label can never name a different repository from the
+  // one the tap opens.
+  let where = forge.webUrl;
+  try {
+    where = new URL(forge.webUrl).pathname.replace(/^\/+/, '') || forge.webUrl;
+  } catch {
+    /* the server built this string; if it is unparseable the whole URL is the honest label */
+  }
+  a.title = `${where} on ${forge.reading}`;
+  a.setAttribute('aria-label', `Open ${where} on ${forge.reading}`);
+  a.insertAdjacentHTML('beforeend', forgeMarkupFor(forge.reading));
+  a.addEventListener('click', (e) => e.stopPropagation());
+  return a;
+}
+
 function teamNode(row) {
   const wrap = document.createElement('div');
   wrap.className = 'm-team';
@@ -1538,10 +1583,14 @@ function teamNode(row) {
   );
   body.appendChild(gutter);
 
+  const title = document.createElement('span');
+  title.className = 'm-team-title';
   const name = document.createElement('span');
   name.className = 'm-team-name';
   name.textContent = row.team.name;
-  body.appendChild(name);
+  title.appendChild(name);
+  if (row.team.forge?.webUrl) title.appendChild(leadForgeLink(row.team.forge));
+  body.appendChild(title);
 
   // A muted numeric badge, deliberately not the dot and deliberately not amber: it answers
   // a different question — the lead has said something since I last looked. Every count on
