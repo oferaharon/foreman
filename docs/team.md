@@ -17,7 +17,9 @@ Nothing here is headless or hidden.
 lead's conversation — a message sent to it, two tool calls folded into one-line chips, and
 its answer — with a reply box at the bottom.](images/phone.png)
 
-`/m/` is a phone-sized view of your leads and nothing else.
+`/m/` is a phone-sized view of the whole panel now, not leads alone — three tabs, Leads,
+Standalones and Rooms — and a lead's card lists its workers underneath exactly as shown here.
+See [the phone view](panel.md#the-phone-view) for the rest of it.
 
 ### Starting a lead
 

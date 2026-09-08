@@ -1150,6 +1150,53 @@ The log is `~/.foreman/shared-room.jsonl`, rotated at boot past 4 MB into one ov
 generation, with its sequence carried across the rotation so a browser holding a cursor is not
 sent back to the start of a fresh file.
 
+### The phone view
+
+`/m/` is a second front door onto the whole panel, not only its leads. Home is three tabs
+across the top — **Leads**, **Standalones**, **Rooms** — reachable by tap or by hash
+(`#/leads`, `#/standalones`, `#/rooms`; bare `#/` means Leads), and the tab you left it on is
+remembered the next time you open it.
+
+**There is no "needs you" section — a rule, not an omission.** Attention is a small mark on
+the row that is waiting and a matching mark on the tab that holds it, and nowhere else. The
+mark lights on a permission prompt, a question Claude is asking, a plan waiting for approval,
+the folder-trust gate, or — on a lead's own row — a worker's task sitting in review. A room's
+mark is unseen posts from other **sessions**; your own posts from the phone never light it,
+the same rule that keeps a room's desktop badge from counting your own words back at you.
+
+**Leads** looks the same as before, one card per team lead, with its live workers now listed
+underneath as muted one-liners — branch and a state word, in the same static dispatch order
+the desktop rail uses, newest on top. The lines are not tap targets. **Workers are still never
+opened from the phone** — a worker's prompt is its lead's to answer, not something to reach
+around the lead for.
+
+**Standalones** lists every live session that belongs to nobody's team, including one you just
+launched that hasn't spoken yet. Tapping one opens the same conversation screen a lead gets,
+minus the parts that only a team has — no tasks tab, no merge queue. The folder-trust gate is
+refused there exactly as everywhere else, with no button drawn. If a session's identity turns
+out to belong to a worker or a lead instead, the screen shows it as gone rather than a
+conversation the phone was never meant to display.
+
+**Rooms** lists open rooms, with an `archived (N)` fold underneath. Open one for the log and a
+composer: a post from the phone is your own word, typed into every other member's terminal
+prefixed `| `, exactly as if you had typed it on the Mac. Enter in the composer writes a
+newline, not a send — the button is the send. `+ room` makes a room from a name and a pick of
+the leads and standalone sessions in reach, never a worker; a room's own `+` adds or removes a
+member and archives the room, each of the last two behind an in-place confirmation before
+anything that takes something away. Renaming a room is not on the phone.
+
+It installs to the Home Screen the same way the panel installs to the Dock — **Share → Add to
+Home Screen** in Safari — under the name **Foreman**, the same name the desktop uses; the two
+manifests differ only by `id`, which is what lets a browser tell them apart as two apps. There
+are no notifications on the phone: plain `http://` on the LAN is not a secure context, so the
+tab and row marks are the phone's whole answer to "something needs you."
+
+**One sentence worth keeping in view.** Membership in a room is who may type into whose
+terminal, and the phone can now change it — create a room, add a member, remove one, archive
+it — exactly as the Mac can. Under a bind wider than loopback that is a control reachable from
+anything on the LAN. This follows from the no-auth stance already in force
+([SECURITY.md](../SECURITY.md)), not from anything this feature adds.
+
 ### Installing it as an app
 
 The panel ships a web-app manifest, so it can leave the browser and become a window of its
