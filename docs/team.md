@@ -156,29 +156,60 @@ isolation is structural, not a matter of workers behaving well. Everything is re
 one stream so there is one place to watch, with system lines (dispatched, blocked, went
 idle, PR opened) styled apart from workers' own words.
 
-Two of those machinery lines are coloured, both in tokens the panel already uses
-elsewhere: **a dispatch is green** — a worker starting is the one piece of machinery that
-is good news — and **two workers on one file stays amber**. Everything else is the plain
-grey card. The colour comes from what the poster said the line *is* (`event: 'dispatch'`
-on the entry), never from reading its sentence, so rewording the message cannot silently
-turn the colour off.
+The room reads as three tiers of loudness rather than one flat list of identical cards.
+Every entry gets a marker, an author line and a body; how loud it gets is carried by shape
+alone, never by a step in the type size.
 
-![The room, read top to bottom: a worker's report as a bubble, folded to five lines behind a
-quiet view more and tagged ready for review with its branch; four grey system cards — a PR
-opened, a task recorded pending, a merge, a task closed; the green line where the next
-worker was dispatched; that worker's own two bubbles, each named and timestamped and each
-folded; and a last grey card for the PR it opened.](images/team-room.png)
+**Machinery** — dispatched, blocked, went idle, PR opened, a task closed — draws as a
+one-line log row: time, author, a one-word keyword, the sentence, with a 2px rule down the
+left gutter carrying whatever colour the line has. A dispatch is green — a worker starting
+is the one piece of machinery that is good news — two workers on one file stays amber, and
+a task merely recorded but not yet started is a dashed grey rule, quieter than the default
+rather than louder. A lead merging on its own judgment is the accent colour, the same one
+the panel spends on authority everywhere else. Everything else — including the four
+commonest machinery shapes, a task closing, a PR opening, a worker starting, a worker's
+model — gets a keyword and no colour at all: a hue here means *look at this*, and routine
+bookkeeping is the opposite of that. The colour comes from what the poster said the line
+*is* (`event: 'dispatch'` on the entry, or `kind: 'conflict'`), never from reading its
+sentence, so rewording the message cannot silently turn a colour off.
+
+**Talk** — a worker's own words — draws as a full-width bubble, in the same style the
+panel's own [rooms](panel.md#rooms) already use: one stable colour per speaker, carried on
+its pill and nowhere else, so a worker is recognisable by colour before its name is read.
+The lead's own line is the one exception — an accent left edge and a faint accent tint
+instead of a hue — and when it is addressed at a worker (`lead → [worker]`) the recipient
+is drawn in that worker's own colour, so the same worker reads the same hue whichever end
+of the line it's on. What gives the bubbles any traffic at all is that a worker's report is
+posted **as the worker** — `from: <task id>`, `kind: 'status'` — rather than as a system
+line from `panel` about it, which is how a multi-paragraph summary used to arrive dressed
+as one-line machinery. `report: 'review'` on the entry carries the fact that it *is* the
+done report, shown as a `review` or `plan` tag beside the author's name; the lead reads it
+back out of `room_read`.
+
+**Needs you** — an escalation or an alert — is the one framed, tinted card left in the
+room, and the only red anywhere in it; red is a budget and this is the whole of it. The two
+share the shape and are told apart only by who's speaking: an escalation is a worker, an
+alert is `panel`.
+
+![The room, read top to bottom: a green dispatch line, a worker's report folded to five
+lines behind a quiet view more and tagged review with its branch, a grey PR-opened line, an
+accent self-merge line folded behind 7 checks ›, a grey task-closed line, a second green
+dispatch line, a plain started-working line, a lead → worker line addressed to that
+worker's own coloured pill, and the start of that worker's own report bubble.](images/team-room.png)
 
 **A long entry folds to five lines.** A worker's DONE report runs to several paragraphs
 and this panel is 340px read beside the conversation with the lead — one report used to be
-the whole room. Bubbles and system cards clamp, with a quiet `view more` inside the entry;
-what fits keeps its own height and grows no control at all, because whether an entry
-overflows is measured rather than guessed at from its length. **Escalations and alerts
-never fold** — they are the two things here that need you, and hiding four fifths of a
-decision behind a control is the failure the loud card exists to prevent. Opening one
-leaves the reader exactly where they were and does not count as scrolling away; what is
-open is remembered by the entry, so the next arriving line does not fold it back under
-whoever is reading it.
+the whole room. Bubbles and machinery sentences both clamp, with a quiet `view more` inside
+the entry; what fits keeps its own height and grows no control at all, because whether an
+entry overflows is measured rather than guessed at from its length. **A self-merge's own
+evidence list folds the same way**, behind a quiet `N checks ›`, closed by default — five
+of them once cost a third of this panel's height on their own, in front of you every time
+whether or not you were looking. On an escalation, only its `grounds` and what it's doing
+meanwhile clamp; the question, its options and its recommendation stay open always, because
+hiding four fifths of a decision behind a control is the exact failure the loud card exists
+to prevent. Opening any of these leaves the reader exactly where they were and does not
+count as scrolling away; what is open is remembered by the entry, so the next arriving line
+does not fold it back under whoever is reading it.
 
 The room is a log, not a transport: workers write to it and never read it, because
 lead→worker already has a better channel — a message dripped into the worker's actual

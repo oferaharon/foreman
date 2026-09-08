@@ -1965,14 +1965,24 @@ reported. The exits all land before any relaunch, which costs a window where the
 down and buys reusing `restoreSessions` unchanged — its skip-what-is-already-live rule is
 also what handles the sessions the guard refused to touch.
 
-**The room reads as three shapes**, all left-aligned: framed system cards (amber for a
-conflict), speech bubbles laned by direction for anyone actually talking, and the loud
-escalation card. What gives the bubbles any traffic at all is that a worker's report is
-posted **as the worker** — `from: <task id>`, `kind: 'status'` — rather than as a `system`
-line from `panel` about it, which is how a multi-paragraph summary used to arrive dressed as
-one-line machinery. `report: 'review'` on the entry carries the fact that it *is* the done
-report; the lead reads it out of `room_read`, the card draws it under the bubble. Everything
-else in the room is machinery and stays `system`.
+**The room reads as three tiers of loudness, not three shapes any more.** Tier 1
+(`system`, `conflict`) is a git-log row: a 2px gutter carries the colour a frame used to
+carry, keyed on `event` — green for a dispatch, amber for a conflict, dashed grey for a
+task merely `pending`, accent for a lead's own self-merge, plain `--ink-muted` for
+everything else, the four server-stamped events (`closed`, `pr`, `started`, `model`)
+included. Tier 2 (`chat`, `status`, `answer`, legacy `link`) is the panel's own rooms
+bubble, full column width, one `--peer-N` hue per speaker on the pill and nowhere else; the
+lead's line keeps the accent edge and 7% tint instead of a hue, and a `lead → [worker]`
+line draws the recipient as that worker's own pill, from the same `roomPill` function both
+ends of the line go through. What gives the bubbles any traffic at all is that a worker's
+report is posted **as the worker** — `from: <task id>`, `kind: 'status'` — rather than as a
+`system` line from `panel` about it, which is how a multi-paragraph summary used to arrive
+dressed as one-line machinery. `report: 'review'` on the entry carries the fact that it
+*is* the done report, shown as a `review`/`plan` tag in the author line; the lead reads it
+out of `room_read`. Tier 3 (`escalation`, `alert`) is the one framed, tinted, red card
+left — the two share it and are told apart only by the author line and tag, a worker's name
+against `panel`. A self-merge's own evidence list folds behind `N checks ›`, closed by
+default. Everything else in the room is machinery and stays `system`.
 
 **Row and header controls**: `⧉` duplicates a session into the same folder, the bin `/exit`s
 one behind a confirmation, a folder icon opens the project in Finder, and `recent` drops the
