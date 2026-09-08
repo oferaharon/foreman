@@ -1823,8 +1823,14 @@ body.row-dragging * { cursor: row-resize !important; }
    appearing. Add it the day it can be measured, not the day it parses. */
 /* Inside the entry, never floating over it, and in the room's own muted ink — the same
    restraint as the "new below" pill: no accent, no motion, nothing that competes with an
-   escalation for the eye. */
+   escalation for the eye.
+
+   `display: block` is what tier 1 needs: a machinery row is an *inline* flow (stamp,
+   author, keyword and sentence all on one line), so an inline-block control would sit
+   beside the words it cut off instead of under them. In a bubble it changes nothing —
+   the button was already the only thing on its line there. */
 .room-more {
+  display: block;
   align-self: flex-start;
   margin-top: 0.15rem;
   padding: 0;
@@ -1837,98 +1843,94 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 .room-more:hover { color: var(--ink); }
 
-/* --- the room's three shapes: system cards, speech bubbles, escalation cards --- */
+/* --- the room's three tiers: machinery lines, talk bubbles, one needs-you card ---
+ *
+ * One skeleton — a marker, an author, a body — and three tiers of *loudness*. Loudness is
+ * carried by shape alone: a gutter rule, a bubble, or a tinted frame. Never by a step in
+ * the type scale, which is why `.room-list` above carries the one body size for all three.
+ *
+ * Measured on 38 consecutive entries of this repo's own room at this column's width:
+ * machinery fell from 2,813px to 1,585px while talk held at 1,986px — the space the room
+ * recovers comes entirely out of the bookkeeping and not one pixel out of what anybody
+ * said. */
 
-/* Panel machinery — a dispatch, a PR, a state change. Each one is a thing that happened,
-   so each one gets its own frame and starts at the left margin like everything else here.
-   Centred text between two hairlines was the first attempt and it read as loose free
-   text — and it took the amber box off the conflict line, which was the part that worked. */
+/* ------------------------------------------------------- tier 1: machinery --- */
+/* A `git log` line, not a card. The frame and the 7% tint go; the colour stays, on a 2px
+   rule down the gutter and on a one-word keyword. Reads `15:59 panel dispatch Worker …` —
+   time, author, keyword, sentence, the author line *inline* so a one-sentence event stays
+   one entry tall.
+ *
+ * **This is not the thing that was tried and rejected on 2026-08-26.** That version was
+ * centred text between two hairlines with no marker and no author; it read as loose free
+ * text and it took the amber box off the conflict line, which was the part that worked.
+ * Here every line starts at a left gutter carrying the colour the box used to carry, and
+ * every line names who wrote it. Keep the gutter and keep its colour, or that reopens.
+ *
+ * The colour is one custom property read in two places — the rule and the keyword — so a
+ * modifier below sets one value rather than two spellings of one decision. */
 .room-system {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  border: 1px solid var(--rule);
-  border-radius: 4px;
-  padding: 0.28rem 0.45rem;
-  background: var(--surface);
+  --mark: var(--rule-strong);
+  border-left: 2px solid var(--mark);
+  padding: 0.05rem 0 0.05rem 0.5rem;
   color: var(--ink-muted);
-  /* No size of its own: the machinery sentence *is* the body size, and `.room-list` carries
-     it for every tier at once. */
   line-height: 1.35;
+  overflow-wrap: anywhere;
 }
-/* The card is still a row (text, then the stamp on its first baseline); the text and its
-   "view more" are a column inside it, so the control lands under the words and not beside
-   the timestamp. */
-.room-system-body { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
-.room-system-text { max-width: 100%; overflow-wrap: anywhere; }
-/* Two workers, one file — the frame the maintainer liked, back where it was. */
-.room-system.is-conflict {
-  color: var(--working);
-  border-color: color-mix(in srgb, var(--working) 45%, transparent);
-  background: color-mix(in srgb, var(--working) 7%, var(--surface));
-}
-/* A worker starting — the same frame in the panel's live green. `--idle` rather than a
-   green of its own: it is the token a live session's dot already uses, so this tracks both
-   themes from the one place they flip, exactly as the conflict's amber does. The mix is
-   the conflict recipe unchanged (45% border, 7% ground) — green text on a green ground is
-   where this usually goes wrong, and 7% of the token over `--surface` is what keeps the
-   ground a tint rather than a second colour. Measured against its own card: **3.71:1
-   light, 6.70:1 dark**, which is the shipped amber's 3.55 / 6.79 to within noise. Under AA
-   for body text in the light theme, and knowingly so: this is a 0.74rem machinery line
-   that matches the frame beside it, and lifting it would mean a darker `--idle` — a
-   palette change that moves every session dot, not a room change. */
-.room-system.is-dispatch {
-  color: var(--idle);
-  border-color: color-mix(in srgb, var(--idle) 45%, transparent);
-  background: color-mix(in srgb, var(--idle) 7%, var(--surface));
-}
-/* A task recorded but not started — the one machinery line that is deliberately quieter
-   than the default rather than louder. No colour: the two that have one (amber conflict,
-   green dispatch) both mean "look at this", and a third would make them worth less by
-   arithmetic. The dashed edge is the whole signal — same ink, same ground, same frame,
-   an outline that reads as provisional because it is. It also stays legible on its own
-   terms: contrast is untouched, since only `border-style` changes. */
-.room-system.is-pending {
-  border-style: dashed;
-}
+/* Two workers on one file keeps its amber, and a worker starting keeps the panel's live
+   green — the same two tokens the frames used to carry, now 2px wide. Measured off the
+   rendered row against `--shelf`, the aside's own ground: amber **6.90:1 dark**, green
+   **6.79:1 dark**, against the 6.79 / 6.70 recorded for the frames they replace. Dark
+   only, per the 2026-08-27 ruling; the light figures are in the plan. */
+.room-system.is-conflict { --mark: var(--working); }
+.room-system.is-dispatch { --mark: var(--idle); }
 /* A lead that merged without the maintainer's word — the fourth machinery colour, and the
-   one that had to be spent: this is the line where something that used to need them
-   happened without them, and it must be findable in a scroll of grey cards.
+   one that had to be spent. `--accent` rather than a fifth hue because the room already
+   spends it on exactly this idea: authority. **5.80:1 dark** on `--shelf`. */
+.room-system.is-self-merge { --mark: var(--accent); }
+/* A task recorded but not started — the one machinery line deliberately quieter than the
+   default rather than louder. No colour of its own: the two that have one both mean "look
+   at this", and a third would make them worth less by arithmetic. Only `border-style`
+   changes, so contrast is untouched. */
+.room-system.is-pending { border-left-style: dashed; }
+/* **An uncoloured keyword is `--ink-muted`, and that is both of them.** An entry with no
+   `event` on the record gets no keyword at all; one that has an `event` but is none of the
+   three coloured kinds must not take the gutter's own `--rule-strong`, which is a rule
+   colour and is nowhere near legible as text. `is-plain` is set by `roomEntryNode` on
+   exactly the rows no modifier above claimed.
 
-   `--accent` rather than a fifth hue, because the room already spends it on exactly this
-   idea: `.room-answer .room-bubble` carries an accent edge, with the comment "an
-   autonomous answer — the accent edge marks the audit trail". A self-merge is the same
-   family, one shape over. It also leaves the three status colours meaning what they mean —
-   green a worker started, amber two workers on one file, red something failed — instead of
-   borrowing one of them for a fourth idea.
+   `is-pending` is in this selector too, and it is **the one place this block departs from
+   the signed-off mock-up** — so the reason is here rather than in a commit message somebody
+   would have to go looking for. The mock-up scopes this rule to `is-plain` alone, which
+   leaves the word `pending` inheriting `--mark`: measured off the rendered row in dark on
+   `--shelf`, **1.47:1**, the only text in the room under AA — in the same change that
+   evicts `--ink-faint` (3.17:1) from this list for exactly that reason. The plan's own
+   per-shape table says a pending line's colour is "none", and an uncoloured keyword is this
+   ink, like every other uncoloured keyword; the plan's contrast table never lists this one,
+   which is what an oversight looks like rather than a decision. Ruled by the maintainer's
+   team on 2026-09-08. **The dashed gutter stays the whole signal** — that is what makes the
+   line quieter than the default, and nothing here spends a colour on it. Measured after:
+   **5.18:1**, the same as the machinery sentence beside it. */
+.room-system.is-plain .room-key,
+.room-system.is-pending .room-key { color: var(--ink-muted); }
+.room-system-text { max-width: 100%; overflow-wrap: anywhere; }
 
-   The mix is the conflict/dispatch recipe unchanged (45% border, 7% ground), and it clears
-   AA for body text in both themes, which neither of the other two does: measured off the
-   rendered card in a headless window, **5.87:1 light and 5.72:1 dark**, against the amber
-   and green recorded above (3.55 / 6.79 and 3.71 / 6.70). Only the allowed line
-   takes it — `roomEntryNode` matches `event` and `allowed` together, so a refusal stays
-   the plain grey card, which is right: the panel refusing is the panel working. */
-.room-system.is-self-merge {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
-}
 /* What the verdict actually checked, under the sentence that announces it. A step smaller
-   than the sentence and in the card's own ink, so it reads as the evidence rather than as
-   the announcement — and inheriting that ink is what makes an allowed self-merge one block
-   instead of a grey list bolted under a tinted line.
+   than the sentence and in the row's own ink, so it reads as the evidence rather than as
+   the announcement.
 
-   No bullet glyph: the room is already dense at 0.74rem and a `disc` column would cost
-   more width than the marker earns. The hanging dash is drawn with `::before` so the
-   wrapped second line of a long reason lines up under the first word, not under the dash.
+   No bullet glyph: the room is already dense and a `disc` column would cost more width
+   than the marker earns. The hanging dash is drawn with `::before` so the wrapped second
+   line of a long reason lines up under the first word, not under the dash. The size step
+   and the dash are the whole of the hierarchy — deliberately **no `opacity`** under them,
+   which was tried and measured at or under AA in all four combinations.
 
-   The size step and the dash are the whole of the hierarchy — there is deliberately **no
-   `opacity`** under them. A 0.85 was tried and measured off the rendered list, and it puts
-   all four combinations at or under AA (4.55 / 4.48 dark, 4.33 / 4.49 light); the
-   self-merge card in the light theme was the worst of them. Fading the one part of the
-   card the maintainer is meant to read back a week later is the wrong thing to buy a
-   little hierarchy with, and the smaller type already says what it is. Without it the list
-   inherits the card's own colour and its measured contrast: 5.87 light, 5.72 dark. */
+   **It now starts folded, and that overturns what this comment used to say.** It argued at
+   length that the list is "not a hover and not a clamp" because the maintainer reads it
+   back a week later. The maintainer overturned it on 2026-09-08, having been shown the
+   measurement: five self-merges in one 38-entry window are 1,646px, a third of the room,
+   1,097px of it these lists. Folding does not stop it being read back — it stops it being
+   in front of you five times per plan item, and the sentence above it already names the PR
+   and the reason. Reading it back is one press. */
 .room-reasons {
   margin: 0.25rem 0 0;
   padding: 0;
@@ -1939,41 +1941,76 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 .room-reasons li { padding-left: 0.7rem; overflow-wrap: anywhere; }
 .room-reasons li::before { content: '—'; float: left; margin-left: -0.7rem; }
+/* The way in. Its own short gutter rule, indented one step past the row's, so it reads as
+   something *under* this line rather than a line of its own — and in the chrome size and
+   the chrome's muted ink, like every other control in this list. It is not `.room-more`:
+   that one toggles a clamp on words already on screen, this one reveals a block that was
+   never drawn. */
+.room-checks {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-left: 2px solid var(--rule-strong);
+  padding: 0.05rem 0 0.05rem 0.5rem;
+  background: none;
+  text-align: left;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.room-checks:hover { color: var(--ink); }
 
-/* Agent speech, laned by direction — worker→lead left, lead→worker right; the reader
-   is neither party. Wide with an offset, never two thin columns hugging the edges. */
-.room-msg { max-width: 94%; line-height: 1.35; }
-.room-msg.from-worker { align-self: flex-start; }
-.room-msg.from-lead { align-self: flex-end; }
-.room-msg.from-lead .room-meta { justify-content: flex-end; }
+/* ------------------------------------------------------------ tier 2: talk --- */
+/* One bubble style — **the panel's rooms bubble** (`.group-bubble`), not a second answer to
+   the same question. A room and this aside have the two things that matter in common: many
+   speakers, and a reader who is none of them.
+ *
+ * **Lanes go, and so does the indent.** Every bubble starts at the same edge and runs the
+ * full column, so its outer edges land on exactly the column the machinery rows start and
+ * stop at. A lane is a two-sided idea and a team room is not two-sided — it is one lead and
+ * several workers, and the reader is neither. This supersedes the 2026-08-26 "laned by
+ * direction" ruling, deliberately and on the maintainer's own amendment of 2026-09-08. The
+ * rooms pane's own 82% goes with it: that indent earns its keep in a 52rem column and at
+ * 340px it was giving away width the words needed, leaving the bubbles looking inset from
+ * the log lines above them. */
+.room-msg { align-self: stretch; max-width: 100%; line-height: 1.45; }
 .room-bubble {
   border: 1px solid var(--rule);
   border-radius: 8px;
-  padding: 0.3rem 0.55rem;
+  border-top-left-radius: 3px;
+  padding: 0.45rem 0.7rem;
   background: var(--surface);
 }
-.room-msg.from-worker .room-bubble { border-top-left-radius: 3px; }
+/* The one exception, and it is the shape that carries authority everywhere in this panel:
+   the lead's own line gets the accent edge and the 7% tint.
+ *
+ * It does **not** get `.group-msg.from-human`'s full-width stretch, which is the most
+ * tempting line in that block because the lead's bubble takes everything else from the
+ * human's. Full width means *the maintainer spoke*, everywhere here; a lead wearing it
+ * would say a human authorized something no human saw. Every bubble is full width now
+ * anyway — what that rule grants is the *semantics*, and those are not the lead's. */
 .room-msg.from-lead .room-bubble {
-  border-top-right-radius: 3px;
+  border-left: 2px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
-/* An autonomous answer — the accent edge marks the audit trail. */
-.room-answer .room-bubble { border-left: 2px solid var(--accent); }
 /* A worker's report arrives with its own paragraphs; keep them. */
 .room-bubble .room-text { white-space: pre-wrap; }
-/* The one piece of machinery inside a bubble: this report was the done report. */
-.room-ready {
+/* The branch (or plan file) a report points at: still on screen, no longer accent and no
+   longer announcing itself in words. It is a reference — the `review` / `plan` tag in the
+   author line is what says *this was the done report*, and the accent is now spent only on
+   the lead and on a self-merge. */
+.room-ref {
   margin-top: 0.25rem;
   font-family: var(--mono);
   font-size: 0.64rem;
-  color: var(--accent);
+  color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
 
-/* The identity row, and it now has four slots rather than three: `who · [→ to] · [tag] ·
-   time`. The tag is the new one — `review`, `plan`, `answer` — and it is drawn from the
-   entry's own fields (`report`, `plan`, `kind`), never from the sentence, the same rule the
-   machinery colours already keep.
+/* The identity row, four slots: `who · [→ to] · [tag] · time`. Each is drawn from the
+   entry's own fields (`from`, `to`, `report`, `plan`, `kind`), never from the sentence —
+   the same rule the machinery colours keep.
    It wraps rather than shrinking past legibility: at the aside's 240px minimum a lead→worker
    line is a pill, an arrow, a second pill, a tag and a stamp, and a second line is a better
    answer than five half-read words. */
@@ -1984,19 +2021,45 @@ body.row-dragging * { cursor: row-resize !important; }
   gap: 0.35rem;
   padding: 0 0.1rem 0.15rem;
 }
+/* The author, in two shapes from one class. Tier 1 puts it inline in a log row and it is
+   plain mono text there; tiers 2 and 3 put it in the identity row above a card, where it
+   becomes the pill. Scoping the chrome to `.room-meta` rather than adding a second class
+   is what keeps `roomPill` a single function that both tiers call. */
 .room-pill {
   font-family: var(--mono);
   font-size: 0.64rem;
   letter-spacing: 0.04em;
+  color: var(--ink-muted);
+}
+.room-meta .room-pill {
   border: 1px solid var(--rule-strong);
   border-radius: 999px;
-  padding: 0.05rem 0.45rem;
-  color: var(--ink-muted);
-  max-width: 11rem; /* a long task id must not blow the aside's width */
+  padding: 0.05rem 0.5rem;
+  max-width: 11rem; /* this column is 340px; the rooms pane's own pill allows 14rem at 52rem */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 2.5rem;
 }
+/* **The pill is the identity, and on tier 2 it is the only thing carrying colour** — one
+   stable hue per speaker off the `--peer-N` ring, set inline by `roomPill` off `colourFor`
+   and keyed on the entry's own `from`, with `currentColor` on the border so a speaker is one
+   value rather than two. A worker is recognisable by colour before its name is read, which
+   is what the lane used to do, done in a way that scales past two.
+
+   **The ring's recorded 7.00–7.06:1 is against `--ground`, and this pill sits on `--shelf`,
+   which is lighter in dark.** Re-measured off the rendered pill on this ground, dark:
+   **5.92–5.97:1** across all seven hues — every one clears AA, and the floor is *above* the
+   5.80 the lead's own accent pill sits at, so nothing in the ring is the worst thing on the
+   row. Nothing about the ring's own separations moves: those are ΔE2000 between colours, not
+   against a ground. Dark only per 2026-08-27; the light figures are in the plan.
+
+   **The hue is tier 2 only.** Tier 1's author is `panel` or `lead` — a green `panel` on every
+   second machinery line is a status colour that means nothing — and tier 3's pill sits on a
+   7% `--decision` ground the ring was never measured against, where a green name on a red
+   card would read as a status. Both stay `--ink-muted`; the hue is what distinguishes
+   *speakers from each other*, and only tier 2 has several. */
 .room-pill.is-lead { color: var(--accent); border-color: currentColor; }
 /* A historical `kind: 'link'` entry names the **project** that spoke, not the role — both
    ends of a link were leads, so `lead` on each of them told you nothing. Links were retired
@@ -2011,15 +2074,23 @@ body.row-dragging * { cursor: row-resize !important; }
   max-width: 9rem;
 }
 .room-pill.is-project.is-human { color: var(--accent); border-color: currentColor; background: none; }
+/* **Which pill gives, decided rather than left to flex.** A lead→worker line draws two
+   bordered pills, an arrow, a tag and a stamp, and under plain flex shrink it is the
+   *speaker's* pill that loses: measured on the old row with a real 31-character task id,
+   `lead` was cut at 300px and again at the 240px CSS minimum, reading `le…`, which says
+   nothing at all. So `lead` is `flex: none` and never gives; the recipient takes the whole
+   squeeze and ellipsises, and a half-read recipient still says which worker by its colour. */
+.room-meta .room-pill.is-lead { flex: none; }
+.room-meta .room-pill.is-to { flex: 0 1 auto; min-width: 2.2rem; }
 /* A separator between two pills, not a word — so it is the one thing in this row below the
    chrome size, and it is mono so it sits on the pills' own baseline rather than the serif's. */
 .room-arrow { color: var(--ink-muted); font-family: var(--mono); font-size: 0.6rem; flex: none; }
 .room-time { color: var(--ink-muted); font-size: 0.64rem; font-family: var(--mono); flex: none; }
-/* What kind of thing this entry is, in one word: `review`, `plan`, `answer`. It replaces
-   nothing yet — the accent bubble edge and the accent mono ready-line it is meant to take
-   over from are still drawn — because a tag has to exist before anything can be retired
-   against it. Accent for all three: they are the same idea, an entry whose *substance* is a
-   decision or a deliverable rather than a remark. */
+/* What kind of thing this entry is, in one word: `review`, `plan`, `answer` — and on tier 3
+   `escalation` or `alert`. Accent for the first three: they are the same idea, an entry whose
+   *substance* is a decision or a deliverable rather than a remark. `--decision` for the last
+   two, which is the room's only red and is the whole of what tier 3 spends it on besides the
+   frame. */
 .room-tag {
   font-family: var(--mono);
   font-size: 0.64rem;
@@ -2028,12 +2099,11 @@ body.row-dragging * { cursor: row-resize !important; }
   flex: none;
 }
 .room-tag.is-review, .room-tag.is-plan, .room-tag.is-answer { color: var(--accent); }
-/* The machinery keyword — `dispatch`, `conflict`, `pending`, `self-merge` — which tier 1
-   puts inline in a log row's author line. Nothing draws one yet; the rule is here so the
-   gutter's colour and the keyword's colour come out of the same custom property when it
-   does, rather than as two spellings of one decision. `--mark` is what a log row will set;
-   until then the fallback is the row's own muted ink, which is what a plain line keeps
-   anyway. */
+.room-tag.is-loud { color: var(--decision); }
+/* The machinery keyword — `dispatch`, `conflict`, `pending`, `self-merge` — inline in a log
+   row's author line, and the gutter's colour and the keyword's colour come out of the one
+   custom property rather than as two spellings of one decision. `is-plain` above is what
+   catches a row whose `--mark` is the rule colour. */
 .room-key {
   font-family: var(--mono);
   font-size: 0.64rem;
@@ -2042,24 +2112,13 @@ body.row-dragging * { cursor: row-resize !important; }
   text-transform: lowercase;
 }
 
-/* Escalations stay loud — the one thing in the room that needs the maintainer. Full width,
-   decision-coloured, deliberately nothing like a bubble that scrolls past unread. */
-.room-escalation {
-  border: 1px solid color-mix(in srgb, var(--decision) 45%, transparent);
-  border-radius: 4px;
-  padding: 0.4rem 0.5rem;
-  background: color-mix(in srgb, var(--decision) 7%, var(--surface));
-  line-height: 1.35;
-}
-.room-escalation > .room-text { font-weight: 600; }
-/* An escalation's own words, at the room's one body size — see `.room-list`. Weight and
-   indent are the hierarchy here; a size step would say this card is a different kind of
-   text from the bubble above it, which it is not. */
-.room-esc-opt { padding-left: 0.6rem; }
-.room-esc-rec { padding-left: 0.6rem; font-weight: 600; }
-.room-grounds { color: var(--ink-muted); }
-/* A stuck or looping worker — a system line drawn at escalation volume. */
-.room-alert {
+/* -------------------------------------------------------- tier 3: needs you --- */
+/* The only framed, tinted, red shape left, and the only red anywhere in the room — red is a
+   budget. An escalation and an alert **share** it and are told apart by the author line they
+   now both carry: an escalation is a worker speaking, an alert is `panel`. Deliberately
+   nothing like a bubble that scrolls past unread. Measured on this ground: `--decision` on
+   its own 7% tint is **5.39:1 dark**. */
+.room-escalation, .room-alert {
   border: 1px solid color-mix(in srgb, var(--decision) 45%, transparent);
   border-radius: 4px;
   padding: 0.4rem 0.5rem;
@@ -2067,6 +2126,19 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink);
   line-height: 1.35;
 }
+.room-escalation > .room-text, .room-alert > .room-text { font-weight: 600; }
+/* The card's own words, at the room's one body size — see `.room-list`. Weight and indent
+   are the hierarchy here; a size step would say this card is a different kind of text from
+   the bubble above it, which it is not. */
+.room-esc-opt { padding-left: 0.6rem; }
+.room-esc-rec { padding-left: 0.6rem; font-weight: 600; }
+/* The audit trail, at the evidence size. On an escalation it clamps and the question,
+   options and recommendation never do: hiding four fifths of a *decision* behind a control
+   is the failure this loud card exists to prevent, and `grounds` and `meanwhile` are not the
+   decision — they are what the worker checked before asking. No `display` of its own,
+   deliberately: `.room-clamp` sits earlier in this file and a `display: block` here would
+   win on the cascade and silently unclamp it. */
+.room-grounds { color: var(--ink-muted); font-size: 0.68rem; }
 
 /* --- the team panel: tasks + settings, stacked over the room in a lead's aside --- */
 
@@ -4530,7 +4602,7 @@ body.row-dragging * { cursor: row-resize !important; }
 .shared-more:hover { color: var(--ink); }
 
 /* What became of one of the maintainer's own messages. Quiet — the same register as the
-   `room-ready` line under a report bubble — because "queued" is a fact to read rather than
+   `room-ref` line under a report bubble — because "queued" is a fact to read rather than
    an error to act on. Amber is this panel's own "waiting" and is used for nothing else
    here. */
 .shared-delivery {

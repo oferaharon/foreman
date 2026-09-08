@@ -8923,9 +8923,9 @@ function createPane(slot, host) {
    * puts a control on screen — an entry that fits must not grow a "view more" that does
    * nothing when clicked, and whether it fits is a measurement, not a guess about length.
    */
-  function roomClampable(el, e, pending) {
+  function roomClampable(el, seq, pending) {
     el.classList.add('room-clamp');
-    pending.push({ seq: e.seq, el, btn: null, overflows: false });
+    pending.push({ seq, el, btn: null, overflows: false });
   }
 
   /**
@@ -8977,7 +8977,7 @@ function createPane(slot, host) {
     // The entry's own frame, found from the text rather than remembered: the record is
     // built before the card that will hold it exists, and a stored reference would be one
     // more thing to keep true through the next restyle.
-    const node = c.el.closest('.room-msg, .room-system');
+    const node = c.el.closest('.room-msg, .room-system, .room-escalation, .room-alert');
     if (!list || !node || !node.isConnected) {
       applyRoomClamp(c);
       return;
@@ -8989,13 +8989,61 @@ function createPane(slot, host) {
     if (now !== was) list.scrollTop += now - was;
   }
 
-  /** A sender/recipient identity chip. The lead is one identity, each task id another. */
-  function roomPill(id) {
+  /**
+   * A sender/recipient identity chip. The lead is one identity, each task id another.
+   *
+   * **One function builds both ends of a lead→worker line**, and that is the whole point:
+   * they name the same worker and have to agree on its hue at both ends of one row. Two
+   * builders of one pill is the `isLeadName` lesson in another costume, and here the failure
+   * would be visible — `lead → [phone-worker-lines]` in one colour, above that worker's own
+   * bubble in another. `is-to` is the *only* thing the recipient adds, and it carries shrink
+   * behaviour and nothing else.
+   *
+   * `colour` is tier 2 and nothing else — see `.room-pill.is-lead`'s comment in the CSS for
+   * why tiers 1 and 3 stay muted. `colourFor` is **imported** from `web/session-colour.js`
+   * and never re-implemented here: a second copy of that FNV-1a hash is two spellings of a
+   * mapping that must agree, and the same worker drawing two different colours in two panes
+   * is the same lesson again. The hue is set inline off the ring rather than as a class per
+   * slot, because seven near-identical rules is what a later change to `PEER_COLOUR_COUNT`
+   * leaves short; `currentColor` on the border keeps a speaker one value rather than two.
+   * The lead is never given one — the accent is authority here and is deliberately outside
+   * the ring.
+   */
+  function roomPill(id, { colour = false, to = false } = {}) {
+    const lead = id === 'lead';
     const p = document.createElement('span');
-    p.className = id === 'lead' ? 'room-pill is-lead' : 'room-pill';
+    p.className = `room-pill${lead ? ' is-lead' : ''}${to ? ' is-to' : ''}`;
     p.textContent = id;
     p.title = id; // long task ids ellipsize; the full name rides the hover
+    if (colour && !lead) {
+      p.style.color = `var(--peer-${colourFor(id)})`;
+      p.style.borderColor = 'currentColor';
+    }
     return p;
+  }
+
+  /**
+   * The one word a machinery line is *about*, beside who wrote it.
+   *
+   * **Keyed on `event` and `kind`, never on the sentence.** A dispatch and the `→ working`
+   * line that follows it are identical by `about` — both carry the task id — and the text is
+   * a message to a human that will be reworded, at which point a sentence-matched keyword
+   * turns off silently and the room goes on looking fine. Same rule the machinery colours
+   * already keep.
+   *
+   * So a line with no `event` on the record gets **no keyword at all** rather than a guess.
+   * 577 machinery lines in this repo's own room carry none and always will (the log is
+   * append-only); giving four of those shapes a keyword is an additive server change, and
+   * deliberately not this one.
+   *
+   * The single derived word is `merge-check`: a refused self-merge carries the same `event`
+   * as an allowed one and is the panel doing its job rather than a decision taken, so it says
+   * what it was — a check — and takes no colour.
+   */
+  function roomKeyword(e) {
+    if (e.kind === 'conflict') return 'conflict';
+    if (!e.event) return '';
+    return e.event === 'self-merge' && !e.allowed ? 'merge-check' : String(e.event);
   }
 
   /**
@@ -9055,6 +9103,11 @@ function createPane(slot, host) {
       s.textContent = word;
       return s;
     };
+    // Tier 3's two words, and they are the only red in the room besides its frame. An
+    // escalation and an alert now share one card, so the tag and the author line are the
+    // whole of what tells them apart — a worker's name against `panel`.
+    if (e.kind === 'escalation') return tag('escalation', 'is-loud');
+    if (e.alert) return tag('alert', 'is-loud');
     if (e.kind === 'answer') return tag('answer', 'is-answer');
     if (e.report === 'review') return e.plan ? tag('plan', 'is-plan') : tag('review', 'is-review');
     return null;
@@ -9076,7 +9129,7 @@ function createPane(slot, host) {
    * `lead → lead` says nothing the pill has not already said better. It carries no tag
    * either — a link is a remark, and none of the three words is ever true of one.
    */
-  function roomMeta(e) {
+  function roomMeta(e, { colour = false } = {}) {
     const meta = document.createElement('div');
     meta.className = 'room-meta';
     // A link entry with no `sender` is not a shape anything writes — but an empty pill
@@ -9087,12 +9140,16 @@ function createPane(slot, host) {
       if (e.ts) meta.append(roomStamp(e.ts));
       return meta;
     }
-    meta.append(roomPill(e.from));
+    meta.append(roomPill(e.from, { colour }));
     if (e.to && e.to !== 'lead') {
       const arrow = document.createElement('span');
       arrow.className = 'room-arrow';
       arrow.textContent = '→';
-      meta.append(arrow, roomPill(e.to));
+      // The recipient takes the *same* answer about colour as the speaker, so the hue stays a
+      // property of the tier rather than of the slot: on a lead→worker bubble both ends are
+      // coloured, and on tier 3 — where a green name on a red card would read as a status —
+      // neither is.
+      meta.append(arrow, roomPill(e.to, { colour, to: true }));
     }
     const tag = roomTag(e);
     if (tag) meta.append(tag);
@@ -9120,100 +9177,91 @@ function createPane(slot, host) {
   }
 
   /**
-   * One room entry as one of three shapes the eye can tell apart mid-scroll: panel
-   * machinery (`system`, `conflict`) as its own framed card, agent speech
-   * (`chat`, `status`, `answer`) as bubbles laned by direction — worker→lead left,
-   * lead→worker right, because the maintainer reads the room without sitting at either end —
-   * and escalations as full-width cards, the one thing here that needs them. `e.alert`
-   * (stuck/loop) keeps the same loud card whatever kind it rides on.
+   * The checks a self-merge verdict actually looked at, behind one control.
    *
-   * Everything is left-aligned and framed. A first pass drew machinery as centred text
-   * between two hairlines, which lost the amber box the conflict line used to have and read
-   * as free text — the maintainer's word for it. Each event is a thing that happened; it
-   * gets an edge to say where it starts and stops.
+   * **This overturns a recorded decision and does it deliberately.** The list used to be
+   * always open, on the ground that the maintainer reads it back a week later, so it was
+   * "not a hover and not a clamp". The measurement that changed it: five self-merges in one
+   * 38-entry window of this repo's own room are 1,646px — a third of the room — of which
+   * 1,097px is these lists. Folding does not stop it being read back; it stops it being in
+   * front of you five times per plan item, and the sentence above already names the PR and
+   * the reason. The comment beside `.room-reasons` in `web/styles.css` was rewritten in the
+   * same commit, because a comment left arguing against the code beside it is worse than no
+   * comment.
    *
-   * The first two shapes are the ones that run long, so those are the two that clamp —
-   * see `roomClampable`. The escalation and the alert never do.
+   * Keyed on `<seq>:checks` in `roomView.expanded`, the same set the five-line clamp uses and
+   * for the same reason: the room repaints in full on every incoming post, and a fold that
+   * re-folds under the reader is worse than no fold. A distinct key from the clamp's own
+   * `seq`, because one entry can carry both.
+   *
+   * Opening swaps the button for the list in place and repaints nothing else — a line
+   * arriving in another room must never take this aside apart under whoever is reading it.
+   * It is one-way until the room is reopened, which is what the signed-off mock-up draws:
+   * its open state carries no control at all.
+   */
+  function roomChecks(e) {
+    const key = `${e.seq}:checks`;
+    const list = () => {
+      const ul = document.createElement('ul');
+      ul.className = 'room-reasons';
+      for (const r of e.reasons) {
+        const li = document.createElement('li');
+        li.textContent = String(r);
+        ul.append(li);
+      }
+      return ul;
+    };
+    if (roomView.expanded.has(key)) return list();
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'room-checks';
+    btn.textContent = `${e.reasons.length} checks ›`;
+    btn.title = 'Show what the merge check looked at.';
+    btn.onclick = () => {
+      roomView.expanded.add(key);
+      btn.replaceWith(list());
+    };
+    return btn;
+  }
+
+  /**
+   * One room entry as one of three *tiers* of loudness, told apart by shape alone.
+   *
+   * **Tier 1 — machinery** (`system`, `conflict`): a git-log line. Time, author, keyword,
+   * sentence, all on one line, with a 2px gutter rule carrying the colour the frame used to.
+   * The bookkeeping is the bulk of this room — 24 of 38 entries in a measured window, 55% of
+   * its height — and it was drawn in exactly the same boxes as a worker's report.
+   *
+   * **Tier 2 — talk** (`chat`, `status`, `answer`, legacy `link`): the panel's rooms bubble,
+   * full column width, colour on the speaker's pill and nowhere else. The lanes are gone: a
+   * lane is a two-sided idea and a team room is one lead, several workers, and a reader who
+   * is neither.
+   *
+   * **Tier 3 — needs you** (`escalation`, `alert`): one framed, tinted, red card — the only
+   * red in the room — shared by both and told apart by the author line they now both carry.
+   *
+   * The first pass at tier 1 drew machinery as centred text between two hairlines; it read as
+   * free text and it took the amber box off the conflict line, which was the part that
+   * worked. Every line here starts at a left gutter that carries that colour, and every line
+   * names who wrote it.
+   *
+   * Tiers 1 and 2 clamp at five lines — see `roomClampable`. Tier 3's *body* never does;
+   * only its audit trail.
    */
   function roomEntryNode(e, pending = []) {
     const kind = e.kind || 'status';
 
-    if (e.alert) {
+    /* ------------------------------------------------------ tier 3: needs you --- */
+    if (e.alert || kind === 'escalation') {
       const card = document.createElement('div');
-      card.className = 'room-alert';
-      if (e.ts) card.title = new Date(e.ts).toLocaleString();
-      // A refused link message rides this card, and it is still one project's words —
-      // knowing whose is exactly as useful here as on a delivered one. Panel alerts
-      // (stuck, loop) keep their bare card: they are machinery and have no speaker.
-      if (kind === 'link') card.append(roomMeta(e));
-      const text = document.createElement('div');
-      text.className = 'room-text';
-      text.textContent = e.text || '';
-      card.append(text);
-      return card;
-    }
-
-    if (kind === 'system' || kind === 'conflict') {
-      // Two of the machinery lines are coloured, and both are keyed on what the poster
-      // said the line *is* — never on how the sentence reads. `about` cannot do it: it is
-      // the task id, and every task-scoped system line carries one, so a dispatch and the
-      // transition that follows it are identical by that key. `event` is what separates
-      // them, and a line without one stays the plain grey card.
-      const card = document.createElement('div');
-      card.className = 'room-system';
-      // Two workers on one file keeps its amber: attention, not alarm, and the one
-      // system line that was already a box before this.
-      if (kind === 'conflict') card.classList.add('is-conflict');
-      // A worker starting is the one piece of machinery that is good news, so it is the
-      // panel's live green — `--idle`, the same token as a session's dot, not a colour of
-      // its own. Matched exactly, so adding `event: 'pr'` later colours nothing by
-      // accident.
-      else if (e.event === 'dispatch') card.classList.add('is-dispatch');
-      // …and a task merely recorded is the opposite of both: nothing started, nothing
-      // needs looking at. So it goes *quieter* than the plain card rather than louder —
-      // a dashed edge, the same muted ink, no colour of its own. Spending a third colour
-      // on "nothing happened" would cost the two that mean something.
-      else if (e.event === 'pending') card.classList.add('is-pending');
-      // A lead that merged on its own authority — the one machinery line where something
-      // that used to need the maintainer happened without them. Matched on the event
-      // **and** on `allowed`, both exactly: the same endpoint posts a line for every
-      // refusal, and a refused check is the panel doing its job, not a thing to mark.
-      else if (e.event === 'self-merge' && e.allowed) card.classList.add('is-self-merge');
-      // The stamp sits on the first line's baseline to the right, so the text and its
-      // "view more" share a column of their own rather than joining that row.
-      const body = document.createElement('div');
-      body.className = 'room-system-body';
-      const text = document.createElement('span');
-      text.className = 'room-system-text';
-      text.textContent = e.text || '';
-      body.append(text);
-      roomClampable(text, e, pending);
-      // What was actually checked, under the sentence. On a self-merge line this is the
-      // substance — the sentence says a decision was taken, the list says on what — and
-      // the maintainer reads it back a week later, so it is not a hover and not a clamp.
-      //
-      // It is drawn from `reasons` rather than from `event`, so any machinery line that
-      // grows a reasons list gets it. Deliberately *outside* the clamp: `applyRoomClamp`
-      // puts "view more" directly after the text it cut off, so the list lands below the
-      // control, and its own height is settled before the clamp pass measures anything.
-      if (Array.isArray(e.reasons) && e.reasons.length) {
-        const list = document.createElement('ul');
-        list.className = 'room-reasons';
-        for (const r of e.reasons) {
-          const li = document.createElement('li');
-          li.textContent = String(r);
-          list.append(li);
-        }
-        body.append(list);
-      }
-      card.append(body);
-      if (e.ts) card.append(roomStamp(e.ts));
-      return card;
-    }
-
-    if (kind === 'escalation') {
-      const card = document.createElement('div');
-      card.className = 'room-escalation';
+      // Two class names, one shape. Red is a budget and this card is the whole of it; both
+      // names stay because a rename is a large silent diff for nothing.
+      card.className = e.alert ? 'room-alert' : 'room-escalation';
+      // Every card on this tier names who wrote it, and that is the whole of what tells the
+      // two apart: an escalation is a worker speaking, an alert is `panel`. The pill stays
+      // muted — the peer hue is tier 2 only, and a green name on a red card reads as a
+      // status. A refused link message rides the alert card and is still one project's
+      // words; `roomMeta` is the one branch that knows how to attribute one.
       card.append(roomMeta(e));
       const text = document.createElement('div');
       text.className = 'room-text';
@@ -9233,41 +9281,107 @@ function createPane(slot, host) {
         r.textContent = `recommends: ${e.recommendation}`;
         card.append(r);
       }
-      if (e.grounds) card.append(roomAside('grounds', e.grounds));
-      if (e.continuing) card.append(roomAside('meanwhile', e.continuing));
+      // **The audit trail clamps; the decision never does.** Hiding four fifths of a decision
+      // behind a control is the exact failure this loud card exists to prevent — so the
+      // question, the options and the recommendation stay open always, and `grounds` and
+      // `meanwhile` fold. That clamp alone is the 1,015px → 763px on the measured pair.
+      //
+      // Keyed `<seq>:grounds` / `<seq>:meanwhile`, because one card can carry both and
+      // `roomView.expanded` is one flat set.
+      for (const [label, value] of [['grounds', e.grounds], ['meanwhile', e.continuing]]) {
+        if (!value) continue;
+        const aside = roomAside(label, value);
+        card.append(aside);
+        roomClampable(aside, `${e.seq}:${label}`, pending);
+      }
       return card;
     }
 
+    /* ------------------------------------------------------ tier 1: machinery --- */
+    if (kind === 'system' || kind === 'conflict') {
+      const row = document.createElement('div');
+      row.className = 'room-system';
+      // The gutter's colour *and* the keyword's, out of one custom property — and every
+      // modifier keyed on what the poster said the line **is**, never on how the sentence
+      // reads. `about` cannot do it: it is the task id, and every task-scoped system line
+      // carries one, so a dispatch and the transition that follows it are identical by that
+      // key. Matched exactly, so a new `event` colours nothing by accident.
+      if (kind === 'conflict') row.classList.add('is-conflict');
+      else if (e.event === 'dispatch') row.classList.add('is-dispatch');
+      // A task merely recorded is the opposite of both: nothing started, nothing to look at.
+      // It goes *quieter* than the plain row rather than louder — a dashed gutter and no
+      // colour. Spending a third hue on "nothing happened" would cost the two that mean
+      // something.
+      else if (e.event === 'pending') row.classList.add('is-pending');
+      // Matched on the event **and** on `allowed`, both exactly: the same endpoint posts a
+      // line for every refusal, and a refused check is the panel doing its job.
+      else if (e.event === 'self-merge' && e.allowed) row.classList.add('is-self-merge');
+      // A row no modifier claimed. The class exists so its keyword takes the row's muted ink
+      // rather than the gutter's `--rule-strong`, which is a rule colour and is nowhere near
+      // legible as text.
+      else row.classList.add('is-plain');
+      if (e.ts) row.append(roomStamp(e.ts), document.createTextNode(' '));
+      // `panel` on every machinery line, which is new and was the "some with, some without"
+      // complaint. It reads `e.from`, so the lead's own lines — a self-merge among them —
+      // say `lead`: one field on the record, not a second spelling of who wrote what.
+      row.append(roomPill(e.from), document.createTextNode(' '));
+      const word = roomKeyword(e);
+      if (word) {
+        const key = document.createElement('span');
+        key.className = 'room-key';
+        key.textContent = word;
+        row.append(key, document.createTextNode(' '));
+      }
+      // Inline with everything above it, so a one-sentence event stays one entry tall — until
+      // it overflows five lines, when the clamp turns this span into a block and the sentence
+      // starts on its own line. That is the measurement doing it, not a branch here.
+      const text = document.createElement('span');
+      text.className = 'room-system-text';
+      text.textContent = e.text || '';
+      row.append(text);
+      roomClampable(text, e.seq, pending);
+      // What the verdict checked, folded. Drawn from `reasons` rather than from `event`, so
+      // any machinery line that grows a list gets it. Deliberately *outside* the clamp:
+      // `applyRoomClamp` puts "view more" directly after the text it cut off, so this lands
+      // below that control, and its own height is settled before the clamp pass measures
+      // anything.
+      if (Array.isArray(e.reasons) && e.reasons.length) row.append(roomChecks(e));
+      return row;
+    }
+
+    /* ----------------------------------------------------------- tier 2: talk --- */
     const wrap = document.createElement('div');
+    // `from-lead` no longer names a lane — every bubble is left-aligned and full width. It
+    // survives as the hook for the accent edge and the 7% tint, the one bubble variant left.
     wrap.className = `room-msg ${e.from === 'lead' ? 'from-lead' : 'from-worker'} room-${kind}`;
-    wrap.append(roomMeta(e));
+    wrap.append(roomMeta(e, { colour: true }));
     const bubble = document.createElement('div');
     bubble.className = 'room-bubble';
     const text = document.createElement('div');
     text.className = 'room-text';
     text.textContent = e.text || '';
-    // The control lands under the text, above the grounds and the ready line — those are
+    // The control lands under the text, above the grounds and the reference — those are
     // short, and machinery a clamp must never swallow.
     bubble.append(text);
-    roomClampable(text, e, pending);
+    roomClampable(text, e.seq, pending);
     if (e.grounds) bubble.append(roomAside('grounds', e.grounds));
-    // The done report is the worker talking, so the words are its own; the fact that it
-    // *is* the done report is machinery, and rides under them rather than replacing them.
+    // The done report is the worker talking, so the words are its own. That it *is* the done
+    // report is now said by the `review` / `plan` tag in the author line, which is why this
+    // line stopped announcing itself and became a bare reference in muted mono: the branch to
+    // merge, or — for a planner, whose branch is empty and would send a reader to look at
+    // nothing — the plan file that is the deliverable.
     if (e.report === 'review') {
-      const ready = document.createElement('div');
-      ready.className = 'room-ready';
-      // A planner's branch is empty, so pointing at it here would send whoever read this
-      // to look at nothing. The file is the deliverable; name that instead.
-      ready.textContent = e.plan
-        ? `plan ready · ${e.plan.split('/').pop()}`
-        : e.branch ? `ready for review · ${e.branch}` : 'ready for review';
-      if (e.plan) ready.title = e.plan;
-      bubble.append(ready);
+      const ref = document.createElement('div');
+      ref.className = 'room-ref';
+      ref.textContent = e.plan ? e.plan.split('/').pop() : e.branch || '';
+      if (e.plan) ref.title = e.plan;
+      // Nothing to name is nothing to draw: an empty node here is a blank line under the
+      // words, which is the room asserting a reference it does not have.
+      if (ref.textContent) bubble.append(ref);
     }
     wrap.append(bubble);
     return wrap;
   }
-
   function buildHead(s) {
     const head = document.createElement('div');
     head.className = 'main-head';
