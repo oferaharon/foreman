@@ -2036,7 +2036,7 @@ async function openSnapshot() {
   const note = document.createElement('p');
   note.className = 'modal-note';
   const row = document.createElement('div');
-  row.className = 'modal-row';
+  row.className = 'modal-row snap-actions';
   box.append(h, body, note, row);
 
   // Busy in either direction. A relaunch counts double: between the exits and the
@@ -2108,7 +2108,7 @@ async function openSnapshot() {
       if (extra.length) bits.push(`${extra.length} running now ${extra.length === 1 ? "isn't" : "aren't"} saved`);
       if (missing.length) bits.push(`${missing.length} saved ${missing.length === 1 ? "isn't" : "aren't"} running`);
       drift.textContent = bits.length ? bits.join(' · ') : 'Matches what’s running.';
-      if (bits.length) drift.style.color = 'var(--decision)';
+      if (bits.length) drift.classList.add('warn');
       body.append(drift);
     }
 

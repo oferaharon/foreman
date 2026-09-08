@@ -331,6 +331,29 @@ body.row-dragging * { cursor: row-resize !important; }
    beside it. */
 .snap-row.is-exited .snap-state { color: var(--decision); }
 
+/* The summary view's button row: save/relaunch on the left, cancel/restore on the right,
+   via a spacer with `margin-right: auto`. Plain `.modal-row` lets its buttons shrink, which
+   is harmless for the 1-2-button rows the other six modals use it for but crushes four
+   buttons here into near-equal slivers with mid-word-wrapped labels — hence a modifier
+   here rather than a change to `.ghost-btn` or `.modal-row` themselves, which stay exactly
+   as every other modal-row caller found them. `flex: none` is what lets the spacer's auto
+   margin actually produce a gap (an auto margin on a shrinking flex item has no slack left
+   to consume once the row is tight), and `flex-wrap` means a genuinely too-narrow window
+   wraps whole buttons onto a second line instead of crushing their text mid-word. */
+.modal-row.snap-actions {
+  flex-wrap: wrap;
+}
+.modal-row.snap-actions .ghost-btn {
+  white-space: nowrap;
+  flex: none;
+}
+
+/* The drift line ("N running aren't saved") is a fact about staleness, not an error — the
+   snapshot still works, it just won't reproduce what's live right now. `--working` is the
+   panel's "pay attention" amber everywhere else (`.quota-row.warn`, `.composer-hint.warn`);
+   `.modal-note.err` stays `--decision` for an actual failure. */
+.field-hint.warn { color: var(--working); }
+
 /* ------------------------------------------------------------- modal --- */
 
 .modal-back {
