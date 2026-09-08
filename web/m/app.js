@@ -14,12 +14,19 @@
  * grown once here already.
  *
  * This file owns five things and nothing else: the websocket, the roster, a hash router,
- * the tab bar, and the home list with its launch button. The lead screen, the room screen,
- * the answer cards and the tasks tab are separate modules behind a fixed contract — see
- * `mountLead` / `mountRoom` / `buildCard` / `mountTasks`.
+ * the tab bar, and the home list with its launch button. The conversation screen, the room
+ * screen, the answer cards and the tasks tab are separate modules behind a fixed contract —
+ * see `mountLead` / `mountRoom` / `buildCard` / `mountTasks`.
+ *
+ * **Two routes mount the conversation screen.** `#/lead/<id>` and `#/session/<id>` are the
+ * same module on the same contract; what differs is the claim each hash makes about the id
+ * — and each claim is re-checked against the roster on **every frame**, not once at mount.
+ * That is a security control rather than tidiness; `roleRefusal` carries the measurement.
+ * Two hashes rather than one with a flag, so the claim is in the URL a reload comes back to.
+ * `#/room/<roomId>` is the third, and it is a screen of its own with its own module.
  *
  * The **socket** is the one thing a screen module never touches directly. `subscribe` and
- * `unsubscribe`, for a transcript and for a room alike, are sent from `enterLead` /
+ * `unsubscribe`, for a transcript and for a room alike, are sent from `enterConversation` /
  * `enterRoom`, taken back in `leaveRoute`, and re-sent in `ws.onopen` — three places that
  * have to agree, kept in one file for the reason the `onopen` block spells out at length.
  *
@@ -45,8 +52,10 @@ import { needsKind } from '../notify.js';
 import { ghostSend, PHONE_TABS, phoneTab } from '../prefs.js';
 import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.js';
 /* The one spelling of who may be shown as an ordinary session, shared with the desktop's
-   room picker. See `standaloneRows`. */
-import { roomParticipants } from '../rooms-create.js';
+   room picker — and the one spelling of what a row is called, which is the name the
+   Standalones list draws, the name its screen's header carries, and the name every room
+   chip and delivery header already gives that same session. See `standaloneRows`. */
+import { roomParticipants, rowName } from '../rooms-create.js';
 /* The one order a lead's workers are ever drawn in, shared with the desktop rail. Imported
    rather than re-spelled for the reason its own header gives at length: every other order
    in this panel is recency, and under a lead recency is wrong — a team is read as a block
@@ -156,7 +165,7 @@ function connect() {
      * bug in this project's history; it has been re-introduced once already, by a refactor
      * that re-subscribed a variable that no longer existed.
      */
-    if (route.kind === 'lead' && route.sessionId) {
+    if (isConversation(route.kind) && route.sessionId) {
       send({ type: 'subscribe', sessionId: route.sessionId, slot: SLOT });
     }
     /*
@@ -219,15 +228,22 @@ function handle(msg) {
 /* ------------------------------------------------------------ router --- */
 
 /*
- * Three kinds of screen — home, `#/lead/<sessionId>` and `#/room/<roomId>` — and home
+ * Four kinds of screen — home, `#/lead/<sessionId>`, `#/session/<sessionId>` and
+ * `#/room/<roomId>` — and home
  * carries which of its three tabs is on: `#/leads`, `#/standalones`, `#/rooms`. The hash is
  * the whole route, so the phone's back gesture works without any history bookkeeping of
  * ours, and a reload comes back to the tab it was on rather than to the top of the pile.
  *
- * `tab` is **sticky across a lead or a room screen**. A hash naming a session or a room says
- * nothing about which list you came from, so `parseHash` answers `null` there and `navigate`
- * leaves the field alone; the back control then returns you to the tab you left, not to
- * Leads. It is also what `homeHash` reads.
+ * The two conversation kinds are one screen and two claims. Everything the shell does for
+ * them — subscribe, rebound, the gone timer, the teardown — is identical and asks
+ * `isConversation`; the one thing that is not is `roleRefusal`, which is why the kind is in
+ * the hash and not a flag beside a shared word. A room is not one of them: it is a screen
+ * of its own, with its own module and its own subscription, exactly as Trap 13 asked.
+ *
+ * `tab` is **sticky across a conversation or a room screen**. A hash naming a session or a
+ * room says nothing about which list you came from, so `parseHash` answers `null` there and
+ * `navigate` leaves the field alone; the back control then returns you to the tab you left,
+ * not to Leads. It is also what `homeHash` reads.
  */
 const route = { kind: 'home', tab: 'leads', sessionId: null, roomId: null };
 
@@ -237,9 +253,16 @@ const route = { kind: 'home', tab: 'leads', sessionId: null, roomId: null };
 const TAB_LABELS = { leads: 'Leads', standalones: 'Standalones', rooms: 'Rooms' };
 const TABS = PHONE_TABS.map((key) => ({ key, label: TAB_LABELS[key] }));
 
-/** Where "back" goes from a session screen: the tab you were on, never a bare `#/`. */
+/** Where "back" goes from a conversation screen: the tab you were on, never a bare `#/`. */
 function homeHash() {
   return `#/${route.tab}`;
+}
+
+/** The two route kinds that mount a conversation. Asked rather than spelled out at each
+ *  site, because every one of those sites has to grow the day another kind lands — and one
+ *  already has: a room is a different screen and is deliberately not in here. */
+function isConversation(kind) {
+  return kind === 'lead' || kind === 'session';
 }
 
 /** The mounted screen's teardown, or null on the home screen. One of these two at most:
@@ -261,8 +284,12 @@ let goneTimer = null;
  */
 function parseHash() {
   const hash = location.hash || '#/';
-  const lead = /^#\/lead\/(.+)$/.exec(hash);
-  if (lead) return { kind: 'lead', sessionId: decodeURIComponent(lead[1]), roomId: null, tab: null };
+  // The kind is the first segment, so the hash carries the claim the route re-checks rather
+  // than a flag beside one shared word.
+  const conv = /^#\/(lead|session)\/(.+)$/.exec(hash);
+  if (conv) {
+    return { kind: conv[1], sessionId: decodeURIComponent(conv[2]), roomId: null, tab: null };
+  }
   // A room id is opaque and is minted by the store, so it is matched the same greedy way a
   // session id is and decoded rather than validated here — an id that names nothing is
   // answered by the server's own `group-room` frame with `room: null`, which the screen
@@ -296,13 +323,13 @@ function navigate() {
     phoneTab.set(next.tab);
   }
 
-  if (route.kind === 'lead') enterLead();
+  if (isConversation(route.kind)) enterConversation();
   else if (route.kind === 'room') enterRoom();
   else enterHome();
 }
 
 function leaveRoute() {
-  if (route.kind === 'lead') {
+  if (isConversation(route.kind)) {
     send({ type: 'unsubscribe', slot: SLOT });
     leadCtx?._dispose();
     leadCtx = null;
@@ -341,9 +368,9 @@ const el = {
   head: document.createElement('header'),
   /*
    * The header's first row. It exists so the tab bar can be the second one *inside* the same
-   * `<header>`: `enterLead` hides the shell header with `el.head.hidden` and the lead screen
-   * draws its own, so a bar appended as a sibling of the header would sit over it — a bug
-   * already caught on this screen once and recorded in `m.css`.
+   * `<header>`: `enterConversation` hides the shell header with `el.head.hidden` and the
+   * conversation screen draws its own, so a bar appended as a sibling of the header would
+   * sit over it — a bug already caught on this screen once and recorded in `m.css`.
    *
    * `web/m/lead.js`'s `watchConnection` reaches across the module boundary with the literal
    * selector `.m-app > .m-head .m-conn` to mirror the socket dot, deliberately, so there is
@@ -904,10 +931,20 @@ function homeRow(team) {
  */
 function stateWord(row) {
   if (!row.lead) return 'no lead running';
-  if (row.blocked) return 'blocked';
-  // `dialog` is a box the panel will not answer — `/model`, `/effort`, the trust gate's
-  // cousins. Saying `idle` there would be a lie, and it is not in the dot's rule.
-  return row.lead.status || 'unknown';
+  return liveStateWord(row.lead, row.blocked);
+}
+
+/**
+ * The state word for a session that is actually running — one spelling, two lists.
+ *
+ * `blocked` is passed in rather than re-derived: both callers already hold `needsKind`'s
+ * answer, and a word that asked the question its own way could read `idle` beside a lit
+ * dot. `dialog` is a box the panel will not answer — `/model`, `/effort`, the trust gate's
+ * cousins — and saying `idle` there would be a lie, as well as disagreeing with the dot.
+ */
+function liveStateWord(s, blocked) {
+  if (blocked) return 'blocked';
+  return s.status || 'unknown';
 }
 
 /**
@@ -952,6 +989,54 @@ function partitionTeams() {
  */
 function standaloneRows() {
   return roomParticipants(state.sessions || []).filter((s) => !s.isLead);
+}
+
+/**
+ * The same rows, in the order the tab draws them.
+ *
+ * Membership and order are kept apart on purpose: `roleRefusal` asks the *membership*
+ * function, so nothing about a sort can widen or narrow who may be opened.
+ *
+ * Sorted by facts that do not move — the launch folder, then the name, then the id. The
+ * roster's own order is urgency-first (blocked, then replied-and-unread, then recency),
+ * which is right for the desktop rail and wrong under a thumb: the row you are reaching for
+ * jumps to the top the instant something else blocks. The Leads tab sorts by name for the
+ * same reason (`loadTeams`) — an order is a promise about where a row will be. The id
+ * breaks the last tie so two sessions sharing a name in one folder cannot swap places
+ * between frames.
+ */
+function standaloneSorted() {
+  return standaloneRows()
+    .slice()
+    .sort(
+      (a, b) =>
+        String(a.project || '').localeCompare(String(b.project || ''), 'en') ||
+        rowName(a).localeCompare(rowName(b), 'en') ||
+        String(a.id).localeCompare(String(b.id), 'en'),
+    );
+}
+
+/**
+ * One ordinary session's worth of facts.
+ *
+ * Rendered strings and booleans only — this goes into the home signature, and a raw
+ * `lastActivity` in there would differ on almost every roster frame and retire the guard
+ * that stops the list being rebuilt under a thumb.
+ */
+function sessionRow(s) {
+  const need = needsKind(s);
+  return {
+    id: s.id,
+    name: rowName(s),
+    // The launch folder's basename, and only when it is not already the name: `rowName`
+    // falls back to `project` itself, and a row reading `alpha · alpha` says one thing
+    // twice. `project` rather than the whole path — a path is most of a 320px screen.
+    folder: s.project && s.project !== rowName(s) ? s.project : '',
+    need,
+    dot: need != null,
+    working: isWorking(s),
+    word: liveStateWord(s, need != null),
+  };
 }
 
 /**
@@ -1132,28 +1217,41 @@ function leadsView(teams) {
 }
 
 /**
- * The Standalones tab, until its list lands.
+ * The Standalones tab: every session that belongs to nobody's team.
  *
- * The count is the real one — `standaloneRows` is the same call the tab mark asks — so what
- * is missing here is the rendering and not the fact. Zero says so rather than drawing an
- * empty box, the way every count on this screen drops entirely at zero.
+ * `standaloneRows` is the membership rule and `standaloneSorted` the order; both are above,
+ * and the tab's mark asks the first of them, so the list and the mark can never be about
+ * different rows. `startable: 0` because "start a lead in a team that has none" is not an
+ * offer a list of ordinary sessions can make.
+ *
+ * Pane-only rows are **in** — a session opened and not yet spoken to, carrying a synthetic
+ * `pane-19` id and no transcript. It is exactly the session you are about to type into, the
+ * maintainer's own call, and the screen already follows the id the moment it first speaks
+ * (`onRebound`). Its transcript opens on `Nothing said yet.`, which is the truth.
  */
 function standalonesView() {
   if (!state.sessions) {
     return { sig: 'sa:loading', startable: 0, nodes: () => [note('Loading sessions…')] };
   }
-  const n = standaloneRows().length;
-  return {
-    sig: `sa:${n}`,
-    startable: 0,
-    nodes: () => [
-      note(
-        n === 0
-          ? 'No ordinary sessions running. Anything you start outside a team appears here.'
-          : `${n} ordinary ${n === 1 ? 'session' : 'sessions'} running. The list arrives in a later update — open them at the Mac for now.`,
-      ),
-    ],
-  };
+
+  const rows = standaloneSorted().map(sessionRow);
+  if (!rows.length) {
+    return {
+      sig: 'sa:empty',
+      startable: 0,
+      nodes: () => [
+        note('No ordinary sessions running. Anything you start outside a team appears here.'),
+      ],
+    };
+  }
+
+  // Everything a reader could see, as rendered strings and booleans. `need` is in it beside
+  // `dot` because the two say different things: the dot is whether it is lit, `need` is what
+  // it says when it is touched, and the trust gate changes only the second.
+  const sig =
+    'sa::' +
+    JSON.stringify(rows.map((r) => [r.id, r.name, r.folder, r.word, r.dot, r.need, r.working]));
+  return { sig, startable: 0, nodes: () => rows.map(sessionNode) };
 }
 
 /**
@@ -1507,6 +1605,60 @@ function workerDotTitle(word) {
 }
 
 /**
+ * One ordinary session, on the Standalones tab.
+ *
+ * Two lines and one tap target, the shape a team card already has: the name on the first
+ * line, the state word and the folder on the second. There is no badge and no context
+ * percentage here — unread is a *team's* count of what its lead said while you were away,
+ * and an ordinary session is one you are in front of.
+ *
+ * The gutter is the team card's own `.m-dots`, reused rather than restated. Two reserved
+ * slots, the top meaning *this wants you* and the bottom *this is running*, so a dot is in
+ * the same place whichever tab you are on; an unlit slot is unpainted, never absent, which
+ * is what stops the geometry drifting as a session blocks and clears.
+ */
+function sessionNode(row) {
+  const wrap = document.createElement('div');
+  wrap.className = 'm-sess';
+
+  const body = document.createElement('button');
+  body.className = 'm-sess-body';
+  body.type = 'button';
+  body.addEventListener('click', () => {
+    location.hash = `#/session/${encodeURIComponent(row.id)}`;
+  });
+
+  const gutter = document.createElement('span');
+  gutter.className = 'm-dots';
+  gutter.append(
+    slotDot('m-dot-wait', row.dot, waitTitleFor(row.need)),
+    slotDot('m-dot-work', row.working, 'this session is working'),
+  );
+  body.appendChild(gutter);
+
+  const name = document.createElement('span');
+  name.className = 'm-sess-name';
+  name.textContent = row.name;
+  body.appendChild(name);
+
+  const meta = document.createElement('span');
+  meta.className = 'm-sess-meta';
+  const word = document.createElement('span');
+  word.className = `m-sess-state${row.dot ? ' is-blocked' : ''}`;
+  word.textContent = row.word;
+  meta.append(word);
+  if (row.folder) {
+    const where = document.createElement('span');
+    where.textContent = ` · ${row.folder}`;
+    meta.append(where);
+  }
+  body.appendChild(meta);
+
+  wrap.appendChild(body);
+  return wrap;
+}
+
+/**
  * What the top dot is about, in words.
  *
  * The trust gate gets its own sentence and that is the only reason `need` carries a *kind*
@@ -1514,10 +1666,19 @@ function workerDotTitle(word) {
  * a dot that said "holding a box" would send a reader to a card the panel deliberately draws
  * no button on — `web/notify.js`'s `trust` body says the same thing for the same reason.
  * Every other kind is a box this view can actually answer.
+ *
+ * `null` means the dot is lit for the other half of a team row's rule — a task in review —
+ * which is why the sentence for it is about a task and not about a box.
  */
+function waitTitleFor(need) {
+  if (need === 'trust') return 'on the folder-trust gate — answer it on the Mac';
+  return need ? 'holding a box' : 'a task is waiting on you';
+}
+
+/** A team row's version: the lead's own kind when it is blocked, and otherwise the review
+ *  half of `row.dot`, which is not a box at all. */
 function waitTitle(row) {
-  if (row.need === 'trust') return 'on the folder-trust gate — answer it on the Mac';
-  return row.blocked ? 'holding a box' : 'a task is waiting on you';
+  return waitTitleFor(row.blocked ? row.need : null);
 }
 
 /** One slot of the gutter. Off means unpainted, never absent — see `teamNode`. */
@@ -1766,18 +1927,44 @@ function renderStartButton(n) {
   el.start.hidden = n === 0;
 }
 
-/* --------------------------------------------------------------- lead --- */
+/* ------------------------------------------------------- conversation --- */
 
-function enterLead() {
-  // The lead screen draws its own header (back, team, model, `ctx:`, interrupt), so the
-  // shell's stands down and the frame takes over the status-bar inset.
+/**
+ * Whether this route may show this row, and what to say when it may not.
+ *
+ * **A security control, and it is asked again on every roster frame rather than once at
+ * mount.** Measured on the bench: a lead was launched from the phone, opened, and then
+ * `/exit`ed — and the registry re-bound that *same session id* to the only other unbound
+ * pane in the folder, an ordinary non-lead session. The screen went on updating, under the
+ * same URL, showing a conversation this view had not been asked to show. The Standalones
+ * route needs the mirror, or item 3 re-opens the hole item 3 exists to stay out of: an id
+ * that comes back a **worker** — or a lead — stops the screen.
+ *
+ * The standalone half asks the **list**, never a second filter written out here. The list
+ * is `roomParticipants` minus the leads: an allow-list on role, never "not a worker", since
+ * kinds have grown here once already and a negative test silently admits the next one. A
+ * membership test spelled a second time would drift in exactly that direction.
+ *
+ * A row that is not on the roster at all is **not** a refusal — that is a beat during a
+ * rebound or a rotation, and `onRoster`'s gone timer is what covers a session that never
+ * arrives.
+ */
+function roleRefusal(s) {
+  if (!s) return null;
+  if (route.kind === 'lead') return s.isLead ? null : 'not-lead';
+  return standaloneRows().some((r) => r.id === s.id) ? null : 'not-standalone';
+}
+
+function enterConversation() {
+  // The screen draws its own header (back, who, model, `ctx:`, interrupt), so the shell's
+  // stands down and the frame takes over the status-bar inset.
   el.head.hidden = true;
   app.classList.add('no-head');
 
-  // A hash typed, bookmarked or reloaded can name anything. The home list only ever links
-  // leads, so this is the one door an ordinary or worker session could come through.
-  const known = sessionOf(route.sessionId);
-  if (known && !known.isLead) return showGone('not-lead');
+  // A hash typed, bookmarked or reloaded can name anything, and each list only ever links
+  // its own. This is the one door another kind of session could come through.
+  const refusal = roleRefusal(sessionOf(route.sessionId));
+  if (refusal) return showGone(refusal);
 
   const host = document.createElement('div');
   host.className = 'm-host';
@@ -1793,8 +1980,10 @@ function enterLead() {
 }
 
 /**
- * The screen's window onto the shell. These six names are the contract items 6, 7 and 8
- * are written against; nothing else here is public.
+ * The screen's window onto the shell. These names are the contract the conversation screen
+ * is written against; nothing else here is public. Three of them landed with the Standalones
+ * tab — `kind`, `homeHash` and `homeLabel` — because one screen module now serves two routes
+ * and has to know which, and because "back" is the tab you left rather than a bare `#/`.
  */
 function makeCtx() {
   const mine = [];
@@ -1810,6 +1999,19 @@ function makeCtx() {
     },
     session: () => sessionOf(route.sessionId),
     /*
+     * Which of the two conversation routes mounted this screen.
+     *
+     * The screen module is one file for both — the transcript, the answer cards, the
+     * composer, the suggestion line and the interrupt are the same on either — and this is
+     * what it branches on for the parts a team has and an ordinary session does not.
+     */
+    get kind() {
+      return route.kind;
+    },
+    /** Where "back" goes and what to call it: the tab you left, never a bare `#/`. */
+    homeHash: () => homeHash(),
+    homeLabel: () => TAB_LABELS[route.tab],
+    /*
      * How many workers this lead has running, for the mark on its `tasks` tab.
      *
      * Answered here rather than handed the roster, so `liveWorkers` stays the one place
@@ -1821,10 +2023,17 @@ function makeCtx() {
      * `paneCwd` is the pane's *launch* folder, which is the identical value
      * `SessionRegistry#team` hands `isLeadName`, and the same key `leadFor` matches on.
      * `cwd` is the transcript's and moves when a session changes directory.
+     *
+     * It is a **lead's** own team and never the folder's, which is the same trap the tasks
+     * tab has: an ordinary session launched inside a team's folder carries that team's
+     * `paneCwd`, so a count taken off the folder alone would put somebody else's workers on
+     * its screen. The session route builds no tasks tab at all — this is the belt to that
+     * brace.
      */
     workers: () => {
-      const repo = sessionOf(route.sessionId)?.paneCwd;
-      return repo ? liveWorkers(repo) : 0;
+      const s = sessionOf(route.sessionId);
+      if (!s?.isLead || !s.paneCwd) return 0;
+      return liveWorkers(s.paneCwd);
     },
     send: (msg) => send({ slot: SLOT, ...msg }),
     on: (type, fn) => {
@@ -1937,12 +2146,15 @@ function makeRoomCtx() {
  * `hashchange`, re-route, and tear down the screen that is mid-subscribe.
  */
 function onRebound(msg) {
-  if (route.kind !== 'lead' || msg.from !== route.sessionId) return;
+  if (!isConversation(route.kind) || msg.from !== route.sessionId) return;
   route.sessionId = msg.to;
   leadEverSeen = false;
   clearTimeout(goneTimer);
   goneTimer = null;
-  history.replaceState(null, '', `#/lead/${encodeURIComponent(msg.to)}`);
+  // The kind the route was opened on, kept: a rebound moves the id and changes nothing
+  // about what the hash claims, and rewriting it as the other kind would answer
+  // `roleRefusal` with a question nobody asked.
+  history.replaceState(null, '', `#/${route.kind}/${encodeURIComponent(msg.to)}`);
   updateLead(sessionOf(msg.to));
 }
 
@@ -1967,17 +2179,15 @@ function onRoster() {
   const session = sessionOf(route.sessionId);
   if (session) {
     /*
-     * The id survived, but it may not be a lead any more — and that is not hypothetical.
-     * Measured on the bench: a lead was launched from the phone, opened, and then `/exit`ed.
-     * Its pane died, and the registry re-bound that *same session id* to the only other
-     * unbound pane in the folder — an ordinary, non-lead session. The screen went on
-     * updating, under the same URL, now showing a conversation the phone is not allowed to
-     * show at all.
+     * The id survived, but it may not be what the hash claims any more — and that is not
+     * hypothetical. The measurement, and why both routes ask, is over `roleRefusal`.
      *
-     * So the route re-checks the fact it was opened on. No grace period: `isLead` is read
-     * off the session's tmux name and cannot flicker for a lead that is still a lead.
+     * No grace period on either side: `isLead` is read off the session's tmux name and
+     * cannot flicker for a lead that is still a lead, and the standalone allow-list is read
+     * off `team.role`, which `sessions.js` writes out of one `#team()` call.
      */
-    if (!session.isLead) return showGone('not-lead');
+    const refusal = roleRefusal(session);
+    if (refusal) return showGone(refusal);
     leadEverSeen = true;
     clearTimeout(goneTimer);
     goneTimer = null;
@@ -1997,7 +2207,7 @@ function onRoster() {
   if (!leadEverSeen || goneTimer) return;
   goneTimer = setTimeout(() => {
     goneTimer = null;
-    if (route.kind !== 'lead' || sessionOf(route.sessionId)) return;
+    if (!isConversation(route.kind) || sessionOf(route.sessionId)) return;
     showGone();
   }, 4000);
 }
@@ -2015,10 +2225,20 @@ function showGone(reason = 'exited') {
   box.className = 'm-gone';
   const text = document.createElement('div');
   text.className = 'm-gone-text';
+  /*
+   * Four sentences, because there are two ways to be refused and two things to have gone.
+   * A worker reaches both refusals — a `#/lead/` hash naming one, and a `#/session/` hash
+   * naming one — and neither sentence offers to open it anywhere, because nothing on this
+   * device does: a worker's question is its lead's to answer.
+   */
   text.textContent =
     reason === 'not-lead'
-      ? 'That session is not a team lead. This view shows leads only.'
-      : 'This lead is no longer running. It was closed or it exited.';
+      ? 'That session is not a team lead. Leads are opened from the Leads tab.'
+      : reason === 'not-standalone'
+        ? 'That session is not an ordinary one. A team lead opens from the Leads tab, and a worker is its lead’s to answer — it is never opened here.'
+        : route.kind === 'lead'
+          ? 'This lead is no longer running. It was closed or it exited.'
+          : 'This session is no longer running. It was closed or it exited.';
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'm-back';
