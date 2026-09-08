@@ -329,6 +329,11 @@ function navigate() {
 }
 
 function leaveRoute() {
+  // Part of the shell header, which every route below `home` hides outright — but hiding the
+  // header does not reset a popover left open inside it, and a route reached while the menu
+  // was up (Escape never pressed, no outside tap) would otherwise come back to `home` still
+  // open. Unconditional and cheap: `closeHeadMenu` is a no-op when there is nothing open.
+  closeHeadMenu();
   if (isConversation(route.kind)) {
     send({ type: 'unsubscribe', slot: SLOT });
     leadCtx?._dispose();
@@ -385,7 +390,9 @@ const el = {
   quota: document.createElement('button'),
   conn: document.createElement('span'),
   start: document.createElement('button'),
-  refresh: document.createElement('button'),
+  menuBtn: document.createElement('button'),
+  menu: document.createElement('div'),
+  menuToggleBox: document.createElement('input'),
   screen: document.createElement('div'),
 };
 
@@ -431,8 +438,8 @@ el.conn.textContent = '●';
  * say so in words for the same reason.
  *
  * Drawn only when there is at least one of them (`renderStartButton`), the way every count
- * on this screen drops entirely at zero. It sits between the connection dot and `⟳` so the
- * refresh stays in the corner a thumb has already learned; the shell header hides itself on
+ * on this screen drops entirely at zero. It sits between the connection dot and `⋯` so the
+ * menu stays in the corner a thumb has already learned; the shell header hides itself on
  * the lead screen, so this inherits the right visibility with no branch of its own.
  */
 el.start.className = 'm-icon-btn m-start-btn';
@@ -443,12 +450,111 @@ el.start.setAttribute('aria-label', 'Start a lead');
 el.start.title = 'Start a lead in a team that has none running';
 el.start.addEventListener('click', openStartSheet);
 
-el.refresh.className = 'm-icon-btn';
-el.refresh.type = 'button';
-el.refresh.textContent = '⟳';
-el.refresh.setAttribute('aria-label', 'Refresh');
-el.refresh.addEventListener('click', refresh);
-el.headRow.append(el.title, el.quota, el.conn, el.start, el.refresh);
+/*
+ * The `⋯`: one button in `⟳`'s old corner, opening a small popover anchored under it that
+ * holds two things that used to live apart — the refresh action and the one preference this
+ * device has, which used to sit as its own section under the home list (see the git history
+ * for `buildPrefs`, retired the same day this landed). A phone's header has room for exactly
+ * one more icon before `+` and the socket dot start fighting it for space, so this is one
+ * button standing in for two controls rather than a second one crowding the row.
+ *
+ * The popover is built once, here, and only ever shown or hidden — never rebuilt — for the
+ * same reason the three tabs are permanent nodes: a control replaced under a thumb on its
+ * way down is a control that eats the tap. `openHeadMenu`/`closeHeadMenu` own the visibility
+ * and the outside-tap/Escape/route-change wiring; nothing here repaints on the roster beat.
+ */
+el.menuBtn.className = 'm-icon-btn';
+el.menuBtn.type = 'button';
+el.menuBtn.textContent = '⋯';
+el.menuBtn.setAttribute('aria-label', 'Menu');
+el.menuBtn.setAttribute('aria-haspopup', 'true');
+el.menuBtn.setAttribute('aria-expanded', 'false');
+el.menuBtn.addEventListener('click', toggleHeadMenu);
+
+el.menu.className = 'm-head-menu';
+el.menu.hidden = true;
+
+const menuRefreshRow = document.createElement('button');
+menuRefreshRow.type = 'button';
+menuRefreshRow.className = 'm-head-menu-row';
+menuRefreshRow.textContent = 'Refresh';
+// Closes the instant it is tapped, before `loadTeams` has even resolved — `refresh()` puts
+// the busy mark on `el.menuBtn` itself, which is the one part of this still on screen once
+// the popover is gone.
+menuRefreshRow.addEventListener('click', () => {
+  closeHeadMenu();
+  refresh();
+});
+
+// The toggle row: same words, same stored flag, same "applies the moment it's tapped" as the
+// section this replaces. A `<label>`, not a row plus a separate click handler, so the tap
+// target is the whole sentence and Space/click both reach the input for free — and so tapping
+// it never has to be told "don't close the menu": nothing here calls `closeHeadMenu` at all.
+const menuToggleRow = document.createElement('label');
+menuToggleRow.className = 'm-head-menu-row m-head-menu-toggle';
+
+el.menuToggleBox.type = 'checkbox';
+el.menuToggleBox.className = 'm-head-menu-switch';
+el.menuToggleBox.checked = ghostSend.on;
+el.menuToggleBox.addEventListener('change', () => {
+  ghostSend.set(el.menuToggleBox.checked);
+});
+
+const menuToggleLabel = document.createElement('span');
+menuToggleLabel.className = 'm-head-menu-title';
+menuToggleLabel.textContent = 'Send suggestions on one tap';
+
+menuToggleRow.append(el.menuToggleBox, menuToggleLabel);
+el.menu.append(menuRefreshRow, menuToggleRow);
+
+// The one positioned ancestor the popover needs. `el.menuBtn` itself cannot be it: a `<div>`
+// inside a `<button>` still bubbles its clicks to that button, which would fire
+// `toggleHeadMenu` a second time on every tap inside the popover, including the checkbox.
+const menuWrap = document.createElement('div');
+menuWrap.className = 'm-head-menu-wrap';
+menuWrap.append(el.menuBtn, el.menu);
+
+el.headRow.append(el.title, el.quota, el.conn, el.start, menuWrap);
+
+let headMenuOpen = false;
+
+function toggleHeadMenu() {
+  if (headMenuOpen) closeHeadMenu();
+  else openHeadMenu();
+}
+
+function openHeadMenu() {
+  if (headMenuOpen) return;
+  headMenuOpen = true;
+  el.menu.hidden = false;
+  el.menuBtn.setAttribute('aria-expanded', 'true');
+  // Re-read rather than trusted stale: the desktop's settings modal writes the same key, and
+  // `/` and `/m/` are one origin — a tab that changed it since this popover last opened
+  // should not show the old answer.
+  el.menuToggleBox.checked = ghostSend.on;
+  // Capturing, the same as the start sheet's Escape handler, and for the same reason: a tap
+  // that lands on something inside the popover must never reach this listener as "outside".
+  document.addEventListener('pointerdown', onHeadMenuOutside, true);
+  document.addEventListener('keydown', onHeadMenuKey, true);
+}
+
+function closeHeadMenu() {
+  if (!headMenuOpen) return;
+  headMenuOpen = false;
+  el.menu.hidden = true;
+  el.menuBtn.setAttribute('aria-expanded', 'false');
+  document.removeEventListener('pointerdown', onHeadMenuOutside, true);
+  document.removeEventListener('keydown', onHeadMenuKey, true);
+}
+
+function onHeadMenuOutside(e) {
+  if (el.menu.contains(e.target) || el.menuBtn.contains(e.target)) return;
+  closeHeadMenu();
+}
+
+function onHeadMenuKey(e) {
+  if (e.key === 'Escape') closeHeadMenu();
+}
 
 /* ------------------------------------------------------------- tabs --- */
 
@@ -570,11 +676,6 @@ function enterHome() {
   homeList = document.createElement('div');
   homeList.className = 'm-teams';
   scroll.appendChild(homeList);
-  // Below the teams, outside `homeList`, and that placement is the whole of what keeps it
-  // safe: `renderHome` calls `replaceChildren` on the list every time its signature moves,
-  // which on a busy morning is every couple of seconds — a checkbox living inside it would
-  // be torn out from under the thumb that was pressing it.
-  scroll.appendChild(buildPrefs());
   el.screen.appendChild(scroll);
 
   // Mounted first, painted second. Anything that measures itself before its container is
@@ -589,46 +690,6 @@ function enterHome() {
   // silent rather than visible — which is exactly why it gets an explicit stop.
   clearInterval(homeTick);
   homeTick = setInterval(renderHome, HOME_TICK_MS);
-}
-
-/**
- * The one preference this device has, at the bottom of the only screen that can hold it.
- *
- * The phone has no settings sheet and does not want one for a single flag. Here it is out
- * of the way of the teams, read once when the screen mounts, and applied the moment it is
- * tapped — the desktop's settings modal has the same control with the same words and they
- * are the same stored answer, because `/` and `/m/` are one origin.
- *
- * Off by default and deliberately so: with it on, one tap on a muted line above the lead's
- * composer sends a message the model wrote into a live session.
- */
-function buildPrefs() {
-  const sec = document.createElement('section');
-  sec.className = 'm-prefs';
-
-  const cap = document.createElement('h2');
-  cap.className = 'm-prefs-cap';
-  cap.textContent = 'Suggested prompts';
-
-  const row = document.createElement('label');
-  row.className = 'm-prefs-row';
-
-  const box = document.createElement('input');
-  box.type = 'checkbox';
-  box.className = 'm-prefs-box';
-  box.checked = ghostSend.on;
-
-  const title = document.createElement('span');
-  title.className = 'm-prefs-title';
-  title.textContent = 'Send suggestions on one tap';
-  row.append(box, title);
-
-  box.addEventListener('change', () => {
-    ghostSend.set(box.checked);
-  });
-
-  sec.append(cap, row);
-  return sec;
 }
 
 /**
@@ -2287,8 +2348,8 @@ async function loadRoster() {
 }
 
 function refresh() {
-  el.refresh.classList.add('is-busy');
-  loadTeams().finally(() => el.refresh.classList.remove('is-busy'));
+  el.menuBtn.classList.add('is-busy');
+  loadTeams().finally(() => el.menuBtn.classList.remove('is-busy'));
   if (ws?.readyState !== WebSocket.OPEN && ws?.readyState !== WebSocket.CONNECTING) {
     retry = 0;
     connect();
