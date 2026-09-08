@@ -217,6 +217,26 @@ select {
  */
 .m-nav-dot { flex: none; }
 
+/* The mark and the wordmark, grouped tighter than `.m-head-row`'s own 0.6rem gap — see the
+   comment beside `el.brand` in app.js. This is the `flex: 1` node in the row now; `.m-title`
+   keeps its own `flex: 1; min-width: 0` one level in, so it still ellipsises. */
+.m-head-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Its own tile carries a fixed dark background, so it reads the same in both themes without
+   a token. */
+.m-head-logo {
+  flex: none;
+  width: 21px;
+  height: 21px;
+  border-radius: 5px;
+}
+
 .m-title {
   font-family: var(--mono);
   font-size: 0.95rem;

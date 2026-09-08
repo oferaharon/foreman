@@ -387,6 +387,8 @@ const el = {
    */
   headRow: document.createElement('div'),
   tabs: document.createElement('nav'),
+  brand: document.createElement('div'),
+  logo: document.createElement('img'),
   title: document.createElement('div'),
   quota: document.createElement('button'),
   conn: document.createElement('span'),
@@ -399,6 +401,18 @@ const el = {
 
 el.head.className = 'm-head';
 el.headRow.className = 'm-head-row';
+// The mark and the wordmark, grouped so the gap between them can be tighter than the row's
+// own — `.m-head-row`'s `gap` is shared by every child (quota, conn, `+`, `⋯`), and pairing
+// a mark with its word wants less air than that. `el.brand` is the `flex: 1` node now, in
+// `.m-title`'s old place in the row; `.m-title` keeps its own `flex: 1; min-width: 0` inside
+// it so it still ellipsises rather than the mark.
+el.brand.className = 'm-head-brand';
+// Not a second accessible name for the app — the word beside it is what a screen reader
+// announces.
+el.logo.className = 'm-head-logo';
+el.logo.src = '/icons/mark.svg';
+el.logo.alt = '';
+el.logo.setAttribute('aria-hidden', 'true');
 el.title.className = 'm-title';
 // The app's name, not the tab's — the tabs below say which list you are on. It was `Leads`
 // until this view stopped being about leads (the maintainer's ruling of 2026-09-07, which
@@ -515,7 +529,8 @@ const menuWrap = document.createElement('div');
 menuWrap.className = 'm-head-menu-wrap';
 menuWrap.append(el.menuBtn, el.menu);
 
-el.headRow.append(el.title, el.quota, el.conn, el.start, menuWrap);
+el.brand.append(el.logo, el.title);
+el.headRow.append(el.brand, el.quota, el.conn, el.start, menuWrap);
 
 let headMenuOpen = false;
 
