@@ -65,7 +65,7 @@ import { mountLead, updateLead } from './lead.js';
 /* The Rooms tab's list and the room screen. Its own module with its own state — a phone
    shows one thing at a time, and that stays true only if the second screen is a second
    module rather than a `kind` field bolted onto the first one's `view`. */
-import { mountRoom, roomsListView, updateRoom } from './rooms.js';
+import { mountRoom, renderCreateSheet, roomsListView, updateRoom } from './rooms.js';
 
 /* ------------------------------------------------------------- state --- */
 
@@ -1075,6 +1075,14 @@ function renderHome() {
    * already going. This is the one function every path that could move either list already
    * goes through.
    */
+  /*
+   * The create-room sheet, ahead of the guard for the reason the start sheet is: what it
+   * draws is the **roster**, while the signature below is about rooms — so a session
+   * appearing or exiting moves the picker and nothing at all on the list behind it, and a
+   * repaint gated on that signature would never come. It carries its own.
+   */
+  renderCreateSheet();
+
   renderStartSheet();
 
   /*
@@ -1268,6 +1276,10 @@ function roomsView() {
       location.hash = `#/room/${encodeURIComponent(id)}`;
     },
     onChange: renderHome,
+    /* A thunk, not a list. The create sheet outlives any one paint and is repainted from
+       `renderHome` above, so it has to read the roster again each time — a list captured
+       when it opened would go on offering a session that has since exited. */
+    sessions: () => state.sessions || [],
   });
 }
 
@@ -2093,6 +2105,10 @@ function makeRoomCtx() {
       return route.roomId;
     },
     room: () => roomOf(route.roomId),
+    /* The live roster, for the membership sheet's two pickers — who may be put in a room,
+       and which row a stored member is right now. A thunk for `room()`'s reason: the sheet
+       is repainted on the roster beat and a captured list would go stale under it. */
+    sessions: () => state.sessions || [],
     /* The socket's own state, asked rather than mirrored off the shell's DOM. `lead.js`
        reads the header's dot with a literal selector and says why at length — a second
        WebSocket would be worse than no indicator at all — and this is the same fact one

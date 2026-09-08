@@ -599,3 +599,450 @@
 .m-room-mention-row:active {
   background: var(--surface-sunk);
 }
+
+/* ============================================================== the list head === */
+
+/* One control, right-aligned, and nothing beside it: the tab bar two rows up already says
+   `Rooms`, and a caption repeating it is one more thing to read for no fact. */
+.m-room-list-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0.5rem 0.7rem;
+  padding-left: calc(0.7rem + env(safe-area-inset-left));
+  padding-right: calc(0.7rem + env(safe-area-inset-right));
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+}
+
+.m-room-make {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 0.9rem;
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.m-room-make:active { background: var(--surface-sunk); }
+
+/* ============================================================ the sheets === */
+
+/*
+ * The box is `m.css`'s `.m-sheet` — the backdrop, the bottom anchor, the rounded top and
+ * the home-indicator inset all come from there, because a second description of one overlay
+ * is two things free to disagree about a safe area. This class only says what the room
+ * sheets add: a little room under the last control, and a floor under the scroller so a
+ * two-row picker does not open a sheet the height of two rows.
+ */
+.m-room-sheet {
+  min-height: 40vh;
+  min-height: 40dvh;
+  padding-bottom: calc(0.9rem + env(safe-area-inset-bottom));
+}
+
+/* Everything in a sheet that is ever hidden. `hidden` is a UA `display: none` and any class
+   rule carrying a `display` beats it — three times paid for on the home screen alone. */
+.m-room-sheet-note[hidden],
+.m-room-cap[hidden],
+.m-room-mlist[hidden],
+.m-room-alist[hidden],
+.m-room-members[hidden] {
+  display: none;
+}
+
+/* A caption over a list or a field. The shell's `.m-prefs-cap` shape, restated rather than
+   borrowed: that one belongs to the home screen's preferences block and this sheet must not
+   start depending on it. */
+.m-room-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin: 0.9rem 0 0.35rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+/* The name field. The caption is inside the label, so the tap target is both. */
+.m-room-field {
+  display: block;
+  padding: 0 1rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+}
+
+.m-room-field .m-room-cap {
+  margin-top: 0.2rem;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/*
+ * 16px, and it is not a taste decision: Safari zooms the whole page in when a focused
+ * input's font-size is under 16px and does not zoom back out, leaving the page wider than
+ * the screen for the rest of the session.
+ */
+.m-room-name-input {
+  width: 100%;
+  min-height: 44px;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+}
+
+.m-room-name-input::placeholder { color: var(--ink-faint); }
+
+/* `N of 8`, beside the caption. It takes the waiting colour at the cap rather than the
+   refusal colour: being full is a state, not a mistake. */
+.m-room-tally {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-faint);
+}
+
+.m-room-tally.m-room-full { color: var(--working); }
+
+/* The two lists a sheet can hold. Capped and scrolled rather than allowed to push the
+   buttons off the bottom of a bottom-anchored box — the box itself scrolls, but a list that
+   owned the whole of it would put `Make the room` below the fold on every open. */
+.m-room-pick-list,
+.m-room-mlist,
+.m-room-alist {
+  max-height: 42vh;
+  max-height: 42dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--rule);
+}
+
+/* One row in any of the three lists. 44px is Apple's minimum target and this is a list of
+   things that open channels into live terminals, so it is a floor rather than a nicety. */
+.m-room-pick,
+.m-room-mrow,
+.m-room-arow {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  text-align: left;
+  border-bottom: 1px solid var(--rule);
+}
+
+.m-room-pick:last-child,
+.m-room-mrow:last-child,
+.m-room-arow:last-child { border-bottom: none; }
+
+.m-room-pick:active,
+.m-room-arow:active { background: var(--surface-sunk); }
+
+/*
+ * The box, drawn by the panel rather than by the browser.
+ *
+ * A stock checkbox is painted from the **browser's** colour scheme rather than the page's
+ * `data-theme` — measured on the desktop's create-room bench: page in light, browser in
+ * dark, and an unticked box came back a solid dark square, which in a multi-select list is
+ * exactly what "chosen" looks like. `data-theme` is not a signal the UA reads and no test
+ * would have caught it.
+ *
+ * Still a real `input[type=checkbox]`, the way `.m-prefs-box` is: checked, focused, toggled
+ * by Space and read out as a checkbox, all for free — with `appearance: none` turning the
+ * box itself into the frame and `::before` into the tick, so there is no second node that
+ * can disagree with the input's own state.
+ */
+.m-room-tick {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 1.35rem;
+  height: 1.35rem;
+  margin: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+/* The tick: a rotated rectangle with two of its four borders drawn, which is the shape the
+   desktop's own picker uses. Transparent until checked, so the box is empty rather than
+   holding a faint mark that could read as a third state. */
+.m-room-tick::before {
+  content: '';
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  width: 0.3rem;
+  height: 0.62rem;
+  border: solid transparent;
+  border-width: 0 2px 2px 0;
+  transform: translate(-50%, -55%) rotate(45deg);
+}
+
+.m-room-tick:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.m-room-tick:checked::before { border-color: var(--surface); }
+
+@media (prefers-reduced-motion: reduce) {
+  .m-room-tick { transition: none; }
+}
+
+/*
+ * The live dot, coloured off `data-status` rather than off a class per state.
+ *
+ * Every class in this sheet has to carry the `m-room` prefix — the one-sheet-per-item rule,
+ * which `lead.css` owning `.m-tab` is the reason for — and `.m-room-live-needs-decision` is
+ * a name nobody would write twice the same way. `gone` is this file's own word for a member
+ * no roster row answers to; it never arrives as a status.
+ */
+.m-room-live {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.m-room-live[data-status='idle'] { background: var(--idle); }
+.m-room-live[data-status='working'] { background: var(--working); }
+.m-room-live[data-status='needs-decision'] { background: var(--decision); }
+.m-room-live[data-status='dialog'] { background: var(--decision); }
+
+/* A member the panel cannot find right now: hollow rather than coloured, because it is the
+   absence of an answer and not an answer. */
+.m-room-live[data-status='gone'] {
+  background: transparent;
+  border: 1px solid var(--rule-strong);
+}
+
+/* The name, which is the one thing in a row that may take the space it needs and then
+   ellipsise. Nothing else in the row shrinks. */
+.m-room-pick-name,
+.m-room-mname {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+
+.m-room-role {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  padding: 0.1rem 0.3rem;
+}
+
+/* The folder, last and quietest — it tells two rows with the same label apart and is not
+   worth a character more than that. At 320px it gives its width up first. */
+.m-room-where {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+/* `remove`, a word rather than an ✕: a phone has no hover, so the only place a glyph could
+   have said what it does is a tooltip nobody opens. */
+.m-room-mx {
+  flex: none;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--decision);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.m-room-mx:active { background: var(--surface-sunk); }
+
+/* The sheet's own line: what is in flight, or the server's own refusal. */
+.m-room-sheet-note {
+  margin: 0.6rem 0 0;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.m-room-sheet-note.m-room-bad { color: var(--decision); }
+
+.m-room-sheet-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem 0.2rem;
+  padding-left: calc(1rem + env(safe-area-inset-left));
+  padding-right: calc(1rem + env(safe-area-inset-right));
+}
+
+.m-room-btn {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 1rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.m-room-btn-go {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.m-room-btn:active { background: var(--surface-sunk); }
+
+.m-room-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ==================================================== the header's controls === */
+
+/*
+ * Row 2 of the room screen's own header is now a row rather than a line: the names, and the
+ * two controls that change them. `.m-room-sub` keeps its `[hidden]` rule at the top of this
+ * file, which beats this `display` by specificity in either order.
+ */
+.m-room-sub {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The names, and the only thing in the row that gives up space. */
+.m-room-sub-who {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.m-room-members {
+  flex: none;
+  min-width: 34px;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.m-room-members:active { background: var(--surface-sunk); }
+
+.m-room-arch {
+  flex: none;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-muted);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+.m-room-arch:active { background: var(--surface-sunk); }
+
+/* ============================================================== asking first === */
+
+/*
+ * A question armed in place, in the merge block's own shape one screen over.
+ *
+ * The row it is in folds everything else away for as long as the question is up: a phone row
+ * is 320px, and a question sharing it with a name and a dot ellipsises to `remove alpha…`,
+ * which is a confirmation that has lost its target. Written as "everything in this row that
+ * is not the question" rather than as a rule per row kind, so the next control this idiom is
+ * put behind inherits it.
+ */
+.m-room-asking > :not(.m-room-ask) { display: none; }
+
+.m-room-ask {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.m-room-ask-q {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink);
+}
+
+.m-room-ask-yes,
+.m-room-ask-no {
+  flex: none;
+  min-width: 44px;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+}
+
+/* The colour is on `yes` and not on `no`, because `no` is the one that happens by default
+   four seconds from now and does not need finding. */
+.m-room-ask-yes { color: var(--decision); }
+.m-room-ask-no { color: var(--ink-muted); }
+
+.m-room-ask-yes:active,
+.m-room-ask-no:active { background: var(--surface-sunk); }

@@ -5,11 +5,17 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import {
+  archiveQuestion,
+  archiveWord,
   archivedIsOpen,
   composerRefusal,
+  createSig,
+  keepPicked,
   memberNames,
   memberStrip,
+  membersSig,
   quietText,
+  removeQuestion,
   roomsListView,
   roomsSig,
 } from '../web/m/rooms.js';
@@ -93,6 +99,16 @@ function fn(name, src) {
     }
   }
   throw new Error(`\`${name}\` has no closing brace`);
+}
+
+/** A function whose parameters are destructured defeats `fn`: its brace walk starts at the
+ *  first `{` after the name, which is the parameter object rather than the body. Those two
+ *  are sliced by hand between their own landmarks instead. */
+function between(src, from, to) {
+  const a = src.indexOf(from);
+  const b = src.indexOf(to, a + 1);
+  assert.ok(a >= 0 && b > a, `\`${from}\` … \`${to}\` must both be there, in that order`);
+  return src.slice(a, b);
 }
 
 /* ------------------------------------------------------------- fixtures --- */
@@ -477,4 +493,435 @@ test('Enter is a newline, not a send', () => {
   assert.match(key, /if \(!mention\) return;/, 'nothing at all happens with no menu up');
   assert.match(key, /chooseMention\(mention\.names\[mention\.index\]\)/);
   assert.doesNotMatch(key, /submit\(\)/);
+});
+
+/* ═════════════════════════════════════ item 5: making and editing a room ═══ */
+
+/*
+ * Creating a room, adding a member, removing one and archiving — all four from the phone,
+ * on the maintainer's ruling of 2026-09-07 (open question A), over a `decisions.md` line
+ * that had said membership stays on the Mac.
+ *
+ * What is pinned here is what would break **silently**, which for this half is narrower and
+ * sharper than for the log:
+ *
+ *  - **The allow-list is asked, never re-spelled.** A worker in the picker is a channel into
+ *    a session whose questions are its lead's business. `POST /api/rooms` refuses one with a
+ *    409, and a second spelling on this side is free to disagree in the direction of showing
+ *    it.
+ *  - **The strongest id is what travels as `remove`.** A label collides by design and a pane
+ *    id does not survive a relaunch, so a `remove` keyed on either can take out somebody
+ *    else — `memberKey` is the one place that order lives.
+ *  - **The cap is the server's.** `MAX_MEMBERS` is a fallback and a second authority is how
+ *    a client starts refusing what the server allows, or allowing what it refuses.
+ *  - **Signatures carry structure, never status.** A status moves every couple of seconds
+ *    and would rebuild a list of checkboxes under the thumb halfway through choosing.
+ *  - **The boxes are drawn, not native.** A stock checkbox is painted from the browser's
+ *    colour scheme rather than the page's, so an unticked box can come back solid and read
+ *    as ticked. No test can see that; what a test *can* hold is that the box is ours.
+ *  - **Taking something away asks first.** Remove and archive arm a question; adding and
+ *    unarchiving do not, because they take nothing away.
+ */
+
+const sess = (id, over = {}) => ({
+  id,
+  label: id,
+  status: 'idle',
+  interactive: true,
+  project: 'alpha',
+  paneCwd: '/sandbox/alpha',
+  ...over,
+});
+
+/* ─────────────────────────────────────────────── the picker's arithmetic ─── */
+
+test('a picked session that has gone away is dropped, and the order survives', () => {
+  /*
+   * A phone is a screen you put down, so the roster under an open picker moves. A session
+   * that has exited must not still count against the cap or be sent in `members` — and the
+   * ids that remain keep their tick order, because that is the order `POST /api/rooms`
+   * receives them in and therefore the order the room lists its members in.
+   */
+  const rows = [sess('b'), sess('a')];
+  assert.deepEqual(keepPicked(['a', 'b'], rows), ['a', 'b'], 'the tick order, not the roster order');
+  assert.deepEqual(keepPicked(['a', 'gone', 'b'], rows), ['a', 'b']);
+  assert.deepEqual(keepPicked(['gone'], rows), []);
+  assert.deepEqual(keepPicked([], rows), []);
+  assert.deepEqual(keepPicked(['a'], []), [], 'an empty roster offers nobody');
+});
+
+test('the create picker’s signature is structure, never status and never the tick', () => {
+  /*
+   * Both exclusions are load-bearing and neither is obvious. **Status** moves every couple
+   * of seconds, so in here it would rebuild every checkbox in the list twice a minute under
+   * a thumb. **Ticked** is worse: the browser has already drawn the tick by the time a
+   * repaint would run, so a rebuild on it is a box that flickers off and back on under the
+   * finger that pressed it. The dot is patched in place instead.
+   */
+  const rows = [sess('a'), sess('b')];
+  const base = createSig(rows);
+  assert.equal(base, createSig([sess('a', { status: 'working' }), sess('b', { status: 'needs-decision' })]));
+  assert.notEqual(base, createSig([sess('a'), sess('c')]), 'a session appearing');
+  assert.notEqual(base, createSig([sess('a')]), 'a session going away');
+  assert.notEqual(base, createSig([sess('a', { label: 'renamed' }), sess('b')]), 'the name it draws');
+  assert.notEqual(base, createSig([sess('a', { project: 'gamma' }), sess('b')]), 'the folder it draws');
+  assert.notEqual(base, createSig([sess('a', { isLead: true }), sess('b')]), 'the lead chip it draws');
+  assert.doesNotMatch(base, /\b\d{13}\b/, 'no millisecond stamp of any kind');
+});
+
+test('the members sheet’s signature carries both lists, because one press moves both', () => {
+  // Adding somebody takes them out of the offer and puts them in the room in one press. A
+  // signature carrying only one half would leave the other showing a session in two places.
+  const r = room();
+  const addable = [sess('c')];
+  const base = membersSig(r, addable);
+  assert.notEqual(base, membersSig(room({ members: [member('alpha-main')] }), addable), 'a member removed');
+  assert.notEqual(base, membersSig(r, []), 'the offer emptying');
+  assert.notEqual(base, membersSig(r, [sess('d')]), 'a different session on offer');
+  assert.notEqual(base, membersSig(room({ archivedAt: 5 }), addable), 'archived, which takes both controls away');
+  assert.equal(base, membersSig(r, [sess('c', { status: 'working' })]), 'a status is patched, not rebuilt');
+});
+
+/* ─────────────────────────────────────────────────── what a question says ─── */
+
+test('a confirmation names its target, and the word matches the button', () => {
+  // `sure?` overwrote the one word naming the action. One function answers both the word on
+  // the control and the word in the question, so the two can never come apart.
+  assert.equal(archiveWord(room()), 'archive');
+  assert.equal(archiveWord(room({ archivedAt: 5 })), 'unarchive');
+  assert.match(archiveQuestion(room()), /archive/);
+  assert.match(archiveQuestion(room()), /the room/, 'the room is named');
+  assert.match(archiveQuestion(null), /this room/, 'and something is said when it is not');
+  assert.match(removeQuestion(member('alpha-main')), /^remove alpha-main\?$/);
+});
+
+test('a member with no name at all is still called something in a question', () => {
+  // `memberName` and not `memberLabel`: that one answers `''` for a record holding none of
+  // the three ids, and `remove ?` is a question about nobody.
+  assert.equal(removeQuestion({ name: '', tmuxSession: '', paneId: '' }), 'remove a session?');
+});
+
+/* ──────────────────────────────────────────────── the list head (source) ─── */
+
+test('the Rooms list has its own head, and it is not the shell’s `+`', () => {
+  /*
+   * The shell header's `+` starts a *lead*; `+ room` is a different verb on a different
+   * list. `startable` staying `0` is what keeps the two from ever sharing a count.
+   */
+  const head = fn('listHead', roomsCode);
+  assert.match(head, /openCreateSheet\(sessions\)/);
+  assert.equal(roomsListView([room()]).startable, 0);
+  assert.equal(roomsListView([]).startable, 0);
+
+  const view = roomsListView(null);
+  assert.equal(view.sig, 'rm:loading');
+  const body = between(roomsCode, 'export function roomsListView', 'function listHead');
+  assert.doesNotMatch(body.slice(0, body.indexOf('const list =')), /listHead/,
+    'no head before the first roster frame — a picker with no roster cannot be answered');
+});
+
+test('the empty state keeps its sentence as well as gaining the control', () => {
+  // An empty list is the one place a reader learns what a room *is* before making one, and
+  // the sentence deliberately does not send anybody to the Mac.
+  const body = between(roomsCode, 'export function roomsListView', 'function listHead');
+  assert.match(body, /listHead\(sessions\)/);
+  assert.match(body, /No rooms yet\./);
+  assert.doesNotMatch(body, /at the Mac/);
+});
+
+test('the roster reaches both pickers as a thunk, never as a captured list', () => {
+  // A sheet outlives any one paint. A list captured when it opened would go on offering a
+  // session that has since exited — which is the whole reason this one repaints where the
+  // desktop's modal deliberately does not.
+  assert.match(appCode, /sessions: \(\) => state\.sessions \|\| \[\]/);
+  assert.equal(appCode.match(/sessions: \(\) => state\.sessions \|\| \[\]/g).length, 2,
+    'once for the create sheet, once for the room screen’s membership');
+  assert.match(fn('renderCreateSheet', roomsCode), /s\.sessions\(\)/);
+  assert.match(fn('renderMembersSheet', roomsCode), /view\.ctx\?\.sessions\?\.\(\)/);
+});
+
+test('the create sheet repaints ahead of the home screen’s signature guard', () => {
+  /*
+   * What it draws is the **roster**, and the guard below it is about rooms — so a session
+   * appearing or exiting moves the picker and nothing at all on the list behind it. Gated on
+   * that signature the repaint would simply never come. `renderStartSheet` sits there for
+   * the same reason and is the precedent.
+   */
+  const home = fn('renderHome', appCode);
+  const at = (needle) => home.indexOf(needle);
+  assert.ok(at('renderCreateSheet()') > 0, 'it is called at all');
+  assert.ok(at('renderCreateSheet()') < at('if (sig === homeSignature) return;'), 'ahead of the guard');
+});
+
+/* ───────────────────────────────────────────── who may be in a room ─────── */
+
+test('the allow-list is asked, never re-spelled', () => {
+  /*
+   * A worker's channel is its lead — the maintainer's ruling — and the filter is an
+   * allow-list on role because kinds have grown here once already. A second spelling on this
+   * side would be free to disagree in the direction of offering one.
+   */
+  assert.match(roomsCode, /roomParticipants\(s\.sessions\(\)\)/, 'the create picker');
+  assert.match(roomsCode, /addableSessions\(rows, room, null\)/, 'and the add picker');
+  assert.doesNotMatch(roomsCode, /team\?\.role/, 'the role test is nowhere in this file');
+  assert.doesNotMatch(roomsCode, /'worker'/, 'and neither is the word it would be written with');
+});
+
+test('the pickers are ordered by the shared sort, with no "here" to sort around', () => {
+  // `orderForHere` puts the folder you are looking at first. A phone on the Rooms tab is not
+  // looking at a session at all, so `null` is the honest answer rather than a stub — and with
+  // no "here" the roster's own order stands.
+  assert.match(fn('renderCreateSheet', roomsCode), /orderForHere\(roomParticipants\(s\.sessions\(\)\), null\)/);
+});
+
+/* ─────────────────────────────────────────── what a press sends ──────────── */
+
+test('creating sends {name, members} of session ids and nothing else', () => {
+  const submit = fn('submitCreate', roomsCode);
+  assert.match(submit, /method: 'POST'/);
+  assert.match(submit, /'\/api\/rooms'/);
+  assert.match(submit, /JSON\.stringify\(\{ name: s\.name\.value\.trim\(\), members: \[\.\.\.s\.picked\] \}\)/);
+  assert.match(submit, /location\.hash = `#\/room\/\$\{encodeURIComponent\(data\.room\.id\)\}`/,
+    'and it opens the room it just made');
+});
+
+test('every membership change is one PATCH, and remove sends the strongest id', () => {
+  /*
+   * `memberKey` is `tmuxSession` → `paneId` → `name`, and which one is *sent* is this side's
+   * decision: a tmux session name survives a `/clear` and a relaunch, a pane id survives
+   * neither, and a label collides by design (`<repo>-<branch>`). The store's `removeMember`
+   * takes the **first** member that answers to the key, so a weaker id can take out somebody
+   * else.
+   */
+  const patch = fn('patchRoom', roomsCode);
+  assert.match(patch, /method: 'PATCH'/);
+  assert.match(patch, /\/api\/rooms\/\$\{encodeURIComponent\(id\)\}/);
+  assert.match(roomsCode, /patchRoom\(\{ remove: memberKey\(member\) \}, drop\)/);
+  assert.match(roomsCode, /patchRoom\(\{ add: row\.id \}, item\)/, 'add is a session id — the picker’s own');
+  assert.match(roomsCode, /patchRoom\(\{ archived: true \}, btn\)/);
+  assert.match(roomsCode, /patchRoom\(\{ archived: false \}, btn\)/);
+});
+
+test('a refusal is the server’s own sentence, on both routes', () => {
+  // Every one of them names the thing that is wrong — the session that has exited, the worker
+  // that cannot be a member, the member that is not in the room — and a paraphrase here would
+  // be the panel's guess at a refusal it did not make.
+  for (const name of ['submitCreate', 'patchRoom']) {
+    const body = fn(name, roomsCode);
+    assert.match(body, /data\.error \|\|/, `${name}: the fallback is only for a response with no body`);
+  }
+  assert.match(fn('patchRoom', roomsCode), /membersError = err\.message/,
+    'held in module state, never painted onto the node that was pressed');
+});
+
+test('nothing is drawn from a PATCH’s answer beyond the beat before the frame', () => {
+  // The endpoint broadcasts a roster frame and the head and the sheet repaint off it, so what
+  // is on screen is the record the store holds rather than the one this browser hoped for.
+  const patch = fn('patchRoom', roomsCode);
+  assert.match(patch, /renderHead\(\)/);
+  assert.match(patch, /renderMembersSheet\(\)/);
+  assert.match(patch, /renderLog\(\)/, 'archiving changes the empty-room sentence as well as the box');
+});
+
+/* ──────────────────────────────────────────────── the cap ───────────────── */
+
+test('the cap is the server’s, and MAX_MEMBERS is only the fallback', () => {
+  // `GET /api/rooms` answers `maxMembers` and that answer wins the moment it lands. A second
+  // authority is how a client starts refusing what the server allows.
+  assert.match(roomsCode, /let maxMembers = MAX_MEMBERS;/);
+  const ask = fn('askCap', roomsCode);
+  assert.match(ask, /fetch\('\/api\/rooms'\)/);
+  assert.match(ask, /data\?\.maxMembers/);
+  assert.match(roomsCode, /askCap\(renderCreateSheet\)/);
+  assert.match(roomsCode, /askCap\(renderMembersSheet\)/);
+  assert.match(roomsCode, /capRefusal\(maxMembers\)/, 'and the refusal names the cap in force');
+  assert.match(roomsCode, /addReason\(room, rows, maxMembers\)/);
+});
+
+test('the ninth tick goes back off rather than being left on over a refusal', () => {
+  // A control that lies about its own state is worse than one that says no.
+  const pick = fn('pickRow', roomsCode);
+  assert.match(pick, /tick\.checked = false;\s*\n\s*say\(capRefusal\(maxMembers\), true\);/);
+});
+
+test('one id is picked once, however the change arrives', () => {
+  /*
+   * A tap cannot push an id twice — `change` fires only when the box's state actually moves
+   * — but a duplicate reaching `POST /api/rooms` comes back as a 400 about duplicate
+   * members, which is a refusal nobody could explain from what is on screen. Found on the
+   * bench, where a synthetic `change` on an already-ticked box read `4 of 8` over three
+   * rows.
+   */
+  assert.match(fn('pickRow', roomsCode), /if \(!s\.picked\.includes\(row\.id\)\) s\.picked = \[\.\.\.s\.picked, row\.id\];/);
+  assert.deepEqual(keepPicked(['a', 'a', 'b'], [sess('a'), sess('b')]), ['a', 'a', 'b'],
+    'and `keepPicked` is a filter, not a de-duplicator — it is not the guard');
+});
+
+test('the button and the tally are one function, so a press cannot beat the rule', () => {
+  const sync = fn('syncCreate', roomsCode);
+  assert.match(sync, /countLine\(s\.picked\.length, maxMembers\)/);
+  assert.match(sync, /canCreate\(s\.name\.value, s\.picked\.length\)/);
+  assert.match(fn('submitCreate', roomsCode), /createReason\(s\.name\.value, s\.picked\.length\)/,
+    'and the refusal is said before the press is thrown away');
+});
+
+/* ───────────────────────────────────── asking before taking away ────────── */
+
+test('remove and archive ask; add and unarchive do not', () => {
+  /*
+   * The ruling names *destructive* controls, not every control. Unarchiving puts a room back
+   * in the open list and adding opens a channel — neither takes anything away, and a question
+   * in front of every press is a question nobody reads.
+   */
+  assert.match(roomsCode, /armAsk\(drop, removeQuestion\(member\)/);
+  assert.match(roomsCode, /armAsk\(btn, archiveQuestion\(room\)/);
+  assert.doesNotMatch(fn('addNode', roomsCode), /armAsk/);
+  const head = fn('renderHead', roomsCode);
+  const unarch = head.slice(head.indexOf('if (room.archivedAt) {'), head.indexOf('} else {'));
+  assert.doesNotMatch(unarch, /armAsk/, 'unarchiving takes nothing away, so it asks nothing');
+});
+
+test('one question at a time, a rebuild disarms it, and it lets go by itself', () => {
+  /*
+   * `web/m/lead.js`'s merge block, to the value. **One at a time** or a stack of asking rows
+   * is a screen where a thumb cannot tell which tap is the one that acts; **a rebuild
+   * disarms**, because a question carried across a repaint is a question about a row that may
+   * not be the same row; **four seconds**, the fallback for nobody answering.
+   */
+  assert.match(roomsCode, /const ASK_MS = 4000;/);
+  const arm = fn('armAsk', roomsCode);
+  assert.match(arm, /^\s*disarmAsk\(\);/m, 'arming a second disarms the first');
+  assert.match(arm, /setTimeout\(\(\) => disarmAsk\(\), ASK_MS\)/);
+  const disarm = fn('disarmAsk', roomsCode);
+  assert.match(disarm, /if \(within && !within\.contains\(group\)\) return;/, 'and it is scoped');
+  assert.match(fn('renderMembersSheet', roomsCode), /disarmAsk\(s\.box\)/);
+  assert.match(fn('renderHead', roomsCode), /disarmAsk\(el\.sub\)/);
+});
+
+test('the question folds its own row rather than sharing it', () => {
+  // A phone row is 320px, and a question sharing it with a name and a dot ellipsises to
+  // `remove alpha…` — a confirmation that has lost its target. Written as "everything in this
+  // row that is not the question", so the next control put behind the idiom inherits it.
+  assert.match(css, /\.m-room-asking > :not\(\.m-room-ask\)\s*\{[^}]*display:\s*none/);
+});
+
+/* ──────────────────────────────────── the box that must not read as ticked ─── */
+
+test('the checkbox is drawn by the panel, not by the browser', () => {
+  /*
+   * Measured on the desktop's create-room bench and recorded in CLAUDE.md: page in light,
+   * browser in dark, and an **unticked** native box came back a solid dark square — which in
+   * a multi-select list is exactly what "chosen" looks like. `data-theme` is not a signal the
+   * UA reads and no assertion can see the rendering. What can be held is that the box is
+   * ours: `appearance: none`, our own frame, and a tick that is transparent until checked.
+   */
+  assert.match(css, /\.m-room-tick\s*\{[^}]*appearance:\s*none/);
+  assert.match(css, /\.m-room-tick\s*\{[^}]*border:\s*1px solid var\(--rule-strong\)/);
+  assert.match(css, /\.m-room-tick::before\s*\{[^}]*border:\s*solid transparent/, 'empty until ticked');
+  assert.match(css, /\.m-room-tick::before\s*\{[^}]*rotate\(45deg\)/, 'a rotated rectangle, the shared shape');
+  assert.match(css, /\.m-room-tick:checked\s*\{[^}]*background:\s*var\(--accent\)/);
+  assert.match(css, /\.m-room-tick:checked::before\s*\{[^}]*border-color:\s*var\(--surface\)/);
+  // Still a real checkbox — checked, focus, Space and the accessibility tree all come free,
+  // and there is no second node that can disagree with the input's own state.
+  assert.match(fn('pickRow', roomsCode), /tick\.type = 'checkbox'/);
+});
+
+test('every colour in the sheets is a token', () => {
+  // The same reason the box is drawn at all: a literal here is a colour that does not move
+  // with the theme, and the one thing this feature cannot afford is a control whose state is
+  // read off a colour that is wrong in one of the two.
+  const sheets = css.slice(css.indexOf('/* ============================================================== the list head'));
+  assert.doesNotMatch(sheets, /:\s*#[0-9a-f]{3,8}\b/i, 'no hex');
+  assert.doesNotMatch(sheets, /\brgba?\(/i, 'no rgb');
+});
+
+/* ───────────────────────────────────────── the size of a thumb ──────────── */
+
+test('every row and control in the sheets clears the thumb floor', () => {
+  // 44px is Apple's minimum target, and this is a list of things that open channels into live
+  // terminals — a floor rather than a nicety.
+  for (const sel of ['.m-room-pick,\\s*\\n\\.m-room-mrow,\\s*\\n\\.m-room-arow', '\\.m-room-make', '\\.m-room-btn', '\\.m-room-name-input']) {
+    assert.match(css, new RegExp(`${sel}\\s*\\{[^}]*min-height:\\s*44px`), sel);
+  }
+});
+
+test('the name field is 16px, like every other input on this phone', () => {
+  // Safari zooms the page in below it and does not zoom back out.
+  assert.match(css, /\.m-room-name-input\s*\{[^}]*font-size:\s*16px/);
+});
+
+test('nothing in the sheets can push the page sideways at 320', () => {
+  // A horizontal scroll on a phone is the one layout bug you cannot get back out of by
+  // scrolling. Every name, folder and question ellipsises inside its own row.
+  for (const sel of ['\\.m-room-pick-name,\\s*\\n\\.m-room-mname', '\\.m-room-where', '\\.m-room-ask-q', '\\.m-room-sub-who']) {
+    assert.match(css, new RegExp(`${sel}\\s*\\{[^}]*text-overflow:\\s*ellipsis`), sel);
+  }
+  assert.match(css, /\.m-room-sheet-note\s*\{[^}]*overflow-wrap:\s*anywhere/);
+});
+
+test('the sheet pays the home-indicator inset at its bottom', () => {
+  // The shell's `.m-sheet` already pays it; this one adds room under the last control, which
+  // on the create sheet is a button and on the members sheet is a list.
+  assert.match(css, /\.m-room-sheet\s*\{[^}]*env\(safe-area-inset-bottom\)/);
+});
+
+/* ─────────────────────────────────────────── three ways out, and a fourth ─── */
+
+test('a sheet closes on the ✕, the backdrop, Escape — and a route change', () => {
+  /*
+   * The fourth is not a way out anybody presses. Every tab switch and every navigation into a
+   * room is a `hashchange`, and without it a sheet opened on the Rooms tab would still be on
+   * screen over the Leads list, repainting against a list that is no longer drawn.
+   */
+  const mount = between(roomsCode, 'function mountSheet', 'function sheetNote');
+  assert.match(mount, /x\.addEventListener\('click', close\)/);
+  assert.match(mount, /if \(e\.target === back\) close\(\)/);
+  assert.match(mount, /e\.key === 'Escape'/);
+  assert.match(mount, /window\.addEventListener\('hashchange', onHash\)/);
+  assert.match(mount, /window\.removeEventListener\('hashchange', onHash\)/, 'and it is given back');
+  assert.match(mount, /document\.removeEventListener\('keydown', onKey, true\)/);
+  assert.match(mount, /disarmAsk\(box\)/, 'a question inside it goes with it');
+});
+
+test('a sheet opens once, and the overlay is the shell’s rather than a second one', () => {
+  assert.match(fn('openCreateSheet', roomsCode), /if \(createSheet \|\| typeof document === 'undefined'\) return;/);
+  assert.match(fn('openMembersSheet', roomsCode), /if \(membersSheet \|\| typeof document === 'undefined'\) return;/);
+  // `.m-sheet*` is `m.css`'s, from the start sheet. A second description of one overlay is
+  // two things free to disagree about a safe area.
+  const mount = between(roomsCode, 'function mountSheet', 'function sheetNote');
+  assert.match(mount, /'m-sheet m-room-sheet'/);
+  assert.match(mount, /document\.body\.append\(back\)/);
+  assert.doesNotMatch(strip(css), /\.m-room-sheet-back/, 'and rooms.css does not draw one of its own');
+});
+
+test('the name field is not focused on open', () => {
+  /*
+   * Where this parts company with the desktop modal it is otherwise built from. Focusing it
+   * opens the software keyboard, and the keyboard covers the bottom half of a
+   * bottom-anchored sheet — which here is the picker and both buttons, i.e. everything the
+   * sheet is for.
+   */
+  assert.doesNotMatch(fn('openCreateSheet', roomsCode), /\.focus\(\)/);
+});
+
+/* ─────────────────────────────────────── the archived room takes nothing ─── */
+
+test('an archived room offers neither control, on the header or in the sheet', () => {
+  // The ruling of 2026-08-26: a control that cannot be answered correctly should not be a
+  // control. The server refuses it too — this is the polite half of a rule enforced elsewhere.
+  assert.match(fn('renderHead', roomsCode), /el\.members\.hidden = !room \|\| Boolean\(room\.archivedAt\)/);
+  const sheet = fn('renderMembersSheet', roomsCode);
+  assert.match(sheet, /s\.addCap\.hidden = archived/);
+  assert.match(sheet, /s\.addList\.hidden = archived/);
+  assert.match(sheet, /const addable = archived \? \[\] : addableSessions/);
+  assert.match(fn('memberNode', roomsCode), /if \(!archived\) \{/, 'and no remove either');
+});
+
+test('a member the panel cannot find is drawn gone, never dropped', () => {
+  // A row that vanished would leave a membership the phone and the server disagree about,
+  // silently. `memberRow` mirrors the server's own rung order and decides only the dot.
+  const sheet = fn('renderMembersSheet', roomsCode);
+  assert.match(sheet, /memberRow\(m, rows\)/);
+  assert.match(sheet, /dot\.dataset\.status = row \? row\.status \|\| '' : 'gone'/);
+  assert.match(css, /\.m-room-live\[data-status='gone'\]/);
 });
