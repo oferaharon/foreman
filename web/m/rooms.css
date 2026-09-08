@@ -654,9 +654,8 @@
   display: none;
 }
 
-/* A caption over a list or a field. The shell's `.m-prefs-cap` shape, restated rather than
-   borrowed: that one belongs to the home screen's preferences block and this sheet must not
-   start depending on it. */
+/* A caption over a list or a field, this sheet's own — nothing outside `rooms.css` depends
+   on this shape, so it stays free to diverge from any other screen's caption. */
 .m-room-cap {
   display: flex;
   align-items: baseline;

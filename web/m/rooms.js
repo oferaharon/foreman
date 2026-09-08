@@ -64,8 +64,8 @@
  * the *browser's* colour scheme rather than the page's `data-theme`, so an unticked box
  * under a light page in a dark browser comes back a solid dark square — which in a
  * multi-select list is exactly what "chosen" looks like. Measured on the desktop's own
- * create-room bench and recorded in CLAUDE.md. `.m-prefs-box` in `m.css` is the phone's
- * precedent and `.m-room-tick` follows it: a real `input[type=checkbox]` with
+ * create-room bench and recorded in CLAUDE.md. `.m-head-menu-switch` in `m.css` is the
+ * phone's precedent and `.m-room-tick` follows it: a real `input[type=checkbox]` with
  * `appearance: none`, so checked, focused, Space and the accessibility tree all still come
  * for free and there is no second node that can disagree with the input's state.
  *

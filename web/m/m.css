@@ -113,7 +113,7 @@ select {
 .m-head[hidden] { display: none; }
 
 /*
- * Row one: the name, the gauges, the socket dot, `+` and `⟳` — exactly what `.m-head` held
+ * Row one: the name, the gauges, the socket dot, `+` and `⋯` — exactly what `.m-head` held
  * before the tab bar arrived, with the same padding and the same gap.
  *
  * `web/m/lead.js`'s `watchConnection` polls `.m-app > .m-head .m-conn` to mirror the socket
@@ -386,9 +386,114 @@ select {
    block have each paid for this trap once already, twenty lines apart. */
 .m-icon-btn[hidden] { display: none; }
 
-/* The `+` opens the start sheet. The same 44px control as `⟳` beside it — only the glyph is
+/* The `+` opens the start sheet. The same 44px control as `⋯` beside it — only the glyph is
    larger, because a `+` at the arrow's size reads as a hairline rather than a control. */
 .m-start-btn { font-size: 1.35rem; }
+
+/*
+ * The `⋯` popover: refresh, and the one preference this device has. Anchored under the
+ * button rather than centred or full-screen — the sheet's own `position: fixed; inset: 0`
+ * idiom is for a box whose every row is a destination worth a thumb's full attention, and
+ * this is two lines a reader glances at and dismisses.
+ *
+ * `.m-head-menu-wrap` is the one positioned ancestor, deliberately a plain wrapper and not
+ * `.m-icon-btn` itself: a `<div>` popover living *inside* the button would have every tap
+ * inside it bubble up as a second click on the button that opened it.
+ */
+.m-head-menu-wrap {
+  position: relative;
+  flex: none;
+}
+
+.m-head-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  min-width: 15rem;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 35%);
+}
+
+.m-head-menu[hidden] { display: none; }
+
+/* Each row at least 44px, Apple's own minimum and the same floor every other control on
+   this screen sets. A `<button>` (Refresh) and a `<label>` (the toggle) share this rule
+   rather than each defining their own, since the row is the target either way. */
+.m-head-menu-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 44px;
+  padding: 0.55rem 0.9rem;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--ink);
+  text-align: left;
+}
+
+.m-head-menu-row:active { background: var(--surface-sunk); }
+
+.m-head-menu-row.is-busy { color: var(--working); }
+
+.m-head-menu-row + .m-head-menu-row { border-top: 1px solid var(--rule); }
+
+.m-head-menu-title { flex: 1; min-width: 0; }
+
+/*
+ * The switch, drawn by the panel rather than by the browser — the room sheet's own tick has
+ * the same reasoning one file over: a stock checkbox is painted from the *browser's* colour
+ * scheme rather than the page's `data-theme`, so an unticked box viewed from a
+ * differently-themed browser can come back a solid dark square and read as ticked. Still a
+ * real `input[type=checkbox]` —
+ * checked, focused, toggled by Space and read out as a checkbox, all for free — with
+ * `appearance: none` turning the box itself into the track and `::before` into the knob, so
+ * there is no second node that can disagree with the input's own state.
+ */
+.m-head-menu-switch {
+  appearance: none;
+  flex: none;
+  position: relative;
+  width: 2.3rem;
+  height: 1.3rem;
+  margin: 0;
+  border: 1px solid var(--rule-strong);
+  border-radius: 999px;
+  background: var(--surface-sunk);
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+.m-head-menu-switch::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0.16rem;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transform: translateY(-50%);
+  transition: transform 140ms ease, background-color 140ms ease;
+}
+.m-head-menu-switch:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* The travel, since it is arithmetic rather than a guess: the padding box is 2.175rem wide
+   (2.3rem less two 1px borders), the knob is 0.9rem, and it sits 0.16rem in at each end —
+   2.175 − 0.16 − 0.9 − 0.16 = 0.955rem. */
+.m-head-menu-switch:checked::before {
+  background: var(--surface);
+  transform: translate(0.955rem, -50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  .m-head-menu-switch,
+  .m-head-menu-switch::before { transition: none; }
+}
 
 /* One screen at a time. Screens are appended here and manage their own scrolling — the
    shell never scrolls, or the header would leave with the list. */
@@ -425,89 +530,6 @@ select {
   display: flex;
   flex-direction: column;
 }
-
-/* ---- the one preference this device has ---- */
-
-/* Under the teams, outside the list that repaints itself, and quiet enough that it never
-   competes with a team row for a thumb. It is the only thing on this screen that is not a
-   team, so it carries a heading rather than sitting bare. */
-.m-prefs {
-  margin: 1.4rem 0 0.6rem;
-  padding: 0.9rem 0.9rem 1rem;
-  padding-left: calc(0.9rem + env(safe-area-inset-left));
-  padding-right: calc(0.9rem + env(safe-area-inset-right));
-  border-top: 1px solid var(--rule);
-}
-
-.m-prefs-cap {
-  margin: 0 0 0.6rem;
-  font-size: 0.72rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-
-.m-prefs-row {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  /* The whole row is the label, so the tap target is the sentence and not the switch. */
-  min-height: 44px;
-}
-
-/* The switch, drawn by the panel rather than by the browser — `.team-toggle-row`'s call on
-   the desktop, followed here rather than invented a second time. Still a real
-   `input[type=checkbox]` — checked, focused, toggled by Space and read out as a checkbox,
-   all for free — with `appearance: none` turning the box itself into the track and
-   `::before` into the knob, so there is no second node that can disagree with the input's
-   state. This is exactly the exposure CLAUDE.md records for `.field-check`: a stock
-   checkbox is painted from the *browser's* colour scheme rather than the page's
-   `data-theme`, so an unticked box viewed from a differently-themed browser can come back a
-   solid dark square and read as ticked. Drawing it ourselves removes that here. */
-.m-prefs-box {
-  appearance: none;
-  flex: none;
-  position: relative;
-  width: 2.3rem;
-  height: 1.3rem;
-  margin: 0;
-  border: 1px solid var(--rule-strong);
-  border-radius: 999px;
-  background: var(--surface-sunk);
-  cursor: pointer;
-  transition: background-color 140ms ease, border-color 140ms ease;
-}
-.m-prefs-box::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 0.16rem;
-  width: 0.9rem;
-  height: 0.9rem;
-  border-radius: 50%;
-  background: var(--ink-faint);
-  transform: translateY(-50%);
-  transition: transform 140ms ease, background-color 140ms ease;
-}
-.m-prefs-box:checked {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-/* The travel, since it is arithmetic rather than a guess: the padding box is 2.175rem wide
-   (2.3rem less two 1px borders), the knob is 0.9rem, and it sits 0.16rem in at each end —
-   2.175 − 0.16 − 0.9 − 0.16 = 0.955rem. */
-.m-prefs-box:checked::before {
-  background: var(--surface);
-  transform: translate(0.955rem, -50%);
-}
-@media (prefers-reduced-motion: reduce) {
-  .m-prefs-box,
-  .m-prefs-box::before { transition: none; }
-}
-
-.m-prefs-title { display: block; font-size: 0.9rem; color: var(--ink); }
-
 
 .m-team {
   border-bottom: 1px solid var(--rule);
