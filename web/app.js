@@ -1,6 +1,7 @@
 import { marked } from '/vendor/marked.js';
 import { isTrustGate, buildTrustNotice } from './trust-gate.js';
 import { step, alertText } from './notify.js';
+import { forgeMarkupFor } from './forge-mark.js';
 // The ghost-text auto-send flag, the TASKS filter, and the one definition of what that
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
@@ -9438,69 +9439,10 @@ function createPane(slot, host) {
     }
     a.title = `${where} on ${reading}`;
     a.setAttribute('aria-label', `Open ${where} on ${reading}`);
-    a.append(reading === 'GitHub' ? githubMark() : forgeMark());
+    // The mark itself — `web/forge-mark.js`, shared with the phone's Leads-tab card, so
+    // both surfaces draw the exact same octicon or git-graph glyph.
+    a.insertAdjacentHTML('beforeend', forgeMarkupFor(reading));
     return a;
-  }
-
-  /** GitHub's own mark — the `mark-github` octicon, MIT, drawn in `currentColor`. */
-  function githubMark() {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('width', '14');
-    svg.setAttribute('height', '14');
-    svg.setAttribute('aria-hidden', 'true');
-    const path = document.createElementNS(SVG_NS, 'path');
-    path.setAttribute(
-      'd',
-      'M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z',
-    );
-    path.setAttribute('fill', 'currentColor');
-    svg.append(path);
-    return svg;
-  }
-
-  /**
-   * A branching graph, for every forge that is not GitHub.
-   *
-   * Deliberately generic and drawn here rather than fetched: shipping a third-party logo
-   * means shipping its licence and its trademark policy too, and this repo is public.
-   * A git graph says "this is the repository" without claiming to be anyone's brand.
-   */
-  function forgeMark() {
-    const svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 16 16');
-    svg.setAttribute('width', '14');
-    svg.setAttribute('height', '14');
-    svg.setAttribute('aria-hidden', 'true');
-
-    // The trunk, and the branch leaving it and coming back — one stroke each, so the
-    // whole glyph carries the same weight as the GitHub mark beside it in the code.
-    const line = (d) => {
-      const p = document.createElementNS(SVG_NS, 'path');
-      p.setAttribute('d', d);
-      p.setAttribute('fill', 'none');
-      p.setAttribute('stroke', 'currentColor');
-      p.setAttribute('stroke-width', '1.5');
-      p.setAttribute('stroke-linecap', 'round');
-      return p;
-    };
-    const node = (cx, cy) => {
-      const c = document.createElementNS(SVG_NS, 'circle');
-      c.setAttribute('cx', String(cx));
-      c.setAttribute('cy', String(cy));
-      c.setAttribute('r', '1.9');
-      c.setAttribute('fill', 'currentColor');
-      return c;
-    };
-
-    svg.append(
-      line('M4 5.4 V10.6'),
-      line('M12 5.4 V6.6 a2.6 2.6 0 0 1-2.6 2.6 H6.6 A2.6 2.6 0 0 0 4 11.8'),
-      node(4, 3.5),
-      node(4, 12.5),
-      node(12, 3.5),
-    );
-    return svg;
   }
 
   /**

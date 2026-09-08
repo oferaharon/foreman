@@ -8,6 +8,7 @@ import {
   READINGS,
   credentialKeys,
   detectForge,
+  forgeSummary,
   onPath,
   readingFor,
   remoteHost,
@@ -292,4 +293,45 @@ test('a self-hosted host is still read as Gitea, and that limit is named not hid
   // somebody "fixes" it by guessing from the hostname, this test says what the trade was.
   const seen = readingFor({ remote: 'x', host: 'gitlab.example.com', tools: { giteaMcp: true } });
   assert.equal(seen.reading, READINGS.gitea);
+});
+
+/*
+ * `forgeSummary` — `GET /api/teams`'s whole source for the phone's Leads-tab forge link.
+ * Tested here rather than through the HTTP route: `server/index.js` calls `server.listen`
+ * at import time, so an HTTP-level test would have to boot a child process the way
+ * `test/team-api.test.js` does, and the one thing worth proving here — that a resolved
+ * pair trims to `{reading, webUrl}` and that a throw does not escape — needs none of that
+ * machinery. `deps` is injected throughout so none of this depends on whether `gh` or a
+ * `github`/`gitea` MCP server happens to be installed on whatever machine runs the suite.
+ */
+
+test('forgeSummary trims a resolved pair to {reading, webUrl} — no remote means no link', async () => {
+  const dir = repoWith('summary-none', null);
+  const seen = await forgeSummary(dir, { mcp: async () => ({}), hasGh: () => false });
+  assert.deepEqual(seen, { reading: READINGS.none, webUrl: null });
+});
+
+test('forgeSummary carries the real page for a resolved GitHub repo', async () => {
+  const dir = repoWith('summary-github', 'https://github.com/example/repo.git');
+  const seen = await forgeSummary(dir, { mcp: async () => ({}), hasGh: () => true });
+  assert.equal(seen.reading, READINGS.github);
+  assert.equal(seen.webUrl, 'https://github.com/example/repo');
+});
+
+test('forgeSummary is `push only` with no link for a forge this panel has no tools for', async () => {
+  const dir = repoWith('summary-push', 'https://gitlab.com/example/repo.git');
+  const seen = await forgeSummary(dir, { mcp: async () => ({ gitea: {} }), hasGh: () => true });
+  assert.equal(seen.reading, READINGS.push);
+  assert.equal(seen.webUrl, null);
+});
+
+test('forgeSummary is null when resolution itself throws, rather than failing the whole team list', async () => {
+  const seen = await forgeSummary('does-not-matter', {
+    remote: async () => {
+      throw new Error('boom');
+    },
+    mcp: async () => ({}),
+    hasGh: () => false,
+  });
+  assert.equal(seen, null);
 });

@@ -516,6 +516,15 @@ test('GET /api/teams reads repo out of team.json, never reconstructs it from the
 
   const names = res.body.teams.map((t) => t.name);
   assert.deepEqual(names, [...names].sort((a, b) => a.localeCompare(b)), 'sorted by name');
+
+  // Neither `plainRepo` nor `ambiguousRepo` is a real git checkout, which is deterministic
+  // rather than incidental: `forgeSummary` (server/forge.js) is unit-tested with injected
+  // deps for the readings that depend on what is installed, and this route-level check only
+  // has to prove the field is actually wired — present on every row, in the shape a `git
+  // remote` read with no origin always produces regardless of what the test machine has.
+  const byNameFull = Object.fromEntries(res.body.teams.map((t) => [t.name, t]));
+  assert.deepEqual(byNameFull.TeamsListPlain.forge, { reading: 'no remote', webUrl: null });
+  assert.deepEqual(byNameFull.Ambiguous.forge, { reading: 'no remote', webUrl: null });
 });
 
 /*

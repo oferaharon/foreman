@@ -565,11 +565,26 @@ select {
  * now, the launch button before it moved to the start sheet — sizes column 3 for line 1 as
  * well, and the row's name was the thing that ellipsised to pay for it.
  */
-.m-team-body:not(.has-badge) .m-team-name { grid-column: 2 / -1; }
+.m-team-body:not(.has-badge) .m-team-title { grid-column: 2 / -1; }
 
-.m-team-name {
+/*
+ * The name and, when the repo has one, the forge mark beside it — one flex row sharing the
+ * grid cell `.m-team-name` used to own outright. `min-width: 0` is what lets a flex child
+ * actually shrink for `.m-team-name`'s own ellipsis below; without it a flex item floors at
+ * its content width and a long team name pushes the mark (and the trailing column) off the
+ * 320px screen this view exists for.
+ */
+.m-team-title {
   grid-column: 2;
   grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.m-team-name {
+  min-width: 0;
   font-family: var(--mono);
   font-size: 0.92rem;
   font-weight: 600;
@@ -578,6 +593,25 @@ select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/*
+ * The forge mark — `leadForgeLink` in `web/m/app.js`. `flex: none` so it never shrinks in
+ * favour of the name (the name ellipsises instead), and the padding/negative-margin pair
+ * grows the tap target to 44px without moving the row's own height or the name's baseline:
+ * the box the finger can hit is bigger than the box the eye sees.
+ */
+.m-lead-forge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 15px;
+  margin: -15px;
+  border-radius: 8px;
+  color: var(--ink-faint);
+}
+
+.m-lead-forge:active { background: var(--surface-sunk); color: var(--ink); }
 
 .m-team-meta {
   grid-column: 2;
