@@ -1115,6 +1115,134 @@ test('a press with no lead is not deduped — the stamp is for a line that actua
   assert.equal(mergeRoom().length, before + 1);
 });
 
+/* ---------------------------------------------------------- the slate --- */
+
+/*
+ * `POST /api/team/room/clear` and `POST /api/team/room/show-all` — the team room's two-button
+ * slate, on the first panel because it already has a team with a room full of lines in it.
+ *
+ * The one thing every case below is really about: **nothing is deleted**. `room.jsonl` is
+ * append-only and stays that way; what moves is a `seq` in `team.json` that the panel draws
+ * *from*. So the line count is asserted to only ever grow, and `show all` is asserted to be
+ * the same log with the pointer taken off.
+ *
+ * These run in file order against one `team.json`, so the first proves the default before
+ * anything has touched it — the same shape as the self-merge block below.
+ */
+
+test('a fresh team has no slate, and the room read says so', async () => {
+  // The state a repo is in the moment its lead has launched: a team dir with a `team.json`
+  // in it. Written straight to disk the way `writeTeamJson` above does — every route that
+  // would seed one cuts a worktree, and this fixture is deliberately not a git repo.
+  fs.writeFileSync(
+    path.join(stateDir, 'teams', teamKeyFor(repo), 'team.json'),
+    JSON.stringify({ repo }, null, 2),
+  );
+  const res = await api('GET', `/api/team/room?folder=${encodeURIComponent(repo)}`);
+  assert.equal(res.status, 200);
+  assert.equal(res.body.slate, null, 'nothing pressed, nothing hidden');
+  assert.ok(res.body.entries.length > 0, 'and there is a room to hide');
+});
+
+test('clear writes one divider, points the slate at it, and deletes nothing', async () => {
+  const before = roomLines(repo);
+  const res = await api('POST', '/api/team/room/clear', { folder: repo });
+  assert.equal(res.status, 200);
+
+  const after = roomLines(repo);
+  assert.equal(after.length, before.length + 1, 'exactly one line was added');
+  assert.deepEqual(after.slice(0, before.length), before, 'and not one earlier line was touched');
+
+  const divider = after[after.length - 1];
+  assert.equal(divider.kind, 'system');
+  assert.equal(divider.event, 'clear', 'the client keys on this, never on the sentence');
+  // `panel`, not `human`: the maintainer's 2026-09-08 ruling is that every machinery line
+  // names `panel`, and `roomPill` draws `from` verbatim — a `human` sender would put a pill
+  // reading `human` on the one tier that has no such speaker.
+  assert.equal(divider.from, 'panel');
+  assert.equal(divider.to, 'all');
+  assert.match(divider.text, /show all/, 'and the sentence says where the rest went');
+
+  // The pointer is the divider's own seq, so the first thing in the cleared room is the
+  // line saying it was cleared.
+  assert.equal(res.body.slate, divider.seq);
+});
+
+test('the slate is on disk, in team.json, and reads back on the room and the config', async () => {
+  const stored = JSON.parse(fs.readFileSync(path.join(stateDir, 'teams', teamKeyFor(repo), 'team.json'), 'utf8'));
+  const seq = roomLines(repo).findLast((e) => e.event === 'clear').seq;
+  assert.equal(stored.slate, seq, 'the fact is on the server, never in one browser');
+
+  const room = await api('GET', `/api/team/room?folder=${encodeURIComponent(repo)}`);
+  assert.equal(room.body.slate, seq, 'so a fresh HTTP read knows where the room starts');
+  const config = await api('GET', `/api/team/config?folder=${encodeURIComponent(repo)}`);
+  assert.equal(config.body.slate, seq);
+});
+
+test('the whole log is still served — the filter is the client’s, not the store’s', async () => {
+  // The endpoint must not start truncating what it hands over. `show all` is a client-side
+  // decision about an unfiltered list, and a server that filtered here would make the other
+  // button impossible to honour without a second read.
+  const res = await api('GET', `/api/team/room?folder=${encodeURIComponent(repo)}`);
+  const seq = res.body.slate;
+  assert.ok(res.body.entries.some((e) => e.seq < seq), 'lines from before the slate are still on the wire');
+});
+
+test('a settings PATCH keeps the slate — it is not in the whitelist and must survive anyway', async () => {
+  // `team.json` is rewritten wholesale by that handler. It rebuilds from `readTeam`, so this
+  // holds today; the failure it guards against is somebody rebuilding `next` from a literal.
+  const seq = (await api('GET', `/api/team/room?folder=${encodeURIComponent(repo)}`)).body.slate;
+  const res = await api('PATCH', '/api/team/config', { folder: repo, toggles: { flagConflicts: false } });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.slate, seq, 'the answer carries it');
+  assert.equal((await api('GET', `/api/team/config?folder=${encodeURIComponent(repo)}`)).body.slate, seq, 'and so does the file');
+  // …and a PATCH cannot set one either: it is not a whitelisted key, so it never reaches `next`.
+  const sneak = await api('PATCH', '/api/team/config', { folder: repo, slate: 999 });
+  assert.equal(sneak.body.slate, seq, 'the slate is the two endpoints’ to write, and nothing else’s');
+});
+
+test('clear again moves the pointer and leaves the first divider in the log', async () => {
+  const before = roomLines(repo);
+  const first = before.findLast((e) => e.event === 'clear').seq;
+  const res = await api('POST', '/api/team/room/clear', { folder: repo });
+  assert.equal(res.status, 200);
+
+  const after = roomLines(repo);
+  assert.equal(after.length, before.length + 1);
+  assert.ok(after.some((e) => e.seq === first && e.event === 'clear'), 'the old divider is history, not a deletion');
+  assert.equal(res.body.slate, after[after.length - 1].seq);
+  assert.ok(res.body.slate > first);
+});
+
+test('show all unsets the pointer, adds no line, and puts every divider back', async () => {
+  const before = roomLines(repo);
+  const res = await api('POST', '/api/team/room/show-all', { folder: repo });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.slate, null);
+
+  const after = roomLines(repo);
+  assert.deepEqual(after, before, 'putting the history back explains itself — no line for it');
+  assert.equal(after.filter((e) => e.event === 'clear').length, 2, 'and both dividers are still there');
+
+  const room = await api('GET', `/api/team/room?folder=${encodeURIComponent(repo)}`);
+  assert.equal(room.body.slate, null);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(stateDir, 'teams', teamKeyFor(repo), 'team.json'), 'utf8')).slate, null);
+});
+
+test('both refuse without a folder, and without a team', async () => {
+  for (const route of ['/api/team/room/clear', '/api/team/room/show-all']) {
+    const blank = await api('POST', route, {});
+    assert.equal(blank.status, 400);
+    assert.match(blank.body.error, /Which folder/);
+
+    // A folder with no team is a 404 rather than a team seeded by a button press.
+    const nowhere = await api('POST', route, { folder: path.join(stateDir, 'NoTeamHere') });
+    assert.equal(nowhere.status, 404);
+    assert.match(nowhere.body.error, /No team for this folder/);
+  }
+  assert.ok(!fs.existsSync(path.join(stateDir, 'teams', teamKeyFor(path.join(stateDir, 'NoTeamHere')))));
+});
+
 /* ------------------------------------------------------- the self-merge --- */
 
 /*

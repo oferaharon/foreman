@@ -37,6 +37,11 @@ import { ghostAction, ghostSig, INTERRUPT_TITLE } from './ghost-action.js';
 // holds still is exactly the kind of thing that gets optimised back into `lastActivity` by
 // somebody tidying, and a node test is what stops that.
 import { orderWorkers } from './worker-order.js';
+// What the team room draws, given the slate the server holds — the `clear` / `show all`
+// pointer. Its own module for the reason every other pure one under `web/` is: the filter
+// is a rule ("from the divider on, divider included") that a node test can hold, and the
+// day it is wrong the room simply shows the wrong lines and looks fine doing it.
+import { slateActive, slateButton, visibleEntries } from './room-slate.js';
 // The two subscription gauges' arithmetic: 50/75 and the percent→tone map, which windows
 // are worth drawing, how old the record is, and how a reset time reads. The fourth shared
 // pure module in `web/`, for the reason each of the three above gives — the phone draws
@@ -4942,6 +4947,16 @@ function createPane(slot, host) {
     // motion, where the duration is 0 and no event is emitted at all. It is what takes
     // `is-folding` back off and what runs the remeasure, so it is not optional.
     foldTimer: null,
+    // Where the room starts, straight off the server: the `seq` of the last `clear`
+    // divider, or `null` for the whole log. Never read from or written to `localStorage` —
+    // the panel is an installed app on more than one device and this is one answer for all
+    // of them (the maintainer's ruling, 2026-09-08). Arrives on the `room` frame and moves
+    // on `room-slate`.
+    slate: null,
+    // The room head's one button, held so `renderRoomHead` can repaint it without walking
+    // the aside for a node the next `renderMain` will have replaced anyway.
+    slateBtnEl: null,
+    slateBusy: false,
     follow: true, // is the room list pinned to its newest line? see renderRoom
     unseen: 0, // entries that arrived while you were reading further up
     painted: 0, // how many were on screen last paint — the diff is what `unseen` counts
@@ -4992,6 +5007,9 @@ function createPane(slot, host) {
     roomView.tasksAt = 0;
     roomView.config = null;
     roomView.settingsOpen = null; // another team, another answer — ask its config again
+    // Another team's slate says nothing about this one's. Cleared here and re-answered by
+    // the `room` frame the subscribe below brings back, the same as `entries` and `cursor`.
+    roomView.slate = null;
     roomView.follow = true; // a room you have just opened is one you are following
     roomView.unseen = 0;
     roomView.painted = 0;
@@ -8292,21 +8310,15 @@ function createPane(slot, host) {
       if (e.target === panel && e.propertyName === 'width') endAsideFold();
     });
     /*
-     * The one plain heading left in this column — `settings` and `tasks` both
-     * carry controls and are built by hand. It is banded (`is-band`) because it is the
-     * heading the tasks list runs straight into: everything here sits on `--shelf`, and a
-     * head with a rule under it and nothing above read as one more line of the list above
-     * rather than as the start of the room. The band is a paint and nothing else — see the
-     * stylesheet for why a border here would move `.tasks-grip` off what it was measured
-     * against.
+     * There is no plain heading left in this column: `settings`, `tasks` and the room all
+     * carry a control now, and all three are built by hand. The room's own `section()`
+     * helper went with the `clear` / `show all` button — `buildRoomHead` is what replaced
+     * it, and it keeps `is-band` for the reason that helper's comment gave: everything in
+     * this aside sits on `--shelf`, and a head with a rule under it and nothing above read
+     * as one more line of the tasks list rather than as the start of the room. The band is
+     * a paint and nothing else — see the stylesheet for why a border here would move
+     * `.tasks-grip` off what it was measured against.
      */
-    const section = (label, title) => {
-      const head = document.createElement('div');
-      head.className = 'room-head is-band';
-      head.textContent = label;
-      head.title = title;
-      return head;
-    };
 
     // No renderTasks/renderRoom here: the aside is not in the document yet, so their
     // isConnected guards would skip — renderMain paints both right after mounting.
@@ -8402,10 +8414,7 @@ function createPane(slot, host) {
     // shape of the box the reader is scrolled inside — the settings fold's own lesson,
     // one and two elements over.
     const asideBand = buildAsideBand();
-    const roomHead = section(
-      'Team room (read only)',
-      'Workers and the lead coordinate here. View only — talk to the lead in the composer.',
-    );
+    const roomHead = buildRoomHead();
     // The room's own edge. It is still the Tasks/Room divider — one boundary, one control
     // — but it sizes the *room* now, so it says so: the reader drags the thing they want
     // bigger, not the thing above it.
@@ -8818,6 +8827,104 @@ function createPane(slot, host) {
     panel.style.setProperty('--aside-frozen', `${w}px`);
   }
 
+  /**
+   * The room's heading, and the one control on it: `clear` / `show all`.
+   *
+   * It used to be a plain `section()` line. It keeps `is-band` — that paint is what stops the
+   * heading reading as one more row of the tasks list above it, and the band is a paint and
+   * nothing else, so the `.tasks-grip` hairline it was measured against is untouched — and
+   * gains `has-controls`, which is TASKS' own line: flex, centred, one gap. The button is
+   * `room-head-toggle`, the same shape as `hide finished` two headings up, because it is the
+   * same kind of thing: it changes what you are looking at and nothing on disk about the
+   * team. Unlike that one it carries **no `aria-pressed`** — there is one button at a time
+   * and its own word says which state the room is in, so a pressed outline on top of that
+   * would be the control saying the same thing twice and disagreeing with itself half the
+   * time.
+   *
+   * No confirmation, deliberately: nothing here is destructive. `room.jsonl` is append-only
+   * and `clear` adds one line to it; the pointer this moves is the only thing that changes,
+   * and the other button puts it back.
+   */
+  function buildRoomHead() {
+    const head = document.createElement('div');
+    head.className = 'room-head is-band has-controls';
+
+    const label = document.createElement('span');
+    label.className = 'room-head-label';
+    label.textContent = 'Team room (read only)';
+    head.title = 'Workers and the lead coordinate here. View only — talk to the lead in the composer.';
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'room-head-toggle';
+    // `margin-left: auto` comes from `.room-head-note` on the TASKS line; this heading has no
+    // note, so the spacer is the button's own. One empty span rather than a second rule in
+    // the stylesheet for a heading that will never carry a count.
+    const spacer = document.createElement('span');
+    spacer.className = 'room-head-note';
+    btn.onclick = (e) => {
+      // `buildTasksHead`'s line and its reason: this heading carries no click handler today,
+      // and this is what keeps that a free choice rather than something the button silently
+      // depends on.
+      e.stopPropagation();
+      pressSlate();
+    };
+    roomView.slateBtnEl = btn;
+    head.append(label, spacer, btn);
+    renderRoomHead();
+    return head;
+  }
+
+  /** Paint the head's one button off the slate the server last told us about. */
+  function renderRoomHead() {
+    const btn = roomView.slateBtnEl;
+    if (!btn) return;
+    const { label, title } = slateButton(roomView.slate);
+    btn.textContent = label;
+    btn.title = title;
+    btn.disabled = roomView.slateBusy || !roomView.repo;
+  }
+
+  /**
+   * Press it. One request, and the answer arrives twice — once as this fetch's body and
+   * once as the `room-slate` frame every open window gets, this one included.
+   *
+   * The frame is what actually repaints, which is the point: a second browser on the same
+   * panel has to end up showing the same room without anybody touching it. The body is read
+   * only to unstick the button and to notice a refusal, and `slateBusy` is there so three
+   * fast clicks write one divider rather than three — `sessionRow`'s `duplicating` lesson,
+   * in a heading.
+   */
+  async function pressSlate() {
+    const repo = roomView.repo;
+    if (!repo || roomView.slateBusy) return;
+    const { action } = slateButton(roomView.slate);
+    roomView.slateBusy = true;
+    renderRoomHead();
+    try {
+      const res = await fetch(`/api/team/room/${action}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: repo }),
+      });
+      const body = await res.json().catch(() => ({}));
+      // The socket frame is the authority and normally lands first; this is the fallback for
+      // a window whose socket is down, and it is guarded on the room not having moved on to
+      // another team while the request was in flight.
+      if (res.ok && roomView.repo === repo) {
+        roomView.slate = slateActive(body.slate) ? body.slate : null;
+        roomView.follow = true;
+        roomView.unseen = 0;
+        renderRoom();
+      }
+    } catch {
+      /* the socket frame or the next open will settle it */
+    } finally {
+      roomView.slateBusy = false;
+      renderRoomHead();
+    }
+  }
+
   function renderRoom() {
     const list = roomView.listEl;
     if (!list || !list.isConnected) return;
@@ -8832,11 +8939,22 @@ function createPane(slot, host) {
     // them — silently, with no scroll event, which is this box's signature failure.
     // Measured at 66px of creep per incoming line before this line existed.
     const held = list.scrollTop;
+    // What the slate leaves on screen — the divider and everything after it, or the whole
+    // log. Computed once and used for every count below as well as for the paint, or
+    // `unseen` would be counting lines this room is not drawing.
+    const shown = visibleEntries(roomView.entries, roomView.slate);
+    renderRoomHead();
     list.replaceChildren();
-    if (!roomView.entries.length) {
+    if (!shown.length) {
       const quiet = document.createElement('div');
       quiet.className = 'room-quiet';
-      quiet.textContent = 'Nothing yet. Worker updates and escalations land here.';
+      // A cleared room is not an empty one, and saying "nothing yet" over a log with two
+      // hundred lines in it would be the panel telling the reader something untrue. It can
+      // only be reached in the beat between the divider being written and the append frame
+      // arriving, which is exactly when the sentence matters most.
+      quiet.textContent = slateActive(roomView.slate)
+        ? 'Cleared. New lines land here; the earlier ones are behind “show all”.'
+        : 'Nothing yet. Worker updates and escalations land here.';
       list.append(quiet);
       roomView.painted = 0;
       roomView.unseen = 0;
@@ -8849,10 +8967,10 @@ function createPane(slot, host) {
     // interleave a layout read with a class write per entry, which is a reflow per entry
     // on a list that repaints on every incoming post. Two passes is one layout.
     const clamps = [];
-    for (const e of roomView.entries) list.append(roomEntryNode(e, clamps));
+    for (const e of shown) list.append(roomEntryNode(e, clamps));
     for (const c of clamps) c.overflows = c.el.scrollHeight > c.el.clientHeight + 1;
     for (const c of clamps) applyRoomClamp(c);
-    roomView.painted = roomView.entries.length;
+    roomView.painted = shown.length;
     if (follow) {
       pinRoom();
       roomView.unseen = 0;
@@ -8865,7 +8983,7 @@ function createPane(slot, host) {
       // A full `room` frame can *shrink* the list (a fresh read, a shorter tail), so the
       // arithmetic is floored rather than trusted — this counter must never go negative
       // and start hiding a hint that is due.
-      roomView.unseen += Math.max(0, roomView.entries.length - before);
+      roomView.unseen += Math.max(0, shown.length - before);
     }
     updateRoomHint();
   }
@@ -9327,6 +9445,14 @@ function createPane(slot, host) {
       // `model` — land here deliberately: they get a keyword and no colour, because a hue
       // here means *look at this*, and a task closing cleanly is the opposite of that.
       else row.classList.add('is-plain');
+      // The slate divider. It is a plain machinery row — plain gutter, `--ink-muted`
+      // keyword, no colour of its own, because a hue in this room means *look at this* and
+      // a line the reader pressed a button to create is the one thing they already know
+      // about. What it adds is a hairline across the column, which is the only shape in the
+      // room that says "a boundary" rather than "an event": with a slate up this is the
+      // first row and the rule is the top of the slate; under `show all` it is where a
+      // clear happened, in its place, which is exactly what it was.
+      if (e.event === 'clear') row.classList.add('is-clear');
       if (e.ts) row.append(roomStamp(e.ts), document.createTextNode(' '));
       // `panel` on every machinery line, which is new and was the "some with, some without"
       // complaint. It reads `e.from`, so the lead's own lines — a self-merge among them —
@@ -12732,6 +12858,30 @@ function createPane(slot, host) {
         if (msg.repo !== roomView.repo) return;
         roomView.entries = msg.entries || [];
         roomView.cursor = msg.cursor || 0;
+        // Where this room starts, off the server on the opening frame. A window that has
+        // just connected therefore draws exactly what one that was already open draws.
+        roomView.slate = slateActive(msg.slate) ? msg.slate : null;
+        renderRoom();
+        return;
+      /*
+       * The slate moved — `clear` or `show all`, pressed here or in another window, on this
+       * Mac or on the phone. The fact is on the server, so every open client is told; that
+       * is the whole reason it is not a `localStorage` key.
+       *
+       * Named in the **team room's** `room-` family, not a `rooms-`/`slate-` sibling: a frame
+       * this switch does not know is swallowed in silence, and one letter between two
+       * different things is the naming trap CLAUDE.md keeps a section on.
+       *
+       * `follow` is put back on and `unseen` zeroed, because both are answers about a list
+       * that has just been replaced wholesale — the reader is being handed a different room,
+       * not scrolled inside the one they were reading, and a "3 new below" over it would be
+       * counting lines that are no longer there.
+       */
+      case 'room-slate':
+        if (msg.repo !== roomView.repo) return;
+        roomView.slate = slateActive(msg.slate) ? msg.slate : null;
+        roomView.follow = true;
+        roomView.unseen = 0;
         renderRoom();
         return;
       case 'room-append':

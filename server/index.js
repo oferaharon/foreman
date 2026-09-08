@@ -58,7 +58,7 @@ import {
 import { TaskStore, TASK_KINDS } from './tasks.js';
 import { createWorktree, removeWorktree, pruneWorktrees, runSetup, tidyLabel, WORKTREES_DIR } from './worktree.js';
 import { writeWorkerSettings, answerTrustGate, resolveWorkerModel, WORKER_MODELS } from './dispatch.js';
-import { ensureTeam, readTeam, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
+import { ensureTeam, readTeam, setSlate, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
 import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
 import { collectQueue, composition, mergeLine, prName, prNumber } from './merge-queue.js';
 import { mergeVerdict } from './merge-check.js';
@@ -1785,7 +1785,11 @@ app.get('/api/team/plans/:id', async (req, res) => {
 app.get('/api/team/room', (req, res) => {
   const repo = String(req.query.folder || '').trim();
   if (!repo) return res.status(400).json({ error: 'Which folder?' });
-  res.json(room.read(repo, { since: Number(req.query.since) || 0 }));
+  // `slate` rides along so a fresh HTTP read knows where the room starts, the same answer
+  // the socket's `room` frame carries. Read off `readTeam` rather than stored anywhere here:
+  // the room store knows nothing about it and must not — it is a *view* of an append-only
+  // log, and the log is untouched.
+  res.json({ ...room.read(repo, { since: Number(req.query.since) || 0 }), slate: readTeam(repo)?.slate ?? null });
 });
 
 /** Post to the room — the lead and workers, via their foreman tools. */
@@ -1803,6 +1807,54 @@ app.post('/api/team/room', (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+/**
+ * The room's slate — `clear` and `show all`, the two halves of one stored pointer.
+ *
+ * **Nothing is deleted, ever.** `room.jsonl` is append-only and neither of these writes a
+ * byte to it beyond one more line; what moves is `team.slate`, a `seq` the panel draws
+ * *from*. `show all` unsets it and the whole log is back. That is the maintainer's ruling
+ * (2026-09-08) and it is the reason this is a pointer rather than a truncation: a room you
+ * cleared last week is still the record of what happened last week.
+ *
+ * On disk rather than in the browser for the same ruling's other half — the panel is an
+ * installed app on more than one device, and a slate cleared on one is cleared on all of
+ * them. `localStorage` cannot answer that.
+ *
+ * `clear` writes the divider **first** and points the slate at its own `seq`, so the first
+ * thing in the cleared room is the line saying it was cleared. Pressed again with a slate
+ * already up, it simply writes a second divider and moves the pointer; the old one is
+ * history and reappears, in its place, under `show all`.
+ *
+ * `from: 'panel'`, not `human`. The maintainer's ruling of 2026-09-08 (A) is that every
+ * machinery line names `panel` as its author, and this is one: `roomPill` draws `e.from`
+ * verbatim, so a `human` sender would put a pill reading `human` on the one tier that has
+ * no such speaker. What a human did is in the sentence; who wrote the line is `panel`.
+ */
+app.post('/api/team/room/clear', (req, res) => {
+  const repo = String(req.body?.folder || '').trim();
+  if (!repo) return res.status(400).json({ error: 'Which folder?' });
+  if (!readTeam(repo)) return res.status(404).json({ error: 'No team for this folder.' });
+  const entry = room.post(repo, {
+    from: 'panel', to: 'all', kind: 'system', event: 'clear',
+    text: 'Room cleared — everything before this is behind “show all”.',
+  });
+  const slate = setSlate(repo, entry.seq);
+  broadcastRoomSlate(repo, slate);
+  res.json({ ok: true, slate });
+});
+
+app.post('/api/team/room/show-all', (req, res) => {
+  const repo = String(req.body?.folder || '').trim();
+  if (!repo) return res.status(400).json({ error: 'Which folder?' });
+  if (!readTeam(repo)) return res.status(404).json({ error: 'No team for this folder.' });
+  // No line for this one. `clear` leaves a divider because the room without it would start
+  // mid-conversation with nothing saying why; putting the history back explains itself, and
+  // a log line per press would be the panel narrating the reader's own scrolling.
+  const slate = setSlate(repo, null);
+  broadcastRoomSlate(repo, slate);
+  res.json({ ok: true, slate });
 });
 
 /** Team config: the toggles and dispatch defaults. PATCH is the maintainer's — the popover. */
@@ -4367,7 +4419,7 @@ function unsubscribe(ws, slot) {
  * torn down with the socket exactly like slots are, and re-joined by the client's
  * `resubscribe()` (the "subscription dies with the socket" trap applies here verbatim).
  */
-const roomSubs = new WeakMap(); // ws -> Map(repo -> listener)
+const roomSubs = new WeakMap(); // ws -> Map(repo -> {listener, slot})
 
 function subscribeRoom(ws, repo, slot) {
   unsubscribeRoom(ws, repo);
@@ -4380,17 +4432,43 @@ function subscribeRoom(ws, repo, slot) {
     if (postedRepo === repo) send(ws, 'room-append', { repo, entry, slot });
   };
   room.on('post', listener);
-  map.set(repo, listener);
-  send(ws, 'room', { repo, ...room.read(repo), slot });
+  // The slot rides in the record beside the listener rather than only inside its closure:
+  // `broadcastRoomSlate` has to name the slot a frame is for, and it reaches these from
+  // outside. One record, one spelling of which pane this subscription is.
+  map.set(repo, { listener, slot });
+  // `slate` on the opening frame, so a window that has just connected draws the room the
+  // same way as one that was already open when the button was pressed.
+  send(ws, 'room', { repo, ...room.read(repo), slate: readTeam(repo)?.slate ?? null, slot });
 }
 
 function unsubscribeRoom(ws, repo) {
   const map = roomSubs.get(ws);
   if (!map) return;
-  for (const [key, listener] of map) {
+  for (const [key, sub] of map) {
     if (repo !== undefined && key !== repo) continue;
-    room.off('post', listener);
+    room.off('post', sub.listener);
     map.delete(key);
+  }
+}
+
+/**
+ * Tell every open client where this room now starts.
+ *
+ * Its own frame, `room-slate`, in the **team room's** `room-` family — not a `rooms-` or
+ * `slate-` sibling. A frame the client does not switch on is swallowed in silence
+ * (CLAUDE.md's `room_*`/`group_*` naming trap), and a name one letter from the group
+ * rooms' would be a wrong call waiting to happen.
+ *
+ * It walks `wss.clients` rather than emitting on the store, because the slate is not the
+ * room's own state: `room.js` is an append-only log and knows nothing about it. The socket
+ * registry is a WeakMap keyed by `ws`, which cannot be enumerated, so the clients are the
+ * way in — and every one of them that holds this repo hears it, which is the whole point
+ * of the fact living on the server.
+ */
+function broadcastRoomSlate(repo, slate) {
+  for (const ws of wss.clients) {
+    const sub = roomSubs.get(ws)?.get(repo);
+    if (sub) send(ws, 'room-slate', { repo, slate, slot: sub.slot });
   }
 }
 

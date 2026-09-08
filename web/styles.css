@@ -1912,6 +1912,19 @@ body.row-dragging * { cursor: row-resize !important; }
    **5.18:1**, the same as the machinery sentence beside it. */
 .room-system.is-plain .room-key,
 .room-system.is-pending .room-key { color: var(--ink-muted); }
+/* The slate divider — where `clear` started the room. Deliberately the *plain* row plus one
+   thing: a hairline across the column, `--rule` rather than `--rule-strong` because it is a
+   boundary and not an emphasis, and it is the only rule in the room that runs the full width.
+   No colour and no fifth `--mark`: this line is the one event in the room the reader created
+   on purpose, so spending a hue on it would cost the two that mean "look at this".
+
+   The gap under it is the list's own `0.45rem` plus this padding, so the first line of the
+   slate sits clear of the rule rather than against it. Nothing here changes the row's height
+   above the rule, so `roomClampable`'s five-line measurement on the sentence is untouched. */
+.room-system.is-clear {
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.4rem;
+}
 .room-system-text { max-width: 100%; overflow-wrap: anywhere; }
 
 /* What the verdict actually checked, under the sentence that announces it. A step smaller
