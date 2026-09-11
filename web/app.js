@@ -76,6 +76,12 @@ import { ghostAction, ghostSig, INTERRUPT_TITLE } from './ghost-action.js';
 import { hueVar, isGroupColour } from './group-hue.js';
 // ^ the group ring's spelling and its bounds. `renderRail` sets `--h` inline on every
 // sibling a group owns, because the rail is a flat list with no container to hang it on.
+import { foldsInto, splitTitle } from './rail-fold.js';
+// ^ when a folder heading is furniture, and how the row's title splits into the path it
+// sits on and the leaf that names it. The eleventh pure module under `web/`, and both
+// rules are in it rather than inline because the wrong re-derivation of either renders
+// perfectly: a fold one row too eager hides a heading over two sessions, and a title split
+// on its own punctuation invents a path that is not the folder.
 import { orderWorkers } from './worker-order.js';
 // What the team room draws, given the slate the server holds — the `clear` / `show all`
 // pointer. Its own module for the reason every other pure one under `web/` is: the filter
@@ -3488,9 +3494,11 @@ function renderRail() {
   // the answer must not depend on how many times a lead's row happens to be built.
   for (const [leadId, workers] of nestedWorkers) nestedWorkers.set(leadId, orderWorkers(workers));
 
-  /** A row plus, when it is a lead, its nested workers — always used in its place. */
-  const rowsFor = (s) => {
-    const rows = [sessionRow(s)];
+  /** A row plus, when it is a lead, its nested workers — always used in its place. `fold`
+   *  rides through to the top-level row only, and is `null` everywhere a folder kept its
+   *  heading; a lead never folds, so a row that has workers never carries one. */
+  const rowsFor = (s, fold = null) => {
+    const rows = [sessionRow(s, fold)];
     for (const w of nestedWorkers.get(s.id) || []) {
       const row = sessionRow(w);
       row.classList.add('worker-row');
@@ -3506,6 +3514,26 @@ function renderRail() {
     if (!folders.has(s.project)) folders.set(s.project, []);
     folders.get(s.project).push(s);
   }
+
+  /**
+   * What a folder draws: how many rows, and — when it holds exactly one — the split that
+   * folds its heading into that row's own name.
+   *
+   * The count is taken over the **expanded** list, not over the folder map's entry, which
+   * is the whole of `foldsInto`'s first half: `rowsFor` turns a lead into itself plus its
+   * nested workers, so one entry can be four rows. It is also the number the heading
+   * prints as `· N`, so the fold rule and the count can never disagree about what the
+   * heading is about.
+   *
+   * `folder` rides on the answer because the `▾` the fold puts on the row's path files
+   * *that* folder — the same `openFolderMenu` the heading carried, anchored one line down.
+   */
+  const foldOf = (f, list) => {
+    const drawn = list.flatMap((s) => [s, ...(nestedWorkers.get(s.id) || [])]);
+    if (!foldsInto(drawn)) return { rows: drawn.length, fold: null };
+    const split = splitTitle(drawn[0]);
+    return { rows: drawn.length, fold: split && { ...split, folder: f } };
+  };
 
   const frag = document.createDocumentFragment();
 
@@ -3582,9 +3610,12 @@ function renderRail() {
     if (g.collapsed) continue;
     let tail = null;
     for (const f of mine) {
-      frag.append(wear(folderHeading(f, true)));
+      // A folder of one prints no heading — its name is the row's path, `▾` and all. The
+      // row still wears the hue, so the spine runs through the gap the heading left.
+      const { rows, fold } = foldOf(f, folders.get(f));
+      if (!fold) frag.append(wear(folderHeading(f, true, rows)));
       for (const s of folders.get(f)) {
-        for (const row of rowsFor(s)) {
+        for (const row of rowsFor(s, fold)) {
           row.classList.add('in-group');
           frag.append(wear(row));
           tail = row;
@@ -3598,8 +3629,11 @@ function renderRail() {
 
   for (const [folder, list] of folders) {
     if (filed.has(folder)) continue;
-    frag.append(folderHeading(folder, false));
-    for (const s of list) frag.append(...rowsFor(s));
+    // Same fold at the foot of the rail as inside a group — the rule is about the folder,
+    // not about what it is filed under. No hue out here, so nothing to wear.
+    const { rows, fold } = foldOf(folder, list);
+    if (!fold) frag.append(folderHeading(folder, false, rows));
+    for (const s of list) frag.append(...rowsFor(s, fold));
   }
 
   el.railList.replaceChildren(frag);
@@ -3755,8 +3789,14 @@ function plainLabel(text, cls) {
  *
  * The heading is derived — it's `basename(cwd)` and always has been — so the menu is the
  * only thing here you chose. It stays out of sight until the row is hovered, like the pin.
+ *
+ * **Drawn only for a folder that did not fold**, so every heading on screen is about two
+ * rows or more, and `· N` is the same number the fold rule was decided on — `foldOf` takes
+ * it once and hands it to both. It counts the rows beneath it and not the sessions, which
+ * is why a lead with three workers reads `· 4`; the *group* header's own `· N` deliberately
+ * disagrees, counting top-level rows only, and that is today's arithmetic left alone.
  */
-function folderHeading(folder, inGroup) {
+function folderHeading(folder, inGroup, count = 0) {
   const row = document.createElement('div');
   row.className = `group-label folder-label${inGroup ? ' in-group' : ''}`;
 
@@ -3765,6 +3805,18 @@ function folderHeading(folder, inGroup) {
   name.textContent = folder;
   name.title = folder;
   row.append(name);
+
+  // Never zero in practice — `renderRail` only builds a heading for a folder with rows
+  // under it, and a folder of exactly one folded instead. Guarded rather than asserted
+  // because a `· 0` beside a name is furniture, the same call `.room-unseen` and the
+  // group heading's own count already make.
+  if (count > 0) {
+    const n = document.createElement('span');
+    n.className = 'folder-count';
+    n.textContent = `· ${count}`;
+    n.title = `${count} session${count === 1 ? '' : 's'} in ${folder}`;
+    row.append(n);
+  }
 
   const menu = document.createElement('button');
   menu.className = 'label-menu';
@@ -3835,23 +3887,119 @@ function groupHeader(g, count, busy = 0) {
   return row;
 }
 
+/** The row's name as it has always read: the whole title, ellipsised. */
+function plainTitle(s) {
+  const title = document.createElement('span');
+  title.className = 'session-title';
+  title.textContent = s.title;
+  title.title = s.title;
+  return title;
+}
+
+/**
+ * The row's name when its folder folded into it: `alpha ▾ / main`.
+ *
+ * Three parts and a control. The **path** is the folder — at weight 500, and at full ink:
+ * nothing in a session name is dimmed (the maintainer's own ruling), so the path and the
+ * leaf are told apart by weight alone and never by fading one of them. The **leaf** is
+ * bold and is the only part that gives way, because it is the half that can be long. The
+ * `/` between them is punctuation rather than name, and takes the muted tone the heading's
+ * own `· N` wears.
+ *
+ * The **`▾`** is the folder heading's menu, one line down: same `openFolderMenu`, same
+ * three parts, anchored on the path it now belongs to. It is a real `<button>`, which is
+ * legal here for exactly one reason — the row around it stopped being one (see
+ * `sessionRow`) — and it **stops propagation on both click and keydown**, or pressing the
+ * menu would open the session underneath it as well.
+ */
+function foldedTitle(s, fold) {
+  const title = document.createElement('span');
+  title.className = 'session-title is-folded';
+  title.title = s.title;
+
+  const path = document.createElement('span');
+  path.className = 'title-path';
+  path.textContent = fold.path;
+  title.append(path);
+
+  const menu = document.createElement('button');
+  menu.className = 'label-menu fold-menu';
+  menu.textContent = '▾';
+  menu.title = `File ${fold.folder} under a group`;
+  menu.onclick = (e) => {
+    e.stopPropagation();
+    openFolderMenu(menu, fold.folder);
+  };
+  // The row answers Enter and Space itself now, and keydown bubbles — so without this,
+  // Enter on the `▾` would open the menu *and* the session behind it.
+  menu.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+  };
+  title.append(menu);
+
+  const sep = document.createElement('span');
+  sep.className = 'title-sep';
+  sep.textContent = '/';
+  sep.setAttribute('aria-hidden', 'true');
+  title.append(sep);
+
+  const leaf = document.createElement('span');
+  leaf.className = 'title-leaf';
+  leaf.textContent = fold.leaf;
+  title.append(leaf);
+
+  return title;
+}
+
 /** One rail row: status dot, name, badges, and the pin that hangs off the end. */
 /** Sessions with a duplicate in flight. Module scope because the rows are transient. */
 const duplicating = new Set();
 
-function sessionRow(s) {
-  // The row is a button and so is the pin, and a button cannot live inside another one —
-  // hence the wrapper, which also carries the hover and selected states so they cover
-  // the pin as well.
+function sessionRow(s, fold = null) {
+  // The pin is a button and a button cannot live inside another one — hence the wrapper,
+  // which also carries the hover and selected states so they cover the pin as well.
   const row = document.createElement('div');
   row.className = `session-row${s.pinned ? ' is-pinned' : ''}${s.isLead ? ' is-lead' : ''}`;
 
-  const btn = document.createElement('button');
+  /*
+   * **`.session` is a `div role="button"`, not a `<button>`, and uniformly so.**
+   *
+   * The reason is one line down: when a folder folds, its `▾` rides the row's own title,
+   * and interactive content cannot nest — a `<button>` inside a `<button>` is invalid, and
+   * so is a `<span role="button" tabindex="0">` inside one, because the restriction is on
+   * interactive content and not on the tag. Every row is built this way and not only the
+   * folded ones: two element types for one row, differing by whether a folder happened to
+   * hold one session, is two focus behaviours and two sets of CSS to keep honest.
+   *
+   * What had to be carried over from the `button {}` reset at the top of `styles.css` is
+   * `cursor: pointer`, and only that — `font` and `color` already inherit on a div, and
+   * `background: none` / `border: none` are a div's own defaults. Nothing in the stylesheet
+   * selects `button.session`; every rule is a class, and `test/rail-fold.test.js` pins it.
+   *
+   * `aria-current` rather than the `aria-selected` this node used to carry: that attribute
+   * is invalid on a `<button>` and invalid on `role="button"` alike — it belongs to
+   * `option`, `tab` and friends — and "the row whose session is open" is exactly what
+   * `aria-current` is for. Set only when true, since `aria-current="false"` on every other
+   * row is noise a screen reader has to walk past.
+   */
+  const btn = document.createElement('div');
   btn.className = `session${s.unread > 0 ? ' has-unread' : ''}`;
+  btn.setAttribute('role', 'button');
+  btn.tabIndex = 0;
   const isOpen = panes.some((p) => p.selected() === s.id);
-  btn.setAttribute('aria-selected', String(isOpen));
-  if (isOpen) row.classList.add('is-open');
+  if (isOpen) {
+    btn.setAttribute('aria-current', 'true');
+    row.classList.add('is-open');
+  }
   btn.onclick = () => openSession(s.id);
+  // The keyboard half of `role="button"`: a real button answers Enter and Space and a div
+  // answers neither, so both are wired by hand. `preventDefault` is for Space, which
+  // otherwise scrolls the rail out from under the row it just opened.
+  btn.onkeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    openSession(s.id);
+  };
 
   const dot = document.createElement('span');
   dot.className = `dot ${s.status}`;
@@ -3860,11 +4008,7 @@ function sessionRow(s) {
   const mark = bindingMark(s);
   if (mark) btn.append(mark);
 
-  const title = document.createElement('span');
-  title.className = 'session-title';
-  title.textContent = s.title;
-  title.title = s.title;
-  btn.append(title);
+  btn.append(fold ? foldedTitle(s, fold) : plainTitle(s));
 
   if (s.unread > 0) {
     const badge = document.createElement('span');
