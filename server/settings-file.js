@@ -330,8 +330,6 @@ export function remoteAddressOf(req) {
  * everything the panel does. What it may *not* do is **widen its own access**: `bindHost`
  * and `allowedOrigins` decide who can reach the panel at all, and a peer that could patch
  * them could turn a loopback panel into a LAN one and add its own origin to the allowlist.
- * That is the one asymmetry, and it is the same shape CCC uses (its network-config
- * endpoint is localhost-only while everything else takes the wider allowlist).
  *
  * **This is not the origin guard and does not replace it.** `origin.js` allows a request
  * with *no* `Origin` header at all, by construction, so that curl, the status hook and
