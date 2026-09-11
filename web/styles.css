@@ -4329,6 +4329,219 @@ body.row-dragging * { cursor: row-resize !important; }
   text-overflow: ellipsis;
 }
 
+/* --------------------------------------------------------------- files --- */
+
+/* The `files` modal, which is the gallery above widened into everything a session
+   produced — images, documents and the links it exposed.
+
+   Beside `.gallery-*` rather than on top of it: the lightbox still opens from here and the
+   per-turn `.img-strip` still draws its own thumbnails, so those rules are live and this
+   is a second, wider box that happens to share a grid shape with them.
+
+   Every colour is a token, in both themes, and there is not a single hard-coded hue in
+   the block — the mock-up carried a light and a dark palette and this is what the panel
+   already spells them as. */
+
+.files-sub {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+  margin: -0.5rem 0 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.files-note {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  margin-bottom: 0.7rem;
+}
+
+/* Pills, and deliberately not checkboxes or a `<select>`: a stock checkbox is painted by
+   the *browser* from the browser's colour scheme rather than from the page's
+   `data-theme`, so an unticked box in a light page under a dark browser reads as ticked —
+   the live bug already flagged on `.field-check`. Every pixel here is ours. */
+.files-filters {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
+.files-pill {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.3em;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.files-pill:hover { border-color: var(--rule-strong); color: var(--ink); }
+.files-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The border and the text carry the selection, not the fill: `--accent-soft` is a button
+   hover tint a couple of points off the surface, and on its own it is the invisible
+   selected row `--row-open` exists to fix one file over. Three signals, one of which
+   survives any theme. */
+.files-pill.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A pill with nothing under it stays in the row, quiet. The six kinds are the vocabulary
+   of what this modal can hold, and a row whose membership changed per session would make
+   "there are no links here" indistinguishable from "links are not a thing". */
+.files-pill.is-empty { opacity: 0.5; }
+
+.files-pill-n { color: var(--ink-faint); }
+.files-pill.is-on .files-pill-n { color: var(--accent); }
+
+/* `auto-fill`, like `.gallery-grid` above and for its reason: the grid answers the modal's
+   width rather than the viewport's, and `.modal.is-wide` is `min(44rem, 100vw - 2rem)`. */
+.files-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.6rem;
+}
+
+.files-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  cursor: zoom-in;
+  overflow: hidden;
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.files-cell:hover { border-color: var(--rule-strong); }
+.files-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A document cell is already the element item 4b will hang the preview overlay on, so the
+   only thing said here is that it does not yet offer a press. */
+.files-cell.is-inert { cursor: default; }
+
+.files-cell.files-link { cursor: pointer; }
+
+.files-cell img {
+  display: block;
+  width: 100%;
+  height: 7rem;
+  object-fit: cover;
+  object-position: top left;
+  background: var(--code-bg);
+}
+
+/* The same 7rem an image thumbnail takes, so a mixed grid is one row of one height. The
+   text is clipped rather than scrolled: this is the first few lines of a document, and a
+   scroller inside a grid cell inside a scrolling modal is three plausible wheel targets. */
+.files-doc {
+  height: 7rem;
+  padding: 0.55rem 0.6rem;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+  background: var(--code-bg);
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.files-doc b { color: var(--ink); font-weight: 600; }
+.files-doc.is-waiting { color: var(--ink-faint); }
+
+/* A link has no thumbnail to draw, so it is a document-shaped cell whose body is the
+   glyph, the title and the short form. Not `pre-wrap` — this is three inline things, not
+   a document. */
+.files-link-body {
+  white-space: normal;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.files-link-mark {
+  display: inline-flex;
+  color: var(--ink-faint);
+}
+
+.files-cell.files-link:hover .files-link-mark { color: var(--accent); }
+
+.files-link-title {
+  color: var(--ink);
+  font-size: 0.64rem;
+  line-height: 1.4;
+  /* Four lines at most; a page title can be a sentence and the cell is a fixed height. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+.files-link-short { color: var(--ink-faint); }
+
+.files-cap {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+  padding: 0 0.4rem 0.35rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+
+/* Only the name gives way. The time — or the `gone` tag — is the shorter half and the one
+   a reader scans down the column, so it never shrinks. */
+.files-cap .files-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-cap .files-when { flex: 0 0 auto; }
+
+/* Gone: the file the session wrote is no longer on disk. Still listed, still legible, and
+   for a `Write` still previewable — its bytes are in the transcript, which is the whole
+   reason this state is greyed rather than hidden. `--working` is the panel's "pay
+   attention" amber everywhere else (`.quota-row.warn`, `.field-hint.warn`); `--decision`
+   is for an actual failure and a deleted file is not one. */
+.files-cell.is-gone { opacity: 0.55; }
+.files-cell.is-gone:hover { opacity: 0.8; }
+.files-cell.is-gone .files-cap .files-name { text-decoration: line-through; }
+.files-gone-tag { color: var(--working); }
+
+/* The modal's own voice for an empty set, in `.empty`'s register but not `.empty` itself:
+   that rule is `flex: 1` for a pane-filling column and this sits in a grid cell. */
+.files-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--ink-faint);
+  padding: 2rem 1rem;
+  text-align: center;
+}
+
+.files-empty p { margin: 0; font-size: 0.92rem; max-width: 24rem; }
 /* ----------------------------------------------------------- lightbox --- */
 
 /* Darker than `.modal-back` and sitting above it, because this opens *over* the gallery
