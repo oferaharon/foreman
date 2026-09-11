@@ -300,6 +300,43 @@ export async function revealInFinder(dir) {
   return target;
 }
 
+/**
+ * Select one **file** in Finder — the sibling of `revealInFinder`, deliberately not a
+ * loosening of it.
+ *
+ * Two separate functions with two opposite guards, because the difference between them is
+ * the difference between showing something and running it. `open <dir>` opens a Finder
+ * window; `open <file>` runs the file's **default handler**, and this very module opens a
+ * `.command` that way to get a Terminal window. So a `revealInFinder` relaxed to accept a
+ * file would turn every folder reveal into a potential launch on the first path that was
+ * not a directory — which is why the plan asks for a sibling by name and why each of these
+ * refuses what the other is for.
+ *
+ * `-R` is the whole of the difference in the call, and it is not a convenience flag: it
+ * says *reveal* rather than *open*, so Finder comes forward with the file selected and
+ * **nothing is executed**. `/usr/bin/open <file>` without `-R` must not appear anywhere in
+ * this feature; there is no open endpoint at all, by the 2026-09-10 ruling.
+ *
+ * The path is never a caller's: the reveal endpoint re-derives it from this session's own
+ * transcript (`revealablePath` in `server/outputs.js`) and hands over what the record said.
+ *
+ * @param {string} file  an absolute path to a regular file
+ * @param {Function} exec  the spawn, defaulted so a test can record the argv instead of
+ *   putting a Finder window on the maintainer's screen — the same trick the naming
+ *   functions above play with `prefix`. Nothing in `server/` passes one.
+ */
+export async function revealFile(file, exec = run) {
+  const target = String(file || '').trim();
+  if (!target) throw new Error('Which file?');
+  const stat = await fsp.stat(target).catch(() => null);
+  if (stat?.isDirectory()) throw new Error(`That is a folder, not a file: ${target}`);
+  // A gone file cannot be revealed, and Finder would answer a missing path by opening
+  // something else's window rather than by failing.
+  if (!stat?.isFile()) throw new Error(`Not a file any more: ${target}`);
+  await exec('/usr/bin/open', ['-R', target]);
+  return target;
+}
+
 /* ------------------------------------------------------------------ launch --- */
 
 /**

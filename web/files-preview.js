@@ -99,13 +99,26 @@ export function previewLost(entry) {
 /**
  * The actions this entry can answer, in the order the row draws them.
  *
- * One today. `reveal in Finder` is item 7 of the plan and lands beside `copy path` on the
- * same rule (a path, and this Mac); there is **no `open` at all**, by ruling — `open <file>`
- * runs the file's default handler, and this panel's own launcher uses exactly that trick.
+ * Two, and the second one asks for strictly more than the first. `copy path` needs a path
+ * and nothing else — a string is copyable whether or not anything is still there. `reveal
+ * in Finder` needs a path **and a file at the end of it**, because Finder has nothing to
+ * select otherwise: hence `onDisk === true` rather than a truth test, since `onDisk` is
+ * deliberately `null` for the pathless entries (76% of the images here) and `false` for
+ * the gone ones, and those are different answers that must not both read as "no".
+ *
+ * A gone `Write` is exactly the case that separates them. Its bytes are in the record, so
+ * it still previews as written and its path is still worth copying — and there is nothing
+ * on disk to reveal, so the second button is absent rather than drawn and disabled. That
+ * is the trust gate's discipline again: the panel offers what it can actually do.
+ *
+ * There is **no `open` at all**, by the 2026-09-10 ruling — `open <file>` runs the file's
+ * default handler, and this panel's own launcher uses exactly that trick. Reveal is
+ * `open -R`, which selects and launches nothing.
  */
 export function previewActions(entry) {
   const path = typeof entry?.path === 'string' ? entry.path.trim() : '';
-  return path ? ['copy-path'] : [];
+  if (!path) return [];
+  return entry?.onDisk === true ? ['copy-path', 'reveal'] : ['copy-path'];
 }
 
 /** The last segment of the footer: how the thing on screen is being shown. */
