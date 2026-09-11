@@ -10897,14 +10897,15 @@ function createPane(slot, host) {
    *
    * Three things about the walk, each of which the plan measured before asking for it:
    *
-   *   **It walks text nodes, and skips `code`, `pre` and `a`.** That is load-bearing
-   *   rather than tidy: 2,599 of 5,328 path-shaped tokens in this data sit inside
-   *   backticks, and that is where nearly every *source* path lives, so skipping them is
-   *   the cheap half of the ruling. Skipping `a` is what makes a second walk over an
-   *   already-linked bubble do nothing at all — the link is an `<a>`, so its own text is
-   *   invisible to the next pass. That is the whole of the idempotency guard; there is no
-   *   flag on the node, which is what keeps a re-walk after the output set grows correct
-   *   rather than merely safe.
+   *   **It walks text nodes, including inline `code`, and skips `pre` and `a`.** The
+   *   ruling of 2026-09-11 and the reason it went that way are on `PATH_SKIP` below:
+   *   backticks are where a path is most often written and the output-set bound, not the
+   *   formatting, is what keeps a source path out. A fenced block stays out because it is
+   *   content rather than a mention. Skipping `a` is a different kind of reason — it is
+   *   what makes a second walk over an already-linked bubble do nothing at all, since the
+   *   link is an `<a>` and its own text is invisible to the next pass. That is the whole
+   *   of the idempotency guard; there is no flag on the node, which is what keeps a
+   *   re-walk after the output set grows correct rather than merely safe.
    *
    *   **It runs on two prose registers and nothing else** — `.msg-assistant` (the parsed
    *   markdown) and `.msg-user` (a `textContent` div). One helper over both, because the
@@ -10924,8 +10925,30 @@ function createPane(slot, host) {
     return s?.cwd || s?.paneCwd || null;
   }
 
-  /** Elements whose text is never prose, and so is never walked. */
-  const PATH_SKIP = new Set(['A', 'CODE', 'PRE', 'SCRIPT', 'STYLE', 'TEXTAREA', 'SVG']);
+  /**
+   * Elements whose text is never walked — and note which one is **not** here.
+   *
+   * `PRE` is skipped: a fenced block is *content* the session is showing you, not a
+   * mention, and a path inside one is part of a file being quoted rather than a thing
+   * being named. `CODE` is **walked**, by the 2026-09-11 ruling, and the reasoning is
+   * worth keeping because the plan originally said the opposite.
+   *
+   * §5.2 asked for `code` to be skipped because that is where nearly every *source* path
+   * lives — 2,599 of 5,328 path-shaped tokens sit inside backticks — and at the time the
+   * skip was the only thing keeping `web/app.js` and `server/index.js` out of the
+   * conversation. It is not any more: the output-set bound does that job, and does it
+   * better, because it refuses a source path wherever it appears rather than only where it
+   * is formatted. What the skip was costing, once the bound existed, was the case a reader
+   * actually wants — Claude writes a path in backticks far more often than not, so the one
+   * register where a mention is most legible was the one register that could not link.
+   *
+   * So: a code span naming one of this session's own outputs links; anything else in a
+   * code span stays exactly as it was, which is what it was before this module existed.
+   * `A` is skipped for the separate reason that it is the whole of the walk's idempotency,
+   * and a `CODE` inside a `PRE` is still skipped — the check walks ancestors, not the
+   * node's own tag.
+   */
+  const PATH_SKIP = new Set(['A', 'PRE', 'SCRIPT', 'STYLE', 'TEXTAREA', 'SVG']);
 
   /** The two registers a path link may be drawn in. */
   const PATH_HOSTS = '.msg-assistant, .msg-user';

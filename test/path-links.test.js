@@ -345,6 +345,39 @@ test('folder reveal: a missing uuid or a negative index answers null without rea
   assert.equal(await revealableFolder(transcript, 'u-notes', -1), null);
 });
 
+/* ------------------------------------------------------- inline code --- */
+
+/*
+ * The 2026-09-11 ruling: a backticked path is exactly the one a reader wants to click, and
+ * the output-set bound is what makes walking code safe. The detector itself has nothing to
+ * say about backticks — by the time the walk reaches a text node the markdown is a `<code>`
+ * element and the text inside it is a bare path — so what these hold is that the *bound*
+ * still separates the two cases with no help from the formatting.
+ */
+
+test('a code span naming one of this session\'s outputs is linked', () => {
+  // What `marked` leaves inside `<code>docs/notes.md</code>` — the walk sees this string.
+  const [hit] = pathLinksIn('docs/notes.md', OUTPUTS, CWD);
+  assert.equal(hit.kind, 'file');
+  assert.equal(hit.entry.uuid, 'u-notes');
+});
+
+test('a code span naming a source file is not linked — the bound refuses it, not the markup', () => {
+  assert.deepEqual(pathLinksIn('web/app.js', OUTPUTS, CWD), []);
+  assert.deepEqual(pathLinksIn('server/index.js', OUTPUTS, CWD), []);
+});
+
+test('a code span that is a route, a git ref or a tally is refused exactly as in prose', () => {
+  for (const token of ['/api/version', 'origin/main', '31/08', 'America/Los_Angeles']) {
+    assert.deepEqual(pathLinksIn(token, OUTPUTS, CWD), [], token);
+  }
+});
+
+test('the folder of an output links from a code span too', () => {
+  const [hit] = pathLinksIn('docs/', OUTPUTS, CWD);
+  assert.equal(hit.kind, 'folder');
+});
+
 /* ------------------------------------------- where it is wired, by source --- */
 
 /*
@@ -367,11 +400,19 @@ test('nothing about path links joins composerSig', () => {
   }
 });
 
-test('the walk skips code, pre and anchors — which is the whole of its idempotency', () => {
+test('the walk skips pre and anchors, and deliberately does not skip inline code', () => {
   const src = appSrc();
   const decl = src.slice(src.indexOf('const PATH_SKIP = new Set('));
   const set = decl.slice(0, decl.indexOf(');'));
-  for (const tag of ['A', 'CODE', 'PRE']) assert.match(set, new RegExp(`'${tag}'`), `${tag} must be skipped`);
+  // `A` is the whole of the walk's idempotency: a drawn link is an anchor, so its own text
+  // is invisible to the next pass. `PRE` is a fenced block, which is content being shown
+  // rather than a path being mentioned.
+  for (const tag of ['A', 'PRE']) assert.match(set, new RegExp(`'${tag}'`), `${tag} must be skipped`);
+  // …and `CODE` is **walked**, by the 2026-09-11 ruling. The plan's §5.2 asked for it to be
+  // skipped because that is where source paths live — but the output-set bound does that
+  // job now, and does it wherever a path appears rather than only where it is formatted,
+  // while the skip was costing the register a path is most often written in.
+  assert.doesNotMatch(set, /'CODE'/, 'inline code is walked, by ruling');
 });
 
 test('the output set is fetched on pane open and off the dot signal, and never polled', () => {

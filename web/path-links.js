@@ -19,7 +19,10 @@
  * DOM-free and fetch-free on purpose, the way `web/trust-gate.js`, `web/files-preview.js`
  * and `web/files-new.js` are, so `test/path-links.test.js` can hold every refusal class in
  * plain Node. The DOM walk that *uses* this lives in `web/app.js`, where the two prose
- * registers it runs over are.
+ * registers it runs over are — and note that it walks **inline code** as well as plain
+ * prose (the 2026-09-11 ruling; `PATH_SKIP` there carries the reasoning), which is why
+ * the refusals below have to stand on their own rather than leaning on formatting to keep
+ * a source path out.
  *
  * --- Why the refusals are the interesting half ---
  *
