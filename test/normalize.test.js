@@ -727,3 +727,39 @@ test('a delivery never counts as unread, because unread counts what Claude said'
   const meta = await probe(ROOM_JSONL);
   assert.deepEqual(meta.replyTimes, stamps, 'only the assistant turn is a reply');
 });
+
+/*
+ * SendUserFile's chip: the summary comes off the tool_use `input`, exactly like every
+ * other case in `toolSummary` — never off `toolUseResult`, which is where the attachments
+ * (and their paths) actually land. A path is never a summary; item 8 handles paths later.
+ */
+const sendUserFile = (input) => ({
+  type: 'assistant',
+  uuid: 'u1',
+  timestamp: '2026-09-10T00:00:00.000Z',
+  message: {
+    role: 'assistant',
+    model: 'claude-sonnet-5',
+    content: [{ type: 'tool_use', id: 'toolu_sf1', name: 'SendUserFile', input }],
+  },
+});
+
+test('SendUserFile summary: a caption wins outright', () => {
+  const [msg] = normalizeRecord(sendUserFile({ files: ['/tmp/a.png', '/tmp/b.png'], caption: 'the two screenshots' }));
+  assert.equal(msg.summary, 'the two screenshots');
+});
+
+test('SendUserFile summary: no caption falls back to a file count, plural', () => {
+  const [msg] = normalizeRecord(sendUserFile({ files: ['/tmp/a.png', '/tmp/b.png'] }));
+  assert.equal(msg.summary, '2 files');
+});
+
+test('SendUserFile summary: a single file is singular, not "1 files"', () => {
+  const [msg] = normalizeRecord(sendUserFile({ files: ['/tmp/a.png'] }));
+  assert.equal(msg.summary, '1 file');
+});
+
+test('SendUserFile summary: no files array and no caption is empty, never a crash', () => {
+  const [msg] = normalizeRecord(sendUserFile({}));
+  assert.equal(msg.summary, '');
+});
