@@ -4488,6 +4488,53 @@ function openLightbox(sessionId, items, start = 0, { src = imageSrc } = {}) {
     return btn;
   }
 
+  /**
+   * `reveal in Finder` — the one action in this overlay that reaches off the browser.
+   *
+   * It posts the same `{uuid, index}` the list handed over and **never the path**, even
+   * though the path is right there on the entry beside it. That is the whole bound the
+   * feature rests on (§7 rule 1): the server re-reads this session's own transcript,
+   * finds that record with the enumerator the list was minted from, and takes the path
+   * from what Claude wrote. Sending `entry.path` would work today and would turn the
+   * endpoint into one that accepts a path tomorrow, which is precisely the prior art the
+   * plan was measured against and refused.
+   *
+   * The server reveals rather than opens — `open -R`, which selects the file in Finder and
+   * launches nothing — and there is no open button here at all, by ruling.
+   *
+   * A refusal flashes the server's own sentence rather than a generic one: the file has
+   * usually just been deleted under a modal that was opened minutes ago, and "no longer on
+   * disk" is the answer the reader wants instead of "that didn't take".
+   */
+  function revealButton(entry) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'lightbox-act';
+    btn.textContent = 'reveal in Finder';
+    btn.title = `Show ${entry.path} in Finder`;
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      btn.disabled = true;
+      try {
+        await postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/output/reveal`, {
+          uuid: entry.uuid,
+          index: entry.index,
+        });
+        btn.textContent = 'revealed';
+      } catch (err) {
+        btn.textContent = err.message;
+      }
+      btn.disabled = false;
+      btn.classList.add('is-flash');
+      setTimeout(() => {
+        if (!btn.isConnected) return;
+        btn.textContent = 'reveal in Finder';
+        btn.classList.remove('is-flash');
+      }, 1400);
+    };
+    return btn;
+  }
+
   function paintHead(entry) {
     const acts = previewActions(entry);
     head.replaceChildren();
@@ -4502,12 +4549,7 @@ function openLightbox(sessionId, items, start = 0, { src = imageSrc } = {}) {
     }
     for (const act of acts) {
       if (act === 'copy-path') head.append(copyButton(entry.path));
-      // `reveal in Finder` lands here, from item 7 of the paths-and-files plan: it is a
-      // POST to `/api/sessions/:id/output/reveal` with the same `{uuid, index}` the list
-      // handed over — never a path — and it is drawn on the same rule as `copy path`
-      // (`previewActions` grows one entry, this loop grows one branch). Nothing is drawn
-      // for it today, deliberately: a disabled button is the thing the trust gate's card
-      // refuses to be.
+      else if (act === 'reveal') head.append(revealButton(entry));
     }
     head.hidden = head.childElementCount === 0;
   }

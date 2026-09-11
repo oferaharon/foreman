@@ -120,14 +120,27 @@ test('a link is not previewable and the overlay would refuse it anyway', () => {
   assert.equal(previewable([]), false);
 });
 
-test('a path buys copy, and no path buys nothing at all', () => {
+test('a path buys copy, a file on disk buys reveal, and no path buys nothing at all', () => {
   // Never a disabled button — the trust gate's discipline, and three images in four on
   // this Mac are pastes or automation screenshots with no path to copy.
-  assert.deepEqual(previewActions(file()), ['copy-path']);
+  assert.deepEqual(previewActions(file()), ['copy-path', 'reveal']);
   assert.deepEqual(previewActions(file({ path: null })), []);
   assert.deepEqual(previewActions(file({ path: '   ' })), []);
   assert.deepEqual(previewActions(file({ path: 42 })), []);
   assert.deepEqual(previewActions(null), []);
+
+  // Reveal asks for strictly more than copy: a path *and* a file at the end of it. A gone
+  // `Write` is the case that separates them — its bytes are in the record so it still
+  // previews and its path is still worth copying, and Finder has nothing to select.
+  assert.deepEqual(previewActions(file({ onDisk: false })), ['copy-path']);
+  assert.deepEqual(previewActions(file({ source: 'sendfile', onDisk: false })), ['copy-path']);
+  // `null` is "there is no file to look for", not "the file is gone" — and a truth test
+  // would collapse the two. It only ever arrives with a null path, but the rule is
+  // written against the field rather than against today's data.
+  assert.deepEqual(previewActions(file({ onDisk: null })), ['copy-path']);
+  assert.deepEqual(previewActions(file({ onDisk: undefined })), ['copy-path']);
+  // The per-turn strip's own ref carries neither, and is unchanged by all of this.
+  assert.deepEqual(previewActions({ uuid: 'u9', index: 0, media: 'image/png' }), []);
 });
 
 test('a gone SendUserFile has nothing left; a gone Write still has the record', () => {

@@ -560,3 +560,64 @@ export async function readOutput(file, uuid, index = 0) {
     return null; // handed over once, gone now
   }
 }
+
+/* ---------------------------------------------------------------- reveal */
+
+/**
+ * The one path a reveal may select, re-derived from this session's own transcript.
+ *
+ * This is the address-space bound of §7 rule 1 doing its work a second time: the browser
+ * sends back the `{uuid, index}` the list handed it and **never a path**, so what gets
+ * revealed is whatever the record says — and the records were written by Claude, not by
+ * the caller. A uuid from another session is not in *this* file and so answers `null`
+ * here, which is the whole of why the endpoint needs no other check on where a path
+ * points.
+ *
+ * It walks the same enumerator `readOutput` walks (`outputBlocks`) and applies the same
+ * `accept`, which is what re-checks a `Write`'s extension against `web/output-exts.js`
+ * server-side — the list a client could have lied about, asked again where it counts. A
+ * `SendUserFile` attachment is **not** filtered by that list, on the rule its own module
+ * states: the tool's whole purpose is handing a file over, so the tool's word is the
+ * witness and a `.wav` reveals the way it lists. Nothing is bought by being stricter here
+ * than the modal is, and a rule that refused what the modal had just drawn a button for
+ * would be a dead button, which is the thing this overlay keeps refusing to draw.
+ *
+ * `null` for every miss, for `readOutput`'s reason: an unknown uuid, an index past the
+ * end, an entry outside the human-facing set, and an image block with no path at all are
+ * one answer to the caller — there is nothing here to reveal — and a distinction it cannot
+ * act on is noise.
+ *
+ * No `stat` and no disk read. Whether the file is still there is `revealFile`'s question,
+ * asked one layer down where the refusal is about the filesystem rather than about the
+ * transcript.
+ */
+export async function revealablePath(file, uuid, index = 0) {
+  if (!uuid || !Number.isInteger(index) || index < 0) return null;
+
+  const rl = lines(file);
+  let found = null;
+  try {
+    for await (const line of rl) {
+      if (!line || !line.includes(uuid)) continue;
+      let candidate;
+      try {
+        candidate = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      // The substring also matches a child record naming this one as its `parentUuid`,
+      // so the record's own field is what decides — `readOutput`'s rule verbatim.
+      if (candidate.uuid !== uuid) continue;
+      const hit = outputBlocks(candidate).find((e) => e.index === index);
+      if (!hit) return null;
+      found = hit;
+      break;
+    }
+  } finally {
+    rl.close();
+  }
+  if (!found || !accept(found)) return null;
+  // 76% of the images here are pastes and automation screenshots with no path; an image
+  // block never has one, and there is nothing for Finder to select.
+  return typeof found.filePath === 'string' && found.filePath ? found.filePath : null;
+}

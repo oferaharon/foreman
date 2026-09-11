@@ -113,6 +113,7 @@ import {
   chooseFolder,
   createSession,
   liveSessionNames,
+  revealFile,
   revealInFinder,
   slugFor,
   uniqueSessionName,
@@ -124,7 +125,7 @@ import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
 import { findFiles } from './files.js';
 import { scanImages, readImage } from './images.js';
-import { scanOutputs, readOutput, OUTPUT_MEDIA } from './outputs.js';
+import { scanOutputs, readOutput, revealablePath, OUTPUT_MEDIA } from './outputs.js';
 import { IMAGE_MEDIA } from './normalize.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1316,6 +1317,47 @@ app.get('/api/sessions/:id/output/:uuid/:index?', async (req, res) => {
     res.end(found.buffer);
   } catch {
     res.status(404).end();
+  }
+});
+
+/**
+ * Show one of this session's outputs in Finder — selected, never opened.
+ *
+ * **The body is `{uuid, index}` and there is no path parameter, here least of all.** The
+ * byte route above says why for bytes; this one is the same bound guarding the one thing
+ * in the feature that reaches outside the browser. `revealablePath` re-reads *this
+ * session's own* transcript, finds that record with the same enumerator the list was
+ * minted from, re-checks a `Write`'s extension against the shared human-facing list, and
+ * answers the path the record itself carries. A LAN peer names a record; Claude named the
+ * file. A real uuid belonging to some *other* session is simply not in this transcript and
+ * so misses like a fabricated one — the address space is the check, and there is no second
+ * one to loosen.
+ *
+ * **And it reveals rather than opens.** `revealFile` runs `open -R`, which brings Finder
+ * forward with the file selected and executes nothing; `/usr/bin/open <file>` without
+ * `-R` runs the file's default handler, and this panel's own launcher gets a Terminal
+ * window by writing a `.command` and opening it. The 2026-09-10 ruling dropped "open on
+ * the Mac" for exactly that reason, so what is missing here is a whole endpoint rather
+ * than a bound on one — and `revealFile` is a sibling of `revealInFinder` rather than a
+ * relaxation of it, or the folder reveal beside it would quietly become a launcher for
+ * the first path that was not a directory.
+ *
+ * Every refusal is the same 404 with a sentence: an unknown record, an entry outside the
+ * human-facing set, an image block with no path, a file that has since been deleted. The
+ * caller cannot act on the difference and nothing is revealed in any of those cases,
+ * which is the only fact the button needs.
+ */
+app.post('/api/sessions/:id/output/reveal', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session?.transcriptPath) return res.status(404).json({ error: 'Unknown session.' });
+  const raw = req.body?.index;
+  const index = raw === undefined || raw === null ? 0 : Number(raw);
+  try {
+    const target = await revealablePath(session.transcriptPath, req.body?.uuid, index);
+    if (!target) return res.status(404).json({ error: 'Nothing in this session names a file there.' });
+    res.json({ ok: true, path: await revealFile(target) });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
   }
 });
 
