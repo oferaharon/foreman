@@ -6,6 +6,15 @@ import readline from 'node:readline';
 import { imageBlocks, servableImage } from './normalize.js';
 import { noteFor } from './images.js';
 import { prNumber } from './merge-queue.js';
+/*
+ * The human-facing extension set, from `web/` — the second module `server/` imports from
+ * there, after `web/trust-gate.js`, and for that file's reason: the browser has to answer
+ * the same question about the same path (the files button's new-item dot reads it off a
+ * live message frame) and `web/` cannot import `server/`. So the list lives where both
+ * sides can reach it rather than being spelled twice. `MEDIA` below stays here: it builds
+ * `Content-Type` headers and is nobody's business in a browser.
+ */
+import { CREATE_EXTS } from '../web/output-exts.js';
 
 /**
  * What a session produced for a human to read — the whole transcript, not the window on
@@ -91,23 +100,12 @@ const MEDIA = new Map([
 /** Anything the table has never heard of, so a `.wav`-shaped surprise still serves. */
 const FALLBACK_MEDIA = 'application/octet-stream';
 
-/**
- * The extensions a **create** may list under — the fixed human-facing set, and the whole
- * of the filter.
- *
- * Extension rather than location, because a rule about where a thing lives rots: this repo
- * has already learned it twice (the state dir resolves on four rungs; `main` was
- * hardcoded in four places). An extension is a fact about the file. `.py`, `.js`,
- * `.json`, `.tsx`, `.swift`, `.sh` — 415 distinct files created on this Mac — are
- * excluded by one short list with no cleverness in it.
- *
- * `SendUserFile` is deliberately **not** filtered by this. Its whole purpose is handing a
- * file to the maintainer, so the tool's own word is the witness and a `.wav` lists.
+/*
+ * `CREATE_EXTS` — the extensions a **create** may list under, and the whole of the filter —
+ * is imported above from `web/output-exts.js`, where its reasoning lives. It used to be
+ * declared here; it moved the day the files button needed to ask the same question in the
+ * browser, and there is no second copy.
  */
-const CREATE_EXTS = new Set([
-  '.md', '.markdown', '.txt', '.text', '.csv', '.pdf', '.rtf',
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg',
-]);
 
 /** Every media string this module will ever name, for the route's belt-to-braces check. */
 export const OUTPUT_MEDIA = new Set([...MEDIA.values()].map(([m]) => m).concat([FALLBACK_MEDIA]));

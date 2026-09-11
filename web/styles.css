@@ -2646,6 +2646,31 @@ body.row-dragging * { cursor: row-resize !important; }
 .ghost-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
 .ghost-btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
+/*
+ * Something landed in this session's files set since this pane last opened the modal.
+ *
+ * 5px of `--accent`, which is the colour the rail's `.unread-badge` already spells for
+ * "new, and yours to look at" — no new token, and no pulse: the rail's collapsed-group dot
+ * animates because it is standing in for a row that has been taken off screen, and this one
+ * is standing beside the control that answers it.
+ *
+ * Here with the header's own buttons rather than down in the `.files-*` block, which belongs
+ * to the modal. `margin-left` on an inline-block and not a `gap` on the button, deliberately:
+ * the button keeps its default `display`, so with no dot in it the control renders exactly as
+ * it did before this existed — the same trade `.composer-above:empty` buys one panel down.
+ * `vertical-align` is measured against uppercase mono at 0.68rem, where `middle` alone sits
+ * a touch low.
+ */
+.head-files-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  margin-left: 0.35rem;
+  vertical-align: 0.08em;
+}
+
 /* A drawing where the others have a word. The padding is squared up and the box centred,
    because a `.ghost-btn`'s padding is tuned to a line of uppercase text and an SVG has no
    baseline to sit on — left alone it rides high next to `SPLIT`. */
