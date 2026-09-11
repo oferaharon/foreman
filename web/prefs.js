@@ -120,6 +120,7 @@ export const HIDE_FINISHED_KEY = 'foreman.hideFinished';
 export const ASIDE_FOLDED_KEY = 'foreman.asideFolded';
 export const ROOM_FOLDED_KEY = 'foreman.roomFolded';
 export const PHONE_TAB_KEY = 'foreman.m.tab';
+export const FILES_VIEW_KEY = 'foreman.filesView';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -200,6 +201,21 @@ export const PHONE_TABS = ['leads', 'standalones', 'rooms'];
  * route somebody asked for.
  */
 export const phoneTab = choice(PHONE_TAB_KEY, PHONE_TABS, 'leads');
+
+/**
+ * Whether the `files` modal draws a grid of cells or one row per entry.
+ *
+ * Grid by default — that is the modal's original shape and the one every screenshot in the
+ * plan was built against. `choice` rather than `flag` because a third layout is a real
+ * possibility later and a boolean would have to be renamed the day it arrives; `filesView`
+ * already reads as "which one", not "is it on".
+ *
+ * One key for the whole browser, `hideFinished`'s own shape: the modal is opened from
+ * whichever session you are looking at, not from a slot, so there is nothing to key a
+ * second answer on.
+ */
+export const FILES_VIEW = ['grid', 'list'];
+export const filesView = choice(FILES_VIEW_KEY, FILES_VIEW, 'grid');
 
 /**
  * What `hideFinished` hides: exactly the three closed states of `TASK_STATES`
