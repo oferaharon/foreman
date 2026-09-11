@@ -73,9 +73,15 @@ import { ghostAction, ghostSig, INTERRUPT_TITLE } from './ghost-action.js';
 // it is a module and not a comparator inlined into `renderRail`: the rule that a team block
 // holds still is exactly the kind of thing that gets optimised back into `lastActivity` by
 // somebody tidying, and a node test is what stops that.
-import { hueVar, isGroupColour } from './group-hue.js';
+import { GROUP_COLOUR_COUNT, hueVar, isGroupColour } from './group-hue.js';
 // ^ the group ring's spelling and its bounds. `renderRail` sets `--h` inline on every
-// sibling a group owns, because the rail is a flat list with no container to hang it on.
+// sibling a group owns, because the rail is a flat list with no container to hang it on,
+// and the `⋯` menu's swatch row offers all `GROUP_COLOUR_COUNT` of them — a slot the ring
+// has but the menu hides is a colour you cannot choose.
+import { eligibleFolders, matchesFilter } from './group-folders.js';
+// ^ which folders a group's `+` may offer, and the one spelling of "the filter box matched
+// this". Both are rules that render perfectly when re-derived wrongly — a menu that forgets
+// to exclude the group's own folders offers a pick that does nothing.
 import { foldsInto, splitTitle } from './rail-fold.js';
 // ^ when a folder heading is furniture, and how the row's title splits into the path it
 // sits on and the leaf that names it. The eleventh pure module under `web/`, and both
@@ -2532,6 +2538,12 @@ function openMenu(anchor, items, { onDismiss } = {}) {
     if (!err.isConnected) el.append(err);
   };
 
+  // What the filter box hides, and the labels it decides over. Collected as the items are
+  // built rather than read back off the DOM: `item.label` is the string the caller meant,
+  // while a built node's `textContent` has a tick column and any `hint` welded onto it — so
+  // a filter read off the node would match a group name nobody typed.
+  const filterable = [];
+
   for (const item of items) {
     if (item.separator) {
       const rule = document.createElement('div');
@@ -2547,6 +2559,60 @@ function openMenu(anchor, items, { onDismiss } = {}) {
       note.className = 'menu-note';
       note.textContent = item.note;
       el.append(note);
+      continue;
+    }
+
+    // A box that narrows the list below it as you type, for a menu that can be long — the
+    // group `+` offers every folder this client has heard of. It is deliberately **not** a
+    // form and nothing about it submits: Enter in here must not pick whatever happens to be
+    // first, because the one thing worse than scrolling a menu is filing a folder under a
+    // group you did not read. A filtered-out item is hidden, not removed, so clearing the
+    // box brings it back without rebuilding anything.
+    if (item.filter) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'menu-filter';
+      input.maxLength = 60;
+      input.placeholder = item.filter.placeholder || 'Filter…';
+      input.setAttribute('aria-label', input.placeholder);
+      input.oninput = () => {
+        const q = input.value;
+        for (const { node, label } of filterable) node.hidden = !matchesFilter(label, q);
+      };
+      el.append(input);
+      continue;
+    }
+
+    // The group ring, as one row of circles. Every slot is offered — a colour the rail can
+    // wear but the menu will not show is a colour you cannot choose (the maintainer's own
+    // ruling) — and the count comes from `GROUP_COLOUR_COUNT` rather than a literal, so the
+    // day the ring grows this row grows with it.
+    //
+    // Real buttons, each with an `aria-label`, because a circle has no text to read: a
+    // swatch row built out of `div`s is ten controls a keyboard cannot reach and a screen
+    // reader cannot name. The hue itself goes on as `--h` through `hueVar`, so the token is
+    // spelled in exactly one place in this repo.
+    if (item.swatches) {
+      const rowEl = document.createElement('div');
+      rowEl.className = 'menu-swatches';
+      for (let n = 1; n <= GROUP_COLOUR_COUNT; n += 1) {
+        const sw = document.createElement('button');
+        sw.className = `menu-swatch${n === item.value ? ' is-current' : ''}`;
+        sw.style.setProperty('--h', hueVar(n));
+        sw.setAttribute('aria-label', `colour ${n}`);
+        sw.title = `colour ${n}`;
+        if (n === item.value) sw.setAttribute('aria-current', 'true');
+        sw.onclick = async () => {
+          try {
+            await item.onPick(n);
+            closeMenu('picked');
+          } catch (error) {
+            fail(error.message);
+          }
+        };
+        rowEl.append(sw);
+      }
+      el.append(rowEl);
       continue;
     }
 
@@ -2592,6 +2658,7 @@ function openMenu(anchor, items, { onDismiss } = {}) {
       label.append(hint);
     }
     btn.append(label);
+    filterable.push({ node: btn, label: item.label });
 
     let armed = !item.confirm;
     btn.onclick = async () => {
@@ -2656,6 +2723,20 @@ const renameGroup = (g, name) =>
 
 const deleteGroup = (g) => groupApi(`/api/groups/${g.id}`, { method: 'DELETE' });
 
+/**
+ * The `⋯` menu's swatch row: one `PATCH {colour}`, and **nothing painted locally first**.
+ *
+ * `setGroupCollapsed` below flips its field before the call and is right to — a caret that
+ * waited on a round trip reads as a dead control, and a refused collapse costs nothing. A
+ * colour is the opposite trade: the store is the only validator (`setColour` refuses a slot
+ * outside the ring, which is the route's 400), so painting the new hue ahead of the answer
+ * would leave a spine on screen in a colour that is not on disk, and the next roster frame
+ * would silently take it back. `groupApi` adopts the groups the response carries and
+ * repaints from those, so the rail moves on the answer rather than on the click.
+ */
+const setGroupColour = (g, colour) =>
+  groupApi(`/api/groups/${g.id}`, { method: 'PATCH', body: JSON.stringify({ colour }) });
+
 function setGroupCollapsed(g, collapsed) {
   g.collapsed = collapsed; // flip now; the broadcast confirms it a beat later
   renderRail();
@@ -2678,9 +2759,19 @@ function openFolderMenu(anchor, folder) {
   openMenu(anchor, items);
 }
 
+/**
+ * `⋯` — rename, recolour, delete.
+ *
+ * The swatch row sits **above the rule that fences the delete off**, which is the whole of
+ * why the order here is not arbitrary: the one destructive thing in this menu keeps the
+ * bottom slot it has always had, behind its own confirm, with nothing new landing between
+ * a reader's eye and it. Picking a colour is the cheapest thing in the panel — one key on
+ * one record, undone by picking another — so it belongs with the rename, on the safe side.
+ */
 function openGroupMenu(anchor, g) {
   openMenu(anchor, [
     { input: { value: g.name, placeholder: 'Rename…', onSubmit: (name) => renameGroup(g, name) } },
+    { swatches: true, value: g.colour, onPick: (n) => setGroupColour(g, n) },
     { separator: true },
     {
       label: 'Delete group',
@@ -2690,6 +2781,42 @@ function openGroupMenu(anchor, g) {
       onPick: () => deleteGroup(g),
     },
   ]);
+}
+
+/**
+ * `+` — file a folder under this group, the reverse of the folder's own `▾`.
+ *
+ * Same endpoint and the same `assign` semantics as that menu; only the direction is new.
+ * A folder already filed somewhere else stays in the list and carries the group it is
+ * leaving as a hint, because `assign` *moves* it — a folder is in exactly one group — and a
+ * pick that quietly emptied another group's block would be the panel doing something the
+ * reader did not read.
+ *
+ * **What it can offer is what the browser knows**: `eligibleFolders` unions the folders with
+ * a live session and the folders filed in any group, less whatever is already in here. A
+ * folder that is neither is invisible to this client, and the empty state says so in words
+ * rather than the panel growing an endpoint that walks the disk.
+ */
+function openGroupAddMenu(anchor, g) {
+  const folders = eligibleFolders(state.sessions, state.groups, g.id);
+  if (!folders.length) {
+    openMenu(anchor, [
+      {
+        note: `Nothing left to add. ${g.name} already holds every folder the panel can see — a folder with no live session and no group of its own isn't known to this browser.`,
+      },
+    ]);
+    return;
+  }
+  const items = [{ filter: { placeholder: 'Search folders…' } }];
+  for (const folder of folders) {
+    const from = state.groups.find((other) => other.id !== g.id && other.folders.includes(folder));
+    items.push({
+      label: folder,
+      hint: from ? `from ${from.name}` : '',
+      onPick: () => assignFolder(folder, g.id),
+    });
+  }
+  openMenu(anchor, items);
 }
 
 /** The header's pin, which is a label rather than a glyph — there's room for words there. */
@@ -3875,10 +4002,39 @@ function groupHeader(g, count, busy = 0) {
 
   row.append(toggle);
 
+  // The header's two controls, in the order they are drawn: add, then the rest.
+  //
+  // Both are **permanently visible at 40%** rather than appearing on hover the way the
+  // folder heading's `▾` does, and the difference is what each one is for. A folder is filed
+  // from its own heading, which you are already pointing at; a group's `+` is reached
+  // *because* you know the group and not the folder, and a control you have to discover by
+  // hovering the thing you were not looking for is a control that does not exist. 40% is the
+  // same trade the row's pin makes in reverse — present enough to find, quiet enough that a
+  // rail of nine groups is not eighteen glyphs shouting.
+  //
+  // No layout change buys it: `.label-menu` already reserves its 1.1rem while invisible, so
+  // a second one adds width and not height, and the sticky offset the folder headings hang
+  // off `.shelf-label` is measured against a height that does not move.
+  const add = document.createElement('button');
+  add.className = 'label-menu';
+  add.textContent = '+';
+  add.title = `Add a folder to ${g.name}`;
+  add.setAttribute('aria-label', `Add a folder to ${g.name}`);
+  add.onclick = (e) => {
+    // The header itself is the collapse toggle, and this button is inside it in reading
+    // order but not in the DOM — stopping propagation anyway, because the `⋯` beside it has
+    // always had to and one of the two behaving differently is the sort of thing nobody
+    // notices until a click folds the group it was trying to add to.
+    e.stopPropagation();
+    openGroupAddMenu(add, g);
+  };
+  row.append(add);
+
   const menu = document.createElement('button');
   menu.className = 'label-menu';
   menu.textContent = '⋯';
-  menu.title = `Rename or delete ${g.name}`;
+  menu.title = `Rename, recolour or delete ${g.name}`;
+  menu.setAttribute('aria-label', `Rename, recolour or delete ${g.name}`);
   menu.onclick = (e) => {
     e.stopPropagation();
     openGroupMenu(menu, g);
