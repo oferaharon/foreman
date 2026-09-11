@@ -48,6 +48,9 @@ function toolSummary(name, input = {}) {
       return input.skill || '';
     case 'SendMessage':
       return input.to ? `to ${input.to}` : '';
+    case 'SendUserFile':
+      if (input.caption) return input.caption;
+      return Array.isArray(input.files) ? `${input.files.length} file${input.files.length === 1 ? '' : 's'}` : '';
     default: {
       const first = input.file_path || input.path || input.query || input.prompt || input.command;
       return typeof first === 'string' ? first : '';

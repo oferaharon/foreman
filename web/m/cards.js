@@ -61,6 +61,7 @@
  */
 
 import { isTrustGate, trustPath, gateSentences } from '../trust-gate.js';
+import { withBlankTargets } from '../anchor-target.js';
 
 /**
  * One live node per session, keyed by id.
@@ -510,7 +511,7 @@ function planReader(s, planPath) {
       // Options per call rather than `marked.setOptions`: this module shares one marked
       // instance with whatever else the page imports, and `breaks: true` would turn a plan
       // wrapped at 90 columns into a wall of forced line breaks on a 390px screen.
-      body.innerHTML = marked.parse(data.markdown, { gfm: true, breaks: false });
+      body.innerHTML = withBlankTargets(marked.parse(data.markdown, { gfm: true, breaks: false }));
     } catch (e) {
       loaded = false; // let a retry happen on the next open
       body.textContent = e.message;

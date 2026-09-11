@@ -15,6 +15,7 @@
  */
 
 import { marked } from '/vendor/marked.js';
+import { withBlankTargets } from '../anchor-target.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -323,7 +324,7 @@ function openBrief(t, chipState) {
       if (!ok) throw new Error(data.error || `Could not load the brief (${status}).`);
       const text = data.task?.body;
       if (text) {
-        body.innerHTML = marked.parse(text);
+        body.innerHTML = withBlankTargets(marked.parse(text));
       } else {
         body.textContent = 'No brief was recorded.';
         body.classList.add('is-faint');
@@ -366,7 +367,7 @@ function planReader(t) {
       const res = await fetch(`/api/team/plans/${encodeURIComponent(t.id)}`);
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data.text === 'string') {
-        md.innerHTML = marked.parse(data.text);
+        md.innerHTML = withBlankTargets(marked.parse(data.text));
         return;
       }
       loaded = false; // let the next open retry
