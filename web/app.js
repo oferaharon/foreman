@@ -3,6 +3,13 @@ import { withBlankTargets } from './anchor-target.js';
 import { isTrustGate, buildTrustNotice } from './trust-gate.js';
 import { step, alertText } from './notify.js';
 import { forgeMarkupFor } from './forge-mark.js';
+// The files modal's two halves that can be tested without a browser: which pill an entry
+// belongs under and how the endpoint's two arrays become one newest-first list
+// (`files-kinds.js`), and the glyph a link row wears (`link-mark.js`, markup strings for
+// `forge-mark.js`'s reason — and no favicons, ever, which would phone out to every host
+// the transcript names the moment the modal opens).
+import { FILE_KINDS, filesCounts, filesFor, filesItems } from './files-kinds.js';
+import { linkMarkupFor } from './link-mark.js';
 // The ghost-text auto-send flag, the TASKS filter, and the one definition of what that
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
@@ -4423,42 +4430,103 @@ function openLightbox(sessionId, images, start = 0) {
 }
 
 /**
- * Every image one session has produced, in order — a grid, and the promise that it is
+ * How much of a document a grid cell shows.
+ *
+ * The byte route serves a whole file — there is no range endpoint and there should not be
+ * one, since the address is a record rather than a path — so the cap is applied here,
+ * after the read. Both halves are needed: the line cap is what makes every cell the same
+ * shape, and the character cap is what stops one 68KB paragraph with no newline in it from
+ * being handed to the layout whole.
+ */
+const PREVIEW_LINES = 14;
+const PREVIEW_CHARS = 900;
+
+/** The first few lines of a document, capped both ways. */
+function previewText(raw) {
+  const out = String(raw ?? '').split('\n').slice(0, PREVIEW_LINES).join('\n');
+  return out.length > PREVIEW_CHARS ? out.slice(0, PREVIEW_CHARS) : out;
+}
+
+/** `example.com/owner/repo` — the address without the scheme, for a link with no title. */
+function hostAndPath(url) {
+  try {
+    const u = new URL(String(url));
+    const p = u.pathname === '/' ? '' : u.pathname.replace(/\/$/, '');
+    return `${u.host}${p}${u.search}`;
+  } catch {
+    return String(url || '');
+  }
+}
+
+/** Just the host, which is the name a link row is filed under. */
+function hostOf(url) {
+  try {
+    return new URL(String(url)).host;
+  } catch {
+    return String(url || '');
+  }
+}
+
+/**
+ * Everything one session has produced, in one grid — and the promise that it is
  * *everything*.
  *
- * That promise is why this fetches instead of reading `view.messages`. The panel only
- * ever holds a window of a transcript (the tailer backfills a byte range, `probe` samples
- * head and tail), so a gallery built from what is on screen would be a subset and would
- * look complete. `/api/sessions/:id/images` makes its own pass over the whole file —
- * ~10ms on a 2.9MB transcript, ~55ms on the largest one on this Mac at 26MB — which is
- * cheap enough to redo on every open, so nothing here is cached and there is nothing to
- * go stale as the session keeps talking.
+ * This is the old image gallery widened. That promise is why it fetches instead of reading
+ * `view.messages`: the panel only ever holds a window of a transcript (the tailer backfills
+ * a byte range, `probe` samples head and tail), so a grid built from what is on screen
+ * would be a subset and would look complete. `/api/sessions/:id/outputs` makes its own pass
+ * over the whole file — 66ms on a 25MB transcript — which is cheap enough to redo on every
+ * open, so nothing here is cached and there is nothing to go stale as the session keeps
+ * talking.
  *
- * Nothing in here measures anything during a paint, which is the one thing that would
- * make it need the room's `scrollTop`-across-the-repaint dance: it draws once, from a
- * grid that is already in the document, and never repaints under the reader.
+ * Three things about the shape, each of which has a rule behind it:
+ *
+ *   **The two arrays are merged here and nowhere else.** The endpoint answers `{outputs,
+ *   links}` and deliberately never merges them (`server/outputs.js`'s header: a file is
+ *   addressed into the transcript, a link is a string). The modal needs one list, so
+ *   `web/files-kinds.js` does that merge as a pure function — which is what makes the six
+ *   counts and each pill's membership testable in plain Node.
+ *
+ *   **A link is an anchor, never an overlay.** `target="_blank"` with
+ *   `rel="noopener noreferrer"` — `noreferrer` beyond the panel's usual `noopener` habit
+ *   because these are addresses from arbitrary third-party pages and there is no reason to
+ *   tell them where the click came from. The panel never fetches one, server-side or in the
+ *   browser, which is also why there are no favicons: one would phone out to every host the
+ *   transcript mentions the moment this opens.
+ *
+ *   **Nothing in here measures anything during a paint.** That is the one thing that would
+ *   make it need the room's `scrollTop`-across-the-repaint dance. A filter click replaces
+ *   the grid's children and lets the scroll go back to the top, which is what a reader
+ *   asking for a different set wants.
  */
-function openGallery(sessionId, sessionTitle) {
+function openFiles(sessionId, sessionTitle) {
   const back = document.createElement('div');
   back.className = 'modal-back';
   const box = document.createElement('div');
-  box.className = 'modal is-wide gallery';
+  box.className = 'modal is-wide files';
 
   const h = document.createElement('h2');
-  h.textContent = 'images';
+  h.textContent = 'files';
   box.append(h);
 
   const sub = document.createElement('div');
-  sub.className = 'gallery-sub';
+  sub.className = 'files-sub';
   sub.textContent = sessionTitle || '';
   box.append(sub);
 
+  // Hidden until there is something to filter: a row of six zeroes over an empty grid says
+  // nothing the empty state does not say better.
+  const filters = document.createElement('div');
+  filters.className = 'files-filters';
+  filters.hidden = true;
+  box.append(filters);
+
+  const note = document.createElement('div');
+  note.className = 'files-note';
+  note.textContent = 'reading the transcript…';
   const grid = document.createElement('div');
-  grid.className = 'gallery-grid';
-  const loading = document.createElement('div');
-  loading.className = 'gallery-note';
-  loading.textContent = 'reading the transcript…';
-  box.append(loading, grid);
+  grid.className = 'files-grid';
+  box.append(note, grid);
 
   const row = document.createElement('div');
   row.className = 'modal-row';
@@ -4468,7 +4536,44 @@ function openGallery(sessionId, sessionTitle) {
   row.append(done);
   box.append(row);
 
+  /*
+   * A document's bytes are fetched when its cell comes into view, which is the same trade
+   * `loading="lazy"` makes for a thumbnail one cell over — a session can hold ninety of
+   * these and the mean document here is 6.5KB. `IntersectionObserver` rather than the
+   * attribute because there is no attribute for a `fetch`; the `null` root is the viewport,
+   * which is correct even though the scroller is `.modal.is-wide`, and it is one less
+   * assumption about which ancestor scrolls. Where the API is missing the previews simply
+   * all load, which is the right failure: a slower open beats an empty grid.
+   */
+  const pending = new Map();
+  const io =
+    typeof IntersectionObserver === 'function'
+      ? new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (!e.isIntersecting) continue;
+              const load = pending.get(e.target);
+              pending.delete(e.target);
+              io.unobserve(e.target);
+              if (load) load();
+            }
+          },
+          { rootMargin: '300px' },
+        )
+      : null;
+
+  function lazily(el, load) {
+    if (!io) {
+      load();
+      return;
+    }
+    pending.set(el, load);
+    io.observe(el);
+  }
+
   const close = () => {
+    io?.disconnect();
+    pending.clear();
     back.remove();
     document.removeEventListener('keydown', onKey, true);
   };
@@ -4487,57 +4592,233 @@ function openGallery(sessionId, sessionTitle) {
   document.body.append(back);
   done.focus();
 
+  /** Where one output's bytes live — a record and an ordinal, never a path. */
+  const outputSrc = (item) =>
+    `/api/sessions/${encodeURIComponent(sessionId)}/output/${encodeURIComponent(item.uuid)}/${item.index}`;
+
+  /** The line under every cell: what it is called, and when it happened. */
+  function captionFor(nameText, item, gone) {
+    const cap = document.createElement('span');
+    cap.className = 'files-cap';
+    const name = document.createElement('span');
+    name.className = 'files-name';
+    name.textContent = nameText;
+    const when = document.createElement('span');
+    when.className = 'files-when';
+    if (gone) {
+      // The mock-up gives the right-hand slot to `gone` rather than drawing both: at a
+      // 10rem column there is room for one, and which of the two a reader needs is not a
+      // close call. The time is still on the cell's own tooltip.
+      when.classList.add('files-gone-tag');
+      when.textContent = 'gone';
+    } else {
+      when.textContent = item.ts ? agoText(Date.parse(item.ts)) : '';
+    }
+    cap.append(name, when);
+    return cap;
+  }
+
+  /** The facts a hover should give back, including the ones the caption had no room for. */
+  function titleFor(item, gone) {
+    const bits = [];
+    if (item.path) bits.push(item.path);
+    if (item.note) bits.push(item.note);
+    if (item.sidechain) bits.push('subagent');
+    if (gone) bits.push('no longer on disk');
+    if (item.ts) bits.push(agoText(Date.parse(item.ts)));
+    return bits.join(' · ');
+  }
+
+  function imageCell(item, images, at) {
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'files-cell files-image';
+    const gone = item.onDisk === false;
+    if (gone) cell.classList.add('is-gone');
+    const title = titleFor(item, gone);
+    if (title) cell.title = title;
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = outputSrc(item);
+    img.alt = item.note || '';
+    cell.append(img);
+
+    cell.append(captionFor(item.name || item.note || 'image', item, gone));
+    cell.onclick = () => openLightbox(sessionId, images, at);
+    return cell;
+  }
+
+  function docCell(item) {
+    // A `<button>` today with nothing behind it, deliberately: item 4b widens
+    // `openLightbox` into the preview overlay and wires the click here, and leaving the
+    // element as the thing that will carry the handler is one less diff then. `is-inert`
+    // is only the cursor, so nothing on screen offers a press that does nothing.
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'files-cell is-inert';
+    const gone = item.onDisk === false;
+    if (gone) cell.classList.add('is-gone');
+    const title = titleFor(item, gone);
+    if (title) cell.title = title;
+
+    const body = document.createElement('div');
+    body.className = 'files-doc';
+    cell.append(body);
+    cell.append(captionFor(item.name || 'file', item, gone));
+
+    const readable = item.kind === 'markdown' || item.kind === 'text';
+    // A `Write`'s bytes are in the transcript, so a document previews as written even
+    // after the file is deleted — `readOutput` never reads the disk for one. A
+    // `SendUserFile` attachment's bytes were only ever on disk, so a gone one has nothing
+    // left to show and says so instead of fetching a 404.
+    const lost = item.source === 'sendfile' && gone;
+
+    if (!readable) {
+      const name = document.createElement('b');
+      name.textContent = item.name || 'file';
+      body.append(name, document.createTextNode('\n\nno preview'));
+      return cell;
+    }
+    if (lost) {
+      const name = document.createElement('b');
+      name.textContent = item.name || 'file';
+      body.append(name, document.createTextNode('\n\nno longer on disk'));
+      return cell;
+    }
+
+    body.classList.add('is-waiting');
+    body.textContent = 'reading…';
+    lazily(cell, async () => {
+      try {
+        const res = await fetch(outputSrc(item));
+        if (!res.ok) throw new Error(`could not read it (${res.status})`);
+        const text = await res.text();
+        if (!body.isConnected) return;
+        body.classList.remove('is-waiting');
+        body.textContent = previewText(text);
+      } catch (err) {
+        if (!body.isConnected) return;
+        body.textContent = err.message;
+      }
+    });
+    return cell;
+  }
+
+  function linkCell(item) {
+    const cell = document.createElement('a');
+    cell.className = 'files-cell files-link';
+    cell.href = item.url;
+    cell.target = '_blank';
+    cell.rel = 'noopener noreferrer';
+    cell.title = item.url;
+
+    const body = document.createElement('div');
+    body.className = 'files-doc files-link-body';
+    const mark = document.createElement('span');
+    mark.className = 'files-link-mark';
+    // Our own constant markup, from `web/link-mark.js` — never anything off the wire.
+    mark.insertAdjacentHTML('beforeend', linkMarkupFor(item));
+    const title = document.createElement('span');
+    title.className = 'files-link-title';
+    title.textContent = item.title || hostAndPath(item.url);
+    body.append(mark, title);
+    if (item.short) {
+      const short = document.createElement('span');
+      short.className = 'files-link-short';
+      short.textContent = item.short;
+      body.append(short);
+    }
+    cell.append(body, captionFor(hostOf(item.url), item, false));
+    return cell;
+  }
+
   // Mounted first, filled second — a grid painted before it is in the document is the
   // room's oldest bug, and a lazily-loaded `<img>` in a detached node never asks for its
   // bytes at all.
   (async () => {
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/images`);
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/outputs`);
       const data = await res.json().catch(() => ({}));
       if (!back.isConnected) return; // closed while we were reading
       if (!res.ok) {
-        loading.textContent = data.error || `Could not read the transcript (${res.status}).`;
+        note.textContent = data.error || `Could not read the transcript (${res.status}).`;
         return;
       }
-      const images = Array.isArray(data.images) ? data.images : [];
-      if (!images.length) {
-        loading.textContent = data.note || 'No images in this conversation — nothing captured, nothing pasted.';
+
+      const items = filesItems(data);
+      const counts = filesCounts(items);
+      sub.textContent = [sessionTitle || '', String(counts.all)].filter(Boolean).join(' · ');
+
+      if (!items.length) {
+        note.remove();
+        const empty = document.createElement('div');
+        empty.className = 'files-empty';
+        const title = document.createElement('div');
+        title.className = 'empty-title';
+        title.textContent = 'nothing produced yet';
+        const p = document.createElement('p');
+        p.textContent =
+          data.note ||
+          'No files and no links in this conversation — nothing written, nothing captured, nothing cited.';
+        empty.append(title, p);
+        grid.append(empty);
         return;
       }
-      loading.textContent = `${images.length} image${images.length === 1 ? '' : 's'}, whole transcript`;
 
-      const frag = document.createDocumentFragment();
-      images.forEach((ref, i) => {
-        const cell = document.createElement('button');
-        cell.className = 'gallery-cell';
-        if (ref.note) cell.title = ref.note;
+      note.textContent = 'what this session produced, newest first — the whole transcript';
 
-        const img = document.createElement('img');
-        img.loading = 'lazy';
-        img.src = imageSrc(sessionId, ref);
-        img.alt = ref.note || '';
-        cell.append(img);
+      let selected = 'all';
+      const pills = new Map();
 
-        // Only recorded facts under a thumbnail. There is no filename to show: on these
-        // records `toolUseResult` is an array that duplicates the content blocks and
-        // carries no path, so a name would have to be invented and isn't.
-        const capBits = [];
-        if (ref.sidechain) capBits.push('subagent');
-        if (ref.toolUseId == null) capBits.push('pasted');
-        if (ref.ts) capBits.push(agoText(Date.parse(ref.ts)));
-        if (capBits.length) {
-          const cap = document.createElement('span');
-          cap.className = 'gallery-cap';
-          cap.textContent = capBits.join(' · ');
-          cell.append(cap);
+      function paint() {
+        io?.disconnect();
+        pending.clear();
+        const shown = filesFor(items, selected);
+        // The lightbox steps through the images the reader can currently see, which is
+        // the set that opened it — the same "the list is already in hand" the strip uses.
+        const images = shown.filter((it) => it.kind === 'image');
+        const frag = document.createDocumentFragment();
+        for (const item of shown) {
+          if (item.kind === 'link') frag.append(linkCell(item));
+          else if (item.kind === 'image') frag.append(imageCell(item, images, images.indexOf(item)));
+          else frag.append(docCell(item));
         }
+        grid.replaceChildren(frag);
+      }
 
-        cell.onclick = () => openLightbox(sessionId, images, i);
-        frag.append(cell);
-      });
-      grid.append(frag);
+      for (const kind of FILE_KINDS) {
+        const pill = document.createElement('button');
+        pill.type = 'button';
+        pill.className = 'files-pill';
+        pill.setAttribute('aria-pressed', String(kind === selected));
+        if (kind === selected) pill.classList.add('is-on');
+        const label = document.createElement('span');
+        label.textContent = kind;
+        const n = document.createElement('span');
+        n.className = 'files-pill-n';
+        n.textContent = String(counts[kind] ?? 0);
+        pill.append(label, n);
+        // A pill with nothing under it stays, greyed: the six are the vocabulary of what
+        // this modal can hold, and a row whose membership changed per session would make
+        // "there are no links" indistinguishable from "links are not a thing here".
+        if (!counts[kind]) pill.classList.add('is-empty');
+        pill.onclick = () => {
+          if (selected === kind) return;
+          selected = kind;
+          for (const [k, p] of pills) {
+            p.classList.toggle('is-on', k === kind);
+            p.setAttribute('aria-pressed', String(k === kind));
+          }
+          paint();
+        };
+        pills.set(kind, pill);
+        filters.append(pill);
+      }
+      filters.hidden = false;
+      paint();
     } catch (err) {
-      if (back.isConnected) loading.textContent = err.message;
+      if (back.isConnected) note.textContent = err.message;
     }
   })();
 }
@@ -9562,22 +9843,23 @@ function createPane(slot, host) {
     };
     meta.append(think);
 
-    // Every image the session has produced, which is a different set from the ones on
-    // screen — see `openGallery`. Always here rather than gated on there being any: the
-    // panel holds a window of the transcript and could not answer "are there any" without
-    // the scan the button itself performs, and a control that came and went on a fact the
-    // rail cannot see would be worse than one that sometimes says "none".
-    const gallery = document.createElement('button');
-    gallery.className = 'ghost-btn';
-    gallery.textContent = 'images';
-    gallery.title = 'Every image in this session — the whole transcript, not just what is loaded';
-    gallery.onclick = () => {
+    // Everything the session has produced for a human to read — images, documents and the
+    // links it exposed — which is a different set from what is on screen; see `openFiles`.
+    // Always here rather than gated on there being any: the panel holds a window of the
+    // transcript and could not answer "are there any" without the scan the button itself
+    // performs, and a control that came and went on a fact the rail cannot see would be
+    // worse than one that sometimes says "none".
+    const files = document.createElement('button');
+    files.className = 'ghost-btn';
+    files.textContent = 'files';
+    files.title = 'Every file and link this session produced — the whole transcript';
+    files.onclick = () => {
       // Resolved at click time, like the pin above: the header is patched across roster
       // updates, so `s` is a snapshot.
       const live = current();
-      if (live) openGallery(live.id, live.title);
+      if (live) openFiles(live.id, live.title);
     };
-    meta.append(gallery);
+    meta.append(files);
 
     // `interrupt` used to live here, four controls along from `thinking` and a whole
     // header away from the box you type into. It sits above the textarea now — see
