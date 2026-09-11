@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { FILE_KINDS, filesCounts, filesFor, filesItems, pillFor } from '../web/files-kinds.js';
+import { FILE_KINDS, filesCounts, filesFor, filesItems, kindLabel, pillFor } from '../web/files-kinds.js';
 
 /*
  * The filter row's arithmetic, run in plain Node — `web/files-kinds.js` is DOM-free for
@@ -212,4 +212,43 @@ test('the gone state rides on the entry and changes no pill', () => {
   assert.equal(bench.onDisk, false);
   assert.equal(pillFor(bench), 'text');
   assert.ok(filesFor(items, 'text').includes(bench));
+});
+
+/*
+ * `kindLabel` — the list view's kind column. The extension where the entry has a name, the
+ * two exceptions (an image, a link) where it can't.
+ */
+
+test('a document reads its own extension, not the pill it lives under', () => {
+  assert.equal(kindLabel(outputs[1]), 'md'); // notes.md — markdown pill
+  assert.equal(kindLabel(outputs[2]), 'txt'); // bench.txt — text pill
+  assert.equal(kindLabel(outputs[3]), 'pdf'); // summary.pdf — the `other` pill
+});
+
+test('an image has no path four times in five, so it always reads `img`', () => {
+  assert.equal(kindLabel(outputs[0]), 'img');
+  assert.equal(kindLabel({ kind: 'image', name: null, path: null }), 'img');
+});
+
+test('a link reads its own short form — `#N` for an issue or PR, `link` otherwise', () => {
+  assert.equal(kindLabel(links[0]), 'link'); // short: 'example.com'
+  assert.equal(kindLabel(links[1]), '#12'); // short: '#12'
+});
+
+test('gone changes nothing here either — the extension is still read off the name', () => {
+  const bench = filesItems(data).find((it) => it.name === 'bench.txt');
+  assert.equal(bench.onDisk, false);
+  assert.equal(kindLabel(bench), 'txt');
+});
+
+test('no name and no path falls back to the entry\'s own `kind`', () => {
+  assert.equal(kindLabel({ kind: 'other', name: null, path: null }), 'other');
+  assert.equal(kindLabel({ kind: 'text', name: '', path: '' }), 'text');
+});
+
+test('a name with no dot at all, or nothing at all, never throws', () => {
+  assert.equal(kindLabel({ kind: 'other', name: 'Makefile', path: null }), 'other');
+  assert.equal(kindLabel(null), '');
+  assert.equal(kindLabel(undefined), '');
+  assert.equal(kindLabel('x'), '');
 });
