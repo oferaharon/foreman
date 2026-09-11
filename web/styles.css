@@ -2803,6 +2803,54 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .msg-assistant a { color: var(--accent); }
 
+/*
+ * A path the session's own conversation names, drawn as something you can act on.
+ *
+ * Same colour as a link in the transcript and a **dotted** underline rather than a solid
+ * one, because it does something different: a web link leaves, and this opens a preview in
+ * place or brings Finder forward. A reader should be able to tell those apart before
+ * clicking, and the underline is the only slot left once the colour is spoken for.
+ *
+ * It is drawn only on paths that name one of this session's own outputs, so it is rare by
+ * construction — which is what makes a dotted rule affordable in running prose. It carries
+ * no `href`, so `cursor` has to be said.
+ */
+.path-link {
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
+  text-underline-offset: 0.18em;
+  overflow-wrap: anywhere;
+}
+
+.path-link:hover,
+.path-link:focus-visible {
+  text-decoration: underline solid;
+}
+
+/* A folder reveal that the server refused — the file has usually just been deleted. */
+.path-link.is-refused {
+  color: var(--decision);
+  text-decoration: none;
+}
+
+/*
+ * The same link inside a chip's summary, where the line is mono, muted and ellipsised.
+ * It must not break either of those: `inherit` keeps the chip's own truncation working
+ * (a coloured child with its own size would out-measure the flex track), and the accent
+ * arrives on hover instead, which is the register the rest of the chip already uses.
+ */
+.chip-summary .path-link {
+  color: inherit;
+  display: inline;
+}
+
+.chip:hover .chip-summary .path-link,
+.chip-summary .path-link:hover,
+.chip-summary .path-link:focus-visible {
+  color: var(--accent);
+}
+
 /* --- tool chips --- */
 
 .chip {

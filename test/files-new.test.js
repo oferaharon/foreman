@@ -225,7 +225,12 @@ test('the dot rides the head render beat and the message-arrival path, and nothi
   // …and live arrival, which is the only thing that ever sets the flag.
   const append = src.slice(src.indexOf('function appendMessages(messages) {'));
   const body = append.slice(0, append.indexOf('function renderMessage(m) {'));
-  assert.ok(body.includes('if (!view.filesNew && anyNewOutput(messages)) {'), 'set on arrival');
+  assert.ok(body.includes('if (anyNewOutput(messages)) {'), 'asked on arrival');
+  assert.ok(body.includes('if (!view.filesNew) {'), 'set once, on arrival');
+  // Item 8 hangs the path-link refetch off the same predicate rather than polling: the dot
+  // and the output set answer the same question, and a second signal for it would be a
+  // second thing to keep in step.
+  assert.ok(body.includes('refreshOutputs();'), 'and the output set is re-asked off the same signal');
   assert.ok(
     body.indexOf('anyNewOutput(messages)') < body.indexOf('if (!streamEl) return;'),
     'counted before anything about drawing is decided',
