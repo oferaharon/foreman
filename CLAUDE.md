@@ -991,6 +991,55 @@ transcripts on this Mac: 1027 image blocks, every one `source.type === 'base64'`
 decision to keep sidechain images (flagged, not filtered) is about the shape of the data
 rather than anything on disk.
 
+**The ordinal rule now has a second reader.** `outputBlocks` (`server/outputs.js`) is
+`imageBlocks` widened: an image keeps the exact ordinal `imageBlocks` gave it, and a
+`Write`-created document or a `SendUserFile` attachment is then numbered starting from the
+pre-filter image count — one index space per record, and still assigned **before** `accept()`
+filters anything, for `imageBlocks`'s own reason. `readOutput` and `revealablePath` are the
+two ends that walk it back to find bytes or a path; a third reader that disagreed about what
+index 1 means would hand back the wrong file rather than the wrong picture.
+
+**`Cache-Control: immutable` is right for a transcript record and wrong for a disk file.**
+`GET /api/sessions/:id/output/:uuid/:index` splits its caching on where the bytes came from:
+an `image` or a `write` entry's bytes are a transcript record, written once, so `immutable`
+is genuinely true. A `sendfile` attachment is bytes on disk that can be overwritten between
+two opens, so it gets `no-store` plus an `ETag` off `mtime`+`size` instead — the same header
+on both would pin the first version of a screenshot in the browser forever.
+
+**A `Write` of an existing path is `update`, not `create`.** `outputBlocks` keys on
+`toolUseResult.type === 'create'`, never on "does `filePath` exist" — 65 of 851 `Write`s on
+the measured Mac were overwrites, and keying on the weaker test puts them in a view whose
+whole promise is "what did this session make," and quietly admits `Edit`'s calls the day
+somebody reuses the condition. `parseCommandOutput`, `parseTaskNotice` and `peerOrigin` all
+learned the same lesson about a result's own field beating its sentence.
+
+**`.files-grid`/`.files-list` carry a `display` that beats `[hidden]`.** Both containers are
+always painted and only the `hidden` attribute decides which is on screen — a view toggle is
+a one-line repaint, never a second fetch — but each also carries an unconditional `display`
+rule, and an author rule always beats the `[hidden]` UA default regardless of specificity.
+Without `.files-grid[hidden], .files-list[hidden] { display: none; }` the losing container
+stayed on screen under the winning one. PR #138's bug; scoped to these two rather than a
+blanket `[hidden]` override, which would have to be proven safe against every other `hidden`
+toggle in the stylesheet.
+
+**The refresh must key on the `toolUseResult` record landing, not the tool call going out.**
+The files dot's own signal (`anyNewOutput`) answers on the tool *call* — right for a boolean
+— while `scanOutputs` needs the `toolUseResult` record, which is not in the transcript until
+the result lands. Refreshing on the `Write` frame ran the scan a beat early: it came back
+without the file, and the path in that sentence stayed plain until the pane was reopened.
+PR #142's fix re-asks at the one place a chip's own resolved-but-unlinked path can change its
+answer — where the matching `tool_result` patches the chip in place — which is also why it
+cannot loop: a refresh that finds nothing leaves the chip unlinked and nothing re-triggers
+until the next result.
+
+**`test/session-launch.test.js` greps the serialised MCP config for `PAT` and trips on any
+worktree whose path contains "path."** The test asserts `session-mcp.json` never mentions a
+credential-shaped word, checked against the whole serialised file — which also contains the
+absolute path to `mcp/foreman.js`, worktree directory included. `PAT` is a substring of
+`PATH`, so a worktree named along the lines of `agent/paths-and-files` fails a test about
+credentials for a reason that has nothing to do with one. Known, not fixed here — the fix is
+anchoring the assertion to the `env` block rather than the whole serialisation.
+
 **The gallery has to read the whole file, and nothing else here does.** The tailer
 backfills a byte window, `loadEarlier` walks another one back, `probe` deliberately samples
 head and tail and never the middle. Every one of those is right, and every one of them
@@ -1921,6 +1970,12 @@ unread badge nobody could clear. Reading one back is `claude --resume`'s job.
 
 **Split view** puts two sessions side by side, which is why everything per-session lives
 inside the `createPane` factory rather than in module scope.
+
+**The Files view** (`server/outputs.js`, the `files` header button) widens the old image
+gallery into everything a session produced for a human to read — images, `Write`-created
+documents, `SendUserFile` attachments, and the links it fetched, cited or created — plus a
+path link in the conversation, bounded to that same set. `docs/panel.md`'s "Files a session
+produced" has the shape; the per-turn image strip and its byte route are untouched.
 
 **Pinning** (`server/pins.js`, pane-keyed and persisted like the queue) adds a `pinned` group
 above the inbox. Pinned rows come *out* of the inbox rather than moving into it — a pin is a

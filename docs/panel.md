@@ -420,42 +420,102 @@ refused with a message saying what is accepted.
 > from images/ for this session". A second folder would mean a second prompt for the same
 > gesture. Sessions in auto mode don't ask.
 
-### Images a session captured
+### Files a session produced
 
-The other direction: images that come *back*. A screenshot a tool took, or one you pasted
-into the terminal, is in the transcript as base64 — and until now the panel threw both
-away, rendering a captured screenshot as the literal text `[image]` and dropping a
-pasted-only message entirely.
+A screenshot a tool took, a report Claude wrote to disk, a file it handed you directly, a
+page it went and read — all four used to be dead text in the transcript or, for a captured
+image, thrown away outright. The `files` button in the pane header collects all of them,
+plus the URLs the session exposed along the way.
 
-They show up in two places.
+**What gets listed.** An item makes the cut when the session either **handed it to you** (a
+`SendUserFile` call — whatever it attached, on the tool's own word, images included) or
+**created it**: a `Write` whose own result says `type: 'create'` — never an edit, and never
+an overwrite of a path that already existed — to one of a fixed set of human-facing
+extensions, plus every image block the per-turn strip already shows. The extension set
+lives in `web/output-exts.js`, shared by the server's own filter and the files button's
+new-item dot so both sides ask the same question about the same path; it isn't reproduced
+here because a second copy is exactly the kind of thing that drifts. Source — `.js`, `.py`,
+everything Claude *edits* rather than hands you — is excluded by that list with no
+cleverness in it, and `.html` is excluded outright: a `Write` of one never lists, mock-up or
+not, though a `SendUserFile` `.html` attachment still lists on the tool's own word.
 
-**A strip across the turn.** Thumbnails sit at the point in the timeline where the images
-landed — under the tool chip, not inside its collapsed body, and under your own bubble for
-one you pasted. Click one for the full-size view: click anywhere or `Esc` to close, `←`/`→`
-to step through that turn's set. The strip scrolls sideways inside itself, so a turn that
-captured eight screenshots never makes the conversation scroll.
+**Six pills** sit along the top — `all`, `images`, `markdown`, `text`, `links`, `other` —
+each with a live count, and `all` is always the sum of the other five. **Grid or list**,
+remembered per browser and independent of the filter: list adds a kind column reading the
+item's own extension (`pdf`, `svg`, `#540` for a link) rather than the pill it lives under,
+because a column of "other, other, other" says nothing the pill row hasn't already.
 
-**A gallery.** `images` in the pane header opens every image the session has produced, in
-order, each captioned with when it arrived and marked `pasted` or `subagent` where that is
-what it was. Clicking a thumbnail opens the same full-size view.
+**The preview overlay** is the same lightbox the per-turn strip already used, widened to
+open on a document too — same `Esc`, same `←`/`→` stepping through whatever the current
+filter shows. Markdown renders; text and CSV show as is; an **`.html` or `.svg` document is
+always shown as text, never rendered** — no `innerHTML`, no `<img>`, no `iframe`. That's a
+document, not an image block: a screenshot that happens to be an SVG still shows as a
+picture, only a *file* named `.html` or `.svg` is forced to text, and only the source tells
+the two apart. Everything the media table has never heard of — a `.pdf`, a `.wav` a tool
+handed over — gets a name and *no preview* rather than a failed fetch. A link never opens
+this overlay at all; it's a plain anchor in the grid or list.
 
-The gallery is the whole file, and that is the point. Everything else in the panel reads a
-*window* of a transcript — the tailer backfills from the end, `probe` samples head and tail
-— so a gallery built from what is on screen would be a subset and would look complete. It
-makes its own streaming pass instead: ~10ms on a 2.9MB transcript, ~55ms on the largest one
-on this machine at 26MB, cheap enough to redo on every open rather than cache.
+**Two actions, copy path and reveal in Finder, drawn only when the item can answer them.**
+`copy path` needs a path; `reveal in Finder` needs a path *and* a file still at the end of
+it, so it's simply absent — not greyed out — on a pathless image (most screenshots have no
+path at all) or on a file that's gone. There is deliberately no `open` button: `open <file>`
+runs the file's default handler, which is exactly how this panel's own launcher gets a
+Terminal window, and this panel is bound wide with no authentication. Reveal runs
+`open -R`, which only selects the file in Finder and launches nothing.
 
-Bytes never travel over the websocket. A transcript frame names an image —
-`{uuid, index, media}`, the ordinal it was walked out under — and the browser fetches it
-from `/api/sessions/:id/image/:uuid/:index`, which is immutable and says so, so each
-thumbnail is fetched once however often the strip repaints. One screenshot is ~60KB and
-nine of them were 19% of one transcript; inlining that would have made the socket carry it
-again on every subscribe.
+**`gone`.** On the transcripts this was measured against, roughly two in five listed files
+no longer exist on disk — mostly `SendUserFile` screenshots saved under a session's own
+scratch folder, which gets purged. A `Write`-created document still previews after that,
+marked *as written — the file is no longer on disk*: its full text was already sitting in
+the transcript record, so showing it needs no disk read at all. A `SendUserFile` attachment
+has no such fallback — its bytes were only ever on disk — so a gone one says *no longer on
+disk, nothing to preview* instead of failing a fetch.
 
-No filename is shown, because there isn't one: on these records `toolUseResult` is an array
-that duplicates the content blocks and carries no path. The caption under a gallery
-thumbnail is the text that came with the image in its own record — `Successfully captured
-screenshot (1274x952, jpeg)`, or your own words beside a pasted one.
+**Links** — the fifth pill — are every URL the session **fetched** (a `WebFetch` call),
+**cited** (a markdown link or a bare URL in its own prose, titled where the transcript gave
+it one) or **created** (an issue or pull-request URL surfacing in a tool result: `gh`
+output, a forge MCP reply). Where the same address shows up more than once, the strongest
+source wins — created over fetched over cited — and the earliest sighting dates the row.
+Deliberately excluded is everything else a tool result carries: a single `WebSearch` can
+return dozens of URLs nobody read, so counting those would turn a short, useful list into a
+dump. An issue/PR link gets the same `#N` short form the merge chips already use; everything
+else gets its host. No favicons — one fetched by the browser would phone out to every host
+the transcript mentions the moment the modal opens, and the panel doesn't fetch anything
+server-side either. Clicking opens a new tab (`noopener noreferrer`) rather than navigating
+the panel itself away, which would otherwise drop every open subscription in both panes.
+
+**A dot** on the `files` header button says something landed in the set since this pane last
+opened it — cleared the moment you click through, per browser, nothing persisted.
+
+**The bound, stated once.** Every route this feature touches is addressed by `{uuid, index}`
+into *this session's own* transcript, never by a path. The browser cannot ask for a file by
+name: the byte route and both reveal routes re-read the record that address names and take
+whatever path — if any — is written there. A uuid from another session, or one that names
+nothing, misses exactly like a fabricated one; there's no second check to loosen, because
+the address space itself is the bound.
+
+### Paths in the conversation
+
+A path Claude writes or mentions becomes a link — dotted underline, no destination to leave
+the panel for — when it names one of **this session's own** files above, or the folder one
+of them sits in. Nothing wider: a source file the session edited, a repo's own docs it
+merely read, anything outside that list stays plain text, checked against the same set the
+Files view itself uses rather than guessed from the shape of the text alone. It runs over
+prose and over inline code — backticks are where a path is most often actually written — but
+never inside a fenced code block, which is content being quoted rather than a mention.
+Clicking a file link opens the preview overlay in place; clicking a folder link reveals that
+folder in Finder, through the same bounded record address as everything else here.
+
+**Three things this deliberately doesn't do, worth knowing rather than discovering.** A file
+created by a Bash redirect or heredoc (`cat > report.md <<'EOF'`) never lists — only `Write`
+is tracked, because Bash's own targets turned out too mixed with bench plumbing to filter
+reliably. A path with a space in it is never linked in conversation — there's no reliable way
+to tell where it ends in running prose. And a URL the session only ever saw inside a tool
+result — anything but an issue or pull-request link — never becomes a link, even when it's
+exactly the address you'd want an hour later.
+
+**Phone.** None of this has reached `/m/` yet — no `files` button, no preview, no path
+links. It's the next wave, not an oversight.
 
 ### Drafts
 
