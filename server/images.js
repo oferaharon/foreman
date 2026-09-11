@@ -39,8 +39,11 @@ function lines(file) {
  * and none is invented. Same record, no cross-record join — a caption that needed the
  * `tool_use` it answers would mean parsing every assistant record in the file for a
  * nicety.
+ *
+ * Exported for `outputs.js`, which lists the same images under a wider view: one spelling
+ * of a caption, or the gallery and the Files view disagree about the same picture.
  */
-function noteFor(rec, toolUseId) {
+export function noteFor(rec, toolUseId) {
   const content = rec?.message?.content;
   if (!Array.isArray(content)) return null;
 
