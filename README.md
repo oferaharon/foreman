@@ -72,7 +72,7 @@ it rather than appearing twice, so it empties as you deal with it.
 </td>
 <td width="50%">
 
-<img src="docs/images/rail-inbox.png" alt="The whole rail top to bottom: the Foreman header with its two rate-limit gauges, the buttons row, and the live/busy/waiting/unread counts; a pinned team lead with two workers nested under it, each carrying an unread badge; two collapsed groups; then the footer with the peer-messages row, the ROOMS band showing one open room and an archived fold, and the GitHub/version line." width="100%" />
+<img src="docs/images/rail-inbox.png" alt="The whole rail top to bottom: the Foreman header and its live/busy/waiting/unread counts; a pinned session on the accent; a Needs you group holding a permission prompt and an unread reply; an open group wearing its own colour as a spine, with a two-session folder heading showing its count, a folded single-session row reading as a path and a leaf, and the selected row at full hue; a collapsed group showing its dot and a summary line counting working sessions and tasks together; a folded single-session row standing on its own at the foot; then the footer with the peer-messages row and the ROOMS band." width="100%" />
 
 </td>
 </tr>
