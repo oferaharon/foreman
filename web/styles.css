@@ -1141,6 +1141,14 @@ body.row-dragging * { cursor: row-resize !important; }
   border-radius: 3px;
 }
 
+/* An author `display` beats the `[hidden]` UA default at any specificity, so a filtered-out
+   item stays on screen under the ones that matched — **PR #138's bug, one popover over**,
+   where `.files-grid`/`.files-list` did exactly this. Scoped to this selector rather than a
+   blanket `[hidden] { display: none }`, for #138's own reason: a blanket override would have
+   to be proven safe against every other `hidden` toggle in this stylesheet. Caught on the
+   bench by reading `offsetHeight` back off a hidden item — 45px — and not by eye. */
+.menu-item[hidden] { display: none; }
+
 .menu-item:hover { background: var(--surface-sunk); color: var(--ink); }
 .menu-item.danger { color: var(--decision); }
 .menu-item.armed { background: var(--decision); color: var(--surface); }

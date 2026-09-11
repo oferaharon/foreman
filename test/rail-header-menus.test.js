@@ -297,6 +297,28 @@ test('the new CSS is tokens only — no hex anywhere in it', () => {
   assert.ok(!/--group-\d/.test(styles), 'the ring lives in web/tokens.css, not the stylesheet');
 });
 
+test('a filtered-out item is actually off the screen, not merely marked hidden', () => {
+  /*
+   * `.menu-item` carries an unconditional `display: flex`, and an author rule beats the
+   * `[hidden]` UA default at any specificity — so without this the filter marks items hidden
+   * and every one of them stays exactly where it was. PR #138's bug one popover over
+   * (`.files-grid`/`.files-list`), and it was caught here the same way: by reading a hidden
+   * item's `offsetHeight` back off the bench — 45px — rather than by eye.
+   *
+   * Scoped to `.menu-item` rather than a blanket `[hidden] { display: none }`, which is
+   * #138's own reasoning: a blanket override would have to be proven safe against every
+   * other `hidden` toggle in this stylesheet.
+   */
+  assert.match(rule('.menu-item'), /display: flex;/, 'the author rule that makes this necessary');
+  assert.match(rule('.menu-item[hidden]'), /display: none;/);
+  const flex = styles.indexOf('.menu-item {');
+  assert.ok(styles.indexOf('.menu-item[hidden] {') > flex, 'and it is declared after it');
+  assert.ok(
+    !/^\[hidden\]\s*\{/m.test(styles),
+    'never a blanket override — #138 scoped its fix to the two containers that needed it',
+  );
+});
+
 test('a swatch is a circle, and the current one is ringed rather than ticked', () => {
   // A tick drawn over a colour hides the colour it is about.
   assert.match(rule('.menu-swatch'), /border-radius: 50%;/);
