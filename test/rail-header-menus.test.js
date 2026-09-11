@@ -283,9 +283,17 @@ test('the header’s pair is visible at rest, and full on hover or focus-within'
 });
 
 test('the reserved column is unchanged, so the second control costs width and not height', () => {
-  // `.folder-label.in-group`'s sticky `top` is hand-measured against `.shelf-label`'s height.
+  // What this pins is the *column*: `.label-menu` reserves its width while invisible, so a
+  // second control on the heading adds no height and the sticky offset below it does not
+  // move for this feature's sake.
+  //
+  // It used to assert `top: 2.5rem` beside it. That number has since moved — the header's
+  // own padding was tightened and the offset followed — and pinning it here would have made
+  // this test fail for a reason that has nothing to do with the pair. The arithmetic that
+  // keeps the offset honest against the header's height lives in
+  // `test/rail-header-tighten.test.js`, which is where a change to either padding should
+  // fail.
   assert.match(rule('.label-menu'), /width: 1\.1rem;/);
-  assert.match(rule('.folder-label.in-group'), /top: 2\.5rem;/);
 });
 
 test('the new CSS is tokens only — no hex anywhere in it', () => {
