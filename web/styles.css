@@ -1086,7 +1086,28 @@ body.row-dragging * { cursor: row-resize !important; }
   transition: opacity 0.12s ease, color 0.12s ease;
 }
 
+/* …except on a group heading, where the two controls — `+` to file a folder in here, `⋯` to
+   rename, recolour or delete — are permanently visible at 40%.
+ *
+ * The folder heading's `▾` stays hidden and is right to: it files the folder you are already
+ * pointing at, so hovering it is the gesture. A group's `+` is the other way round — you
+ * reach for it *because* you know the group and not the folder, and a control you can only
+ * find by hovering the thing you were not looking for is a control nobody finds. 40% is the
+ * quiet end of visible: enough to be there, not enough that a rail of nine groups reads as
+ * eighteen glyphs.
+ *
+ * `focus-within` on the heading rather than `:focus-visible` on the button alone, so tabbing
+ * to either control brings **both** up — the pair is one affordance and half of it surfacing
+ * reads as a glitch. The whole thing is an opacity change: `.label-menu` reserves its 1.1rem
+ * while invisible, so the second control costs width and not height, and `.folder-label
+ * .in-group`'s hand-measured 2.5rem sticky offset does not move. Measured on the bench
+ * before and after: the heading is 49px tall either way (48px for the first, which has no
+ * top rule).
+ */
+.shelf-label .label-menu { opacity: 0.4; }
+
 .group-label:hover .label-menu,
+.shelf-label:focus-within .label-menu,
 .label-menu:focus-visible { opacity: 1; }
 .label-menu:hover { color: var(--accent); }
 
@@ -1149,7 +1170,59 @@ body.row-dragging * { cursor: row-resize !important; }
   padding: 0.3rem 0.4rem;
 }
 
-.menu-form input:focus { outline: none; border-color: var(--accent); }
+.menu-form input:focus,
+.menu-filter:focus { outline: none; border-color: var(--accent); }
+
+/* The box at the top of a long menu that narrows what is under it. Same box as the rename
+   field one rule up, deliberately — it is the same gesture in the same popover, and two
+   spellings of one input is how a menu ends up with two different-looking text boxes in it.
+   It is not in a form and nothing about it submits; see `openMenu` for why. */
+.menu-filter {
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 0.3rem 0.4rem;
+}
+
+/* The group ring, offered whole: one row of circles in the `⋯` menu, every slot the rail can
+   wear. Ten at this size come to about 11.2rem, which sits inside the menu's 16rem ceiling
+   without wrapping — `flex-wrap` is there for the day the ring grows, not for today. */
+.menu-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0.35rem 0.4rem 0.45rem;
+}
+
+/* A real button per slot, because a circle has no text: ten `div`s here would be ten
+   controls a keyboard cannot reach and a screen reader cannot name. The hue arrives as `--h`
+   set inline from `hueVar`, so no `--group-N` is ever spelled outside `web/group-hue.js`. */
+.menu-swatch {
+  flex: none;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: var(--h);
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.menu-swatch:hover { transform: scale(1.15); }
+
+/* The one it is wearing, ringed rather than ticked — a tick over a colour hides the colour.
+   Two shadows: the inner one is the menu's own ground, so the ring reads as a gap rather
+   than as a second colour touching the swatch. */
+.menu-swatch.is-current,
+.menu-swatch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--ink-muted);
+}
+
+.menu-swatch:focus-visible { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--accent); }
 
 .menu-err {
   font-family: var(--mono);
