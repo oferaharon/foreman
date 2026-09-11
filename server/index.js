@@ -4121,6 +4121,10 @@ app.patch('/api/groups/:id', (req, res) => {
     if (req.body?.collapsed !== undefined) {
       group = groups.setCollapsed(req.params.id, req.body.collapsed);
     }
+    /* The `⋯` menu's swatch row. A slot outside the ring throws, which is the 400 below —
+     * `setColour` is the only validator, so the route cannot disagree with the store about
+     * what a slot is. */
+    if (req.body?.colour !== undefined) group = groups.setColour(req.params.id, req.body.colour);
     if (!group) return res.status(404).json({ error: 'No such group.' });
     broadcastRoster();
     res.json({ ok: true, group, groups: groups.list() });

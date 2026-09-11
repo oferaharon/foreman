@@ -151,6 +151,48 @@
   --peer-5: #005690;
   --peer-6: #6b00e5;
   --peer-7: #a80046;
+
+  /* The rail's group ring — a **spine**, the 3px bar down the left edge of an open group's
+     block, one slot per group (`web/group-hue.js` hands them out, `server/groups.js` stores
+     the number). Ten slots: eight groups exist on the machine this was built on, so the
+     room's seven-hue ring already wraps.
+
+     Measured, not picked — and measured against a **different rule and a different ground**
+     from `--peer-N` above, which is why it is its own ring rather than a reuse of that one.
+     A peer pill is *text* on `--ground` and was held to 7:1; a spine is a **non-text
+     graphic** that sits on `--surface`, on `--shelf` inside an open group, and on
+     `--surface-sunk` under the cursor, so the rule is WCAG 1.4.11 and the target is **3:1
+     against all three**. The reservations carry over and matter more here, because a spine
+     sits inches from the status dots: nothing in the ring may land near `--working`,
+     `--decision`, `--accent`, `--idle` or `--mode-edits`, and pairwise separation inside the
+     ring is the whole point of having one.
+
+     Light theme (`--surface` #ffffff, `--shelf` #f6f6f6, `--surface-sunk` #eeeef4):
+
+       contrast vs surface   3.47 – 7.49
+       contrast vs shelf     3.21 – 6.93
+       contrast vs sunk      3.00 – 6.48   ← the binding ground here: the darkest of the three
+
+     Minimum pairwise ΔE2000 within the ring: **20.49**. Minimum ΔE2000 from any ring member
+     to any of `--working` / `--decision` / `--accent` / `--idle` / `--mode-edits`: **12.50**
+     — the same floor the peer ring cleared at 12.79, with three more slots in the ring.
+
+     **The order of the ten is itself a measurement.** Slots are handed out 1, 2, 3… in
+     creation order (`assignColour`: least-used, ties by lowest index), so *consecutive*
+     slots are the pairs a real rail draws next to each other — and the ring is ordered to
+     maximise the smallest consecutive gap rather than listed by hue. Minimum ΔE2000 between
+     consecutive slots: **48.33** here, **50.22** dark. Re-ordering these lines by eye would
+     throw that away silently, because every other number in this comment would still hold. */
+  --group-1: #7d4813;
+  --group-2: #256dff;
+  --group-3: #0a6230;
+  --group-4: #ff2d89;
+  --group-5: #009a8a;
+  --group-6: #f55025;
+  --group-7: #0795bc;
+  --group-8: #a08800;
+  --group-9: #9219aa;
+  --group-10: #379e00;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -187,6 +229,29 @@
     --peer-5: #1da5ff;
     --peer-6: #bd84ff;
     --peer-7: #ff6aa8;
+
+    /* Same ring, dark values — measured against this theme's own grounds (`--surface`
+       #191a22, `--shelf` #21222a, `--surface-sunk` #14151c) and this theme's status/accent
+       colours. See the light block above for how the ring was chosen and why it is not
+       `--peer-N`.
+
+         contrast vs surface   4.01 – 9.05
+         contrast vs shelf     3.66 – 8.27   ← the binding ground here: the lightest of the three
+         contrast vs sunk      4.21 – 9.51
+
+       Minimum pairwise ΔE2000 within the ring: **25.13**. Minimum ΔE2000 to
+       `--working` / `--decision` / `--accent` / `--idle` / `--mode-edits`: **12.59**.
+       Minimum ΔE2000 between consecutive slots: **50.22**. */
+    --group-1: #ae6a06;
+    --group-2: #2972f8;
+    --group-3: #008c4c;
+    --group-4: #e80193;
+    --group-5: #00d2bd;
+    --group-6: #ea2b2b;
+    --group-7: #0abfff;
+    --group-8: #ddb800;
+    --group-9: #d399ff;
+    --group-10: #79d12d;
   }
 }
 
@@ -217,4 +282,18 @@
   --peer-5: #1da5ff;
   --peer-6: #bd84ff;
   --peer-7: #ff6aa8;
+
+  /* Same ring and same numbers as the `prefers-color-scheme` block above — the
+     explicit-choice mirror of it, so `data-theme="dark"` wins over the media query the
+     same way every other token here does. */
+  --group-1: #ae6a06;
+  --group-2: #2972f8;
+  --group-3: #008c4c;
+  --group-4: #e80193;
+  --group-5: #00d2bd;
+  --group-6: #ea2b2b;
+  --group-7: #0abfff;
+  --group-8: #ddb800;
+  --group-9: #d399ff;
+  --group-10: #79d12d;
 }
