@@ -124,6 +124,7 @@ import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
 import { findFiles } from './files.js';
 import { scanImages, readImage } from './images.js';
+import { scanOutputs, readOutput, OUTPUT_MEDIA } from './outputs.js';
 import { IMAGE_MEDIA } from './normalize.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1209,6 +1210,108 @@ app.get('/api/sessions/:id/image/:uuid/:index', async (req, res) => {
     if (!found || !IMAGE_MEDIA.has(found.media)) return res.status(404).end();
     res.set('Content-Type', found.media);
     res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('Content-Length', String(found.buffer.length));
+    res.end(found.buffer);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+/**
+ * Everything this session produced for a human to read, oldest first — files and links,
+ * refs only — plus one boolean the scan deliberately does not carry.
+ *
+ * `images` above is this route's ancestor and the same thing is load-bearing here: the
+ * panel never loads a transcript whole (the tailer backfills a byte window, `probe`
+ * samples head and tail), so a Files view built from `view.messages` would be a subset and
+ * would look complete. `scanOutputs` makes its own streaming pass — measured by the
+ * planner at **60.5 ms on the largest transcript here (26 MB)** and **2.5 ms on a typical
+ * 0.5 MB one**. Cheap enough to redo on every open, so nothing is cached and there is
+ * nothing to invalidate as the file grows.
+ *
+ * `onDisk` is added here rather than in the scan, one `stat` per pathed entry (median 2
+ * per session, max 35 — free). A `stat` is a disk read and the scan is a transcript read;
+ * folding them together would make a pure function impure for one boolean. It is **`null`,
+ * not `false`, for a pathless entry** — 76% of the images here have no path at all, and
+ * "there is no file to look for" is a different answer from "the file is gone". A client
+ * that read a missing key as falsy would draw three images in four as deleted.
+ *
+ * Note also what the *files* half deliberately still answers when `onDisk` is false: a
+ * `write` entry's bytes are in the transcript, so a document that has since been deleted
+ * or rewritten still previews as written. Only a `sendfile` attachment truly loses its
+ * bytes with the file.
+ */
+app.get('/api/sessions/:id/outputs', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Unknown session.' });
+  if (!session.transcriptPath) {
+    return res.json({ outputs: [], links: [], note: 'No transcript yet — the session has not spoken.' });
+  }
+  try {
+    const { outputs, links, scan } = await scanOutputs(session.transcriptPath);
+    const withDisk = await Promise.all(
+      outputs.map(async (o) => {
+        if (!o.path) return { ...o, onDisk: null };
+        try {
+          const st = await fsp.stat(o.path);
+          return { ...o, onDisk: st.isFile() };
+        } catch {
+          return { ...o, onDisk: false };
+        }
+      }),
+    );
+    res.json({ outputs: withDisk, links, scan });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * One output's bytes, addressed by the record it lives in and its ordinal within it.
+ *
+ * **There is no path parameter, and there must never be one.** The browser sends back the
+ * same `{uuid, index}` the list handed it and the server re-reads *this session's own*
+ * transcript to find out what that names. A LAN peer cannot name a file, only a record —
+ * and the records were written by Claude, not by the caller. That is the whole bound this
+ * feature rests on, and it is a property of the address space rather than a check that
+ * could be loosened: the prior art this was measured against accepts any absolute path on
+ * its read, open and reveal routes.
+ *
+ * `:index` is optional and defaults to 0, because a `Write`-created document is the only
+ * output its record holds while a tool result can hold several images. One shape, one
+ * enumerator (`outputBlocks`), both ends.
+ *
+ * Caching splits on where the bytes came from, and backwards is a stale screenshot shown
+ * forever: a transcript record is written once and never changes, so `immutable` is
+ * genuinely true for an `image` or a `write`; a `sendfile` attachment on disk can be
+ * overwritten between two opens, so it gets `no-store` and an `ETag` off mtime+size.
+ *
+ * The `Content-Type` comes only through `OUTPUT_MEDIA`, so a `media_type` written into a
+ * transcript by some tool cannot be reflected into a response header — `readOutput` has
+ * already refused anything outside that table, which makes the check here belt to its
+ * braces. `nosniff` and the sandbox CSP are for the one member of the set that can carry
+ * script: an `<img>` never runs an SVG's, but a browser navigated straight at this URL
+ * would, on the panel's own origin.
+ */
+app.get('/api/sessions/:id/output/:uuid/:index?', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session?.transcriptPath) return res.status(404).end();
+  const index = req.params.index === undefined ? 0 : Number(req.params.index);
+  try {
+    const found = await readOutput(session.transcriptPath, req.params.uuid, index);
+    if (!found || !OUTPUT_MEDIA.has(found.media)) return res.status(404).end();
+
+    res.set('Content-Type', found.media);
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('Content-Security-Policy', "sandbox; default-src 'none'");
+    if (found.source === 'sendfile') {
+      const etag = `W/"${Math.round(found.mtimeMs)}-${found.size}"`;
+      res.set('ETag', etag);
+      res.set('Cache-Control', 'no-store');
+      if (req.headers['if-none-match'] === etag) return res.status(304).end();
+    } else {
+      res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    }
     res.set('Content-Length', String(found.buffer.length));
     res.end(found.buffer);
   } catch {
