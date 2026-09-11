@@ -22,6 +22,11 @@ import {
   previewKindFor,
   previewLost,
 } from './files-preview.js';
+// …and whether an arriving message just put something in that modal, for the dot on the
+// `files` button. The predicate is DOM-free so a node test can hold its six witnesses, and
+// the extension list it asks about is the one `server/outputs.js` filters a `Write` with —
+// imported from `web/output-exts.js` by both, rather than spelled twice.
+import { anyNewOutput } from './files-new.js';
 // The ghost-text auto-send flag, the TASKS filter, and the one definition of what that
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
@@ -5368,6 +5373,26 @@ function createPane(slot, host) {
     error: null,
     lastMarked: null, // newest timestamp we have reported as read
 
+    /*
+     * Has anything landed in this session's files set since this pane last opened the
+     * modal? The `files` button's dot, and the unread badge's model rather than a server
+     * fact: per browser, in memory, nothing persisted, cleared by looking.
+     *
+     * **In the factory** for the reason everything per-session in here is — split view
+     * means two panes at once, and module scope is where the second one gets caught. The
+     * two panes count independently even when they hold the same session, because the
+     * question is about a reader's attention and there are two readers' worth of screen.
+     *
+     * A boolean and not a count, for `web/files-new.js`'s reason: the dot is the whole of
+     * what is drawn, and a number could not be made to agree with what the modal's own
+     * whole-file scan lists.
+     *
+     * It starts false and is only ever set by `appendMessages` — a live arrival. A
+     * `transcript` frame replaces `messages` wholesale and counts nothing, which is what
+     * makes a pane's first load zero: history is not new.
+     */
+    filesNew: false,
+
     /* ------------------------------------------------- the shared room --- */
 
     /*
@@ -5699,6 +5724,11 @@ function createPane(slot, host) {
     view.hasEarlier = false;
     view.error = null;
     view.lastMarked = null;
+    // A different session's outputs are a different question, and what is about to arrive
+    // over the wire is that session's *history* — not new. One reset here covers every way
+    // a pane changes hands: the other three (`openShared`, `openGroupRoom`, `close`) stop
+    // the pane being a session at all, and it only ever becomes one again through here.
+    view.filesNew = false;
     chipNodes.clear();
     send({ type: 'subscribe', sessionId: id, slot });
     renderRail();
@@ -10215,15 +10245,27 @@ function createPane(slot, host) {
     // performs, and a control that came and went on a fact the rail cannot see would be
     // worse than one that sometimes says "none".
     const files = document.createElement('button');
-    files.className = 'ghost-btn';
-    files.textContent = 'files';
-    files.title = 'Every file and link this session produced — the whole transcript';
+    // `head-files`, in the header's own namespace beside `head-status` and `head-dialog`,
+    // rather than a `files-*` name: those belong to the modal, and the one thing this class
+    // is for is letting `paintFilesBtn` find this node again after a repaint.
+    files.className = 'ghost-btn head-files';
+    // The label is a text node of its own so the dot can be a sibling inside the button.
+    // Set through `textContent` on the span and never on the button, or the next paint
+    // wipes the dot it is supposed to be drawing beside.
+    files.append(text('files'));
     files.onclick = () => {
       // Resolved at click time, like the pin above: the header is patched across roster
       // updates, so `s` is a snapshot.
       const live = current();
-      if (live) openFiles(live.id, live.title);
+      if (!live) return;
+      // Cleared by *looking*, which is the whole of what the dot promises. Before the
+      // modal's own fetch and not after it: the reader has asked, and a dot that survived
+      // the press until a fetch came back would read as a press that did nothing.
+      view.filesNew = false;
+      paintFilesBtn(files);
+      openFiles(live.id, live.title);
     };
+    paintFilesBtn(files);
     meta.append(files);
 
     // `interrupt` used to live here, four controls along from `thinking` and a whole
@@ -10317,6 +10359,47 @@ function createPane(slot, host) {
    * So the answer is re-asked wherever the count can have moved — `openSplit`, `closePane`
    * and `openSharedRoom` all already call `renderHead` on every pane for this kind of reason.
    */
+  /**
+   * The dot on the `files` button: is there anything in this session's files set this pane
+   * has not looked at?
+   *
+   * A dot and not a number, and the choice is the maintainer's own words — "a small
+   * indicator" — held up against what a number could honestly say. Three reasons it stays a
+   * dot. The count the browser can compute is not the count the modal shows: this pane sees
+   * only what arrived while it was watching, the modal scans the whole transcript, and a
+   * badge reading `3` over one new row is the thing this repo refuses to do more reliably
+   * than any other. A `Write` that overwrote a document lights it without adding a row
+   * (`web/files-new.js` has the measurement), which a number would put a figure on and a
+   * dot merely hints at. And the header is a flex row of 0.68rem uppercase mono ghost
+   * buttons — a filled numeric pill in the middle of it would be the loudest thing in the
+   * header, for the quietest fact in it.
+   *
+   * Appended and removed rather than hidden, the way the merge block is: a button with no
+   * dot is byte-identical to the one that shipped before this existed, so nothing about
+   * `files`' own metrics moved. The title changes with it, because the dot is 5px and a
+   * reader who has noticed it deserves a sentence on hover rather than a guess.
+   */
+  function paintFilesBtn(btn = host.querySelector('.head-files')) {
+    if (!btn) return;
+    const on = view.kind === 'session' && view.filesNew === true;
+    const dot = btn.querySelector('.head-files-dot');
+    if (on && !dot) {
+      const d = document.createElement('span');
+      d.className = 'head-files-dot';
+      // Named for a screen reader, since a bare dot says nothing to one. `role="status"`
+      // is deliberately *not* set: this node is built at the moment the fact becomes true,
+      // so a live region would announce it the instant a tool wrote a file — an
+      // interruption for something whose whole register is "quiet, and here when you look".
+      d.setAttribute('aria-label', 'new since you last looked');
+      btn.append(d);
+    } else if (!on && dot) {
+      dot.remove();
+    }
+    btn.title = on
+      ? 'Something new since you last looked — every file and link this session produced'
+      : 'Every file and link this session produced — the whole transcript';
+  }
+
   function syncSplitBtn(btn = host.querySelector('.split-toggle'), s = current()) {
     if (!btn) return;
     btn.disabled = false;
@@ -10639,6 +10722,12 @@ function createPane(slot, host) {
       // …and the one that stays put and changes what it *does*, because the split can be
       // opened or closed without this header ever being rebuilt.
       syncSplitBtn(head.querySelector('.split-toggle'), s);
+      // …and the files button's dot, on this beat for `renderMergeQueue`'s reason and
+      // never in `composerSig`: a document landing must not rebuild the textarea under
+      // whoever is typing. `appendMessages` paints it the moment it becomes true, so this
+      // is the repaint that keeps it honest rather than the one that first draws it — it
+      // is also what puts the dot back after anything rebuilds this header.
+      paintFilesBtn(head.querySelector('.head-files'));
     }
 
     // The task list rides the roster beat: renderHead is what every `sessions` frame
@@ -10756,6 +10845,26 @@ function createPane(slot, host) {
 
   function appendMessages(messages) {
     view.messages.push(...messages);
+
+    /*
+     * The files button's dot, before anything about *drawing* is decided — and that order
+     * is the point. What lands in the modal has nothing to do with what this pane shows: a
+     * thinking block is filtered below when the toggle is off, a `tool_result` returns
+     * early to patch its chip in place, and a pane with no `streamEl` returns earlier
+     * still. Counted down there, a screenshot inside a result would never light the button.
+     *
+     * Painted here as well as on the roster beat. `renderHead` is the canonical beat and
+     * keeps the dot honest after any repaint that rebuilds the header — but a `messages`
+     * frame arrives on its own clock, and waiting a poll to show a dot that is already
+     * true is a needless lag. One function does both, and it is nowhere near
+     * `composerSig`: a file landing must never tear the textarea down under a reader's
+     * cursor (`renderMergeQueue`'s rule, and the plan's §7 rule 6).
+     */
+    if (!view.filesNew && anyNewOutput(messages)) {
+      view.filesNew = true;
+      paintFilesBtn();
+    }
+
     if (!streamEl) return;
 
     const stick = isNearBottom();
