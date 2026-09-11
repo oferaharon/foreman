@@ -1086,10 +1086,13 @@ the same x without anything new being measured, and the two places the tint brea
 (`.shelf-label`'s `margin-top`, `.in-group-last`'s `padding-bottom`) are the two places the
 spine breaks too. The two heading kinds give back exactly the 3px the border adds, out of
 their own `padding-left`, so nothing they contain moves sideways when the border appears.
-And the sticky `2.5rem` was re-measured, not assumed, at two different points in the rail
-redesign — once when the spine first landed and once again after the header grew its `+`
-and `⋯` controls — and came back unchanged both times, which is what let the plan treat it
-as settled rather than re-deriving it a third time.
+And `.folder-label.in-group`'s sticky offset — hand-measured against the group header's own
+height, per the line above — was re-measured rather than assumed at two different points in
+the rail redesign, once when the spine first landed and once again after the header grew its
+`+` and `⋯` controls, and came back unchanged both times. That is the lesson worth keeping,
+not the figure: read the header's actual height off the DOM before trusting the offset,
+because anything that changes the header's padding — this one included — moves it, and a
+number copied out of an old PR body is exactly the kind of thing that goes stale here first.
 
 `--shelf` is `color-mix(in srgb, var(--ink) 4%, var(--surface))` on purpose: one line that
 darkens the light theme and lightens the dark one. It must not be `--surface-sunk`, which
