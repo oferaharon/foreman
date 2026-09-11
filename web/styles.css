@@ -914,6 +914,15 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
 }
 
+/* How many rows the heading is about — and it is only ever drawn over two or more, since a
+   folder of one folds into its row instead. Same manners as `.shelf-count` one heading up:
+   never squeezed, tabular so a two-digit count doesn't jog the `▾` beside it. */
+.folder-count {
+  flex: none;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+}
+
 /* A group is the one heading in the rail you *wrote*, and the only one that folds a block
    of sessions out of sight — so it carries more weight than the derived folder headings
    under it. Bigger, brighter, and fenced off above, so a rail of nine folders reads as
@@ -1178,10 +1187,16 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .session-row.is-open .session-title { color: var(--ink); }
 
+/* A `div role="button"`, not a `<button>` — see `sessionRow`'s own note for why (a folded
+   folder's `▾` lives inside this box, and interactive content cannot nest). The one thing
+   that had to be carried over from the `button {}` reset at the top of this file is
+   `cursor: pointer`; `font` and `color` inherit on a div and `background`/`border` are
+   already none. Nothing here or anywhere else in this stylesheet selects `button.session`. */
 .session {
   flex: 1;
   min-width: 0;
   text-align: left;
+  cursor: pointer;
   display: grid;
   grid-template-columns: 0.85rem 1fr auto;
   gap: 0 0.6rem;
@@ -1300,6 +1315,68 @@ body.row-dragging * { cursor: row-resize !important; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ------------------------------------------------------------- the fold --- */
+
+/* A folder holding exactly one row prints no heading: its name becomes the head of that
+   row's own name, `alpha ▾ / main`, with the heading's `▾` riding along. A rail of nine
+   one-session folders loses nine lines of furniture.
+ *
+ * Flex rather than the plain inline run above it, because there are now four things on the
+ * line and only one of them may give way. `text-overflow: ellipsis` cannot reach into a
+ * flex child, so the leaf carries its own — the path, the `▾` and the `/` are `flex: none`
+ * and the leaf is what shortens, which is the right half to lose: it is the part that can
+ * be long, and the path is the part that says where you are.
+ *
+ * **Nothing here is dimmed.** The maintainer's ruling: a session name is separated from
+ * its path by *weight* — 500 against the row's own 600/700 — and never by fading one of
+ * them, so both wear the inherited `--ink`. The `/` is the one muted thing on the line and
+ * it is punctuation rather than name, the same tone the heading's `· N` wears.
+ *
+ * `overflow: hidden` is inherited from the rule above and kept: the path is a folder
+ * basename and is `flex: none`, so a pathological one clips at the column edge rather than
+ * spilling into the unread pill's track. Clipped beats spilled — the `title` attribute
+ * carries the whole name either way. */
+.session-title.is-folded {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.title-path { flex: none; font-weight: 500; }
+
+.title-sep { flex: none; color: var(--ink-faint); }
+
+/* The only part that gives way — and bold, because it is the name. Unread and selected
+   rows set the weight on `.session-title` itself, so both parts keep their own: the unread
+   signal on a folded row is its pill and its full-ink title, not a bolder path. */
+.title-leaf {
+  font-weight: 700;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The folder heading's menu, one line down and on the row instead. `.label-menu` carries
+   the look and the hover-reveal; what it cannot carry is the trigger, since the rules above
+   key on `.group-label:hover` and this one lives on a session row. Baseline-aligned with
+   the path rather than the flex default, so the glyph sits on the name's own line.
+ *
+ *
+ * **`.label-menu`'s reserved 1.1rem column is left alone, and it was measured rather than
+ * waved through.** That column exists so every heading's glyph lines up at the end of its
+ * row; in the middle of a name it would be air. It isn't: `▾` in `--mono` at this line's
+ * 10.11px is **18.09px** wide on its own, and a flex item's `min-width: auto` floors at
+ * min-content — so the 17.59px column never applies. Measured both ways on the bench, the
+ * path-to-`/` gap is 27.19px pinned and 27.69px auto, a difference of half a pixel, which
+ * is why there is no override here: a rule that moves nothing is a rule a later reader has
+ * to work out the purpose of. Nothing reflows on hover either way, because `opacity` is not
+ * layout and the glyph occupies its width whether it is on screen or not. */
+.fold-menu { align-self: baseline; }
+
+.session-row:hover .fold-menu { opacity: 1; }
 
 .session-meta {
   grid-column: 2 / -1;
