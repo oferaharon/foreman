@@ -109,3 +109,31 @@ export function filesFor(items, kind) {
   if (!kind || kind === 'all') return list.filter((it) => pillFor(it));
   return list.filter((it) => pillFor(it) === kind);
 }
+
+/**
+ * The word the list view's kind column shows — the file's own extension where there is
+ * one, never the pill it lives under.
+ *
+ * A `.pdf` and a `.rtf` are both the `other` pill, and a reader scanning a column of
+ * "other, other, other" has learned nothing the pill row didn't already say. The extension
+ * is the fact that tells two `other` rows apart, so it is what this shows — `pdf`, `rtf`,
+ * `csv`, `html`, whatever `server/outputs.js`'s own media table names the file. `pillFor`
+ * still decides what a reader can *filter by*; this only decides what one row *says*.
+ *
+ * Two kinds the extension can't speak for. An image mostly has no path at all (76% of the
+ * gallery, per the plan) so there is no extension to read — every image row says `img`.
+ * A link is a string, not a file, and reuses the short form `server/outputs.js` already
+ * computed through `prNumber` — `#540` for an issue or a PR, `link` for anything else,
+ * never a re-parse of the URL.
+ */
+export function kindLabel(item) {
+  if (!item || typeof item !== 'object') return '';
+  if (item.kind === 'link') {
+    return typeof item.short === 'string' && item.short.startsWith('#') ? item.short : 'link';
+  }
+  if (item.kind === 'image') return 'img';
+  const name = typeof item.name === 'string' ? item.name : typeof item.path === 'string' ? item.path : '';
+  const dot = name.lastIndexOf('.');
+  const ext = dot > -1 && dot < name.length - 1 ? name.slice(dot + 1).toLowerCase() : '';
+  return ext || (typeof item.kind === 'string' ? item.kind : '');
+}
