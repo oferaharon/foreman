@@ -27,6 +27,10 @@ import {
 // the extension list it asks about is the one `server/outputs.js` filters a `Write` with —
 // imported from `web/output-exts.js` by both, rather than spelled twice.
 import { anyNewOutput } from './files-new.js';
+// …and the height that modal settles at when it opens. Pure so `test/files-height.test.js`
+// can hold the clamp and its refusals in plain Node; the measuring is the browser's half
+// and stays in `openFiles`.
+import { filesModalHeight } from './files-height.js';
 // …and the path detector the conversation's own prose is walked with. Shape only: it
 // answers which runs of text *look* like a path, and `linkablePaths` then keeps the ones
 // that name this session's own outputs or a folder holding one. Pure for the usual reason
@@ -4788,14 +4792,27 @@ function openFiles(sessionId, sessionTitle) {
   const box = document.createElement('div');
   box.className = 'modal is-wide files';
 
+  /*
+   * The card is a column: this head does not scroll, the content region below it does, and
+   * the close row is pinned under both. The maintainer's complaint was that "when it's at max
+   * height the entire modal scrolls" — `.is-wide`'s own `overflow-y: auto` is what did
+   * that, taking the title and the filter pills off screen with the cells, so `.modal.files`
+   * turns it off and the scrolling moves one level in. A wrapper rather than six
+   * `flex: 0 0 auto` children: the existing margins between the title, the subtitle, the bar
+   * and the note are block margins and stay block margins inside it.
+   */
+  const headRegion = document.createElement('div');
+  headRegion.className = 'files-head';
+  box.append(headRegion);
+
   const h = document.createElement('h2');
   h.textContent = 'files';
-  box.append(h);
+  headRegion.append(h);
 
   const sub = document.createElement('div');
   sub.className = 'files-sub';
   sub.textContent = sessionTitle || '';
-  box.append(sub);
+  headRegion.append(sub);
 
   // Hidden until there is something to filter: a row of six zeroes over an empty grid says
   // nothing the empty state does not say better. The view toggle rides in the same bar and
@@ -4824,16 +4841,24 @@ function openFiles(sessionId, sessionTitle) {
   listBtn.textContent = 'list';
   viewToggle.append(gridBtn, listBtn);
   bar.append(viewToggle);
-  box.append(bar);
+  headRegion.append(bar);
 
   const note = document.createElement('div');
   note.className = 'files-note';
   note.textContent = 'reading the transcript…';
+  headRegion.append(note);
+
+  // The one thing that scrolls. Both containers and the empty state live in it, so the
+  // empty message sits *inside* the settled box rather than collapsing it — same element,
+  // same wording as before.
+  const bodyRegion = document.createElement('div');
+  bodyRegion.className = 'files-body';
   const grid = document.createElement('div');
   grid.className = 'files-grid';
   const list = document.createElement('div');
   list.className = 'files-list';
-  box.append(note, grid, list);
+  bodyRegion.append(grid, list);
+  box.append(bodyRegion);
 
   /** The toggle's own two-button state, and which of the two containers is on screen. The
    *  filter selection lives in `selected` below and neither button here touches it — that
@@ -4847,17 +4872,24 @@ function openFiles(sessionId, sessionTitle) {
     list.hidden = view !== 'list';
   }
   paintView();
+  // Both toggles send the content region back to the top, and that is a decision rather
+  // than a default: an offset into a grid of 10rem cells is not the same offset into a
+  // list of one-line rows, so carrying it over would land the reader somewhere arbitrary
+  // in a list they have not seen. Nothing is measured to do it — there is no `scrollTop`
+  // read here and so nothing for the room's forced-layout trap to bite.
   gridBtn.onclick = () => {
     if (view === 'grid') return;
     view = 'grid';
     filesView.set(view);
     paintView();
+    bodyRegion.scrollTop = 0;
   };
   listBtn.onclick = () => {
     if (view === 'list') return;
     view = 'list';
     filesView.set(view);
     paintView();
+    bodyRegion.scrollTop = 0;
   };
 
   const row = document.createElement('div');
@@ -4903,11 +4935,59 @@ function openFiles(sessionId, sessionTitle) {
     io.observe(el);
   }
 
+  /*
+   * The card's height, settled once and then left alone.
+   *
+   * Measured after the first paint of `all` — the widest view the modal has — and written
+   * as an **inline height** rather than a custom property: it is one number, read back by
+   * nothing else and never composed with anything in CSS, so a property would only be an
+   * indirection between the measurement and the box it is about. The clamp itself is
+   * `filesModalHeight`, where a Node test can hold it.
+   *
+   * `head` is `card - region`, not a sum of the head's own parts: that subtraction stays
+   * right when CSS has already clamped the card at its `max-height` backstop (the region
+   * has shrunk, the head has not), and it needs no list of which children count as chrome.
+   * `region.scrollHeight` is the content's natural height whether or not it currently fits.
+   *
+   * What it deliberately does *not* do is re-measure. A filter change or a view toggle
+   * repaints the region and the box does not move, which is the whole ruling.
+   */
+  let settledContent = null;
+  let settledHead = null;
+
+  function settleHeight() {
+    if (!box.isConnected) return;
+    const cardH = box.getBoundingClientRect().height;
+    const regionH = bodyRegion.getBoundingClientRect().height;
+    const content = bodyRegion.scrollHeight;
+    const head = cardH - regionH;
+    const px = filesModalHeight(content, head, window.innerHeight);
+    if (px == null) return; // nothing measurable yet — leave the card as CSS has it
+    settledContent = content;
+    settledHead = head;
+    box.style.height = `${px}px`;
+  }
+
+  /*
+   * A resize re-clamps to the *new* 80% and nothing more: the content's natural height was
+   * measured once and is not measured again, so the box can only shrink to fit a shorter
+   * window or grow back to what it originally wanted. A `resize` listener rather than a
+   * `ResizeObserver` because an automated Chrome window reports `visibilityState: 'hidden'`
+   * and Chrome suspends those callbacks there — the room panel's hour, already paid for.
+   */
+  function onResize() {
+    if (settledContent == null) return;
+    const px = filesModalHeight(settledContent, settledHead, window.innerHeight);
+    if (px != null) box.style.height = `${px}px`;
+  }
+  window.addEventListener('resize', onResize);
+
   const close = () => {
     io?.disconnect();
     pending.clear();
     back.remove();
     document.removeEventListener('keydown', onKey, true);
+    window.removeEventListener('resize', onResize);
   };
   function onKey(e) {
     // A lightbox opened from a cell is on top and owns Escape; it stops the event before
@@ -5177,6 +5257,7 @@ function openFiles(sessionId, sessionTitle) {
         list.hidden = true;
         grid.hidden = false;
         grid.append(empty);
+        settleHeight();
         return;
       }
 
@@ -5239,12 +5320,19 @@ function openFiles(sessionId, sessionTitle) {
             p.setAttribute('aria-pressed', String(k === kind));
           }
           paint();
+          // A new list starts at its top. The box itself does not move — that is what
+          // `settleHeight` bought — so this is the content region's own offset and nothing
+          // else, and it is set rather than read.
+          bodyRegion.scrollTop = 0;
         };
         pills.set(kind, pill);
         filters.append(pill);
       }
       bar.hidden = false;
       paint();
+      // The one measurement, on the `all` view, with the bar already on screen: from here
+      // the card's height is a fact and every later repaint happens inside it.
+      settleHeight();
     } catch (err) {
       if (back.isConnected) note.textContent = err.message;
     }

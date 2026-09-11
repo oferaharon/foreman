@@ -4415,6 +4415,54 @@ body.row-dragging * { cursor: row-resize !important; }
    the block — the mock-up carried a light and a dark palette and this is what the panel
    already spells them as. */
 
+/* The card is a column, and this is the half of the fixed-height rule that lives in CSS.
+   `.is-wide` above is `max-height: calc(100vh - 2rem)` plus `overflow-y: auto`, which is
+   what used to scroll the *whole* card once the grid outgrew it — the title, the subtitle
+   and the filter pills sliding away with the cells. So the scrolling moves one level in:
+   the head and the close row are `flex: 0 0 auto`, `.files-body` takes what is left and is
+   the only thing with a scrollbar.
+
+   `min-height: 0` on it is not optional. A flex child's automatic minimum size is its
+   content, so without it the region refuses to shrink and the card grows past the height
+   `openFiles` fixed it at — the same automatic-minimum rule `.modal`'s own
+   `overflow-wrap` comment is about, one axis over.
+
+   `max-height: 80vh` is a backstop, not the mechanism: the card is `auto` while the
+   transcript is being read, and the inline height `openFiles` measures and sets (see
+   `web/files-height.js`) is what settles it. The literal is spelled here as well as there
+   because a resize between two frames should never be able to draw a card taller than the
+   window. */
+.modal.files {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 80vh;
+}
+
+/* The head carries the card's own background so that nothing can ever show through it —
+   true by construction today (it is a sibling above the scroller, not an overlay on it),
+   and cheap insurance the day somebody makes it sticky instead. A plain block, so the
+   margins between the title, the subtitle, the bar and the note stay the block margins
+   they already were. */
+.modal.files > .files-head {
+  flex: 0 0 auto;
+  background: var(--surface);
+}
+
+.modal.files > .modal-row { flex: 0 0 auto; }
+
+/* The one thing in this modal that scrolls. `overflow-x: hidden` because a wide cell or a
+   long unbroken name must not push the card's own box sideways, and `overscroll-behavior`
+   so a wheel that reaches the end of the list does not chain out to the page behind the
+   backdrop. */
+.modal.files > .files-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
 .files-sub {
   font-family: var(--mono);
   font-size: 0.68rem;
