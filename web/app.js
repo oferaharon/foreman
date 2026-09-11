@@ -1,4 +1,5 @@
 import { marked } from '/vendor/marked.js';
+import { withBlankTargets } from './anchor-target.js';
 import { isTrustGate, buildTrustNotice } from './trust-gate.js';
 import { step, alertText } from './notify.js';
 import { forgeMarkupFor } from './forge-mark.js';
@@ -4237,7 +4238,7 @@ function openTaskBrief(t, chipState) {
   // the plan reader below it — one set of heading/list/code rules, not two drifting ones.
   body.className = 'task-brief-body plan-md';
   if (t.body) {
-    body.innerHTML = marked.parse(t.body);
+    body.innerHTML = withBlankTargets(marked.parse(t.body));
   } else {
     // A markdown parse of the empty string must not turn this into a blank box.
     body.textContent = 'No brief was recorded.';
@@ -4317,7 +4318,7 @@ function taskPlanReader(t) {
       const res = await fetch(`/api/team/plans/${encodeURIComponent(t.id)}`);
       const data = await res.json().catch(() => ({}));
       if (res.ok && typeof data.text === 'string') {
-        md.innerHTML = marked.parse(data.text);
+        md.innerHTML = withBlankTargets(marked.parse(data.text));
         return;
       }
       loaded = false; // let the next open retry
@@ -10153,7 +10154,7 @@ function createPane(slot, host) {
       case 'assistant': {
         const div = document.createElement('div');
         div.className = 'msg-assistant';
-        div.innerHTML = marked.parse(m.text || '');
+        div.innerHTML = withBlankTargets(marked.parse(m.text || ''));
         return div;
       }
       case 'command': {
@@ -10458,7 +10459,7 @@ function createPane(slot, host) {
       label.textContent = 'returned';
       const body = document.createElement('div');
       body.className = 'msg-assistant';
-      body.innerHTML = marked.parse(finalText);
+      body.innerHTML = withBlankTargets(marked.parse(finalText));
       ret.append(label, body);
       el.append(ret);
     }
@@ -10554,7 +10555,7 @@ function createPane(slot, host) {
     else if (markdown && body) {
       const prose = document.createElement('div');
       prose.className = 'msg-assistant';
-      prose.innerHTML = marked.parse(body);
+      prose.innerHTML = withBlankTargets(marked.parse(body));
       out.append(prose);
     } else out.textContent = body || '';
     wrap.append(out);
@@ -11577,7 +11578,7 @@ function createPane(slot, host) {
         const res = await fetch(`/api/sessions/${encodeURIComponent(s.id)}/plan-file`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not read it.');
-        body.innerHTML = marked.parse(data.markdown);
+        body.innerHTML = withBlankTargets(marked.parse(data.markdown));
       } catch (e) {
         loaded = false; // let a retry happen on the next open
         body.textContent = e.message;
