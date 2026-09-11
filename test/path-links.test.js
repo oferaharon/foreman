@@ -415,3 +415,21 @@ test('.path-link is the transcript link colour with a dotted underline', () => {
   // A hard-coded colour is the one thing that cannot answer both themes.
   assert.doesNotMatch(body, /#[0-9a-f]{3,8}/i);
 });
+
+test('a write becomes linkable when its result lands, not when the call goes out', () => {
+  const src = appSrc();
+  const append = src.slice(src.indexOf('function appendMessages(messages) {'));
+  const body = append.slice(0, append.indexOf('function renderMessage(m) {'));
+  // `anyNewOutput` answers on the tool *call* — right for the dot, which is a boolean, and
+  // a beat early for the scan, which needs the `toolUseResult` record. Measured on the
+  // bench: the set came back without the file and the sentence naming it a second later
+  // was drawn against it. The chip's own resolved-but-unlinked path is the question asked
+  // again at the only moment its answer can have changed.
+  assert.match(body, /chip-summary\[data-path\]/);
+  const at = body.indexOf("chip-summary[data-path]");
+  assert.ok(body.slice(at).includes('refreshOutputs()'), 'the result path re-asks');
+  assert.ok(
+    body.indexOf("if (m.kind === 'tool_result' && chipNodes.has(m.toolUseId))") < at,
+    'and it is asked where the chip is patched in place',
+  );
+});

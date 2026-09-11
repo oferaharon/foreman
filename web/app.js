@@ -11250,6 +11250,24 @@ function createPane(slot, host) {
       if (m.kind === 'tool_result' && chipNodes.has(m.toolUseId)) {
         const node = chipNodes.get(m.toolUseId);
         applyResult(node, { isError: m.isError, output: m.output, diff: m.diff, images: m.images });
+        /*
+         * …and this is the moment a write actually becomes an output, which is a beat
+         * later than the moment the dot fires. `anyNewOutput` answers on the tool *call*
+         * — right for a dot, which is a boolean — while `scanOutputs` needs the
+         * `toolUseResult` record, and that is not in the transcript until the result
+         * lands. Measured on the bench: the refresh fired on the `Write` frame, the scan
+         * came back without the file, and the sentence naming it a second later was drawn
+         * against a set that did not have it yet. Nothing re-asked, and the path stayed
+         * plain until the pane was reopened.
+         *
+         * So: a chip carrying a resolved path that is still unlinked is exactly the
+         * question "has this become an output yet", asked at the only moment the answer
+         * can have changed. It cannot loop — a refresh that finds nothing leaves the chip
+         * unlinked and nothing re-triggers until the next result — and a `Write` outside
+         * the human-facing set simply never links, which is the correct answer.
+         */
+        const pending = node.querySelector?.('.chip-summary[data-path]');
+        if (pending && !pending.querySelector('.path-link')) refreshOutputs();
         continue;
       }
       if (m.kind === 'title') {
