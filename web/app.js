@@ -5041,6 +5041,32 @@ function openFiles(sessionId, sessionTitle) {
   }
 
   /**
+   * The modal's voice for "there is nothing here", in one place because there are now two
+   * kinds of nothing and they must not drift apart.
+   *
+   * **A session that produced nothing** keeps `nothing produced yet` and its sentence,
+   * unchanged. **A filter with nothing under it** is the second kind — it had no rendering
+   * at all before this, because a card that collapsed to its head said it by being empty,
+   * and a card whose height is now settled cannot say it that way: the reader gets a blank
+   * region inside a box that did not move. Same element, same register, different title, so
+   * the two cannot be confused for each other by a reader or by a test.
+   *
+   * One instance per call: the grid and the list are both painted on every paint and a node
+   * cannot be in two parents at once.
+   */
+  function emptyBlock(titleText, bodyText) {
+    const empty = document.createElement('div');
+    empty.className = 'files-empty';
+    const title = document.createElement('div');
+    title.className = 'empty-title';
+    title.textContent = titleText;
+    const p = document.createElement('p');
+    p.textContent = bodyText;
+    empty.append(title, p);
+    return empty;
+  }
+
+  /**
    * The one way anything in this modal opens the preview overlay.
    *
    * Four callers — an image cell, a document cell, an image row, a document row — and one
@@ -5241,16 +5267,11 @@ function openFiles(sessionId, sessionTitle) {
 
       if (!items.length) {
         note.remove();
-        const empty = document.createElement('div');
-        empty.className = 'files-empty';
-        const title = document.createElement('div');
-        title.className = 'empty-title';
-        title.textContent = 'nothing produced yet';
-        const p = document.createElement('p');
-        p.textContent =
+        const empty = emptyBlock(
+          'nothing produced yet',
           data.note ||
-          'No files and no links in this conversation — nothing written, nothing captured, nothing cited.';
-        empty.append(title, p);
+            'No files and no links in this conversation — nothing written, nothing captured, nothing cited.',
+        );
         // The bar (filters and the view toggle) stays hidden — there is nothing to switch
         // the view of — so the empty message always shows in `grid`, whatever this browser
         // last remembered, or a `list`-remembered browser would hide it behind nothing.
@@ -5292,6 +5313,27 @@ function openFiles(sessionId, sessionTitle) {
             listFrag.append(docRow(item, shown, at));
           }
         });
+        if (!shown.length) {
+          // A pill with a zero on it, pressed. It used to say this by collapsing the card
+          // to its head; a card whose height is settled has to say it in words, or the
+          // reader gets a blank region inside a box that did not move. The sentence names
+          // the filter rather than the count — the pill beside it is already the count, and
+          // `all` cannot reach this branch (there are items, or the branch above ran).
+          // Short on purpose, and both halves of that were measured. `No ${selected} in this
+          // conversation` is ungrammatical on two of the six pills ("No other in this
+          // conversation"), so the pill is named in quotes instead. And the sentence carries
+          // no advice — the card is settled to what `all` needs, which for a session of four
+          // entries is shorter than this block, so a second line is a line the scroller
+          // clips; the pills it would have pointed at are two rows above it anyway.
+          const line = `No entries under “${selected}”.`;
+          // `is-filter` is padding alone — see the rule in `web/styles.css` for why this one
+          // cannot carry the whole-session state's 2rem.
+          for (const frag of [gridFrag, listFrag]) {
+            const block = emptyBlock('nothing of this kind', line);
+            block.classList.add('is-filter');
+            frag.append(block);
+          }
+        }
         grid.replaceChildren(gridFrag);
         list.replaceChildren(listFrag);
       }

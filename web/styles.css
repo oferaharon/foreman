@@ -4751,6 +4751,14 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 .files-empty p { margin: 0; font-size: 0.92rem; max-width: 24rem; }
+
+/* The same block, drawn for a filter with nothing under it, and the one thing it cannot
+   share is 2rem of vertical padding. The whole-session state sizes the card around itself,
+   so its padding is free; this one appears *inside* a card already settled to what the `all`
+   view needed, and for a session of a few entries that content box is ~90px — measured 117.6
+   for the block against a 92.2px region, so the sentence under the title needed a scroll to
+   read. Everything else about it is `.files-empty`: same element, same register, same ink. */
+.files-empty.is-filter { padding: 0.9rem 1rem; }
 /* ----------------------------------------------------------- lightbox --- */
 
 /* Darker than `.modal-back` and sitting above it, because this opens *over* the gallery
