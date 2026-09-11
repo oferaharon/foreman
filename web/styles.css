@@ -890,9 +890,28 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 /* Sticks below the group header, so the offset has to match its height — bump one and
-   this follows, or a folder heading scrolls under the group it belongs to. */
+ * this follows, or a folder heading scrolls under the group it belongs to.
+ *
+ * **2.1rem is the header's own height, measured, and not a round number chosen for looking
+ * like one.** On the bench, dark, at 320px of rail: 7.2 top + 19.95 name + 6.4 bottom =
+ * 33.55 for the first group in the rail, and 34.55 for every one after it, which carries a
+ * 1px `border-top` the first does not. One `top` cannot be both, so this is 33.6px — the
+ * first header's height to within 0.05px, and 0.95px inside the second's.
+ *
+ * The direction of that 0.95 is the part worth keeping. An offset *below* either height
+ * leaves a band of the scrolling list showing between the pinned header and the pinned
+ * heading; an offset *inside* it lands on the header's blank `padding-bottom`, which this
+ * heading repaints in the same `--shelf` tint with its own 3px spine at the same x. So when
+ * the two cannot agree, it errs inside. Measured pinned: seam 0.04px under a first header
+ * and −0.96px under a later one, and the gap between the two names is 16.03px pinned
+ * against 16.03 in flow (15.03 against 15.99 for a later group) — sticking changes where
+ * the heading is, never how far it sits from the name above it.
+ *
+ * It used to be `2.5rem` against a 48px header — 8px short, so a pinned folder heading ate
+ * the header's entire `padding-bottom` and the gap between the two names closed from 17.6px
+ * in flow to 9.6px pinned. That is what "flush" is measured against here. */
 .folder-label.in-group {
-  top: 2.5rem;
+  top: 2.1rem;
   padding-top: 0.6rem;
   /* 1.9rem, less the 3px the spine's border adds — see "the spine" below. */
   padding-left: calc(1.9rem - 3px);
@@ -932,8 +951,27 @@ body.row-dragging * { cursor: row-resize !important; }
   letter-spacing: 0.02em;
   font-weight: 600;
   color: var(--ink);
-  padding-top: 1.25rem;
-  padding-bottom: 0.5rem;
+  /* **The card's own inset, and it is not the breathing room it used to be.** This padding
+     predates the spine and the tint, when it was blank rail above a heading and read as the
+     gap *between* two groups. Now that both start at the header's top edge, the same 20px
+     sits visibly *inside* the card, above its name — which is the gap you see and the one
+     this is. 7.2px reads as a card's padding instead.
+
+     The bottom is 0.4rem, which is `.group-label`'s own base — the value the folder heading
+     under it already has, since `.folder-label.in-group` overrides only the top. So the
+     header keeps the rhythm of the heading directly beneath it: 6.4 + that heading's 9.6 =
+     16px between the two names, against 17.6 before. Density below the header is unchanged;
+     12.8px is reclaimed above it.
+
+     The gap *between* groups is `margin-top`, three lines down, and is deliberately not
+     this — it is outside the tint and the spine, and it does not move.
+
+     Measured on the bench, dark, at 320px of rail: an open header goes 48 → 34 as the first
+     in the rail and 49 → 35 after that, a collapsed one 70 → 56 and 71 → 57.
+     `.folder-label.in-group`'s sticky `top` is measured off those and moved with them — read
+     its note, it is the one thing here that breaks silently. */
+  padding-top: 0.45rem;
+  padding-bottom: 0.4rem;
   border-top: 1px solid var(--rule);
   margin-top: 0.5rem;
   /* 1.1rem, less the 3px the spine's border adds — see "the spine" below. A collapsed
@@ -1047,11 +1085,15 @@ body.row-dragging * { cursor: row-resize !important; }
  * siblings; a new sibling between a header and its rows would cut both, and so would a
  * vertical margin on this one. So the header wraps and this rides as a full-width flex item
  * that pays for its height in `padding-top`. The wrap is scoped to `.collapsed` rather than
- * set on every heading, which is what makes the open header's geometry provably untouched:
- * measured at 48px first / 49px otherwise before and after, exactly as item 4 left it.
+ * set on every heading, which is what makes the open header's geometry provably untouched by
+ * *this* line: measured at 48px first / 49px otherwise before and after it was added. Those
+ * two figures are that measurement's record and not the header's height — the padding above
+ * has since been tightened, and the pair is 34/35 open against 56/57 collapsed. What the
+ * scoping still buys is that the second line costs the open header nothing, which is the
+ * whole of the claim.
  *
  * A collapsed group has no folder headings beneath it, so `.folder-label.in-group`'s
- * hand-measured 2.5rem sticky offset cannot collide with this — which is the whole reason
+ * hand-measured 2.1rem sticky offset cannot collide with this — which is the whole reason
  * the line is affordable on this heading and would not be on any other. */
 .shelf-label.collapsed { flex-wrap: wrap; row-gap: 0; }
 
@@ -1148,10 +1190,11 @@ body.row-dragging * { cursor: row-resize !important; }
  * `focus-within` on the heading rather than `:focus-visible` on the button alone, so tabbing
  * to either control brings **both** up — the pair is one affordance and half of it surfacing
  * reads as a glitch. The whole thing is an opacity change: `.label-menu` reserves its 1.1rem
- * while invisible, so the second control costs width and not height, and `.folder-label
- * .in-group`'s hand-measured 2.5rem sticky offset does not move. Measured on the bench
- * before and after: the heading is 49px tall either way (48px for the first, which has no
- * top rule).
+ * while invisible, so the second control costs width and not height — measured on the bench
+ * before and after, the heading was 49px tall either way (48px for the first, which has no
+ * top rule). Those two figures are that change's record and are no longer the heading's
+ * height: the padding above has since been tightened and it is 35/34. The pair still costs
+ * nothing vertically, which is the whole of what this paragraph claims.
  */
 .shelf-label .label-menu { opacity: 0.4; }
 
