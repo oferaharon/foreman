@@ -4563,6 +4563,10 @@ function openLightbox(sessionId, items, start = 0, { src = imageSrc } = {}) {
 
     if (kind === 'image' && !lost) {
       doc.hidden = true;
+      // Emptied rather than merely hidden: the last document's text would otherwise sit in
+      // the tree behind a picture, which costs nothing on screen and is a lie to anything
+      // reading the DOM — a bench, a find-in-page, a screen reader.
+      page.replaceChildren();
       img.hidden = false;
       img.src = src(sessionId, entry);
       img.alt = entry.note || 'Image from this session';

@@ -4594,6 +4594,14 @@ body.row-dragging * { cursor: row-resize !important; }
   gap: 0;
 }
 
+/* The footer wraps inside the panel's own width rather than the scrim's, so a long line
+   does not read as a caption for something wider than the thing above it. */
+.lightbox-fig.is-doc .lightbox-cap {
+  max-width: none;
+  margin-top: 0.6rem;
+  text-align: left;
+}
+
 /* The action row. On a document it is the panel's own top bar (square bottom corners, the
    panel carries the rest); on an image it floats over the scrim above the picture. */
 .lightbox-head {
