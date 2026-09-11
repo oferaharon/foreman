@@ -113,10 +113,13 @@ the group rather than appearing twice, so it empties as you deal with it. A sess
 that's still `working` is held back — it hasn't finished talking yet. `⇧⇥` cycles the
 queue.
 
-![The top of the rail: a pinned team lead with its worker nested under it, then a Needs
-you group holding one session stopped on a permission prompt and one carrying two unread
-replies, then a project heading with the open session under
-it.](images/rail-inbox.png)
+![The whole rail: a pinned session on the accent, then a Needs you group holding one
+session stopped on a permission prompt and one carrying two unread replies, then an open
+group wearing its own colour as a spine — a two-session folder heading with its count, a
+folded single-session row reading as a path and a leaf, and the selected row at full hue —
+then a collapsed group showing its dot and summary line, working sessions and tasks
+counted together, and a folded single-session row standing on its own at the
+foot.](images/rail-inbox.png)
 
 Workers nested under a lead are the one list here that isn't recency: they sit in the order
 they were **dispatched**, newest on top, and stay there — speak to one and its row doesn't
@@ -210,18 +213,45 @@ where you say so.
 
 Hover a folder heading and click its `▾`: pick an existing group, type a name to make a
 new one, or `Ungroup`. The heading moves under that group, indented, and the group header
-folds the whole block away when you click it. A group's `⋯` renames it or deletes it —
-deleting a group never deletes anything filed under it; those folders go back to standing
-on their own.
+folds the whole block away when you click it. A group's header also carries a permanent
+`+`, faint until you hover it: pick a folder from the list and it moves here, which is the
+same move in reverse — reachable from the group when you know the group and not which
+folder you're after. The list is everything the browser already knows about, a folder
+already filed elsewhere included (with a hint saying which group it's leaving), because a
+folder lives in exactly one group and moving it out of another is what a pick there does.
 
 A group holds **folders**, not sessions, because sessions rotate with every `/clear` and
 folders don't. A folder lives in exactly one group, so nothing is ever drawn twice.
 
+**Every group you make wears a colour**, assigned automatically the moment you make it and
+changeable any time after from the `⋯` menu's row of swatches — the same menu that renames
+and deletes. It shows as a spine: a bar down the left edge of the group's header, every
+folder heading filed under it, and every row under those, nested workers included, so you
+read which group a row belongs to off the edge of the rail without reading a word. The
+**selected row** inside a group takes that colour at full strength, brighter than the
+spine running past it — that's the one row in the group you're actually looking at.
+Pinned rows, the Needs you queue, and folders you haven't grouped carry no colour at all;
+their marker is the plain accent it's always been.
+
+A folder holding exactly one session doesn't get a heading of its own any more — the
+folder's name becomes the start of the row's own name instead, `alpha ▾ / main`, with the
+`▾` riding the path where the heading's menu used to live. A folder of two or more keeps
+its heading, now printing how many rows are under it (`beta · 3`). The fold has one honest
+limit: it only fires when the row's title actually begins with its folder's name, which is
+true for anything this panel launched but not guaranteed for a session some other launcher
+started — those can carry a `<repo>-<branch>` title with nothing folder-shaped about it,
+and they keep their heading rather than have the panel invent a path that isn't real.
+
 Collapsing can't hide anything you need: a session blocked on you is in **Needs you**
-above, and a pinned one is above that. What's left inside a group is quiet by definition —
-with one exception, which is why a folded group grows the same pulsing dot its rows carry
-when something inside it is **working**. Blocked and unread get hoisted out; running
-doesn't, so that dot is the only thing standing in for it.
+above, and a pinned one is above that. What's left inside a group is quiet by
+definition — with one exception, which is why a folded group grows the same pulsing dot
+its rows carry when something inside it is **working**, plus a line saying what: `2
+working · newest 4m · 3 tasks`, all of it counting nested workers as well as the folders
+you can see. That's worth saying plainly, because it's a different set from the number on
+the header one line up — the header's own `· N` still counts top-level rows only, the way
+it always has, so a lead with three workers reads `· 1` on its heading and its collapsed
+group's summary line can still say `3 working`. Two numbers, two questions, one line
+apart.
 
 Group headings are the one label in the rail you *wrote* — the folder headings under them
 are derived — and they're the only thing that folds a block of sessions out of sight, so
@@ -246,10 +276,10 @@ be indented. Collapsed groups stay flat, which makes the tint itself say "this o
 open". Rows inside still darken under the cursor: the tint is a mix off the ink colour
 rather than the sunk grey hover already uses, so both work in either theme.
 
-Groups live in `~/.foreman/groups.json`, collapse state included, so two windows
-agree and a reload doesn't reopen everything you just tidied away. A group whose folders
-have nothing running is still drawn — dimmed, `· 0` — rather than vanishing into
-something you can't rename or delete.
+Groups live in `~/.foreman/groups.json`, colour and collapse state both, so two windows
+agree and a reload doesn't reopen everything you just tidied away or repaint it in a
+different colour. A group whose folders have nothing running is still drawn — dimmed,
+`· 0` — rather than vanishing into something you can't rename or delete.
 
 ### Snapshot and restore
 
