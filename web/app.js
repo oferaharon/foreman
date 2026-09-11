@@ -27,6 +27,12 @@ import {
 // the extension list it asks about is the one `server/outputs.js` filters a `Write` with —
 // imported from `web/output-exts.js` by both, rather than spelled twice.
 import { anyNewOutput } from './files-new.js';
+// …and the path detector the conversation's own prose is walked with. Shape only: it
+// answers which runs of text *look* like a path, and `linkablePaths` then keeps the ones
+// that name this session's own outputs or a folder holding one. Pure for the usual reason
+// — `test/path-links.test.js` holds the six measured false-positive classes in plain Node,
+// where a browser would only get in the way.
+import { pathLinksIn, resolvePath } from './path-links.js';
 // The ghost-text auto-send flag, the TASKS filter, and the one definition of what that
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
@@ -4422,6 +4428,17 @@ function imageSrc(sessionId, ref) {
  * `SendUserFile`'s bytes). One function, two address spaces, and the caller that knows
  * which one it is in says so.
  */
+/**
+ * Where one output's bytes live — a record and an ordinal, never a path.
+ *
+ * Module scope because there are two callers now and they are nowhere near each other: the
+ * files modal's grid and list, and a path link in the conversation. One spelling of an
+ * address the server re-derives is the point of the address space — `server/index.js`'s
+ * byte route says the long version.
+ */
+const outputSrcFor = (sessionId, item) =>
+  `/api/sessions/${encodeURIComponent(sessionId)}/output/${encodeURIComponent(item.uuid)}/${item.index}`;
+
 function openLightbox(sessionId, items, start = 0, { src = imageSrc } = {}) {
   // A link never opens this (§7 rule 3), so it is out of the walk entirely rather than
   // skipped on the way past — which is what makes the position counter mean something.
@@ -4908,8 +4925,7 @@ function openFiles(sessionId, sessionTitle) {
   done.focus();
 
   /** Where one output's bytes live — a record and an ordinal, never a path. */
-  const outputSrc = (item) =>
-    `/api/sessions/${encodeURIComponent(sessionId)}/output/${encodeURIComponent(item.uuid)}/${item.index}`;
+  const outputSrc = (item) => outputSrcFor(sessionId, item);
 
   /** The line under every cell: what it is called, and when it happened. */
   function captionFor(nameText, item, gone) {
@@ -5435,6 +5451,34 @@ function createPane(slot, host) {
      */
     filesNew: false,
 
+    /*
+     * This session's own output set, as `GET /api/sessions/:id/outputs` last answered —
+     * and the whole of what bounds a path link in the conversation.
+     *
+     * A path in prose becomes a link only when it names one of these, or the folder one of
+     * these sits in (the 2026-09-11 ruling). So the browser holds the list rather than
+     * asking per path: the detector is a text scan and the scope check is a `Map` lookup,
+     * and the expensive half — a streaming pass over the whole transcript — has already
+     * been paid for by the files modal's own endpoint.
+     *
+     * **Fetched once per pane open, and again only when something lands.** `web/files-new.js`
+     * already tells this pane that an arriving message put something in the files set — the
+     * dot's own signal — so that is what is reused; nothing polls. A pane that never sees a
+     * `Write` fetches exactly once.
+     *
+     * In the factory for the reason everything per-session in here is: split view means two
+     * panes, and two sessions' output sets in module scope is one pane drawing the other's
+     * links.
+     */
+    outputs: [],
+    // A late answer must not paint over a pane that has changed hands. Bumped by `open`,
+    // checked by the fetch — the `seq` trick the lightbox's own paints use.
+    outputsSeq: 0,
+    // One request at a time, with a trailing re-run for anything that landed while it was
+    // in flight: a turn that writes three files is one extra scan, not three.
+    outputsBusy: false,
+    outputsAgain: false,
+
     /* ------------------------------------------------- the shared room --- */
 
     /*
@@ -5771,8 +5815,16 @@ function createPane(slot, host) {
     // a pane changes hands: the other three (`openShared`, `openGroupRoom`, `close`) stop
     // the pane being a session at all, and it only ever becomes one again through here.
     view.filesNew = false;
+    // …and the output set with it, which is the same fact one layer down: a path link is
+    // bounded to *this* session's outputs, so a pane that has changed hands must draw none
+    // until the new session's list has arrived. The seq bump is what discards an answer
+    // still in flight for the session being left.
+    view.outputs = [];
+    view.outputsSeq += 1;
+    view.outputsAgain = false;
     chipNodes.clear();
     send({ type: 'subscribe', sessionId: id, slot });
+    refreshOutputs();
     renderRail();
     renderMain();
     // This slot has stopped holding a room, so it has stopped being foldable. Derived
@@ -10830,6 +10882,280 @@ function createPane(slot, host) {
     return out;
   }
 
+  /* ------------------------------------------------------- path links --- */
+
+  /*
+   * A path in the conversation, drawn as something you can act on — and the bound that
+   * makes that safe.
+   *
+   * The ruling: a path becomes a link **only** when it names one of this session's own
+   * human-facing outputs, or a folder that is the parent directory of one. Paths to code
+   * files, to a repo's own docs the session merely read, to anything outside that set,
+   * stay plain text. There is no "looks like a path, so link it" anywhere in here — the
+   * detector (`web/path-links.js`) answers *shape* and this answers *scope*, off a list
+   * the server minted.
+   *
+   * Three things about the walk, each of which the plan measured before asking for it:
+   *
+   *   **It walks text nodes, and skips `code`, `pre` and `a`.** That is load-bearing
+   *   rather than tidy: 2,599 of 5,328 path-shaped tokens in this data sit inside
+   *   backticks, and that is where nearly every *source* path lives, so skipping them is
+   *   the cheap half of the ruling. Skipping `a` is what makes a second walk over an
+   *   already-linked bubble do nothing at all — the link is an `<a>`, so its own text is
+   *   invisible to the next pass. That is the whole of the idempotency guard; there is no
+   *   flag on the node, which is what keeps a re-walk after the output set grows correct
+   *   rather than merely safe.
+   *
+   *   **It runs on two prose registers and nothing else** — `.msg-assistant` (the parsed
+   *   markdown) and `.msg-user` (a `textContent` div). One helper over both, because the
+   *   walk is on live text nodes and never on a string: assistant prose is HTML before
+   *   anything can touch it and user prose never is, and one "linkify the text" helper
+   *   applied to both would double-escape one or inject into the other. A chip's *output*
+   *   is deliberately not a register here — that is command output, not prose.
+   *
+   *   **Nothing about it joins `composerSig`.** It paints inside the transcript, on the
+   *   message beat and on the output set's own arrival; a file landing must never rebuild
+   *   the textarea under a reader's cursor (`renderMergeQueue`'s rule, §7 rule 6).
+   */
+
+  /** The base a relative path in this session's prose is resolved against. */
+  function pathBase() {
+    const s = current();
+    return s?.cwd || s?.paneCwd || null;
+  }
+
+  /** Elements whose text is never prose, and so is never walked. */
+  const PATH_SKIP = new Set(['A', 'CODE', 'PRE', 'SCRIPT', 'STYLE', 'TEXTAREA', 'SVG']);
+
+  /** The two registers a path link may be drawn in. */
+  const PATH_HOSTS = '.msg-assistant, .msg-user';
+
+  /**
+   * The anchor itself: the panel's link colour, a dotted underline so it reads as
+   * something that happens *here* rather than something that leaves, and the action it
+   * can answer.
+   *
+   * It carries **no `href`**, on purpose. There is nowhere to navigate — a file opens the
+   * preview overlay in place and a folder posts to the server — and an `href` would give
+   * a middle click a destination the panel cannot honour. `role="link"` plus `tabindex`
+   * is what keeps it reachable without one.
+   */
+  function pathAnchor(hit, sessionId) {
+    const a = document.createElement('a');
+    a.className = `path-link is-${hit.kind}`;
+    a.textContent = hit.text;
+    a.setAttribute('role', 'link');
+    a.tabIndex = 0;
+    a.title =
+      hit.kind === 'file'
+        ? `Preview ${hit.entry.path}`
+        : `Show this folder in Finder (${hit.entry.path} is in it)`;
+    const act = (e) => {
+      // The chip summary is inside a `<button>` whose own click toggles the chip open, and
+      // an assistant bubble may sit inside one too. Stopping here is what keeps a path
+      // link from also doing the thing the element around it does.
+      e.preventDefault();
+      e.stopPropagation();
+      if (hit.kind === 'file') openOutputPreview(sessionId, hit.entry);
+      else revealOutputFolder(sessionId, hit.entry, a);
+    };
+    a.onclick = act;
+    a.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') act(e);
+    };
+    return a;
+  }
+
+  /**
+   * Replace every confirmed path in one element's text nodes with a link.
+   *
+   * Text nodes are collected before anything is mutated — a `TreeWalker` over a tree being
+   * spliced underneath it is a walk with no defined answer — and each node is replaced by
+   * a fragment of its own surviving text plus the anchors.
+   */
+  function linkPathsIn(el) {
+    if (!el || view.kind !== 'session' || !view.outputs.length) return;
+    const sessionId = view.selected;
+    if (!sessionId) return;
+    const cwd = pathBase();
+    if (!cwd) return;
+
+    const texts = [];
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || !node.nodeValue.includes('/')) return NodeFilter.FILTER_REJECT;
+        for (let p = node.parentElement; p && p !== el.parentElement; p = p.parentElement) {
+          if (PATH_SKIP.has(p.tagName)) return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    while (walk.nextNode()) texts.push(walk.currentNode);
+
+    for (const node of texts) {
+      const text = node.nodeValue;
+      const hits = pathLinksIn(text, view.outputs, cwd);
+      if (!hits.length) continue;
+      const frag = document.createDocumentFragment();
+      let at = 0;
+      for (const hit of hits) {
+        if (hit.start > at) frag.append(text.slice(at, hit.start));
+        frag.append(pathAnchor(hit, sessionId));
+        at = hit.end;
+      }
+      if (at < text.length) frag.append(text.slice(at));
+      node.replaceWith(frag);
+    }
+  }
+
+  /** …and over a node and every prose block inside it, which is what one message is. */
+  function linkPathsInTree(node) {
+    if (!node) return;
+    if (node.nodeType === 1 && node.matches?.(PATH_HOSTS)) linkPathsIn(node);
+    for (const el of node.querySelectorAll?.(PATH_HOSTS) || []) linkPathsIn(el);
+  }
+
+  /**
+   * The `Write` / `SendUserFile` chip's own summary, linked — the higher-yield half.
+   *
+   * Every human-facing output this session made has a chip naming it, against roughly one
+   * mention in prose for every five sessions, and the chip sits at the exact point in the
+   * timeline where the file was made. So this is the site worth getting right.
+   *
+   * It does **not** run the detector over the summary text. `toolSummary` shortens a path
+   * for the chip (`…/docs/notes.md`), so the string on screen is not a path at all — the
+   * real one is on the message's own `input`, which is the honest witness and the one
+   * `web/files-new.js` already asks. The link's *text* stays whatever the summary said;
+   * only its behaviour is new.
+   *
+   * `SendUserFile` links only when it handed over exactly one file: with two, the summary
+   * is a caption or a count and names no particular one of them, and a link on it would be
+   * a guess about which. The resolved path is stamped on the node either way, so a later
+   * pass — the output set arriving after the chip was drawn — can ask again without the
+   * message.
+   */
+  function chipOutputPath(m) {
+    const input = m?.input && typeof m.input === 'object' ? m.input : null;
+    if (!input) return null;
+    if (m.name === 'Write') return typeof input.file_path === 'string' ? input.file_path : null;
+    if (m.name === 'SendUserFile') {
+      const files = Array.isArray(input.files) ? input.files.filter((f) => typeof f === 'string') : [];
+      return files.length === 1 ? files[0] : null;
+    }
+    return null;
+  }
+
+  function markChipPath(node, m) {
+    const sum = node?.querySelector?.('.chip-summary');
+    if (!sum || !sum.textContent) return;
+    const raw = chipOutputPath(m);
+    if (!raw) return;
+    const abs = resolvePath(raw, pathBase());
+    if (!abs) return;
+    sum.dataset.path = abs;
+    linkChipSummary(sum);
+  }
+
+  /** Draw the link on a summary already carrying a resolved path, if it is in the set. */
+  function linkChipSummary(sum) {
+    if (!sum?.dataset?.path || sum.querySelector('.path-link')) return;
+    if (view.kind !== 'session' || !view.selected || !view.outputs.length) return;
+    const entry = view.outputs.find((o) => o.path && resolvePath(o.path, null) === sum.dataset.path);
+    if (!entry) return;
+    const a = pathAnchor({ kind: 'file', entry, text: sum.textContent }, view.selected);
+    a.classList.add('path-link-chip');
+    sum.replaceChildren(a);
+  }
+
+  /** Walk everything on screen again — the output set has grown. */
+  function relinkPaths() {
+    if (!streamEl || view.kind !== 'session') return;
+    for (const el of streamEl.inner.querySelectorAll(PATH_HOSTS)) linkPathsIn(el);
+    for (const sum of streamEl.inner.querySelectorAll('.chip-summary[data-path]')) linkChipSummary(sum);
+  }
+
+  /**
+   * Ask the server what this session has produced, then relink what is already drawn.
+   *
+   * The same endpoint the files modal opens on, and for the same reason it exists: the
+   * panel only ever holds a *window* of a transcript, so a set built from `view.messages`
+   * would be a subset and would look complete. A failure is silent — no links is exactly
+   * what the panel drew before this feature, and a banner over a garnish would be worse
+   * than the garnish being missing.
+   */
+  async function refreshOutputs() {
+    if (view.kind !== 'session' || !view.selected) return;
+    if (view.outputsBusy) {
+      view.outputsAgain = true;
+      return;
+    }
+    view.outputsBusy = true;
+    const mine = view.outputsSeq;
+    const id = view.selected;
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/outputs`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (mine !== view.outputsSeq || view.selected !== id) return;
+      view.outputs = Array.isArray(data.outputs) ? data.outputs.filter((o) => o && o.path) : [];
+      relinkPaths();
+    } catch {
+      // Offline, or the session went away between the roster and the fetch.
+    } finally {
+      view.outputsBusy = false;
+      if (view.outputsAgain) {
+        view.outputsAgain = false;
+        refreshOutputs();
+      }
+    }
+  }
+
+  /**
+   * A file link's click: the same preview overlay a cell in the files modal opens.
+   *
+   * The **whole** output set goes over, unfiltered, which is the one thing this caller has
+   * to get right — the overlay's arrow keys walk what it was handed, and handing it one
+   * entry would make a link a dead end where a cell is a way in. `outputSrcFor` rather
+   * than the overlay's default, for the modal's own reason: these are outputs, and a
+   * `SendUserFile` screenshot is not an image *block*, so it has no address under
+   * `/image/:uuid/:index` at all.
+   */
+  function openOutputPreview(sessionId, entry) {
+    const at = view.outputs.indexOf(entry);
+    openLightbox(sessionId, view.outputs, at < 0 ? 0 : at, { src: (id, item) => outputSrcFor(id, item) });
+  }
+
+  /**
+   * A folder link's click: Finder, selecting the folder — and **no path in the body**.
+   *
+   * It posts the `{uuid, index}` of the output that folder holds, and the server does the
+   * `dirname` off its own re-read of this session's transcript (`revealableFolder`). That
+   * is the same bound the file reveal keeps, and the reason it is kept here too is that a
+   * folder body would be the first path parameter in the feature — precisely the prior art
+   * the plan measured and refused.
+   *
+   * A refusal flashes on the link itself rather than anywhere else: the reader's attention
+   * is on the word they just clicked, and the usual answer is that the file has been
+   * deleted since the session wrote it.
+   */
+  async function revealOutputFolder(sessionId, entry, el) {
+    const was = el.textContent;
+    try {
+      await postJSON(`/api/sessions/${encodeURIComponent(sessionId)}/output/reveal-folder`, {
+        uuid: entry.uuid,
+        index: entry.index,
+      });
+    } catch (err) {
+      el.textContent = err.message;
+      el.classList.add('is-refused');
+      setTimeout(() => {
+        if (!el.isConnected) return;
+        el.textContent = was;
+        el.classList.remove('is-refused');
+      }, 1800);
+    }
+  }
+
   function renderStream() {
     // `renderAllStreams` fires this on every pane when the thinking toggle flips. Neither a
     // thread nor the shared room has a transcript to redraw, or a live `streamEl` to redraw
@@ -10902,9 +11228,16 @@ function createPane(slot, host) {
      * `composerSig`: a file landing must never tear the textarea down under a reader's
      * cursor (`renderMergeQueue`'s rule, and the plan's §7 rule 6).
      */
-    if (!view.filesNew && anyNewOutput(messages)) {
-      view.filesNew = true;
-      paintFilesBtn();
+    if (anyNewOutput(messages)) {
+      if (!view.filesNew) {
+        view.filesNew = true;
+        paintFilesBtn();
+      }
+      // The same signal, reused rather than polled: a path link is bounded to this
+      // session's output set, so the set has to be re-asked when something lands in it —
+      // and this is already the one predicate that knows. A file written this turn is
+      // linkable in the next sentence Claude writes about it.
+      refreshOutputs();
     }
 
     if (!streamEl) return;
@@ -10933,7 +11266,24 @@ function createPane(slot, host) {
     }
   }
 
+  /**
+   * One normalized message as a node — and the one place a path link is ever drawn on a
+   * message as it arrives.
+   *
+   * The link pass is here rather than inside each branch so that every register gets it on
+   * the same terms and none can be missed when a branch is added: a `.msg-assistant` built
+   * for a chip's markdown body or for a subagent's `returned` block is prose in exactly the
+   * sense the two obvious ones are. The chip summary is the one thing asked for by name,
+   * because its link comes off the message's `input` rather than off the text on screen.
+   */
   function renderMessage(m) {
+    const node = buildMessage(m);
+    linkPathsInTree(node);
+    if (m?.kind === 'tool_use') markChipPath(node, m);
+    return node;
+  }
+
+  function buildMessage(m) {
     switch (m.kind) {
       // A pasted screenshot arrives on the user's own record, beside the text — and a
       // message that was *only* an image used to be dropped in `normalize.js` and never

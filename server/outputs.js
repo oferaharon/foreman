@@ -621,3 +621,35 @@ export async function revealablePath(file, uuid, index = 0) {
   // block never has one, and there is nothing for Finder to select.
   return typeof found.filePath === 'string' && found.filePath ? found.filePath : null;
 }
+
+/**
+ * The one **directory** a reveal may select: the folder an output of this session lives in.
+ *
+ * The 2026-09-11 ruling bounds a folder link to *the parent directory of one of this
+ * session's own outputs*, and this is where that is enforced — one layer below the route,
+ * for `revealablePath`'s reason and out of the same resolver. The browser posts the
+ * `{uuid, index}` of the output whose parent it means and **never a directory**: the path
+ * is re-derived here from what Claude wrote, so the address space is the bound and there
+ * is no second check to loosen. A uuid belonging to another session is simply not in this
+ * transcript and misses exactly like a fabricated one.
+ *
+ * It refuses a **gone** file, and that is a deliberate strictness rather than an oversight:
+ * the directory of a deleted file very often still exists, and revealing it would be the
+ * panel opening a folder on the strength of a record it can no longer confirm anything
+ * about. The only thing that makes a folder revealable here is an output that is *there*,
+ * so a `stat` is asked even though `revealInFinder` will ask its own about the directory.
+ * A gone `Write` still previews as written — its bytes are in the transcript — and still
+ * does not reveal, on either button.
+ *
+ * `null` for every miss, `revealablePath`'s rule verbatim: an unknown record, an entry
+ * outside the human-facing set, an image block with no path, a file that has since been
+ * deleted, and a path that sits at the root with no parent are one answer to the caller.
+ */
+export async function revealableFolder(file, uuid, index = 0) {
+  const target = await revealablePath(file, uuid, index);
+  if (!target) return null;
+  const st = await fsp.stat(target).catch(() => null);
+  if (!st?.isFile()) return null;
+  const dir = path.dirname(target);
+  return dir && dir !== target ? dir : null;
+}

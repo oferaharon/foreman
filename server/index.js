@@ -125,7 +125,7 @@ import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
 import { findFiles } from './files.js';
 import { scanImages, readImage } from './images.js';
-import { scanOutputs, readOutput, revealablePath, OUTPUT_MEDIA } from './outputs.js';
+import { scanOutputs, readOutput, revealablePath, revealableFolder, OUTPUT_MEDIA } from './outputs.js';
 import { IMAGE_MEDIA } from './normalize.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -1356,6 +1356,44 @@ app.post('/api/sessions/:id/output/reveal', async (req, res) => {
     const target = await revealablePath(session.transcriptPath, req.body?.uuid, index);
     if (!target) return res.status(404).json({ error: 'Nothing in this session names a file there.' });
     res.json({ ok: true, path: await revealFile(target) });
+  } catch (err) {
+    res.status(404).json({ error: err.message });
+  }
+});
+
+/**
+ * Show the **folder** one of this session's outputs lives in — the other end of item 8's
+ * path links, and the only thing in the panel that reveals a directory it was not given.
+ *
+ * The body is `{uuid, index}` and, as on every route in this feature, **there is no path
+ * parameter**. A folder link in the conversation is drawn only when the text resolves to
+ * the parent directory of an output this session produced, so what the browser sends back
+ * is the *output's* address and the server does the `dirname` itself
+ * (`revealableFolder`). The alternative — a `{folder}` body, checked against a list — is
+ * the same endpoint with a path in it, which is the prior art the plan was measured
+ * against and refused. The browser never names a directory either.
+ *
+ * `revealInFinder`, not `revealFile`: this one opens a Finder window on a directory and
+ * refuses a file, which is the opposite guard its sibling carries. The two are separate
+ * functions precisely so a folder reveal can never become `open <file>` on the first path
+ * that turns out not to be a directory — `open` on a file runs its default handler, and
+ * this panel's own launcher gets a Terminal window by writing a `.command` and opening it.
+ *
+ * Every refusal is the same 404 the file reveal answers with, plus one more: a **gone**
+ * file. Its folder may well still be there, and the panel still declines — the thing that
+ * makes a directory revealable here is an output it can confirm, and a folder inferred
+ * from a path that no longer resolves is a guess. `revealableFolder`'s header says the
+ * same from the other side.
+ */
+app.post('/api/sessions/:id/output/reveal-folder', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session?.transcriptPath) return res.status(404).json({ error: 'Unknown session.' });
+  const raw = req.body?.index;
+  const index = raw === undefined || raw === null ? 0 : Number(raw);
+  try {
+    const dir = await revealableFolder(session.transcriptPath, req.body?.uuid, index);
+    if (!dir) return res.status(404).json({ error: 'Nothing in this session names a file in that folder.' });
+    res.json({ ok: true, folder: await revealInFinder(dir) });
   } catch (err) {
     res.status(404).json({ error: err.message });
   }
