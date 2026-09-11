@@ -51,6 +51,7 @@
  */
 
 import { marked } from '/vendor/marked.js';
+import { withBlankTargets } from '../anchor-target.js';
 import { buildCard } from './cards.js';
 // The ghost-text auto-send flag, shared with the desktop's settings modal — see
 // `web/prefs.js`. `/` and `/m/` are one origin, so one browser gives one answer.
@@ -1317,7 +1318,7 @@ function renderMessage(m) {
     case 'assistant': {
       const div = document.createElement('div');
       div.className = 'm-msg-assistant';
-      div.innerHTML = marked.parse(m.text || '');
+      div.innerHTML = withBlankTargets(marked.parse(m.text || ''));
       return div;
     }
     // The panel's own [room] poke at a lead. Nobody typed it, so it must not wear the
