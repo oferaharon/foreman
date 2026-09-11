@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
+import { GROUP_COLOUR_COUNT, assignColour, isGroupColour } from '../web/group-hue.js';
 
 const FILE = path.join(STATE_DIR, 'groups.json');
 
@@ -55,7 +56,7 @@ export class GroupStore {
   /** @param {string} [file] override the store location (tests) */
   constructor(file = FILE) {
     this.file = file;
-    this.groups = []; // [{ id, name, collapsed, auto, folders: [] }]
+    this.groups = []; // [{ id, name, collapsed, auto, colour, folders: [] }]
     this.seq = 0;
     this.dirty = false;
     this.#load();
@@ -76,12 +77,31 @@ export class GroupStore {
           name: g.name.slice(0, MAX_NAME),
           collapsed: Boolean(g.collapsed),
           auto: 'auto' in g ? Boolean(g.auto) : looksAuto(folders),
+          colour: isGroupColour(g.colour) ? g.colour : null,
           folders,
         });
       }
       this.seq = Number.isInteger(raw?.seq) ? raw.seq : this.groups.length;
+      this.#backfillColours();
     } catch {
       /* first run, or hand-edited into nonsense — start clean */
+    }
+  }
+
+  /*
+   * Every group made before the colour existed gets one, in list order, by the same rule a
+   * new group gets — so each record sees what the ones above it took and the first ten come
+   * out on ten different slots. Also catches a slot hand-edited into nonsense, which `#load`
+   * has already read back as `null`.
+   *
+   * Marked dirty so it is written **once**: the field only has to be guessed the first time,
+   * and a rail whose spines moved on every restart would be worse than no spines.
+   */
+  #backfillColours() {
+    for (const g of this.groups) {
+      if (isGroupColour(g.colour)) continue;
+      g.colour = assignColour(this.groups);
+      this.dirty = true;
     }
   }
 
@@ -138,7 +158,14 @@ export class GroupStore {
     const clean = this.#clean(name);
     this.#assertUnique(clean);
     this.seq += 1;
-    const group = { id: `g${this.seq}`, name: clean, collapsed: false, auto: Boolean(auto), folders: [] };
+    const group = {
+      id: `g${this.seq}`,
+      name: clean,
+      collapsed: false,
+      auto: Boolean(auto),
+      colour: assignColour(this.groups),
+      folders: [],
+    };
     this.groups.push(group);
     this.dirty = true;
     return { ...group, folders: [] };
@@ -167,6 +194,28 @@ export class GroupStore {
     const group = this.get(id);
     if (!group) return null;
     group.collapsed = Boolean(collapsed);
+    this.dirty = true;
+    return { ...group, folders: [...group.folders] };
+  }
+
+  /**
+   * Override the slot the ring handed out — the `⋯` menu's swatch row.
+   *
+   * Validated rather than coerced, and the message says what a slot is: this is the one
+   * write that comes in as a number over the API, and a group silently painted slot 1
+   * because somebody sent `"3"` would be a colour nobody chose. An unknown id is `null`
+   * (a 404), a bad slot throws (a 400) — the same split `rename` already has.
+   *
+   * @param {string} id
+   * @param {number} colour a slot in `1..GROUP_COLOUR_COUNT`
+   */
+  setColour(id, colour) {
+    if (!isGroupColour(colour)) {
+      throw new Error(`A group colour is a whole number from 1 to ${GROUP_COLOUR_COUNT}.`);
+    }
+    const group = this.get(id);
+    if (!group) return null;
+    group.colour = colour;
     this.dirty = true;
     return { ...group, folders: [...group.folders] };
   }

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 /*
  * Scratch state dir before the import: the store derives the `worktrees/` prefix from it
@@ -293,4 +297,255 @@ test('the flag survives a reload rather than being re-guessed', () => {
   const reopened = new GroupStore(file);
   assert.equal(reopened.get(team.id).auto, true);
   reopened.stop();
+});
+
+/* ------------------------------------------------------------- the colour slot --- */
+
+/*
+ * A group wears a slot of the rail's ring (`web/group-hue.js`), and the number lives on
+ * the record because a spine has to survive a reload and a restart. The rule itself is
+ * tested next door in `test/group-hue.test.js`; what matters here is that the store
+ * assigns one, carries it across a reload, and refuses a slot that isn't one.
+ */
+
+const { GROUP_COLOUR_COUNT } = await import('../web/group-hue.js');
+
+test('a new group is given a slot, and the first ones are all different', () => {
+  const g = new GroupStore(tmpStore());
+  const slots = ['alpha', 'beta', 'gamma'].map((n) => g.create(n).colour);
+  assert.deepEqual(slots, [1, 2, 3]);
+  g.stop();
+});
+
+test('the slot survives a reload rather than being re-assigned', () => {
+  const file = tmpStore();
+  const g = new GroupStore(file);
+  g.create('alpha');
+  const beta = g.create('beta');
+  g.setColour(beta.id, 7);
+  g.flush();
+  g.stop();
+
+  const reopened = new GroupStore(file);
+  assert.equal(reopened.get(beta.id).colour, 7, 'a chosen colour is not re-rolled at boot');
+  reopened.stop();
+});
+
+/*
+ * `#load` rebuilds each record from named keys, so a field it does not know about is
+ * dropped — which is why the backfill exists and why it has to be written down. Groups on
+ * disk from before this change carry no `colour` at all.
+ */
+test('a record with no colour is backfilled, in list order, and written once', () => {
+  const file = tmpStore();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      seq: 3,
+      groups: [
+        { id: 'g1', name: 'alpha', collapsed: false, folders: ['alpha'] },
+        { id: 'g2', name: 'beta', collapsed: false, folders: ['beta'] },
+        { id: 'g3', name: 'gamma', collapsed: false, folders: [] },
+      ],
+    }),
+  );
+
+  const g = new GroupStore(file);
+  assert.deepEqual(g.list().map((x) => x.colour), [1, 2, 3], 'each one sees what the ones above took');
+  assert.equal(g.dirty, true, 'the guess is written, so it is only ever guessed once');
+  g.flush();
+  g.stop();
+
+  const reopened = new GroupStore(file);
+  assert.deepEqual(reopened.list().map((x) => x.colour), [1, 2, 3], 'and the backfill survives');
+  assert.equal(reopened.dirty, false, 'nothing left to guess on the second boot');
+  reopened.stop();
+});
+
+test('a slot already on disk is kept, and only the gaps are filled', () => {
+  const file = tmpStore();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      seq: 3,
+      groups: [
+        { id: 'g1', name: 'alpha', colour: 4, folders: [] },
+        { id: 'g2', name: 'beta', folders: [] },
+        { id: 'g3', name: 'gamma', colour: 99, folders: [] }, // hand-edited into nonsense
+      ],
+    }),
+  );
+
+  const g = new GroupStore(file);
+  assert.deepEqual(g.list().map((x) => x.colour), [4, 1, 2]);
+  g.stop();
+});
+
+test('setColour refuses anything that is not a slot', () => {
+  const g = new GroupStore(tmpStore());
+  const made = g.create('alpha');
+
+  assert.equal(g.setColour(made.id, 5).colour, 5);
+  for (const bad of [0, -1, GROUP_COLOUR_COUNT + 1, 1.5, '2', null, undefined, NaN, {}]) {
+    assert.throws(
+      () => g.setColour(made.id, bad),
+      /whole number from 1 to/i,
+      `refused: ${String(bad)}`,
+    );
+  }
+  assert.equal(g.get(made.id).colour, 5, 'and none of them changed the colour it had');
+  g.stop();
+});
+
+/* The same split `rename` has: an unknown id is nothing to change, a bad slot is a bad
+ * request. The route reads the two differently (404 against 400), so the store must too. */
+test('setColour on a group that does not exist is null, not a throw', () => {
+  const g = new GroupStore(tmpStore());
+  assert.equal(g.setColour('g99', 3), null);
+  g.stop();
+});
+
+/* --------------------------------------------------- the colour over the wire --- */
+
+/*
+ * `PATCH /api/groups/:id` against the real server, the shape `test/team-api.test.js`
+ * uses: a scratch state dir, a free port, and nothing that touches the real one — a
+ * second panel on the real state dir boots its own worktree GC and would sweep real
+ * worktrees. The route lives inline in `server/index.js`, so there is nothing to import
+ * and the thing worth testing is the whole request: express body parsing, the status
+ * codes, and the fact that a slot the store refuses comes back as a 400 rather than as a
+ * silently coerced colour.
+ */
+
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+let panel;
+let port;
+let panelState;
+
+async function freePort() {
+  const probe = net.createServer();
+  await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+  const { port: p } = probe.address();
+  await new Promise((r) => probe.close(r));
+  return p;
+}
+
+async function api(method, route, body) {
+  const res = await fetch(`http://127.0.0.1:${port}${route}`, {
+    method,
+    headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return { status: res.status, body: await res.json() };
+}
+
+/** SIGTERM makes the panel flush on its way out, so an `rm` in the same tick races it. */
+function stop(proc) {
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    proc.once('exit', resolve);
+    proc.kill();
+  });
+}
+
+test.before(async () => {
+  panelState = await fsp.mkdtemp(path.join(os.tmpdir(), 'foreman-groups-api-'));
+  /* Seeded with one group carrying no colour, so the boot backfill is visible through the
+     API as well as through the store. */
+  await fsp.writeFile(
+    path.join(panelState, 'groups.json'),
+    JSON.stringify({ seq: 1, groups: [{ id: 'g1', name: 'alpha', collapsed: false, folders: ['alpha'] }] }),
+  );
+  port = await freePort();
+  panel = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], {
+    cwd: ROOT,
+    env: {
+      ...process.env,
+      FOREMAN_PORT: String(port),
+      FOREMAN_HOST: '127.0.0.1',
+      FOREMAN_STATE_DIR: panelState,
+      /* A scratch label, because a panel rotates the log files its label names at boot and
+         the default label's files are the real panel's. Nothing here needs a log; this is
+         the one line that makes sure a big one could never be touched. */
+      FOREMAN_AGENT_LABEL: 'com.example.foreman-groups-test',
+    },
+    stdio: ['ignore', 'ignore', 'ignore'],
+  });
+  // Insurance against an interrupted run: `after` never fires on a Ctrl-C.
+  process.on('exit', () => panel?.kill());
+
+  const deadline = Date.now() + 20_000;
+  for (;;) {
+    try {
+      await fetch(`http://127.0.0.1:${port}/api/groups`);
+      return;
+    } catch {
+      if (Date.now() > deadline) throw new Error('the scratch panel never came up');
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+});
+
+test.after(async () => {
+  await stop(panel);
+  if (panelState) await fsp.rm(panelState, { recursive: true, force: true });
+});
+
+test('the backfilled colour is on the wire without any client plumbing', async () => {
+  const res = await api('GET', '/api/groups');
+  assert.equal(res.status, 200);
+  assert.equal(res.body.groups[0].colour, 1, 'a group written before the field had one');
+});
+
+test('a group made over the API comes back with a slot of its own', async () => {
+  const res = await api('POST', '/api/groups', { name: 'beta' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.group.colour, 2);
+});
+
+test('PATCH colour round-trips, and rides the whole list back', async () => {
+  const made = await api('POST', '/api/groups', { name: 'gamma' });
+  const id = made.body.group.id;
+
+  const patched = await api('PATCH', `/api/groups/${id}`, { colour: 9 });
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.group.colour, 9);
+  assert.equal(patched.body.groups.find((g) => g.id === id).colour, 9);
+
+  const after = await api('GET', '/api/groups');
+  assert.equal(after.body.groups.find((g) => g.id === id).colour, 9, 'and it stuck');
+});
+
+test('a slot outside the ring is a 400 with a sentence, and changes nothing', async () => {
+  const made = await api('POST', '/api/groups', { name: 'delta' });
+  const id = made.body.group.id;
+  const had = made.body.group.colour;
+
+  for (const bad of [0, GROUP_COLOUR_COUNT + 1, 2.5, '3', null]) {
+    const res = await api('PATCH', `/api/groups/${id}`, { colour: bad });
+    assert.equal(res.status, 400, `refused: ${String(bad)}`);
+    assert.match(res.body.error, /whole number from 1 to/i);
+  }
+
+  const after = await api('GET', '/api/groups');
+  assert.equal(after.body.groups.find((g) => g.id === id).colour, had);
+});
+
+test('a colour for a group that does not exist is a 404', async () => {
+  const res = await api('PATCH', '/api/groups/g999', { colour: 3 });
+  assert.equal(res.status, 404);
+});
+
+/* Name and collapse still work, and a PATCH carrying a colour beside a name applies both —
+ * the route walks the three in order rather than treating them as alternatives. */
+test('colour sits beside name and collapsed rather than replacing them', async () => {
+  const made = await api('POST', '/api/groups', { name: 'epsilon' });
+  const id = made.body.group.id;
+
+  const res = await api('PATCH', `/api/groups/${id}`, { name: 'epsilon-two', collapsed: true, colour: 6 });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.group.name, 'epsilon-two');
+  assert.equal(res.body.group.collapsed, true);
+  assert.equal(res.body.group.colour, 6);
 });
