@@ -894,12 +894,19 @@ body.row-dragging * { cursor: row-resize !important; }
 .folder-label.in-group {
   top: 2.5rem;
   padding-top: 0.6rem;
-  padding-left: 1.9rem;
+  /* 1.9rem, less the 3px the spine's border adds — see "the spine" below. */
+  padding-left: calc(1.9rem - 3px);
+  border-left: 3px solid var(--spine);
 }
 
 /* Rows under a group are indented with it, so the fold reads as one block. Marked in JS:
-   the rail is a flat list of siblings, so there's no nesting for CSS to key off. */
-.session-row.in-group { padding-left: 0.8rem; }
+   the rail is a flat list of siblings, so there's no nesting for CSS to key off. And the
+   border-left is the spine — a *colour* here and never a width, since every `.session-row`
+   already carries a 3px transparent one. See "the spine" below. */
+.session-row.in-group {
+  padding-left: 0.8rem;
+  border-left-color: var(--spine);
+}
 
 .folder-name {
   overflow: hidden;
@@ -920,6 +927,11 @@ body.row-dragging * { cursor: row-resize !important; }
   padding-bottom: 0.5rem;
   border-top: 1px solid var(--rule);
   margin-top: 0.5rem;
+  /* 1.1rem, less the 3px the spine's border adds — see "the spine" below. A collapsed
+     group keeps its spine: folded, this line is the whole of the group on screen, and the
+     bar on it is what separates it from whatever heading comes next. */
+  padding-left: calc(1.1rem - 3px);
+  border-left: 3px solid var(--spine);
 }
 
 /* The first group has the rail head's rule directly above it already. */
@@ -939,6 +951,69 @@ body.row-dragging * { cursor: row-resize !important; }
 /* Marked in `renderRail` for the same reason the indent is: nothing here knows it is last
    without being told. Closes the block so the next heading isn't flush against it. */
 .session-row.in-group-last { padding-bottom: 0.5rem; }
+
+/* ------------------------------------------------------------- the spine --- */
+
+/* A group you made also carries a **spine**: a 3px bar in that group's own colour, down
+   the left edge of its header, its folder headings and every row under it, nested workers
+   included. You read "which group" off the edge of the rail without reading any words.
+ *
+ * `--h` is set inline, per sibling, in `renderRail`'s group loop — because the rail is a
+ * flat list and there is no container to hang it on, the same structural fact the tint
+ * above already lives with. A sibling that never passes through that loop (a pinned row,
+ * an inbox row, an ungrouped folder heading) simply has no `--h`, so every `var(--h, …)`
+ * here falls back to the accent with no branch in JavaScript.
+ *
+ * It is continuous for free, and that is worth knowing before anything is moved: all
+ * three sibling kinds pad *inside* their box, so their left borders already land on the
+ * same x. The headings' `padding-left` is reduced by exactly the 3px the border adds, so
+ * nothing they contain moves sideways. The two places the spine is *supposed* to break are
+ * the two the tint already breaks at — `.shelf-label`'s `margin-top`, which separates one
+ * group from the next, and `.in-group-last`'s `padding-bottom`, which closes the block.
+ * Anything that later adds a vertical margin to a row or a heading cuts both at once.
+ */
+
+/* **Two strengths, and the reason is `--row-open`'s reason.** A selected row is found by
+   three signals, not one — a filled band, a left edge thick enough to read as a marker,
+   and a title at full ink — and inside a group that edge would otherwise be the group's
+   hue against the group's own hue, which is no step at all. So the spine runs reduced and
+   the marker runs full.
+
+   **50%, and it is measured rather than sketched.** The two signals pull against each
+   other: a deeper mix makes the spine easier to see and the marker's step smaller, and a
+   shallower one does the reverse. 50% is (within half a point of) the mix that maximises
+   the *weaker* of the two — the balance point, at 49.5%, where the spine's own contrast
+   against its worst ground and the marker's step over the spine meet at 1.665:1. Neither
+   is traded for the other, which is the only defensible place to stand when both matter.
+
+   Light theme, spine over each of the three grounds a row can sit on:
+
+     vs --surface        1.78 – 2.57      ΔE2000 23.0 – 32.7
+     vs --shelf          1.72 – 2.50      ΔE2000 22.7 – 32.2
+     vs --surface-sunk   1.68 – 2.45      ΔE2000 23.3 – 30.5   ← binding: the darkest ground
+     marker vs spine     1.65 – 2.98      ΔE2000 16.0 – 32.7
+
+   Dark theme:
+
+     vs --surface        1.76 – 3.20      ΔE2000 23.7 – 39.7
+     vs --shelf          1.68 – 3.09      ΔE2000 23.0 – 39.0   ← binding: the lightest ground
+     vs --surface-sunk   1.80 – 3.24      ΔE2000 24.3 – 39.7
+     marker vs spine     1.96 – 2.70      ΔE2000 18.0 – 27.2
+
+   Two honest notes on those numbers. A *reduced* bar cannot clear the 3:1 the ring itself
+   was measured to — that figure is the full hue's, and it is what the marker still wears;
+   a 50% bar is below it by construction, at any percentage short of 100. What carries the
+   spine instead is hue: it differs from every ground it sits on by ΔE2000 ≥ 22.7 in both
+   themes, where the widest gap anywhere in the ring's own reservations is 12.50, and the
+   grouping it signals is redundant anyway — the `--shelf` tint and the group's own header
+   are both still there. And the marker's step is stated over `--shelf`, the spine a
+   selected row's neighbours actually wear; over a *hovered* neighbour (`--surface-sunk`,
+   light) the smallest step is 1.59 rather than 1.65. */
+.shelf-label,
+.folder-label.in-group,
+.session-row.in-group {
+  --spine: color-mix(in srgb, var(--h, var(--accent)) 50%, transparent);
+}
 
 /* Flat view has no headings to separate the triage sections from the list, so it gets a
    rule instead — but only when there is something above it to separate from. */
@@ -1095,7 +1170,10 @@ body.row-dragging * { cursor: row-resize !important; }
    between two strong states every time you moved the mouse across the rail. */
 .session-row.is-open {
   background: var(--row-open);
-  border-left-color: var(--accent);
+  /* The group's own hue at full strength, so the marker still steps forward from the
+     reduced spine running past it — the third signal, kept. Outside a group there is no
+     `--h` and this is the accent it has always been. */
+  border-left-color: var(--h, var(--accent));
 }
 
 .session-row.is-open .session-title { color: var(--ink); }

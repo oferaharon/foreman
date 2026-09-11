@@ -73,6 +73,9 @@ import { ghostAction, ghostSig, INTERRUPT_TITLE } from './ghost-action.js';
 // it is a module and not a comparator inlined into `renderRail`: the rule that a team block
 // holds still is exactly the kind of thing that gets optimised back into `lastActivity` by
 // somebody tidying, and a node test is what stops that.
+import { hueVar, isGroupColour } from './group-hue.js';
+// ^ the group ring's spelling and its bounds. `renderRail` sets `--h` inline on every
+// sibling a group owns, because the rail is a flat list with no container to hang it on.
 import { orderWorkers } from './worker-order.js';
 // What the team room draws, given the slate the server holds — the `clear` / `show all`
 // pointer. Its own module for the reason every other pure one under `web/` is: the filter
@@ -3553,17 +3556,37 @@ function renderRail() {
     // the shelf it normally sits on has nothing on it. It comes back when the session does.
     if (!count) continue;
 
-    frag.append(groupHeader(g, count, busy));
+    // The group's colour, on every sibling the group owns.
+    //
+    // The rail is a flat list, so there is no container to set this on once — the spine is
+    // tiled from the header, the folder headings and the rows the same way the tint is, and
+    // each of them has to carry the hue itself. Everything that never comes through this
+    // loop (a pinned row, an inbox row, an ungrouped folder) gets no `--h` at all, which is
+    // what keeps its selected marker on the accent with no branch here or in the stylesheet.
+    //
+    // Re-set on every build, which is correct: `renderRail` rebuilds the rail from scratch
+    // on every roster tick, so there is nothing here that has to survive a repaint.
+    //
+    // A record whose `colour` is not a slot gets nothing rather than `var(--group-undefined)`,
+    // and the stylesheet's own `var(--h, var(--accent))` fallback draws it in the accent.
+    // The store backfills on load, so this is a guard rather than a path.
+    const hue = isGroupColour(g.colour) ? hueVar(g.colour) : null;
+    const wear = (node) => {
+      if (hue) node.style.setProperty('--h', hue);
+      return node;
+    };
+
+    frag.append(wear(groupHeader(g, count, busy)));
     // Collapsing can't hide anything you need: a session that wants you is in the inbox
     // above, and a pinned one is above that. What's left in here is quiet by definition.
     if (g.collapsed) continue;
     let tail = null;
     for (const f of mine) {
-      frag.append(folderHeading(f, true));
+      frag.append(wear(folderHeading(f, true)));
       for (const s of folders.get(f)) {
         for (const row of rowsFor(s)) {
           row.classList.add('in-group');
-          frag.append(row);
+          frag.append(wear(row));
           tail = row;
         }
       }
