@@ -10,6 +10,18 @@ import { forgeMarkupFor } from './forge-mark.js';
 // the transcript names the moment the modal opens).
 import { FILE_KINDS, filesCounts, filesFor, filesItems } from './files-kinds.js';
 import { linkMarkupFor } from './link-mark.js';
+// …and the preview overlay's third pure half: which renderer an entry gets, what it can be
+// asked to do, and the line along the bottom. Separate from `files-kinds.js` because the
+// pill an entry lives under and the way it is painted are answered from different fields —
+// an `.svg` is `kind: 'image'` in the grid and text in the overlay, and only `source` tells
+// those apart.
+import {
+  previewable,
+  previewActions,
+  previewFoot,
+  previewKindFor,
+  previewLost,
+} from './files-preview.js';
 // The ghost-text auto-send flag, the TASKS filter, and the one definition of what that
 // filter hides. In `web/prefs.js` rather than here because the phone's lead screen reads
 // the same keys, and two spellings of one setting is a setting that appears to work — see
@@ -4364,41 +4376,225 @@ function taskPlanReader(t) {
 function imageSrc(sessionId, ref) {
   return `/api/sessions/${encodeURIComponent(sessionId)}/image/${encodeURIComponent(ref.uuid)}/${ref.index}`;
 }
-
 /**
- * One image, big, over everything.
+ * One thing from this session, big, over everything.
  *
- * Deliberately small: it closes on a click anywhere and on Escape, and there is no zoom
- * and no pan. Arrow keys step through the set that opened it, which is not a carousel so
- * much as the list already being in hand — the strip or the grid passed its whole array,
- * so it costs two lines and no chrome.
+ * This started as the image lightbox and is still that on an image — same class, same
+ * keys, same click-anywhere-to-close — widened so a *document* from the files modal opens
+ * in it too. One overlay rather than two, because everything that made the image one worth
+ * keeping is the part a document needs as well: it is the thing on top, it owns Escape,
+ * and the list that opened it is already in hand so the arrow keys cost two lines and no
+ * chrome.
+ *
+ * Four things about it, each of which is a rule rather than a preference:
+ *
+ *   **The renderer is `web/files-preview.js`'s answer, never a switch written here.** That
+ *   module is DOM-free and tested in plain Node, and the one decision it exists for is the
+ *   one that must never quietly relax: an `.html` or `.svg` **document** is shown as text.
+ *   No `innerHTML`, no `iframe`, and no `<img>` either — an `<img>` of an SVG document is
+ *   §7 rule 4 broken one element over. An SVG that arrived as an image *block* keeps its
+ *   `<img>`, and only `source` tells those two apart.
+ *
+ *   **Markdown goes through `withBlankTargets`, like every other `marked.parse` here.** A
+ *   link inside a document the session wrote would otherwise navigate the panel itself
+ *   away and drop every subscription in both panes.
+ *
+ *   **The arrow keys walk the list the reader can currently see, and skip a link.** The
+ *   modal hands over its *filtered* list, so stepping never leaves the set the pills say is
+ *   on screen; a link is an anchor in the grid and never opens this, so it is filtered out
+ *   of the walk rather than skipped mid-step — which is also what keeps `N / M` honest.
+ *
+ *   **An action is drawn only when the entry can answer it.** A pasted screenshot has no
+ *   path and gets the picture and nothing else — the trust gate's discipline, which draws
+ *   no button rather than a dead one, and three images in four on this Mac are pastes or
+ *   automation screenshots.
+ *
+ * `src` is a parameter because the two callers address bytes in different spaces: the
+ * per-turn strip's refs are image blocks (`/image/:uuid/:index`) while the files modal's
+ * entries are outputs (`/output/:uuid/:index`, which also serves a `Write`'s and a
+ * `SendUserFile`'s bytes). One function, two address spaces, and the caller that knows
+ * which one it is in says so.
  */
-function openLightbox(sessionId, images, start = 0) {
-  if (!images?.length) return;
-  let at = Math.max(0, Math.min(start, images.length - 1));
+function openLightbox(sessionId, items, start = 0, { src = imageSrc } = {}) {
+  // A link never opens this (§7 rule 3), so it is out of the walk entirely rather than
+  // skipped on the way past — which is what makes the position counter mean something.
+  const steps = (items || []).filter(previewable);
+  if (!steps.length) return;
+  const clicked = (items || [])[start];
+  let at = Math.max(0, steps.indexOf(clicked));
+
+  // Bumped on every paint, so a fetch that comes back after the reader has already
+  // arrowed on paints nothing. The byte route is `immutable` for a record, so stepping
+  // back is a browser-cache hit and there is nothing here to cache a second time.
+  let seq = 0;
 
   const back = document.createElement('div');
   back.className = 'modal-back lightbox';
 
   const fig = document.createElement('figure');
   fig.className = 'lightbox-fig';
+
+  // The action row. Hidden rather than empty when there is nothing to draw, so a pathless
+  // image is byte-identical to the overlay before this existed.
+  const head = document.createElement('div');
+  head.className = 'lightbox-head';
+
   const img = document.createElement('img');
   img.className = 'lightbox-img';
+
+  // The document panel: a surface the text is legible on, over a scrim built for a photo.
+  const doc = document.createElement('div');
+  doc.className = 'lightbox-doc';
+  const page = document.createElement('div');
+  page.className = 'lightbox-page';
+  doc.append(page);
+
   const cap = document.createElement('figcaption');
   cap.className = 'lightbox-cap';
-  fig.append(img, cap);
+  fig.append(head, img, doc, cap);
   back.append(fig);
 
+  /** `copy path`, and the flash that says it happened. */
+  function copyButton(path) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'lightbox-act';
+    btn.textContent = 'copy path';
+    btn.title = path;
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(path);
+        btn.textContent = 'copied';
+      } catch {
+        // No clipboard permission, or an insecure context: say so rather than flashing a
+        // success the reader would then paste nothing from.
+        btn.textContent = 'could not copy';
+      }
+      btn.classList.add('is-flash');
+      setTimeout(() => {
+        if (!btn.isConnected) return;
+        btn.textContent = 'copy path';
+        btn.classList.remove('is-flash');
+      }, 1400);
+    };
+    return btn;
+  }
+
+  function paintHead(entry) {
+    const acts = previewActions(entry);
+    head.replaceChildren();
+    // The name is the row's own label and is only worth the line when there is a button
+    // beside it — the caption underneath already says what this is.
+    if (acts.length && (entry.name || entry.path)) {
+      const name = document.createElement('span');
+      name.className = 'lightbox-head-name';
+      name.textContent = entry.path ? shortPath(entry.path) : entry.name;
+      name.title = entry.path || entry.name;
+      head.append(name);
+    }
+    for (const act of acts) {
+      if (act === 'copy-path') head.append(copyButton(entry.path));
+      // `reveal in Finder` lands here, from item 7 of the paths-and-files plan: it is a
+      // POST to `/api/sessions/:id/output/reveal` with the same `{uuid, index}` the list
+      // handed over — never a path — and it is drawn on the same rule as `copy path`
+      // (`previewActions` grows one entry, this loop grows one branch). Nothing is drawn
+      // for it today, deliberately: a disabled button is the thing the trust gate's card
+      // refuses to be.
+    }
+    head.hidden = head.childElementCount === 0;
+  }
+
+  /** The `plain-other` branch, and the gone-attachment branch, share this shape. */
+  function noPreview(entry, why) {
+    const box = document.createElement('div');
+    box.className = 'lightbox-none';
+    const name = document.createElement('div');
+    name.className = 'lightbox-none-name';
+    name.textContent = entry.name || entry.path || 'file';
+    const facts = document.createElement('div');
+    facts.className = 'lightbox-none-facts';
+    facts.textContent = [entry.kind || 'file', shortBytes(entry.bytes)].filter(Boolean).join(' · ');
+    const p = document.createElement('p');
+    p.textContent = why;
+    box.append(name, facts, p);
+    return box;
+  }
+
+  async function paintText(entry, mine, asMarkdown) {
+    page.replaceChildren();
+    page.className = `lightbox-page ${asMarkdown ? 'plan-md lightbox-md' : 'lightbox-pre-wrap'}`;
+    const waiting = document.createElement('div');
+    waiting.className = 'lightbox-waiting';
+    waiting.textContent = 'reading…';
+    page.append(waiting);
+    let text;
+    try {
+      const res = await fetch(src(sessionId, entry));
+      if (!res.ok) throw new Error(`could not read it (${res.status})`);
+      text = await res.text();
+    } catch (err) {
+      if (mine !== seq || !page.isConnected) return;
+      page.replaceChildren(noPreview(entry, err.message));
+      return;
+    }
+    if (mine !== seq || !page.isConnected) return;
+    if (asMarkdown) {
+      // The same accepted trust level `.plan-md` already runs at, on text this transcript
+      // already holds — and `withBlankTargets` so a link in it opens a tab instead of
+      // taking the panel with it.
+      page.innerHTML = withBlankTargets(marked.parse(text));
+    } else {
+      const pre = document.createElement('pre');
+      pre.className = 'lightbox-pre';
+      pre.textContent = text;
+      page.replaceChildren(pre);
+    }
+  }
+
   function paint() {
-    const ref = images[at];
-    img.src = imageSrc(sessionId, ref);
-    img.alt = ref.note || 'Image from this session';
+    const entry = steps[at];
+    const mine = ++seq;
+    const kind = previewKindFor(entry);
+    const lost = previewLost(entry);
+
+    paintHead(entry);
+    fig.classList.toggle('is-doc', kind !== 'image' || lost);
+
+    if (kind === 'image' && !lost) {
+      doc.hidden = true;
+      img.hidden = false;
+      img.src = src(sessionId, entry);
+      img.alt = entry.note || 'Image from this session';
+    } else {
+      img.hidden = true;
+      img.removeAttribute('src');
+      doc.hidden = false;
+      if (lost) {
+        // A `SendUserFile` attachment's bytes were only ever on disk. A `Write`'s are in
+        // the record, which is why a gone one falls through to the fetch below and still
+        // previews as written.
+        page.className = 'lightbox-page';
+        page.replaceChildren(noPreview(entry, 'no longer on disk, nothing to preview'));
+      } else if (kind === 'markdown' || kind === 'text') {
+        paintText(entry, mine, kind === 'markdown');
+      } else {
+        page.className = 'lightbox-page';
+        page.replaceChildren(noPreview(entry, 'no preview — reveal in Finder to open it'));
+      }
+    }
+
     // `note` is the text that came with the image in its own record and is only on refs
     // that came from the gallery's scan; a strip's ref carries the ordinal and nothing
     // else, and the message it belongs to is right there on screen behind this.
     const bits = [];
-    if (images.length > 1) bits.push(`${at + 1} / ${images.length}`);
-    if (ref.note) bits.push(ref.note);
+    if (steps.length > 1) bits.push(`${at + 1} / ${steps.length}`);
+    if (entry.note) bits.push(entry.note);
+    const foot = previewFoot(entry, {
+      at: entry.ts ? new Date(entry.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+      size: shortBytes(entry.bytes),
+    });
+    if (foot) bits.push(foot);
     cap.textContent = bits.join('  ·  ');
     cap.hidden = bits.length === 0;
   }
@@ -4409,21 +4605,28 @@ function openLightbox(sessionId, images, start = 0) {
   };
   function onKey(e) {
     if (e.key === 'Escape') {
-      // The gallery this may have opened from is listening for Escape too, and it
+      // The modal this may have opened from is listening for Escape too, and it
       // registered first, so it would close underneath. Stopping the event here is what
-      // makes Escape mean "the thing on top".
+      // makes Escape mean "the thing on top" — and it is what returns the reader to that
+      // modal with the filter and the scroll it had, since nothing there is touched.
       e.stopImmediatePropagation();
       close();
-    } else if (e.key === 'ArrowRight' && images.length > 1) {
-      at = (at + 1) % images.length;
+    } else if (e.key === 'ArrowRight' && steps.length > 1) {
+      at = (at + 1) % steps.length;
       paint();
-    } else if (e.key === 'ArrowLeft' && images.length > 1) {
-      at = (at - 1 + images.length) % images.length;
+    } else if (e.key === 'ArrowLeft' && steps.length > 1) {
+      at = (at - 1 + steps.length) % steps.length;
       paint();
     }
   }
   document.addEventListener('keydown', onKey, true);
-  back.onmousedown = close;
+  back.onmousedown = (e) => {
+    // An image closes on a click anywhere, exactly as it always has. A document must not:
+    // the panel is text to select, an action row to press and links to follow, and a
+    // reader who closed it by starting a selection would have to find the cell again.
+    if (e.target?.closest?.('.lightbox-doc, .lightbox-head')) return;
+    close();
+  };
 
   paint();
   document.body.append(back);
@@ -4629,7 +4832,7 @@ function openFiles(sessionId, sessionTitle) {
     return bits.join(' · ');
   }
 
-  function imageCell(item, images, at) {
+  function imageCell(item, shown, at) {
     const cell = document.createElement('button');
     cell.type = 'button';
     cell.className = 'files-cell files-image';
@@ -4645,18 +4848,21 @@ function openFiles(sessionId, sessionTitle) {
     cell.append(img);
 
     cell.append(captionFor(item.name || item.note || 'image', item, gone));
-    cell.onclick = () => openLightbox(sessionId, images, at);
+    // The whole filtered list, not just the images in it: the overlay's arrow keys walk
+    // what the reader can currently see, files and links alike, and it drops the links
+    // itself. `outputSrc` because these are outputs — a `SendUserFile` screenshot is not
+    // an image *block* and has no address in `/image/:uuid/:index` at all.
+    cell.onclick = () => openLightbox(sessionId, shown, at, { src: (id, it) => outputSrc(it) });
     return cell;
   }
 
-  function docCell(item) {
-    // A `<button>` today with nothing behind it, deliberately: item 4b widens
-    // `openLightbox` into the preview overlay and wires the click here, and leaving the
-    // element as the thing that will carry the handler is one less diff then. `is-inert`
-    // is only the cursor, so nothing on screen offers a press that does nothing.
+  function docCell(item, shown, at) {
+    // The same overlay an image opens, which is the whole of item 4b: a document is
+    // rendered markdown, a `<pre>` or a name and a sentence, decided by
+    // `web/files-preview.js` and never by a switch out here.
     const cell = document.createElement('button');
     cell.type = 'button';
-    cell.className = 'files-cell is-inert';
+    cell.className = 'files-cell';
     const gone = item.onDisk === false;
     if (gone) cell.classList.add('is-gone');
     const title = titleFor(item, gone);
@@ -4666,6 +4872,7 @@ function openFiles(sessionId, sessionTitle) {
     body.className = 'files-doc';
     cell.append(body);
     cell.append(captionFor(item.name || 'file', item, gone));
+    cell.onclick = () => openLightbox(sessionId, shown, at, { src: (id, it) => outputSrc(it) });
 
     const readable = item.kind === 'markdown' || item.kind === 'text';
     // A `Write`'s bytes are in the transcript, so a document previews as written even
@@ -4775,15 +4982,16 @@ function openFiles(sessionId, sessionTitle) {
         io?.disconnect();
         pending.clear();
         const shown = filesFor(items, selected);
-        // The lightbox steps through the images the reader can currently see, which is
-        // the set that opened it — the same "the list is already in hand" the strip uses.
-        const images = shown.filter((it) => it.kind === 'image');
+        // Every cell is handed the whole filtered list and its own place in it: the
+        // preview overlay steps through what the reader can currently see rather than
+        // through one kind, which is the same "the list is already in hand" the strip
+        // uses. It drops the links out of the walk itself.
         const frag = document.createDocumentFragment();
-        for (const item of shown) {
+        shown.forEach((item, at) => {
           if (item.kind === 'link') frag.append(linkCell(item));
-          else if (item.kind === 'image') frag.append(imageCell(item, images, images.indexOf(item)));
-          else frag.append(docCell(item));
-        }
+          else if (item.kind === 'image') frag.append(imageCell(item, shown, at));
+          else frag.append(docCell(item, shown, at));
+        });
         grid.replaceChildren(frag);
       }
 

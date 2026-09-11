@@ -4431,10 +4431,6 @@ body.row-dragging * { cursor: row-resize !important; }
 .files-cell:hover { border-color: var(--rule-strong); }
 .files-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-/* A document cell is already the element item 4b will hang the preview overlay on, so the
-   only thing said here is that it does not yet offer a press. */
-.files-cell.is-inert { cursor: default; }
-
 .files-cell.files-link { cursor: pointer; }
 
 .files-cell img {
@@ -4579,6 +4575,157 @@ body.row-dragging * { cursor: row-resize !important; }
   text-align: center;
   max-width: 60rem;
   overflow-wrap: anywhere;
+}
+
+/* --- the same overlay, on a document ---------------------------------------
+
+   Everything below draws only when the overlay is showing something that is not a
+   picture. An image is untouched: `.lightbox-head` is `hidden` unless the entry has an
+   action to offer, and `.lightbox-doc` is `hidden` on the image branch, so a pathless
+   screenshot is the same three nodes it has always been.
+
+   The scrim was built for a photograph, so a document needs a surface of its own to be
+   legible on — and the panel takes the modal's tokens rather than the lightbox's two
+   hard-coded greys, which is what makes it read correctly in both themes. */
+
+.lightbox-fig.is-doc {
+  align-items: stretch;
+  width: min(64rem, 100%);
+  gap: 0;
+}
+
+/* The action row. On a document it is the panel's own top bar (square bottom corners, the
+   panel carries the rest); on an image it floats over the scrim above the picture. */
+.lightbox-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  cursor: default;
+}
+
+.lightbox-fig.is-doc .lightbox-head {
+  border-radius: 4px 4px 0 0;
+  border-bottom: 0;
+}
+
+/* The path. Already shortened to its last two segments by `shortPath` before it gets here
+   — the tail is the half that names the file — with the whole of it on the row's title. */
+.lightbox-head-name {
+  flex: 1 1 8rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lightbox-act {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink);
+  background: var(--surface-sunk);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+}
+
+.lightbox-act:hover { border-color: var(--rule-strong); }
+.lightbox-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The flash that says the clipboard took it. Colour only — the label already changed, and
+   a control that moved would be a control that moved under the cursor that pressed it. */
+.lightbox-act.is-flash {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.lightbox-doc {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: 0 0 4px 4px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 60%);
+  cursor: default;
+}
+
+/* The one scroller. `overscroll-behavior` for `.plan-md`'s own reason: the page scrolls
+   and the transcript behind the overlay does not. */
+.lightbox-page {
+  min-height: 0;
+  max-height: calc(100vh - 10rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.8rem 1rem;
+  font-size: 0.84rem;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+/* `.plan-md` is the markdown typography this panel already has, and the overlay borrows it
+   whole. The two things it has to undo are the plan reader's own box: a 40vh cap and a
+   sunk panel inside a panel. Two classes, so this wins on specificity wherever the file
+   order lands. */
+.lightbox-page.lightbox-md {
+  max-height: calc(100vh - 10rem);
+  margin-top: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.lightbox-pre {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
+.lightbox-waiting { font-family: var(--mono); font-size: 0.7rem; color: var(--ink-faint); }
+
+/* `plain-other`, and the one case that has nothing left anywhere: a `SendUserFile`
+   attachment whose file is gone. Centred and quiet — there is nothing to read here, and
+   the sentence is the whole content. */
+.lightbox-none {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 2.5rem 1rem;
+  text-align: center;
+}
+
+.lightbox-none-name {
+  font-family: var(--mono);
+  font-size: 0.8rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.lightbox-none-facts {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+.lightbox-none p {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+  max-width: 24rem;
 }
 
 /* ======================================================= confirmation === */
