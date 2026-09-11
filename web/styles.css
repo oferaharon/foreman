@@ -1037,6 +1037,55 @@ body.row-dragging * { cursor: row-resize !important; }
    since a 7px circle has no baseline of its own to sit on. */
 .shelf-dot { align-self: center; margin-left: 0.15rem; }
 
+/* ------------------------------------------- what a folded group is hiding --- */
+
+/* A collapsed group says what it is holding: `● 2 working · newest 4m · 3 tasks`, over
+   everything inside it — nested workers included, unlike the `· N` on the line above.
+ *
+ * **It is a second line inside the header's own box, not a fourth sibling kind.** The rail
+ * is a flat list, and an open group's tint and spine are tiled from adjacent full-width
+ * siblings; a new sibling between a header and its rows would cut both, and so would a
+ * vertical margin on this one. So the header wraps and this rides as a full-width flex item
+ * that pays for its height in `padding-top`. The wrap is scoped to `.collapsed` rather than
+ * set on every heading, which is what makes the open header's geometry provably untouched:
+ * measured at 48px first / 49px otherwise before and after, exactly as item 4 left it.
+ *
+ * A collapsed group has no folder headings beneath it, so `.folder-label.in-group`'s
+ * hand-measured 2.5rem sticky offset cannot collide with this — which is the whole reason
+ * the line is affordable on this heading and would not be on any other. */
+.shelf-label.collapsed { flex-wrap: wrap; row-gap: 0; }
+
+.shelf-summary {
+  flex: 0 0 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  /* Padding, never margin. See above — a margin here cuts the tint and the spine. And
+     `row-gap: 0` on the heading above, because `.shelf-label`'s `gap` was measured for the
+     items on its one line: turning `flex-wrap` on silently hands that same figure to the
+     row gap as well, and the step between the two lines is then two numbers deep with only
+     one of them written down. Measured: 28px of step where 22 was asked for. */
+  padding-top: 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--ink-faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* The `·` is furniture, so it sits a step below the words it divides rather than competing
+   with them. An opacity step rather than a second ink token: `--ink-faint` is already the
+   quietest text colour either theme defines, and the one below it is `--rule`, which is a
+   line colour and not measured to be read as a glyph. */
+.shelf-sep { opacity: 0.55; }
+
+/* The dot leads the line, so it needs no left nudge of its own here. */
+.shelf-summary .shelf-dot { margin-left: 0; }
+
 .shelf-toggle {
   flex: 1;
   min-width: 0;

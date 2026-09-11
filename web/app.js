@@ -88,6 +88,12 @@ import { foldsInto, splitTitle } from './rail-fold.js';
 // rules are in it rather than inline because the wrong re-derivation of either renders
 // perfectly: a fold one row too eager hides a heading over two sessions, and a title split
 // on its own punctuation invents a path that is not the folder.
+import { ageText, groupSummary } from './group-summary.js';
+// ^ what a folded group is hiding, in one line — and the one spelling of the rail's age
+// buckets, which `relativeTime` below delegates to. The set it counts over is
+// worker-inclusive and deliberately disagrees with the heading's own `· N` one line up:
+// `renderRail` lifts nested workers out before that count is taken, so a busy worker in a
+// closed team group used to light nothing until the stuck timer fired.
 import { orderWorkers } from './worker-order.js';
 // What the team room draws, given the slate the server holds — the `clear` / `show all`
 // pointer. Its own module for the reason every other pure one under `web/` is: the filter
@@ -1170,13 +1176,17 @@ function shortModel(model) {
   return model.replace(/\s*\(.*\)\s*$/, '').trim();
 }
 
+/*
+ * How long ago, in the rail's own spelling — `now`, `4m`, `3h`, `2d`.
+ *
+ * The buckets moved into `web/group-summary.js` when the folded group's summary needed the
+ * same answer, and this delegates rather than keeping a copy. Two spellings of one set of
+ * buckets is the `isLeadName` lesson in its smallest costume, and here it is worse than
+ * usual: the two strings are never on screen at the same time — one of them only exists
+ * while the group is *folded* — so a drift between them has nothing to give it away.
+ */
 function relativeTime(ms) {
-  if (!ms) return '';
-  const d = Math.max(0, Date.now() - ms) / 1000;
-  if (d < 60) return 'now';
-  if (d < 3600) return `${Math.floor(d / 60)}m`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h`;
-  return `${Math.floor(d / 86400)}d`;
+  return ageText(ms, Date.now());
 }
 
 /**
@@ -3642,6 +3652,13 @@ function renderRail() {
     folders.get(s.project).push(s);
   }
 
+  /** Sessions to rows: every entry, plus the workers nested under whichever are leads.
+   *  One spelling, because two readers now ask it — the fold rule, which is about what a
+   *  folder *draws*, and the folded group's summary, which is about what a folded group
+   *  *hides*. Both answers are wrong in the same direction if the expansion is forgotten,
+   *  and both render perfectly while being wrong. */
+  const expand = (list) => list.flatMap((s) => [s, ...(nestedWorkers.get(s.id) || [])]);
+
   /**
    * What a folder draws: how many rows, and — when it holds exactly one — the split that
    * folds its heading into that row's own name.
@@ -3656,7 +3673,7 @@ function renderRail() {
    * *that* folder — the same `openFolderMenu` the heading carried, anchored one line down.
    */
   const foldOf = (f, list) => {
-    const drawn = list.flatMap((s) => [s, ...(nestedWorkers.get(s.id) || [])]);
+    const drawn = expand(list);
     if (!foldsInto(drawn)) return { rows: drawn.length, fold: null };
     const split = splitTitle(drawn[0]);
     return { rows: drawn.length, fold: split && { ...split, folder: f } };
@@ -3700,10 +3717,6 @@ function renderRail() {
     for (const f of g.folders) filed.add(f);
     const mine = g.folders.filter((f) => folders.has(f));
     const count = mine.reduce((n, f) => n + folders.get(f).length, 0);
-    const busy = mine.reduce(
-      (n, f) => n + folders.get(f).filter((s) => s.status === 'working').length,
-      0,
-    );
 
     // A heading over nothing is furniture. Empty is measured *after* hoisting, against the
     // rows this loop is about to draw — so a group whose only session is up in the inbox
@@ -3731,7 +3744,23 @@ function renderRail() {
       return node;
     };
 
-    frag.append(wear(groupHeader(g, count, busy)));
+    /*
+     * What a fold is hiding, for the heading to say — and **only** when it is folded,
+     * because that is the only state in which the line is drawn or the dot is lit.
+     *
+     * Note the set, which is the whole of this: `expand` puts a lead's nested workers back
+     * in, so the summary covers every session inside the group, while `count` two lines up
+     * stays top-level rows only. The two numbers disagree on purpose and the docs say so.
+     * Before this, the dot ran off the same top-level set as the count, so a worker working
+     * inside a closed team group lit nothing at all until `stuck` fired twenty minutes
+     * later — a measured hole, closed here on the maintainer's own ruling, at the accepted
+     * cost of a collapsed team group that pulses when only a worker is busy.
+     */
+    const summary = g.collapsed
+      ? groupSummary(expand(mine.flatMap((f) => folders.get(f))), Date.now())
+      : null;
+
+    frag.append(wear(groupHeader(g, count, summary)));
     // Collapsing can't hide anything you need: a session that wants you is in the inbox
     // above, and a pinned one is above that. What's left in here is quiet by definition.
     if (g.collapsed) continue;
@@ -3957,8 +3986,14 @@ function folderHeading(folder, inGroup, count = 0) {
   return row;
 }
 
-/** A group you made: click the header to fold it away, `⋯` to rename or drop it. */
-function groupHeader(g, count, busy = 0) {
+/**
+ * A group you made: click the header to fold it away, `⋯` to rename or drop it.
+ *
+ * `summary` is `renderRail`'s answer to "what is this fold hiding", and it is `null` for
+ * an open group — where there is nothing to hide, because every row is on screen saying it
+ * for itself.
+ */
+function groupHeader(g, count, summary = null) {
   const row = document.createElement('div');
   row.className = `group-label shelf-label${g.collapsed ? ' collapsed' : ''}`;
 
@@ -3986,19 +4021,6 @@ function groupHeader(g, count, busy = 0) {
   // folders can still be re-filed from the folder menu, which lists every group.
   n.textContent = `· ${count}`;
   toggle.append(n);
-
-  // Folded away, and something inside it is running.
-  //
-  // Collapsing is only safe because the inbox hoists anything blocked or unread out of its
-  // folder first — but *working* is neither, so a busy session is the one thing a closed
-  // group can genuinely hide. The same pulsing dot the rows use, on the heading standing in
-  // for them. Not drawn when open, where every row shows its own.
-  if (g.collapsed && busy) {
-    const dot = document.createElement('span');
-    dot.className = 'dot working shelf-dot';
-    dot.title = `${busy} session${busy === 1 ? '' : 's'} working in here`;
-    toggle.append(dot);
-  }
 
   row.append(toggle);
 
@@ -4040,6 +4062,59 @@ function groupHeader(g, count, busy = 0) {
     openGroupMenu(menu, g);
   };
   row.append(menu);
+
+  /*
+   * Folded away, and what that is hiding — the second line, and the one state it is drawn
+   * in.
+   *
+   * Collapsing is only safe because the inbox hoists anything blocked or unread out of its
+   * folder first — but *working* is neither, so a busy session is the one state a closed
+   * group can genuinely hide. The pulsing dot has stood in for that since groups existed;
+   * this is the rest of the sentence beside it, and the dot now counts the same
+   * worker-inclusive set the words do.
+   *
+   * **Inside the header's own box, never a sibling beneath it.** The rail is a flat list
+   * and an open group's tint and spine are *tiled* from adjacent full-width siblings, so a
+   * fourth sibling kind — or a vertical margin on this one — cuts both. It rides as a
+   * wrapped flex item at `flex: 0 0 100%` and pays for its height in `padding-top`, which
+   * is a distinction with a reason rather than a taste: a margin here is the one thing
+   * §4.4 of the plan says must never appear in this list.
+   *
+   * Appended last, after the two controls, so those stay on the header's first line where
+   * item 4 put them — the summary sits under the name, not beside the buttons.
+   */
+  const clauses = (g.collapsed && summary?.clauses) || [];
+  if (clauses.length) {
+    const line = document.createElement('div');
+    line.className = 'shelf-summary';
+    // The count above is top-level rows; this line is everything inside. Said here because
+    // the two numbers sit one line apart and a reader has no other way to know.
+    line.title = 'Everything inside this group, nested workers included';
+
+    // Nothing running anywhere inside draws no dot — as it always has, and now over a set
+    // wide enough for that to mean what it says.
+    if (summary.working) {
+      const dot = document.createElement('span');
+      dot.className = 'dot working shelf-dot';
+      dot.title = `${summary.working} session${summary.working === 1 ? '' : 's'} working in here`;
+      line.append(dot);
+    }
+
+    clauses.forEach((clause, i) => {
+      if (i) {
+        const sep = document.createElement('span');
+        sep.className = 'shelf-sep';
+        sep.textContent = '·';
+        line.append(sep);
+      }
+      const span = document.createElement('span');
+      span.textContent = clause;
+      line.append(span);
+    });
+
+    row.append(line);
+  }
+
   return row;
 }
 
