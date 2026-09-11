@@ -1079,6 +1079,21 @@ which holds only while none of them carries a vertical margin: the gap between g
 `margin-top` on the next header, deliberately outside the tint, and the block's bottom edge
 is `in-group-last`, marked in JS because nothing in a flat list knows it is last.
 
+The spine — the 3px coloured bar a group's rows carry down their left edge — is a second
+tenant of that exact constraint, and got it for free: `.shelf-label`, `.folder-label.in-group`
+and `.session-row.in-group` all already pad *inside* their box, so their left borders land on
+the same x without anything new being measured, and the two places the tint breaks
+(`.shelf-label`'s `margin-top`, `.in-group-last`'s `padding-bottom`) are the two places the
+spine breaks too. The two heading kinds give back exactly the 3px the border adds, out of
+their own `padding-left`, so nothing they contain moves sideways when the border appears.
+And `.folder-label.in-group`'s sticky offset — hand-measured against the group header's own
+height, per the line above — was re-measured rather than assumed at two different points in
+the rail redesign, once when the spine first landed and once again after the header grew its
+`+` and `⋯` controls, and came back unchanged both times. That is the lesson worth keeping,
+not the figure: read the header's actual height off the DOM before trusting the offset,
+because anything that changes the header's padding — this one included — moves it, and a
+number copied out of an old PR body is exactly the kind of thing that goes stale here first.
+
 `--shelf` is `color-mix(in srgb, var(--ink) 4%, var(--surface))` on purpose: one line that
 darkens the light theme and lightens the dark one. It must not be `--surface-sunk`, which
 is what a row's hover uses — a tinted group whose rows stopped reacting to the cursor would
@@ -1169,11 +1184,11 @@ group. And when you remove rows from a flat list, check the tint: it is tiled fr
 full-width siblings, so a group must go as a whole block or its edges come apart —
 benched with a lone group first, last and alone between two hidden ones.
 
-**A collapsed group hides one thing for ordinary rows and two for workers, and the dot
-covers only the first.** For an ordinary session and for a lead, folding is safe because
-the inbox hoists anything blocked or unread *out* of its folder first — but **working** is
-neither, so a busy session is the one state a closed group can genuinely hide. Hence the
-pulsing dot on the heading, drawn only when collapsed.
+**A collapsed group hides one thing for ordinary rows and two for workers.** For an
+ordinary session and for a lead, folding is safe because the inbox hoists anything blocked
+or unread *out* of its folder first — but **working** is neither, so a busy session is the
+one state a closed group can genuinely hide. Hence the pulsing dot on the heading, drawn
+only when collapsed, and now a second line beside it: `2 working · newest 4m · 3 tasks`.
 
 The hoisting rule then changed, for workers alone. A worker's permission prompt is its
 lead's to answer and its finished report is its lead's to read, so a worker row no longer
@@ -1183,15 +1198,116 @@ not visible. The trade was bought with the lead row's `N waiting` count, which n
 same fact the inbox stopped showing, and backstopped by the stuck timer, which
 puts the row in the inbox for real once it has actually been abandoned there.
 
-And the compensating signal is hidden for exactly that window, which is the part nothing
-on screen tells you. Measured on a scratch panel driven with fixture rosters, reading the
-heading's own DOM: a plain **working** session in a collapsed group draws
-`<span class="dot working shelf-dot">`; a worker nested under its lead draws **no dot in
-either state**, blocked or working, because `renderRail` pulls nested workers out of
-`rest` before `busy` is computed off it. So inside a collapsed team group such a worker
-has no row *and* no dot — and the lead's `N waiting` line is inside the collapse too. It
-all surfaces when the timer fires; nothing stays hidden past it. Anything that widens the
-quieting, or that changes what the dot counts, has to be measured against this again.
+**The dot used to cover only the ordinary-row half of that trade, and now covers both.**
+`renderRail` pulls nested workers out of `rest` before the folder map is built, so the
+group's own `count` — top-level rows only — was also, until this, the set the dot and
+`busy` were computed over: a worker working inside a collapsed team group lit nothing at
+all until the stuck timer fired twenty minutes later. `web/group-summary.js`'s
+`groupSummary` closes that hole by reading the **worker-inclusive** set instead — the same
+`expand()` the fold rule already builds, folded workers included — so the dot and the new
+summary line both count a busy worker the moment it starts, not twenty minutes after. `busy`
+itself is gone from the group loop; the module's `working` is what feeds the dot now. The
+accepted cost, taken on the maintainer's own ruling: a collapsed team group now pulses when
+*only* a nested worker is busy and every top-level row in it is idle — worth knowing before
+reading a quiet-looking heading as quiet. The header's own `· N` is untouched and still
+counts top-level rows alone, which is why it and the summary line one row down can
+legitimately disagree — `· 1` on the heading, `3 working` in the line below it, both true.
+
+**The spine runs at half strength and the marker at full, and that split is measured, not
+sketched.** `--row-open`'s own reasoning is three signals, not one — a filled band, an edge
+thick enough to read as a marker, and a title at full ink — and inside a group the edge
+would otherwise be the group's own hue against the group's own hue, no step at all: exactly
+the state `--row-open` was built to get *out* of. 50% is the point (within half a point of
+49.5%) that maximises the *weaker* of the two things pulling against each other — the
+spine's contrast against its worst ground and the marker's step over the spine — rather than
+trading one for the other. In dark theme the binding ground is `--shelf` (contrast 1.68 –
+3.09) and the marker's step over the spine is 1.96 – 2.70 (ΔE2000 18.0 – 27.2 minimum); light
+theme's binding ground is `--surface-sunk` (1.68 – 2.45) with a 1.65 – 2.98 marker step. The
+amended mockup's own drawing — spine and marker in one colour — was refused for exactly
+this reason once it was measured rather than eyeballed.
+
+**A `▾` on the row's own path can't be a `<button>`, because the row it sits inside already
+is one — or was.** Interactive content cannot nest, and a `<span role="button">` inside a
+real `<button>` is exactly as invalid as a nested `<button>` would be, since the restriction
+is on interactive content and not on the tag. So `.session` is now uniformly `<div
+role="button" tabindex="0">` with its own `keydown` handler answering Enter and Space by
+hand — every row, not only the folded ones, because two element types for one row kind is
+two focus behaviours and two stylesheets to keep honest. The one thing carried over from the
+`button {}` reset is `cursor: pointer`; nothing in the stylesheet ever selected
+`button.session`, every rule is a class. It also retired an invalid attribute that had been
+sitting there unnoticed: `aria-selected` belongs to `option`/`tab`, not a button or a
+`role="button"` div, and is now `aria-current` — set only on the open row, so a screen
+reader isn't walking past `aria-current="false"` on every other one.
+
+**The fold's title split is bound to the folder, never to the string's own last dash.** A
+row's title is `label || meta.title || project`, and `label` — the thing that would make a
+dash-split safe — is present only for sessions this panel itself minted; anything else falls
+back to Claude Code's own `customTitle`, which several launchers derive as `<repo>-<branch>`,
+CLAUDE.md's very first trap and the reason one folder on the machine this was built on held
+96 transcripts under one title. Splitting *that* on its last dash hands back a "path" that is
+a repo name, not the folder the row is actually filed under. So the split only fires when the
+title begins with `${s.project}-`, and a title that can't be split that way keeps its
+folder's heading rather than getting an invented path — honest rather than worked around,
+and it means a session started by another launcher never folds.
+
+**The spine's ring is its own ten hues, measured to a different rule than the room's seven,
+and the slot order is itself a measurement.** `--peer-N` is *text* on `--ground`, held to
+7:1; the spine is a **non-text graphic** sitting on `--surface`, `--shelf` and
+`--surface-sunk` at once, so it is held to WCAG 1.4.11's 3:1 against all three — light
+theme's binding ground is `--surface-sunk` (3.00 – 6.48), dark's is `--shelf` (3.66 – 8.27).
+Every one of the ten also has to clear a floor of ΔE2000 from `--working` / `--decision` /
+`--accent` / `--idle` / `--mode-edits`, the same reservation the peer ring makes, measured
+here at 12.50 (light) / 12.59 (dark) minimum. And because slots are handed out 1, 2, 3… in
+creation order (`assignColour`: least-used, ties by lowest index), the ten lines in
+`web/tokens.css` are not listed by hue — they're ordered to maximise the gap between
+*consecutive* slots, since consecutive slots are the pairs a real rail draws next to each
+other: 48.33 (light) / 50.22 (dark) ΔE2000 minimum between neighbours. `GROUP_COLOUR_COUNT`
+is spelled once in `web/group-hue.js` and `test/group-hue.test.js` pins it against the actual
+count of `--group-N` tokens, because CSS cannot import a constant and the two would otherwise
+drift silently.
+
+**`GroupStore` drops a field it has never heard of, the same way `TaskStore` drops a whole
+record.** `#load` rebuilds each group from named keys and `#flush` rewrites the file from
+that rebuild two seconds later, so a `colour` written by this feature and then rolled back
+past it is silently erased on the next flush — milder than the task-state version of this
+(there whole records vanish; here the colours re-assign themselves on the next boot), but
+the same family. **Back up `groups.json` before rolling back past #145.**
+
+**`.menu-item`'s `display: flex` beat `[hidden]`, the same way `.files-grid`'s did.** The
+group `+` menu's filter box hides non-matching rows by setting `.hidden`, and `.menu-item`
+carries an unconditional `display: flex` that outranks the `[hidden]` UA default — so a
+filtered-out item stayed on screen, just no longer clickable in the way its position
+implied. `.menu-item[hidden] { display: none }`, scoped rather than a blanket `[hidden]`
+override, is the same fix in the same shape.
+
+**Turning `flex-wrap` on hands the container's own `gap` to the row gap as well, silently.**
+`.shelf-label.collapsed` wraps so the new summary line can sit under the header's first row,
+and `.shelf-label`'s `gap` — measured for the items sitting on its *one* line — became the
+step between that line and the summary the moment wrapping was enabled, measured at 28px
+where 22 was asked for. `.shelf-summary`'s `row-gap: 0` sits beside the wrap for exactly that
+reason, and it is a trap worth remembering anywhere else in this stylesheet a `flex-wrap` is
+switched on after the fact.
+
+**An automated Chrome window answers no keyboard input and no CSS transition, and both bit
+this feature.** `document.visibilityState: 'hidden'` is what an automated window reports,
+which is the same fact the room panel's `ResizeObserver` trap and the files gallery's `lazy`
+trap already carry, in new clothes here: the window delivers no *trusted* keyboard event, so
+keyboard proof for the row's new `div role="button"` had to go through dispatched events
+rather than a real keypress, with mouse clicks proven separately; and it suspends CSS
+transitions and animations outright, so `getComputedStyle` on a transitioning opacity reads
+the *from* value forever and a hover/focus state measured against a live `transition` has to
+force `transition: none` first or the numbers are simply wrong. The same suspension is why a
+pulsing dot's presence has to be read off the DOM (is the node there, does it carry `.dot
+working`) rather than off whether it visibly pulses in a bench screenshot — the animation
+itself does not run in an automated window even when the element is drawn correctly.
+
+**A static copy of `web/` needs `/vendor/marked.js` in place, or the page 404s silently
+while still looking fine.** `app.js`'s first line is `import { marked } from
+'/vendor/marked.js'` — served in the real panel from `node_modules/marked/lib/marked.esm.js`
+by a server route, which a bare static file server over `web/` doesn't have. The failure is
+quiet: the page paints its static HTML, the module import 404s in the console, and nothing
+in the rail ever renders, which reads like a fixture problem rather than a missing file. Copy
+`marked.esm.js` into the static copy's own `vendor/marked.js` before benching anything.
 
 **A subscription is keyed by socket *and slot*.** `subs` is `ws -> Map(slot -> sub)`, and
 every `transcript` / `messages` / `earlier` / `rebound` frame carries its slot. A frame
@@ -1998,6 +2114,12 @@ none and are read by what they hold: a hand-made group files what the rail draws
 folder name), and only a dispatch ever wrote an absolute path under `worktrees/`; empty is no
 evidence and stays yours. Reaping is guarded by emptiness alone, which doubles as the guard
 for a team group somebody hand-filed a real project into: it isn't empty, so it stays.
+
+Each group also wears a colour, assigned automatically and changeable from the `⋯` menu's
+swatch row, drawn as a spine down its header, its folder headings and its rows, with the
+selected row inside taking that colour at full strength; a folder holding exactly one
+session folds into that row's own name instead of printing a heading; and the header's `+`
+files a folder into the group, the `▾`'s own move in reverse.
 
 **Snapshot / restore** (`server/snapshot.js`) keeps one slot in `~/.foreman/snapshot.json`,
 written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned}` per
