@@ -397,7 +397,12 @@ function linksFrom(rec) {
 
 /**
  * Fold the raw hits into one row per address: the strongest provenance wins, the earliest
- * timestamp orders it, and the first real title sticks to it.
+ * sighting dates it, and the first real title sticks to it.
+ *
+ * `uuid` and `ts` move **together**, and always as the earliest sighting's pair. They are
+ * one fact — the record this row is dated by — and letting the provenance contest carry the
+ * uuid while the clock carried the timestamp would produce a row whose two halves name
+ * different records, which is a lie a reader cannot see.
  *
  * A title is never invented; it is only ever adopted from another sighting of the same
  * URL, which is why the winner of a provenance contest can still end up wearing the title
@@ -413,12 +418,12 @@ function foldLinks(raw) {
       byUrl.set(url, { kind: 'link', url, title: hit.title || null, from: hit.from, short: shortFor(url), uuid: hit.uuid, ts: hit.ts });
       continue;
     }
-    if (RANK[hit.from] > RANK[prev.from]) {
-      prev.from = hit.from;
+    if (RANK[hit.from] > RANK[prev.from]) prev.from = hit.from;
+    if (!prev.title && hit.title) prev.title = hit.title;
+    if (hit.ts && (!prev.ts || hit.ts < prev.ts)) {
+      prev.ts = hit.ts;
       prev.uuid = hit.uuid;
     }
-    if (!prev.title && hit.title) prev.title = hit.title;
-    if (hit.ts && (!prev.ts || hit.ts < prev.ts)) prev.ts = hit.ts;
   }
   return [...byUrl.values()].sort((a, b) => String(a.ts || '').localeCompare(String(b.ts || '')));
 }

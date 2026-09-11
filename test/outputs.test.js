@@ -393,6 +393,7 @@ test('one address, one row: the strongest provenance wins and the earliest times
   const row = links.find((l) => l.url === pr);
   assert.equal(row.from, 'created', 'created beats cited');
   assert.equal(row.ts, '2026-09-09T05:00:00.000Z', 'the earliest sighting orders it');
+  assert.equal(row.uuid, 'a1', 'and the uuid is that same record — the pair never names two');
   assert.equal(row.title, 'the gamma PR', 'and the title the prose gave it sticks');
   assert.equal(row.short, '#12');
   const other = links.find((l) => l.url !== pr);
