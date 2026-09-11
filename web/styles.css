@@ -4357,6 +4357,18 @@ body.row-dragging * { cursor: row-resize !important; }
   margin-bottom: 0.7rem;
 }
 
+/* The filter row and the grid/list toggle share one line — filters take whatever width
+   they need and the toggle rides at the far right, `margin-left: auto` the way the
+   mock-up's `.view` does. Both hide together: a row of pills and a toggle over an empty
+   grid says nothing the empty state doesn't say better. */
+.files-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.7rem;
+}
+
 /* Pills, and deliberately not checkboxes or a `<select>`: a stock checkbox is painted by
    the *browser* from the browser's colour scheme rather than from the page's
    `data-theme`, so an unticked box in a light page under a dark browser reads as ticked —
@@ -4365,8 +4377,34 @@ body.row-dragging * { cursor: row-resize !important; }
   display: flex;
   gap: 0.35rem;
   flex-wrap: wrap;
-  margin-bottom: 0.7rem;
+  flex: 1;
 }
+
+/* Two plain buttons in a bordered strip, the same reasoning as the pills above: a native
+   control answers to the browser's theme, not `data-theme`. */
+.files-view {
+  display: flex;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.files-view-btn {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  padding: 0.22rem 0.6rem;
+  border: none;
+  background: var(--surface);
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.files-view-btn:hover { color: var(--ink); }
+.files-view-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.files-view-btn.is-on { background: var(--accent-soft); color: var(--accent); }
 
 .files-pill {
   display: inline-flex;
@@ -4411,6 +4449,14 @@ body.row-dragging * { cursor: row-resize !important; }
   grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
   gap: 0.6rem;
 }
+
+/* The toggle sets `hidden` on whichever container is not the current view, and both carry
+   an unconditional `display` above — an author rule always beats the `[hidden]` UA
+   default regardless of selector specificity, so without this the losing container stays
+   on screen under the winning one. Scoped to these two rather than a blanket `[hidden]`
+   rule, which would also have to be proven safe against every other `hidden` toggle in
+   this stylesheet. */
+.files-grid[hidden], .files-list[hidden] { display: none; }
 
 .files-cell {
   display: flex;
@@ -4523,6 +4569,52 @@ body.row-dragging * { cursor: row-resize !important; }
 .files-cell.is-gone:hover { opacity: 0.8; }
 .files-cell.is-gone .files-cap .files-name { text-decoration: line-through; }
 .files-gone-tag { color: var(--working); }
+
+/* The list view: one row per entry, same filters and same order as the grid. `.files-cap`
+   is the grid cell's own name-and-time caption, reused whole rather than rebuilt — a row
+   is a kind column ahead of it and nothing else, so `gone` reads identically in both
+   views without a second rule for it. */
+.files-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.files-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.3rem;
+  border: none;
+  border-bottom: 1px solid var(--rule);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.files-row:last-child { border-bottom: none; }
+.files-row:hover { background: var(--surface-sunk); }
+.files-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.files-row-kind {
+  flex: 0 0 2.6rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+}
+
+.files-row .files-cap {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+}
+
+.files-row.is-gone { opacity: 0.55; }
+.files-row.is-gone:hover { opacity: 0.8; }
+.files-row.is-gone .files-cap .files-name { text-decoration: line-through; }
 
 /* The modal's own voice for an empty set, in `.empty`'s register but not `.empty` itself:
    that rule is `flex: 1` for a pane-filling column and this sits in a grid cell. */

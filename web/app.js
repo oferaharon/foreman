@@ -8,7 +8,7 @@ import { forgeMarkupFor } from './forge-mark.js';
 // (`files-kinds.js`), and the glyph a link row wears (`link-mark.js`, markup strings for
 // `forge-mark.js`'s reason — and no favicons, ever, which would phone out to every host
 // the transcript names the moment the modal opens).
-import { FILE_KINDS, filesCounts, filesFor, filesItems } from './files-kinds.js';
+import { FILE_KINDS, filesCounts, filesFor, filesItems, kindLabel } from './files-kinds.js';
 import { linkMarkupFor } from './link-mark.js';
 // …and the preview overlay's third pure half: which renderer an entry gets, what it can be
 // asked to do, and the line along the bottom. Separate from `files-kinds.js` because the
@@ -32,6 +32,8 @@ import { asideFolded, ghostSend, hideFinished, isFinishedState } from './prefs.j
 // aside's test — two lines from one module is the cheap half of that trade, and collapsing
 // them is a one-line change for whoever touches these imports next.
 import { roomFolded } from './prefs.js';
+// …and the `files` modal's remembered grid/list choice, on its own line for the same reason.
+import { filesView } from './prefs.js';
 // What a closed side panel has room to say. The ninth pure module under `web/`, shipped by
 // item 1 of this feature with nothing wired to it; the lead's aside is the first half to
 // wear it. `asideStripFacts` reads the same `s.team` object `teamLine` reads, which is what
@@ -4705,6 +4707,16 @@ function hostOf(url) {
  *   make it need the room's `scrollTop`-across-the-repaint dance. A filter click replaces
  *   the grid's children and lets the scroll go back to the top, which is what a reader
  *   asking for a different set wants.
+ *
+ *   **The grid and the list are both always built, and the hidden one costs nothing.**
+ *   `paint()` fills both containers on every filter change; only the CSS `hidden` attribute
+ *   decides which one is on screen. That is what keeps a view toggle a one-line repaint
+ *   instead of a second fetch or a cached-but-stale copy — and it is safe for exactly one
+ *   reason: the list never calls `lazily()`. A row shows a kind, a name and a time, none of
+ *   which needs a document's bytes, so there is no second `fetch` racing the grid's. The
+ *   thumbnails are the only thing that could double-fetch, and `loading="lazy"` on an
+ *   element with no layout box (a `hidden` ancestor) never asks for its bytes at all — so a
+ *   grid image and its list twin cost one request between them, not two.
  */
 function openFiles(sessionId, sessionTitle) {
   const back = document.createElement('div');
@@ -4722,18 +4734,67 @@ function openFiles(sessionId, sessionTitle) {
   box.append(sub);
 
   // Hidden until there is something to filter: a row of six zeroes over an empty grid says
-  // nothing the empty state does not say better.
+  // nothing the empty state does not say better. The view toggle rides in the same bar and
+  // is hidden with it — there is nothing to switch the view of yet.
+  const bar = document.createElement('div');
+  bar.className = 'files-bar';
+  bar.hidden = true;
   const filters = document.createElement('div');
   filters.className = 'files-filters';
-  filters.hidden = true;
-  box.append(filters);
+  bar.append(filters);
+
+  // Two plain buttons, not a native control — `.files-pill`'s own reason (CLAUDE.md's
+  // `.field-check` trap: a stock checkbox is painted by the *browser's* colour scheme, not
+  // the page's `data-theme`). `view` starts from the remembered choice; every session opens
+  // the modal on whatever it was last left on, in this browser.
+  let view = filesView.value === 'list' ? 'list' : 'grid';
+  const viewToggle = document.createElement('div');
+  viewToggle.className = 'files-view';
+  const gridBtn = document.createElement('button');
+  gridBtn.type = 'button';
+  gridBtn.className = 'files-view-btn';
+  gridBtn.textContent = 'grid';
+  const listBtn = document.createElement('button');
+  listBtn.type = 'button';
+  listBtn.className = 'files-view-btn';
+  listBtn.textContent = 'list';
+  viewToggle.append(gridBtn, listBtn);
+  bar.append(viewToggle);
+  box.append(bar);
 
   const note = document.createElement('div');
   note.className = 'files-note';
   note.textContent = 'reading the transcript…';
   const grid = document.createElement('div');
   grid.className = 'files-grid';
-  box.append(note, grid);
+  const list = document.createElement('div');
+  list.className = 'files-list';
+  box.append(note, grid, list);
+
+  /** The toggle's own two-button state, and which of the two containers is on screen. The
+   *  filter selection lives in `selected` below and neither button here touches it — that
+   *  is the whole of "switching view keeps the current filter". */
+  function paintView() {
+    gridBtn.classList.toggle('is-on', view === 'grid');
+    gridBtn.setAttribute('aria-pressed', String(view === 'grid'));
+    listBtn.classList.toggle('is-on', view === 'list');
+    listBtn.setAttribute('aria-pressed', String(view === 'list'));
+    grid.hidden = view !== 'grid';
+    list.hidden = view !== 'list';
+  }
+  paintView();
+  gridBtn.onclick = () => {
+    if (view === 'grid') return;
+    view = 'grid';
+    filesView.set(view);
+    paintView();
+  };
+  listBtn.onclick = () => {
+    if (view === 'list') return;
+    view = 'list';
+    filesView.set(view);
+    paintView();
+  };
 
   const row = document.createElement('div');
   row.className = 'modal-row';
@@ -4836,6 +4897,25 @@ function openFiles(sessionId, sessionTitle) {
     return bits.join(' · ');
   }
 
+  /**
+   * The one way anything in this modal opens the preview overlay.
+   *
+   * Four callers — an image cell, a document cell, an image row, a document row — and one
+   * handler, because the grid and the list are two drawings of the same list and a second
+   * path is a second place for the address or the walk to be got wrong. The list view's
+   * rows were built inert against exactly this slot.
+   *
+   * Two things it carries that a caller should not have to know. The whole **filtered**
+   * list goes over, not just the images in it: the overlay's arrow keys walk what the
+   * reader can currently see, files and links alike, and it drops the links out of the
+   * walk itself. And `outputSrc` rather than the overlay's default — these are *outputs*,
+   * and a `SendUserFile` screenshot is not an image *block*, so it has no address in
+   * `/image/:uuid/:index` at all.
+   */
+  function openPreview(shown, at) {
+    openLightbox(sessionId, shown, at, { src: (id, item) => outputSrc(item) });
+  }
+
   function imageCell(item, shown, at) {
     const cell = document.createElement('button');
     cell.type = 'button';
@@ -4852,11 +4932,7 @@ function openFiles(sessionId, sessionTitle) {
     cell.append(img);
 
     cell.append(captionFor(item.name || item.note || 'image', item, gone));
-    // The whole filtered list, not just the images in it: the overlay's arrow keys walk
-    // what the reader can currently see, files and links alike, and it drops the links
-    // itself. `outputSrc` because these are outputs — a `SendUserFile` screenshot is not
-    // an image *block* and has no address in `/image/:uuid/:index` at all.
-    cell.onclick = () => openLightbox(sessionId, shown, at, { src: (id, it) => outputSrc(it) });
+    cell.onclick = () => openPreview(shown, at);
     return cell;
   }
 
@@ -4876,7 +4952,7 @@ function openFiles(sessionId, sessionTitle) {
     body.className = 'files-doc';
     cell.append(body);
     cell.append(captionFor(item.name || 'file', item, gone));
-    cell.onclick = () => openLightbox(sessionId, shown, at, { src: (id, it) => outputSrc(it) });
+    cell.onclick = () => openPreview(shown, at);
 
     const readable = item.kind === 'markdown' || item.kind === 'text';
     // A `Write`'s bytes are in the transcript, so a document previews as written even
@@ -4944,6 +5020,65 @@ function openFiles(sessionId, sessionTitle) {
     return cell;
   }
 
+  /** The kind column every list row starts with — `web/files-kinds.js`'s own word, mono
+   *  and faint, never the pill an item lives under (`pdf`, not `other`). */
+  function kindSpan(item) {
+    const k = document.createElement('span');
+    k.className = 'files-row-kind';
+    k.textContent = kindLabel(item);
+    return k;
+  }
+
+  /**
+   * The list view's three row builders — one per cell kind, same order and same set as the
+   * grid's `imageCell`/`docCell`/`linkCell`, reusing `captionFor` for the name-and-time half
+   * so a `gone` row is struck through and tagged the same way in both views without a
+   * second rule for it.
+   *
+   * A row is a `<button>` (or, for a link, an `<a>`) rather than a table row: the modal has
+   * no header to anchor a `<table>` to and every other clickable thing in this modal is
+   * already a button, `imageCell` included.
+   */
+  function imageRow(item, shown, at) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'files-row files-row-image';
+    const gone = item.onDisk === false;
+    if (gone) row.classList.add('is-gone');
+    const title = titleFor(item, gone);
+    if (title) row.title = title;
+    row.append(kindSpan(item), captionFor(item.name || item.note || 'image', item, gone));
+    row.onclick = () => openPreview(shown, at);
+    return row;
+  }
+
+  function docRow(item, shown, at) {
+    // `openPreview`, the same function the grid's cell calls — this row was built inert
+    // against that slot and now fills it. Not a second path: a row and a cell are two
+    // drawings of one item, and the walk they open must be the one list.
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'files-row files-row-doc';
+    const gone = item.onDisk === false;
+    if (gone) row.classList.add('is-gone');
+    const title = titleFor(item, gone);
+    if (title) row.title = title;
+    row.append(kindSpan(item), captionFor(item.name || 'file', item, gone));
+    row.onclick = () => openPreview(shown, at);
+    return row;
+  }
+
+  function linkRow(item) {
+    const row = document.createElement('a');
+    row.className = 'files-row files-row-link';
+    row.href = item.url;
+    row.target = '_blank';
+    row.rel = 'noopener noreferrer';
+    row.title = item.url;
+    row.append(kindSpan(item), captionFor(item.title || hostAndPath(item.url), item, false));
+    return row;
+  }
+
   // Mounted first, filled second — a grid painted before it is in the document is the
   // room's oldest bug, and a lazily-loaded `<img>` in a detached node never asks for its
   // bytes at all.
@@ -4973,6 +5108,11 @@ function openFiles(sessionId, sessionTitle) {
           data.note ||
           'No files and no links in this conversation — nothing written, nothing captured, nothing cited.';
         empty.append(title, p);
+        // The bar (filters and the view toggle) stays hidden — there is nothing to switch
+        // the view of — so the empty message always shows in `grid`, whatever this browser
+        // last remembered, or a `list`-remembered browser would hide it behind nothing.
+        list.hidden = true;
+        grid.hidden = false;
         grid.append(empty);
         return;
       }
@@ -4986,17 +5126,30 @@ function openFiles(sessionId, sessionTitle) {
         io?.disconnect();
         pending.clear();
         const shown = filesFor(items, selected);
-        // Every cell is handed the whole filtered list and its own place in it: the
-        // preview overlay steps through what the reader can currently see rather than
-        // through one kind, which is the same "the list is already in hand" the strip
+        // Every cell and every row is handed the whole filtered list and its own place in
+        // it: the preview overlay steps through what the reader can currently see rather
+        // than through one kind, which is the same "the list is already in hand" the strip
         // uses. It drops the links out of the walk itself.
-        const frag = document.createDocumentFragment();
+        //
+        // Both containers are filled on every paint — the toggle only flips `hidden` —
+        // which is safe because the list never calls `lazily()`; see that function's own
+        // header for why that is free rather than a second fetch.
+        const gridFrag = document.createDocumentFragment();
+        const listFrag = document.createDocumentFragment();
         shown.forEach((item, at) => {
-          if (item.kind === 'link') frag.append(linkCell(item));
-          else if (item.kind === 'image') frag.append(imageCell(item, shown, at));
-          else frag.append(docCell(item, shown, at));
+          if (item.kind === 'link') {
+            gridFrag.append(linkCell(item));
+            listFrag.append(linkRow(item));
+          } else if (item.kind === 'image') {
+            gridFrag.append(imageCell(item, shown, at));
+            listFrag.append(imageRow(item, shown, at));
+          } else {
+            gridFrag.append(docCell(item, shown, at));
+            listFrag.append(docRow(item, shown, at));
+          }
         });
-        grid.replaceChildren(frag);
+        grid.replaceChildren(gridFrag);
+        list.replaceChildren(listFrag);
       }
 
       for (const kind of FILE_KINDS) {
@@ -5027,7 +5180,7 @@ function openFiles(sessionId, sessionTitle) {
         pills.set(kind, pill);
         filters.append(pill);
       }
-      filters.hidden = false;
+      bar.hidden = false;
       paint();
     } catch (err) {
       if (back.isConnected) note.textContent = err.message;

@@ -267,3 +267,64 @@ test('anything other than the stored "1" is expanded', async () => {
     },
   );
 });
+
+/*
+ * The `files` modal's grid/list toggle — a `choice`, not a `flag`, so what is worth pinning
+ * is the vocabulary as much as the storage: both real values round-trip, and anything else
+ * — never stored, an old build's word, a hand edit in devtools — comes back as `grid`, the
+ * modal's original shape.
+ */
+
+test('grid with nothing stored', async () => {
+  await withStorage(fakeStore(), ({ filesView, FILES_VIEW_KEY }) => {
+    assert.equal(FILES_VIEW_KEY, 'foreman.filesView');
+    assert.equal(filesView.value, 'grid');
+  });
+});
+
+test('both values round-trip', async () => {
+  const store = fakeStore();
+  await withStorage(store, ({ filesView, FILES_VIEW_KEY }) => {
+    assert.equal(filesView.set('list'), 'list');
+    assert.equal(store.map.get(FILES_VIEW_KEY), 'list');
+    assert.equal(filesView.value, 'list');
+    assert.equal(filesView.set('grid'), 'grid');
+    assert.equal(store.map.get(FILES_VIEW_KEY), 'grid');
+    assert.equal(filesView.value, 'grid');
+  });
+});
+
+test('a browser already told "list" comes back on list', async () => {
+  await withStorage(fakeStore({ 'foreman.filesView': 'list' }), ({ filesView }) => {
+    assert.equal(filesView.value, 'list');
+  });
+});
+
+test('a word this build has never heard of is grid, never itself', async () => {
+  await withStorage(fakeStore({ 'foreman.filesView': 'cards' }), ({ filesView }) => {
+    assert.equal(filesView.value, 'grid');
+  });
+});
+
+test('setting an unknown word stores the fallback, not the word', async () => {
+  const store = fakeStore();
+  await withStorage(store, ({ filesView, FILES_VIEW_KEY }) => {
+    assert.equal(filesView.set('cards'), 'grid');
+    assert.equal(store.map.get(FILES_VIEW_KEY), 'grid');
+  });
+});
+
+test('a store that throws leaves the toggle on grid and the page standing', async () => {
+  await withStorage(deniedStore, ({ filesView }) => {
+    assert.equal(filesView.value, 'grid');
+    assert.equal(filesView.set('list'), 'list', 'this visit still behaves');
+    assert.equal(filesView.value, 'list');
+  });
+});
+
+test('no localStorage at all is grid, not a crash', async () => {
+  await withStorage(undefined, ({ filesView }) => {
+    assert.equal(filesView.value, 'grid');
+    assert.doesNotThrow(() => filesView.set('list'));
+  });
+});
