@@ -258,7 +258,8 @@ are derived — and they're the only thing that folds a block of sessions out of
 they carry more weight than everything under them: larger, brighter, and fenced off above.
 A rail of nine folders should read as five things.
 
-**`recent`**, off at the right of the rail head, drops all of it — groups and folder
+**`recent`** — a sort icon, off at the right of the rail head, no label on it any more —
+drops all of it — groups and folder
 headings both — for one list ordered by what moved last. For the morning where you know
 which session you want but not which of nine folders it lives in, the filing is three
 extra reads.
@@ -352,7 +353,8 @@ it never spends the bench you saved.
 
 ### Briefs
 
-`briefs`, in the rail head between `snapshot` and `recent`, opens one read-only box with
+`briefs`, in the rail head between `snapshot` and the sort icon (`recent`), opens one
+read-only box with
 every brief a session on this Mac is launched reading.
 
 A **brief** is the text appended to Claude Code's own system prompt at launch

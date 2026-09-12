@@ -267,6 +267,16 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .new-session:hover { color: var(--accent); border-color: var(--accent); }
 
+/* `recent` and `settings`: the label is gone, an SVG in `currentColor` takes its place, and
+   this is only about keeping the button the same box the text ones are — same height, the
+   glyph centred rather than baseline-aligned the way a run of letters would be. */
+.new-session.icon-only {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.15rem 0.35rem;
+}
+
 /* Off on its own at the right end: the other two *do* something, this one changes how the
    rail reads, and a view switch sitting flush against them would invite a stray click. */
 .rail-toggle { margin-left: auto; }
