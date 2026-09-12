@@ -361,7 +361,7 @@ session in the same folder — the rules it keeps, the tools it is told it has, 
 base branch it was generated against. Until this there was nowhere to read one: it is
 written to a file under the state dir at launch and nothing ever showed it.
 
-Four tabs:
+Five tabs:
 
 - **lead** — what the next team lead started in the chosen repository would read.
 - **worker** — what a dispatched build worker would read, with `<task>` standing in for the
@@ -370,8 +370,11 @@ Four tabs:
 - **standalone** — the short standing brief every ordinary session the panel launches
   carries. It is **one file for the whole machine**, so this tab has no repository picker:
   there is nothing for one to change.
+- **decisions** — the chosen repository's own `decisions.md`, its standing rulings, read
+  straight off disk rather than generated. A repository that has never had a lead has no
+  such file yet, and the tab says so rather than showing an empty document.
 
-The picker on the other three lists the repositories that have a team, and opens on the one
+The picker on the other four lists the repositories that have a team, and opens on the one
 the left-hand pane is looking at when that repository has a team. A repository with no team
 yet still renders, from the same defaults a dispatch would use — reading a brief never
 creates a team directory, a `team.json` or a `decisions.md`.
@@ -386,7 +389,9 @@ Briefs are generated per launch, so a session already running is on whatever was
 when it started; changing a toggle, or upgrading the panel, reaches the *next* one. There
 is deliberately no refresh control — see the *known gap* in `CLAUDE.md` — because a button
 that regenerated a brief would reach nothing that is currently running, which is the
-opposite of what pressing it would look like.
+opposite of what pressing it would look like. The `decisions` tab is the one exception: it
+is not generated at all, so what it shows is simply whatever is on disk right now, and the
+note above it says that instead.
 
 Everything in the box is read-only. There is no edit field, no launch button and no POST
 behind it; it is the same rule the task-brief modal keeps, for the same reason — a control

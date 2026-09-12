@@ -211,11 +211,29 @@ test('reading briefs for a repo with no team creates nothing on disk', async () 
 
   // It still answers, with the defaults dispatch would have used.
   assert.equal(out.hasTeam, false);
-  assert.deepEqual(Object.keys(out.briefs).sort(), ['lead', 'planner', 'standalone', 'worker']);
+  assert.deepEqual(Object.keys(out.briefs).sort(), ['decisions', 'lead', 'planner', 'standalone', 'worker']);
+  assert.equal(out.briefs.decisions, null, 'no file on disk, and reading it created none either');
   for (const [kind, text] of Object.entries(out.briefs)) {
+    if (kind === 'decisions') continue;
     assert.ok(text.length > 200, `${kind} is a real brief`);
     assert.ok(!text.includes('undefined'), `${kind} never prints undefined`);
   }
+});
+
+test('a repo with a decisions.md gets its actual text back, verbatim', async () => {
+  const repo = makeRepo('has-decisions', { origin: 'https://github.com/example/has-decisions.git' });
+  resetForgeCache();
+  resetBaseBranchCache();
+  const tDir = teamDir(repo);
+  fs.mkdirSync(tDir, { recursive: true });
+  const decisionsFile = path.join(tDir, 'decisions.md');
+  fs.writeFileSync(decisionsFile, '## 2026-01-01 — RULING: zzq-testname likes it this way.\n');
+
+  const out = await briefsFor(repo);
+
+  assert.equal(out.briefs.decisions, '## 2026-01-01 — RULING: zzq-testname likes it this way.\n');
+  // Read live, not seeded or overwritten — the file on disk is exactly what was written.
+  assert.equal(fs.readFileSync(decisionsFile, 'utf8'), '## 2026-01-01 — RULING: zzq-testname likes it this way.\n');
 });
 
 test('the placeholder task id is a placeholder, in the brief and in the plan path', async () => {

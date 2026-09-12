@@ -2511,11 +2511,16 @@ async function openSnapshot() {
  * same rule `openTaskBrief` keeps one floor up, for the same reason — a control that
  * started or changed something would be the panel doing what the lead is for.
  *
- * Four tabs and a repo picker on three of them; which three is `briefs-tabs.js`'s rule, not
- * this function's. One fetch answers all four kinds for a repo, so changing tab never
+ * Five tabs and a repo picker on four of them; which four is `briefs-tabs.js`'s rule, not
+ * this function's. One fetch answers all five kinds for a repo, so changing tab never
  * re-fetches and changing repo fetches once — and the cache is a `Map` that dies with the
  * modal, because a brief held over from this morning shown without a word would be exactly
  * the stale-and-confident failure the note at the top is about.
+ *
+ * **`decisions` is not a brief and the note at the top says so.** The other four are
+ * generated at launch and can go stale the moment code changes; the rulings file is read
+ * off disk on every fetch, so `paintNote` swaps the caveat for that tab alone rather than
+ * repeating a warning that does not apply to it.
  */
 async function openBriefs() {
   const back = document.createElement('div');
@@ -2631,6 +2636,15 @@ async function openBriefs() {
     picker.hidden = !needsRepo(kind);
   }
 
+  /** The caveat above the tabs is about generated briefs; `decisions` is a file read live
+   *  and the warning would be a wrong thing to say about it. */
+  function paintNote() {
+    note.textContent =
+      kind === 'decisions'
+        ? 'The chosen repo’s rulings file, read live — not generated at launch, and not a brief.'
+        : 'Generated at launch. This is what the next session started here would read — one already running is on the brief it started with.';
+  }
+
   /** Plain text in the body, for "loading…" and for an error — never markdown, so a
    *  message that happens to contain a `#` does not come back as a heading. */
   function say(text, cls = '') {
@@ -2639,6 +2653,14 @@ async function openBriefs() {
   }
 
   function paintFacts() {
+    // The facts line names what a brief was generated from — base, forge, the placeholder
+    // task id. None of that is true of a file read straight off disk, so this tab draws
+    // nothing here rather than a forge reading nobody asked about.
+    if (kind === 'decisions') {
+      facts.textContent = '';
+      facts.classList.remove('warn');
+      return;
+    }
     const m = needsRepo(kind) ? meta.get(repo) : null;
     if (!m) {
       facts.textContent = '';
@@ -2658,10 +2680,18 @@ async function openBriefs() {
 
   function paint() {
     paintTabs();
+    paintNote();
     const key = cacheKey(repo, kind);
     const md = cache.get(key);
     if (md === undefined) {
       say('loading…', 'is-quiet');
+      paintFacts();
+      return;
+    }
+    // `null` is the route's honest answer for "no decisions.md yet" — the ordinary state
+    // for a repo that has never had a lead, not an error and not empty markdown.
+    if (kind === 'decisions' && md === null) {
+      say('No rulings recorded for this repo yet — the file is created when a team lead is first launched here.', 'is-quiet');
       paintFacts();
       return;
     }
@@ -2680,7 +2710,7 @@ async function openBriefs() {
     load();
   }
 
-  /* ---- one fetch per repo, answering all four kinds ---- */
+  /* ---- one fetch per repo, answering all five kinds ---- */
 
   let inflight = null;
   async function load() {

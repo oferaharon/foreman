@@ -17,18 +17,19 @@ import { BRIEF_KINDS, cacheKey, defaultRepo, isBriefKind, needsRepo } from '../w
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-test('the four tabs, in order, outward from the team', () => {
+test('the five tabs, in order, outward from the team', () => {
   assert.deepEqual(
     BRIEF_KINDS.map((k) => k.kind),
-    ['lead', 'worker', 'planner', 'standalone'],
+    ['lead', 'worker', 'planner', 'standalone', 'decisions'],
   );
   for (const k of BRIEF_KINDS) assert.equal(typeof k.label, 'string');
 });
 
-test('three kinds are a function of a repo and the standalone brief is not', () => {
+test('four kinds are a function of a repo and the standalone brief is not', () => {
   assert.equal(needsRepo('lead'), true);
   assert.equal(needsRepo('worker'), true);
   assert.equal(needsRepo('planner'), true);
+  assert.equal(needsRepo('decisions'), true);
   // One file for the whole machine (`server/session-launch.js`), so a repo picker there
   // would be a control that changes nothing — worse than absent, because it implies the
   // answer depends on it.
