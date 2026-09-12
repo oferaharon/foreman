@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
-import { rememberFooter, openTaskFor, workerTeam, SessionRegistry } from '../server/sessions.js';
+import { tmpdir } from 'node:os';
+import { forgeSummary, resetForgeCache } from '../server/forge.js';
+import { forgesFor, rememberFooter, openTaskFor, workerTeam, SessionRegistry } from '../server/sessions.js';
 
 /*
  * Model and `ctx:` are scraped off the composer footer, which a question box, a permission
@@ -223,4 +227,91 @@ test('a seed with nothing to seed changes nothing', () => {
   r.noteModel(null, 'Sonnet 5');
 
   assert.deepEqual(rememberFooter(r.footers, '%16', null), { model: 'Fable 5.1', contextPct: 12 });
+});
+
+/*
+ * The forge on a roster row — the mark in a pane's header, and now on every session
+ * rather than on a lead alone.
+ *
+ * Two things it must not do, and both are about the poll rather than about forges: it
+ * runs on every tick over every Claude pane on this machine, so a folder held by three
+ * panes must cost one resolution and not three; and nothing about a header decoration may
+ * stop the roster being built.
+ */
+
+test('a folder held by several panes is resolved once, not once per pane', async () => {
+  const asked = [];
+  const forges = await forgesFor(
+    ['/repo/alpha', '/repo/alpha', '/repo/gamma', '/repo/alpha'],
+    async (dir) => {
+      asked.push(dir);
+      return { reading: 'GitHub', webUrl: `https://github.com/o${dir}` };
+    },
+  );
+
+  assert.deepEqual(asked.sort(), ['/repo/alpha', '/repo/gamma'], 'one call per distinct folder');
+  assert.equal(forges.size, 2);
+  assert.equal(forges.get('/repo/alpha').reading, 'GitHub');
+});
+
+test('a pane with no folder asks nothing and answers nothing', async () => {
+  const asked = [];
+  const forges = await forgesFor([null, undefined, '', '/repo/beta'], async (dir) => {
+    asked.push(dir);
+    return { reading: 'no remote', webUrl: null };
+  });
+
+  assert.deepEqual(asked, ['/repo/beta'], 'a pane tmux reports no cwd for is skipped');
+  // The row reads this with `?? null`, so a folder that is not in the map draws nothing.
+  assert.equal(forges.get(null), undefined);
+});
+
+test('a resolver that throws costs that folder its mark and nothing else', async () => {
+  const forges = await forgesFor(['/repo/alpha', '/repo/gamma'], async (dir) => {
+    if (dir === '/repo/alpha') throw new Error('git is having a day');
+    return { reading: 'Gitea', webUrl: 'https://forge.example/o/gamma' };
+  });
+
+  assert.equal(forges.get('/repo/alpha'), null, 'quiet, not thrown');
+  assert.equal(forges.get('/repo/gamma').reading, 'Gitea');
+});
+
+/*
+ * The ordinary case on this machine is a folder that is not a git repo at all — a home
+ * directory, a scratch folder, anywhere somebody opened a session. `git remote get-url`
+ * fails there, and the whole of what that must produce is a quiet row.
+ */
+test('a folder that is not a git repo is `no remote` with no link, not an error', async () => {
+  resetForgeCache();
+  const dir = await fsp.mkdtemp(path.join(tmpdir(), 'forge-not-a-repo-'));
+  try {
+    // The real remote read — that is the half under test. The other two reads are stubbed
+    // so the answer does not depend on what this Mac happens to have installed.
+    const forges = await forgesFor([dir], (d) => forgeSummary(d, { mcp: async () => ({}), hasGh: () => false }));
+    assert.deepEqual(forges.get(dir), { reading: 'no remote', webUrl: null });
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+    resetForgeCache();
+  }
+});
+
+/*
+ * The trap this field is one `meta.cwd` away from: Claude Code rewrites a transcript's
+ * `cwd` when a session changes directory mid-conversation, and the repository has not
+ * moved. Nothing here can drive `refresh()` — it needs tmux — so the pin is on the source
+ * of the two row assignments, which is the thing that would silently go wrong.
+ */
+test('a row takes its forge from the pane it runs in, never from the transcript', async () => {
+  const src = await fsp.readFile(new URL('../server/sessions.js', import.meta.url), 'utf8');
+  const lookups = [...src.matchAll(/forge:\s*forges\.get\(([^)]*)\)/g)].map((m) => m[1].trim());
+
+  assert.equal(lookups.length, 2, 'both row shapes carry one — bound, and pane-only');
+  for (const arg of lookups) {
+    assert.match(arg, /pane\.cwd$/, 'the pane’s launch folder');
+    assert.doesNotMatch(arg, /meta\./, 'never the transcript’s, which moves');
+  }
+
+  // …and the roster is broadcast on a diff, so a forge that appeared under a running
+  // session reaches a browser only if `#diff` is asked about it.
+  assert.match(src, /JSON\.stringify\(prev\.forge\) !== JSON\.stringify\(s\.forge\)/);
 });

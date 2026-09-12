@@ -970,6 +970,21 @@ controls beside it are verbs about the session and this one is about somewhere e
 it opens the pane's *launch* directory, the one its rail heading is named after, not
 wherever the conversation has since changed to.
 
+### The repository's page
+
+Between the session's name and the status text in a pane header, a small mark — GitHub's
+octicon, or a plain git graph for anything else — links to the repository that session's
+folder belongs to. It opens in a new tab, and hovering names what the click will open:
+`owner/repo on GitHub`.
+
+It appears on **every** session whose repository the panel has tools for, not only on a
+team lead: the reading rides on the roster row, worked out from the pane's *launch*
+folder, so a session that has changed directory mid-conversation still names the repo it
+started in. A folder on a forge the panel has no tools for — `push only` — and one with no
+`origin` at all draw nothing, which is the same rule as everywhere else here: a link to a
+forge nothing in the panel can talk to would imply support it does not have. See
+[The forge](team.md#the-forge) for how the reading is arrived at.
+
 ### Split view
 
 The `split` button in a pane header — or `⌘\` — opens a second column with its own
