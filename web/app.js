@@ -5565,7 +5565,7 @@ function openFiles(sessionId, sessionTitle) {
   box.append(headRegion);
 
   const h = document.createElement('h2');
-  h.textContent = 'files';
+  h.textContent = 'files/links';
   headRegion.append(h);
 
   const sub = document.createElement('div');
@@ -11230,7 +11230,7 @@ function createPane(slot, host) {
     // The label is a text node of its own so the dot can be a sibling inside the button.
     // Set through `textContent` on the span and never on the button, or the next paint
     // wipes the dot it is supposed to be drawing beside.
-    files.append(text('files'));
+    files.append(text('files/links'));
     files.onclick = () => {
       // Resolved at click time, like the pin above: the header is patched across roster
       // updates, so `s` is a snapshot.
