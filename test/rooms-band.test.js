@@ -484,11 +484,11 @@ test('the band is a sibling of `.rail-list`, never a block inside it', () => {
   assert.ok(!/\bmargin\b/.test(decl), 'the band carries no vertical margin');
 });
 
-test('the band sits below the shared row and above the footer', () => {
-  const shared = html.indexOf('class="rail-shared"');
+test('the band sits above the shared row and above the footer', () => {
   const rooms = html.indexOf('<div class="rail-rooms"');
+  const shared = html.indexOf('class="rail-shared"');
   const foot = html.indexOf('class="rail-foot"');
-  assert.ok(shared < rooms && rooms < foot);
+  assert.ok(rooms < shared && shared < foot);
 });
 
 test('the rooms band never joins `composerSig`', () => {

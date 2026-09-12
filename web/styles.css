@@ -6380,7 +6380,7 @@ body.row-dragging * { cursor: row-resize !important; }
    that makes a new one.
 
    A **sibling** of `.rail-list`, never a block inside it, for the reason the shared row
-   above gives in its own words: an open group's tint in
+   below gives in its own words: an open group's tint in
    that list is tiled from three full-width rows *in that flow*, and `.folder-label.in-group`
    carries a hand-measured sticky offset against the row heights in there. Out here this is
    one more item in the rail's flex column. **No vertical margin**, deliberately — a gap
@@ -6395,7 +6395,7 @@ body.row-dragging * { cursor: row-resize !important; }
    into the create modal (plan §2 item
    8), so a gate over the whole band would mean the first room could never be made — the
    control would appear only once traffic existed, which is exactly what the shared row
-   above refuses to do in its own markup's words. So `.rail-rooms` is always here, carrying
+   below refuses to do in its own markup's words. So `.rail-rooms` is always here, carrying
    one quiet heading line, and `.app.has-rooms` gates `.rooms-list` alone. The class stays
    on `.app` rather than on the rail because it is one fact about the whole window. */
 .rail-rooms {
@@ -6468,7 +6468,7 @@ body.row-dragging * { cursor: row-resize !important; }
 .rooms-add:hover { color: var(--accent); background: var(--surface-sunk); }
 
 /* The rows, and the half that actually comes and goes. With nothing in it the band is its
-   head alone — one line, the way `.rail-shared` above is one line — and `padding-bottom`
+   head alone — one line, the way `.rail-shared` below is one line — and `padding-bottom`
    rides on the list rather than on the band so that line does not sit over a gap it is not
    using. */
 .rooms-list {

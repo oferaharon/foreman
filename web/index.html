@@ -132,8 +132,51 @@
         <div class="rail-list" id="railList"></div>
 
         <!--
+          The rooms band: one row per open room, and the archived ones folded away.
+
+          A **sibling** of `.rail-list`, never a block inside it — it sits directly after
+          the session list, with the peer-messages row moved below it and `.rail-foot` last.
+          The reason is the one that row gives in its own words, one band down: an open
+          group's tint in that list is tiled from three full-width rows *in that flow*, so
+          anything joining it has to answer to it, and `.folder-label.in-group`'s sticky `top`
+          is a hand-measured offset against the row heights in there. Out here the band is one
+          more item in the column and neither of those has anything to know about it. It
+          carries no vertical margin for the same reason.
+
+          **The head is persistent; only the list comes and goes.** `.app.has-rooms` gates
+          `.rooms-list` alone, and the head being a sibling of the list rather than a wrapper
+          around it is the whole reason that is possible.
+
+          Why: `+ room` is the **only** way into the create modal, so a gate over the whole
+          band would mean the first room could never be made from the panel at all. The
+          control would appear only once traffic existed — precisely what the shared-room row
+          below refuses to do in its own words: "a control that only appears once traffic
+          exists is a control nobody discovers." The maintainer's ruling, taken on those
+          grounds after it was escalated.
+
+          So with no rooms the band is one quiet heading line and its control, the way
+          `.rail-shared` below is one row — and the rail is otherwise the rail it was before
+          this feature.
+
+          The rows are filled by `renderRoomsBand` from the roster frame's `rooms` array, and
+          they are **patched in place, never rebuilt**: `renderSharedRow`'s reason, one band
+          down. The log itself never rides that frame.
+        -->
+        <div class="rail-rooms" id="railRooms">
+          <div class="rooms-head">
+            <span class="rooms-title">rooms</span>
+            <button class="rooms-add" id="roomsAdd" type="button" title="Make a room and choose which sessions are in it">
+              + room
+            </button>
+          </div>
+          <div class="rooms-list" id="roomsList"></div>
+        </div>
+
+        <!--
           Peer messages — `shared room` in every identifier here, and the mismatch is
-          deliberate (see `server/shared-room.js`'s header). One row, always here.
+          deliberate (see `server/shared-room.js`'s header). One row, always here. Filed
+          below the rooms band (below its archived fold) since it is the row nobody actively
+          uses — the maintainer's ruling, 2026-09-12.
 
           It is a *row* rather than a card because there is exactly one of it — the machine
           has one room, however many sessions are on it — and a band that can hold only one
@@ -152,47 +195,6 @@
           <span class="rail-shared-name">peer messages</span>
           <span class="rail-shared-unseen" id="railSharedUnseen" hidden></span>
         </button>
-
-        <!--
-          The rooms band: one row per open room, and the archived ones folded away.
-
-          A **sibling** of `.rail-list`, never a block inside it — the last band in the
-          rail's own flex column, after the shared-room row above. The reason is the one that
-          row already gives in its own words: an open group's tint in that list is tiled from
-          three full-width rows *in that flow*, so anything joining it has to answer to it,
-          and `.folder-label.in-group`'s sticky `top` is a hand-measured offset against the
-          row heights in there. Out here the band is one more item in the column and neither
-          of those has anything to know about it. It carries no vertical margin for the same
-          reason.
-
-          **The head is persistent; only the list comes and goes.** `.app.has-rooms` gates
-          `.rooms-list` alone, and the head being a sibling of the list rather than a wrapper
-          around it is the whole reason that is possible.
-
-          Why: `+ room` is the **only** way into the create modal, so a gate over the whole
-          band would mean the first room could never be made from the panel at all. The
-          control would appear only once traffic existed — precisely what the shared-room row
-          above refuses to do in its own words: "a control that only appears once traffic
-          exists is a control nobody discovers." The maintainer's ruling, taken on those
-          grounds after it was escalated.
-
-          So with no rooms the band is one quiet heading line and its control, the way
-          `.rail-shared` above is one row — and the rail is otherwise the rail it was before
-          this feature.
-
-          The rows are filled by `renderRoomsBand` from the roster frame's `rooms` array, and
-          they are **patched in place, never rebuilt**: `renderSharedRow`'s reason, one band
-          up. The log itself never rides that frame.
-        -->
-        <div class="rail-rooms" id="railRooms">
-          <div class="rooms-head">
-            <span class="rooms-title">rooms</span>
-            <button class="rooms-add" id="roomsAdd" type="button" title="Make a room and choose which sessions are in it">
-              + room
-            </button>
-          </div>
-          <div class="rooms-list" id="roomsList"></div>
-        </div>
 
         <!-- A sibling of the list, never inside it: an open group's tint is tiled from
              three full-width rows in `.rail-list`, and anything joining that flow would
