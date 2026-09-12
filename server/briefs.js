@@ -150,14 +150,35 @@ export async function assembleLead({ repo, teamDir: tDir, decisionsFile, config 
 }
 
 /**
- * The four briefs for one repo, as the *next* session launched there would read them.
+ * The rulings file itself, read live — never generated, never seeded.
+ *
+ * Unlike the four briefs, `decisions.md` is not a function of a launch: it is the record a
+ * lead appends to over time, and this reads whatever is on disk right now. `null` for "the
+ * file does not exist" is the ordinary state for a repo that has never had a lead — caught
+ * the way `readTeam` catches a missing `team.json`, on any read failure rather than only
+ * `ENOENT`, because a modal answering "no rulings yet" for a file that is merely unreadable
+ * is the same honest fallback `briefsFor` already gives a repo with no `team.json`.
+ */
+async function readDecisions(decisionsFile) {
+  try {
+    return await fsp.readFile(decisionsFile, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The four briefs plus the rulings file, for one repo — the five things a session, or a
+ * human reading this modal, could ever be looking at for one team.
  *
  * `taskId` is a placeholder: worker and planner briefs are per task, and there is no task
  * here. A literal `<task>` is chosen over a plausible-looking id because a brief with a
  * real-looking label in it invites a reader to go looking for that task.
  *
  * `standalone` is the one machine-wide file (`session-launch.js`) and takes no repo, so it
- * comes back whether or not one was named.
+ * comes back whether or not one was named. `decisions` is the opposite of standalone in
+ * every way that matters here — repo-bound, never generated, read rather than assembled —
+ * and comes back only when a repo was named, same as the three brief kinds.
  */
 export async function briefsFor(repo, { port = PORT, taskId = '<task>', deps = {} } = {}) {
   const standalone = sessionBrief();
@@ -174,6 +195,7 @@ export async function briefsFor(repo, { port = PORT, taskId = '<task>', deps = {
   const lead = await assembleLead({ repo, teamDir: tDir, decisionsFile, config, port, deps });
   const base = lead.base;
   const human = humanName(repo);
+  const decisions = await readDecisions(decisionsFile);
 
   return {
     repo,
@@ -187,6 +209,7 @@ export async function briefsFor(repo, { port = PORT, taskId = '<task>', deps = {
       worker: workerBrief({ repo, taskId, decisionsFile, human, base }),
       planner: plannerBrief({ repo, taskId, planFile: planPath(repo, taskId), decisionsFile, human, base }),
       standalone,
+      decisions,
     },
   };
 }

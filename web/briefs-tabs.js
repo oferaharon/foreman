@@ -22,7 +22,7 @@
  * opens on an empty picker has to be driven before it says anything at all.
  *
  * **The cache key is repo-and-kind and it is deliberately not repo alone.** One fetch
- * answers all four kinds for a repo (`GET /api/briefs?repo=…`), so switching tabs inside
+ * answers all five kinds for a repo (`GET /api/briefs?repo=…`), so switching tabs inside
  * one repo must not re-fetch — but the key still names the kind, because `standalone`'s
  * answer is repo-independent and keying it under whichever repo happened to be selected
  * when it was fetched would store four copies of one string and re-fetch on every repo
@@ -35,17 +35,25 @@
  */
 
 /**
- * The four tabs, in the order they are drawn: outward from the team.
+ * The five tabs, in the order they are drawn: outward from the team, then the record of
+ * what the team decided.
  *
  * `lead` first because it is the one people come here to read — it is the longest, the
  * most consequential and the only one with toggles behind it. Then the two roles it
- * dispatches, then the brief that has nothing to do with a team at all.
+ * dispatches, then the brief that has nothing to do with a team at all, then `decisions` —
+ * last because it is not a brief at all, it is the rulings file itself. It carries
+ * `repo: true` for the same reason `lead` does (it lives under one repo's team dir), but
+ * unlike the other three repo-bound kinds it names no task placeholder and is not
+ * regenerated per launch — it is read live, so `needsRepo` is right about it needing a
+ * picker for the wrong reason and callers that also assume "repo-bound implies generated
+ * from a launch" have to be checked rather than assumed.
  */
 export const BRIEF_KINDS = [
   { kind: 'lead', label: 'lead', repo: true },
   { kind: 'worker', label: 'worker', repo: true },
   { kind: 'planner', label: 'planner', repo: true },
   { kind: 'standalone', label: 'standalone', repo: false },
+  { kind: 'decisions', label: 'decisions', repo: true },
 ];
 
 /** Whether this kind's brief is a function of a repository. Unknown kinds answer `false`
