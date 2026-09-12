@@ -503,7 +503,7 @@ refused with a message saying what is accepted.
 
 A screenshot a tool took, a report Claude wrote to disk, a file it handed you directly, a
 page it went and read — all four used to be dead text in the transcript or, for a captured
-image, thrown away outright. The `files` button in the pane header collects all of them,
+image, thrown away outright. The `files/links` button in the pane header collects all of them,
 plus the URLs the session exposed along the way.
 
 **What gets listed.** An item makes the cut when the session either **handed it to you** (a
@@ -511,7 +511,7 @@ plus the URLs the session exposed along the way.
 **created it**: a `Write` whose own result says `type: 'create'` — never an edit, and never
 an overwrite of a path that already existed — to one of a fixed set of human-facing
 extensions, plus every image block the per-turn strip already shows. The extension set
-lives in `web/output-exts.js`, shared by the server's own filter and the files button's
+lives in `web/output-exts.js`, shared by the server's own filter and the files/links button's
 new-item dot so both sides ask the same question about the same path; it isn't reproduced
 here because a second copy is exactly the kind of thing that drifts. Source — `.js`, `.py`,
 everything Claude *edits* rather than hands you — is excluded by that list with no
@@ -563,7 +563,7 @@ the transcript mentions the moment the modal opens, and the panel doesn't fetch 
 server-side either. Clicking opens a new tab (`noopener noreferrer`) rather than navigating
 the panel itself away, which would otherwise drop every open subscription in both panes.
 
-**A dot** on the `files` header button says something landed in the set since this pane last
+**A dot** on the `files/links` header button says something landed in the set since this pane last
 opened it — cleared the moment you click through, per browser, nothing persisted.
 
 **The bound, stated once.** Every route this feature touches is addressed by `{uuid, index}`
@@ -593,7 +593,7 @@ to tell where it ends in running prose. And a URL the session only ever saw insi
 result — anything but an issue or pull-request link — never becomes a link, even when it's
 exactly the address you'd want an hour later.
 
-**Phone.** None of this has reached `/m/` yet — no `files` button, no preview, no path
+**Phone.** None of this has reached `/m/` yet — no `files/links` button, no preview, no path
 links. It's the next wave, not an oversight.
 
 ### Drafts

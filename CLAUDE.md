@@ -2119,7 +2119,7 @@ unread badge nobody could clear. Reading one back is `claude --resume`'s job.
 **Split view** puts two sessions side by side, which is why everything per-session lives
 inside the `createPane` factory rather than in module scope.
 
-**The Files view** (`server/outputs.js`, the `files` header button) widens the old image
+**The Files view** (`server/outputs.js`, the `files/links` header button) widens the old image
 gallery into everything a session produced for a human to read — images, `Write`-created
 documents, `SendUserFile` attachments, and the links it fetched, cited or created — plus a
 path link in the conversation, bounded to that same set. `docs/panel.md`'s "Files a session
