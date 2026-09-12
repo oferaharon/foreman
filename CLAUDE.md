@@ -81,7 +81,11 @@ the brief (`lead-brief.js` / `worker-brief.js`), `--mcp-config` + `--strict-mcp-
 for the tools (`mcp/foreman.js`, one hand-rolled stdio server serving two roles), and
 `--settings` for the permission stance. No repo gets a new file and no `CLAUDE.md` gets
 edited for a session to take part, which is deliberate: a role declared in the folder is
-a role handed to every *ordinary* session opened there.
+a role handed to every *ordinary* session opened there. **Every role now carries a
+`--settings` file, including a standalone** (`session-settings.json`,
+`server/session-launch.js`) — the one thing in it is an allow rule for the panel's own
+`foreman` tools, spelled `mcp__foreman`, the bare whole-server form. See the classifier
+trap below for why.
 
 State lives outside every repo, under `~/.foreman/` (resolved, not fixed — see the trap
 below): `teams/<repo-key>/` holds
@@ -1370,6 +1374,27 @@ matches `Write(path)` rules in file permission checks *at all*, and says so at l
 rule is a warning banner over a hole. The lead's settings carried both halves for four
 waves; the Write halves were never doing anything. `pathRule` in `server/team.js` is
 the one place that builds these — don't hand-write them, and don't reach for `Write`.
+
+**A tool call with no matching allow rule goes to the auto-mode classifier, and the
+classifier can itself fail.** The maintainer hit this live: a standalone room member's
+`mcp__foreman__group_post` came back denied with *"Permission for this action was denied
+by the Claude Code auto mode classifier. Reason: Stage 2 classifier error — blocking based
+on stage 1 assessment (usually transient — retrying often succeeds)."* Nothing about the
+call was wrong and nothing this repo's own guards would have refused — the classifier
+simply errored on its own, on a tool nobody had told it about in advance. Every role now
+carries an explicit allow rule for the panel's own server (`mcp__foreman`, the bare
+whole-server form — confirmed against the installed Claude Code's own docs, `### MCP` on
+the permissions page, v2.1.257: "`mcp__puppeteer` matches any tool provided by the
+`puppeteer` server"), so a `foreman` tool call is decided before the classifier is ever
+asked. `leadSettings` (`server/team.js`), `writeWorkerSettings` (`server/dispatch.js`, so
+both build workers and planners), and the standalone `session-settings.json`
+(`server/session-launch.js`, via `--settings`) each carry it. This is an allow rule and
+nothing more: `assertNotBlocked`, `PaneLock`, every endpoint refusal, the merge-check wall,
+and the dispatch-confirmation discipline in the brief are all untouched — it removes the
+harness's flaky second opinion on tools the panel itself serves, and nothing else. The bare
+server form was chosen over a hand-copied per-tool list for the `isLeadName` reason: a tool
+added to `LEAD_TOOLS` or `WORKER_TOOLS` later needs no matching update here, because there
+is nothing to update.
 
 **`git status --porcelain` collapses an untracked directory to `dir/`.** A new file in a
 new folder is reported as its parent, so two workers editing the same fresh path never

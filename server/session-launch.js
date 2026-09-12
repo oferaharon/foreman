@@ -39,10 +39,21 @@ import { PORT, STATE_DIR } from './config.js';
  *   scoping away the feature. `FOREMAN_ROLE=session` is the whole of the scope, and
  *   `mcp/foreman.js` fails closed on an unrecognised one.
  *
- * The files are written at boot and re-written before every launch, so a change to either
- * needs `npm run restart-panel` **and** a session relaunch: like the lead's, a brief only
- * ever reaches the *next* session. There is no "refresh brief" control, for standalones any
- * more than for leads.
+ * The files are written at boot and re-written before every launch, so a change to any of
+ * them needs `npm run restart-panel` **and** a session relaunch: like the lead's, a brief
+ * only ever reaches the *next* session. There is no "refresh brief" control, for standalones
+ * any more than for leads.
+ *
+ * A third file, `session-settings.json`, rides on `--settings` beside the other two. It
+ * holds exactly one permission rule — an allow for `mcp__foreman`, the bare server form,
+ * confirmed against the installed Claude Code's own docs to match every tool a `session`
+ * role exposes (`group_list`, `group_post`, `group_read`) without needing to name any of
+ * them. Without it, every one of those calls goes to auto mode's classifier fresh, and the
+ * classifier can itself fail transiently — a maintainer report of `group_post` denied with
+ * "Stage 2 classifier error … usually transient" is what this file exists to stop. It layers
+ * on top of the user's own settings (`--settings` merges, the same as everywhere else in
+ * this repo) rather than replacing them: no deny, no other allow, nothing that would change
+ * how a standalone session behaves beyond this one rule.
  */
 
 /** The panel's own checkout — `mcp/foreman.js` lives beside `server/`. */
@@ -50,6 +61,7 @@ const PANEL_REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 
 export const SESSION_BRIEF_FILE = path.join(STATE_DIR, 'session-brief.md');
 export const SESSION_MCP_FILE = path.join(STATE_DIR, 'session-mcp.json');
+export const SESSION_SETTINGS_FILE = path.join(STATE_DIR, 'session-settings.json');
 
 /**
  * The standalone brief.
@@ -148,12 +160,25 @@ export function sessionMcpConfig({ port = PORT, repo = PANEL_REPO } = {}) {
   };
 }
 
-/** Write both files. Returns the two paths. */
+/**
+ * The standalone permission stance, as an object.
+ *
+ * One rule: an allow for `mcp__foreman`, the bare server form — confirmed against the
+ * installed Claude Code's own docs (`### MCP`, permissions page, v2.1.257) to match every
+ * tool a server exposes, so it needs no update when `SESSION_TOOLS` gains one. Nothing
+ * else: no deny, no other allow. See the module header for why this exists.
+ */
+export function sessionSettings() {
+  return { permissions: { allow: ['mcp__foreman'] } };
+}
+
+/** Write all three files. Returns the three paths. */
 export async function writeSessionFiles() {
   await fsp.mkdir(STATE_DIR, { recursive: true });
   await fsp.writeFile(SESSION_BRIEF_FILE, sessionBrief());
   await fsp.writeFile(SESSION_MCP_FILE, `${JSON.stringify(sessionMcpConfig(), null, 2)}\n`);
-  return { brief: SESSION_BRIEF_FILE, mcp: SESSION_MCP_FILE };
+  await fsp.writeFile(SESSION_SETTINGS_FILE, `${JSON.stringify(sessionSettings(), null, 2)}\n`);
+  return { brief: SESSION_BRIEF_FILE, mcp: SESSION_MCP_FILE, settings: SESSION_SETTINGS_FILE };
 }
 
 /**
@@ -176,7 +201,9 @@ export async function writeSessionFiles() {
  * that one entry's `failed`.
  */
 export async function standaloneArgs() {
-  const { brief, mcp } = await writeSessionFiles();
-  // `--strict-mcp-config` is deliberately absent. See the header.
-  return ['--append-system-prompt-file', brief, '--mcp-config', mcp];
+  const { brief, mcp, settings } = await writeSessionFiles();
+  // `--strict-mcp-config` is deliberately absent. See the header. `--settings` merges with
+  // the user's own settings files (permission-rule lists combine across scopes) rather than
+  // replacing them, so this adds the one `mcp__foreman` allow rule and nothing else.
+  return ['--append-system-prompt-file', brief, '--mcp-config', mcp, '--settings', settings];
 }

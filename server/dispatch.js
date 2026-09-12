@@ -92,8 +92,18 @@ export const GIT_DENY = [
  * Write the settings file a worker launches with (`--settings <file>`).
  *
  * Push notifications off — the lead is the single notifying entity, three blocked
- * workers must not be three phone buzzes. `allow` is the repo's own build/test commands;
- * the deny floor rides along always.
+ * workers must not be three phone buzzes. `allow` is the repo's own build/test commands
+ * plus `mcp__foreman`, unconditionally — a build worker's whole tool surface there is
+ * `room_post` and `task_report` (`WORKER_TOOLS`), and a planner's is identical, so there is
+ * nothing to gate the rule behind and no reason it should ever be missing from either. The
+ * deny floor rides along always.
+ *
+ * The bare server form (never a per-tool list) is the same choice `leadSettings` makes and
+ * for the same two reasons: it is confirmed to match every tool a `foreman` role exposes
+ * (`### MCP`, the installed Claude Code's own permissions docs, v2.1.257 — "`mcp__puppeteer`
+ * matches any tool provided by the `puppeteer` server"), and it needs no update if
+ * `WORKER_TOOLS` ever grows. It is an allow rule and nothing more: `assertNotBlocked`,
+ * `PaneLock`, and every other guard behind these tools are untouched by it.
  *
  * `deny` is the per-kind stance on top of that floor — for a planner, the rules that
  * make "cannot write code" a wall rather than a request (`plannerStance` in team.js
@@ -108,7 +118,9 @@ export async function writeWorkerSettings({ repo, label, allow = [], deny = [] }
   const settings = {
     agentPushNotifEnabled: false,
     permissions: {
-      allow: [...allow],
+      // Skips the auto-mode classifier for every `foreman` tool call — see the doc
+      // comment. First, so the file reads as "the panel's own tools, then this kind's own".
+      allow: ['mcp__foreman', ...allow],
       // The floor first, so reading the file top-down reads as "never these, plus
       // whatever this kind of worker also may not do".
       deny: [...GIT_DENY, ...deny],

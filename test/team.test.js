@@ -236,11 +236,15 @@ test('the merge rule is the forge\'s own, and there is no general one', () => {
   // here has run that server, so its tool name is unverified — and an unverified name in
   // an allow rule is a rule that silently does nothing, which is worse than a prompt the
   // lead can answer. The panel's copy says so rather than the settings pretending.
-  assert.equal(allowFor({ forge: 'github', via: 'mcp' }).length, 2, 'the team dir write, the release rule, and nothing else');
+  assert.equal(
+    allowFor({ forge: 'github', via: 'mcp' }).length,
+    3,
+    'the team dir write, the release rule, the foreman tools, and nothing else',
+  );
 
   // No forge: the merge toggle can be on and grants nothing, because there is nothing to
-  // merge — the release rule still rides along.
-  assert.equal(allowFor(null).length, 2);
+  // merge — the release rule and the foreman tools still ride along.
+  assert.equal(allowFor(null).length, 3);
   assert.equal(mergeRule(null), null);
   assert.equal(mergeRule({ forge: null, via: null }), null);
 });
@@ -291,6 +295,22 @@ test('the lead may publish a release, unconditionally and only that verb', () =>
     assert.ok(deny.includes('Bash(git push:*)'), 'the git push deny is untouched');
     assert.ok(deny.includes('Bash(git commit:*)'));
     assert.ok(deny.includes(pathRule('Edit', repo)), 'the lead still never writes code');
+  }
+});
+
+test('the lead always allows its own foreman tools, unconditionally and by the bare server form', () => {
+  const repo = '/Users/x/Code/Api';
+  const dir = '/Users/x/state/teams/key';
+  const gitea = { forge: 'gitea', via: 'mcp' };
+
+  for (const leadMerges of [false, true]) {
+    for (const forge of [null, gitea]) {
+      const { allow } = leadSettings({ repo, dir, leadMerges, forge }).permissions;
+      assert.ok(allow.includes('mcp__foreman'), 'the classifier-skipping rule is missing');
+      // The bare server form, never a per-tool list that would drift the day LEAD_TOOLS
+      // gains an entry.
+      assert.ok(!allow.some((r) => r.startsWith('mcp__foreman__')), 'must be the whole-server form, not a per-tool rule');
+    }
   }
 });
 

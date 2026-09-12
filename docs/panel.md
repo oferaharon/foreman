@@ -371,7 +371,9 @@ Five tabs:
 - **planner** — the same for a planner, including the plan file it is allowed to write.
 - **standalone** — the short standing brief every ordinary session the panel launches
   carries. It is **one file for the whole machine**, so this tab has no repository picker:
-  there is nothing for one to change.
+  there is nothing for one to change. The session also carries a generated `--settings`
+  file allowing its `foreman` tools, which this tab does not render — it shows the brief
+  text, not the permission stance.
 - **decisions** — the chosen repository's own `decisions.md`, its standing rulings, read
   straight off disk rather than generated. A repository that has never had a lead has no
   such file yet, and the tab says so rather than showing an empty document.
