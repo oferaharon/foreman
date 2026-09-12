@@ -400,6 +400,18 @@ export function mergeRule(forge) {
  * prompt on that one verb; it does not touch the `git push` deny above (`gh release create
  * --target <sha>` tags on the forge without a push) and grants nothing else `gh release` can
  * do — not delete, not edit, no other `gh` or `git` surface.
+ *
+ * `mcp__foreman` is unconditional too, for a different reason: it names the panel's own
+ * tool server, not a forge verb, so there is no "authorise a merge" question to gate it
+ * behind. In auto mode, a tool call with no matching allow rule goes to Claude Code's own
+ * classifier before it reaches this repo's guards (`assertNotBlocked`, `PaneLock`, the
+ * merge-check wall) at all — and the classifier can itself fail transiently (a maintainer
+ * report: "Stage 2 classifier error … usually transient"), denying a call those guards
+ * never got a chance to see. The bare server form matches every tool the lead's `foreman`
+ * server exposes and needs no update when `LEAD_TOOLS` gains one — confirmed against the
+ * installed Claude Code's own docs (`### MCP` in the permissions page, v2.1.257):
+ * "`mcp__puppeteer` matches any tool provided by the `puppeteer` server". This is an allow
+ * rule, nothing more — every guard behind these tools still runs exactly as it did.
  */
 export function leadSettings({ repo, dir, leadMerges = false, forge = null }) {
   const rule = leadMerges ? mergeRule(forge) : null;
@@ -419,6 +431,8 @@ export function leadSettings({ repo, dir, leadMerges = false, forge = null }) {
         // earlier. Publishes a release and its tag; does NOT lift the git push deny above,
         // and grants nothing else `gh release` can do — not delete, not edit.
         'Bash(gh release create:*)',
+        // Skips the auto-mode classifier for every `foreman` tool call. See the doc comment.
+        'mcp__foreman',
       ],
     },
   };

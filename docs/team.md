@@ -111,10 +111,12 @@ falls. Three consequences, none of which is a gap to be fixed:
   dispatch. It does not cover your own sessions, and it never did: a worktree isolates
   *files* while history stays shared, so the rule has to ride on the session rather than on
   the checkout.
-- **Ordinary sessions get no worktree, no branch and no permission stance.** That is the
-  design rather than an omission. The panel observes and injects, most sessions never came
-  from it in the first place, and a tool that imposed a workflow on every session you
-  started would be a different tool.
+- **Ordinary sessions get no worktree and no branch.** That is the design rather than an
+  omission. The panel observes and injects, most sessions never came from it in the first
+  place, and a tool that imposed a workflow on every session you started would be a
+  different tool. They do carry one generated permission rule now — an allow for the
+  panel's own `foreman` tools (`session-settings.json` in `server/session-launch.js`, via
+  `--settings`) — but nothing beyond it: no deny list, no path restriction, no git floor.
 
 ### Planners
 

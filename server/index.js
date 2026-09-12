@@ -118,7 +118,7 @@ import {
   slugFor,
   uniqueSessionName,
 } from './launch.js';
-import { standaloneArgs, writeSessionFiles, SESSION_BRIEF_FILE, SESSION_MCP_FILE } from './session-launch.js';
+import { standaloneArgs, writeSessionFiles, SESSION_BRIEF_FILE, SESSION_MCP_FILE, SESSION_SETTINGS_FILE } from './session-launch.js';
 import { saveUpload, resolveImage, pruneImages } from './uploads.js';
 import { rotateLogs, rotationLines, LOG_OUT, LOG_ERR } from './logs.js';
 import { FORMULA, panelIsHomebrew } from './homebrew.js';
@@ -5092,16 +5092,17 @@ const { rotated: rotatedLogs, notes: logNotes } = rotateLogs();
 const configSeed = seedConfigFile(CONFIG_FILE, { bindHost: HOST, sessionPrefix: SESSION_PREFIX });
 
 /*
- * Write the standalone brief and MCP config, so `<STATE_DIR>` holds today's pair from the
- * moment the panel is up rather than from the first launch after it.
+ * Write the standalone brief, MCP config and permission stance, so `<STATE_DIR>` holds
+ * today's three files from the moment the panel is up rather than from the first launch
+ * after it.
  *
- * Best-effort here and never a refusal to boot: `standaloneArgs()` rewrites both files
- * before every launch anyway, so the only thing a failure here costs is the two files being
- * absent until somebody starts a session — and a panel that would not start because it could
- * not write a brief would be a worse trade than one that says so and carries on. It is also
- * **after the stand-down probe**, like the rotation and the config seed above and for the
- * same reason: a panel about to decline to start does not write into the running panel's
- * state dir.
+ * Best-effort here and never a refusal to boot: `standaloneArgs()` rewrites all three files
+ * before every launch anyway, so the only thing a failure here costs is the three files
+ * being absent until somebody starts a session — and a panel that would not start because it
+ * could not write a brief would be a worse trade than one that says so and carries on. It is
+ * also **after the stand-down probe**, like the rotation and the config seed above and for
+ * the same reason: a panel about to decline to start does not write into the running
+ * panel's state dir.
  *
  * Collected now, printed with the boot lines below where somebody is looking.
  */
@@ -5224,14 +5225,16 @@ server.listen(PORT, HOST, () => {
     );
   }
 
-  // The two files every ordinary session is launched with. Named on every boot for the
-  // reason the state dir above is: they are appended to the system prompt of every session
-  // the panel opens, and a reader who wants to know what their sessions were told should not
-  // have to find out from this file. A failure is a warning, never a refusal to boot —
-  // `standaloneArgs()` rewrites both before each launch and will say so there instead.
+  // The three files every ordinary session is launched with. Named on every boot for the
+  // reason the state dir above is: they are appended to the system prompt, registered as the
+  // one tool server, and layered onto the permission stance of every session the panel
+  // opens, and a reader who wants to know what their sessions were told should not have to
+  // find out from this file. A failure is a warning, never a refusal to boot —
+  // `standaloneArgs()` rewrites all three before each launch and will say so there instead.
   if (sessionFiles.ok) {
     console.log(`Sessions: ${SESSION_BRIEF_FILE}`);
     console.log(`          ${SESSION_MCP_FILE}`);
+    console.log(`          ${SESSION_SETTINGS_FILE}`);
   } else {
     const err = sessionFiles.error;
     console.warn(`Sessions: could not write ${SESSION_BRIEF_FILE} (${err?.code || err?.message}) — the next launch will try again.`);

@@ -78,13 +78,19 @@ test('every id on the list resolves, plain and [1m]', () => {
 
 const readSettings = async (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
-test('a build worker\'s settings are the floor and the repo\'s own commands', async () => {
+test('a build worker\'s settings are the floor, the repo\'s own commands, and the foreman tools', async () => {
   const file = await writeWorkerSettings({ repo: '/Users/x/Code/Api', label: 'build-one', allow: ['Bash(npm test:*)'] });
   const s = await readSettings(file);
   assert.equal(s.agentPushNotifEnabled, false, 'the lead is the single notifying entity');
-  assert.deepEqual(s.permissions.allow, ['Bash(npm test:*)']);
+  assert.deepEqual(s.permissions.allow, ['mcp__foreman', 'Bash(npm test:*)']);
   assert.deepEqual(s.permissions.deny, GIT_DENY, 'nothing extra — a builder writes code');
   assert.ok(!s.permissions.deny.some((r) => r.startsWith('Edit(')), 'a builder may edit its worktree');
+});
+
+test('the foreman allow rule is present even with no other allow entries, and is the bare server form', async () => {
+  const file = await writeWorkerSettings({ repo: '/Users/x/Code/Api', label: 'bare' });
+  const s = await readSettings(file);
+  assert.deepEqual(s.permissions.allow, ['mcp__foreman'], 'unconditional — a worker\'s whole tool surface is room_post and task_report');
 });
 
 test('a planner is denied the checkout and every worktree, and allowed exactly the plans dir', async () => {
@@ -109,6 +115,7 @@ test('a planner is denied the checkout and every worktree, and allowed exactly t
   }
   assert.ok(s.permissions.allow.includes(pathRule('Edit', plans)), 'the one place it may write');
   assert.ok(s.permissions.allow.includes('Bash(npm test:*)'), 'reading a repo means running its tests');
+  assert.ok(s.permissions.allow.includes('mcp__foreman'), 'a planner gets the same classifier-skipping rule as a build worker');
 
   // Deny beats allow, so the allow has to be narrower than the team dir — a planner that
   // could reach one level up could rewrite decisions.md, which is the maintainer's own memory.

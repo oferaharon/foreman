@@ -37,15 +37,28 @@ process.on('exit', () => fs.rmSync(STATE, { recursive: true, force: true }));
 
 const mod = await import('../server/session-launch.js');
 
-/* ------------------------------------------------------------------ the two files --- */
+/* ----------------------------------------------------------------- the three files --- */
 
-test('both files land under the state dir it was given, and nowhere else', async () => {
-  const { brief, mcp } = await mod.writeSessionFiles();
+test('all three files land under the state dir it was given, and nowhere else', async () => {
+  const { brief, mcp, settings } = await mod.writeSessionFiles();
   assert.equal(brief, path.join(STATE, 'session-brief.md'));
   assert.equal(mcp, path.join(STATE, 'session-mcp.json'));
+  assert.equal(settings, path.join(STATE, 'session-settings.json'));
   // Nothing else, and nothing per session: the identity is read from `TMUX_PANE` at run
-  // time, so there is exactly one pair of files on the machine and nothing to collect.
-  assert.deepEqual(fs.readdirSync(STATE).sort(), ['session-brief.md', 'session-mcp.json']);
+  // time, so there is exactly one set of files on the machine and nothing to collect.
+  assert.deepEqual(
+    fs.readdirSync(STATE).sort(),
+    ['session-brief.md', 'session-mcp.json', 'session-settings.json'],
+  );
+});
+
+test('the settings file is one allow rule for the panel\'s own tools, nothing more', async () => {
+  await mod.writeSessionFiles();
+  const s = JSON.parse(fs.readFileSync(path.join(STATE, 'session-settings.json'), 'utf8'));
+  assert.deepEqual(Object.keys(s), ['permissions'], 'nothing beyond the permissions block');
+  assert.deepEqual(Object.keys(s.permissions), ['allow'], 'no deny, no ask, no other key');
+  assert.deepEqual(s.permissions.allow, ['mcp__foreman']);
+  assert.deepEqual(s, mod.sessionSettings(), 'the file on disk is not what sessionSettings() returns');
 });
 
 test('the MCP config names the session role, no repo, and no credential', async () => {
@@ -144,12 +157,13 @@ test('the brief names the three tools and both line prefixes, and names nobody',
 
 /* ------------------------------------------------------------------- the flags --- */
 
-test('the flags merge the MCP config and never replace it', async () => {
+test('the flags merge the MCP config and the settings, and never replace either', async () => {
   const args = await mod.standaloneArgs();
 
   assert.deepEqual(args, [
     '--append-system-prompt-file', path.join(STATE, 'session-brief.md'),
     '--mcp-config', path.join(STATE, 'session-mcp.json'),
+    '--settings', path.join(STATE, 'session-settings.json'),
   ]);
 
   // The measured one. `--mcp-config` merges; `--strict-mcp-config` turns it into a
@@ -159,17 +173,20 @@ test('the flags merge the MCP config and never replace it', async () => {
     !args.includes('--strict-mcp-config'),
     '--strict-mcp-config would silently strip every other MCP server an ordinary session has',
   );
-  // Nor a settings file: a standalone's permission stance is the user's own.
-  assert.ok(!args.includes('--settings'), 'a standalone gets no generated settings file');
 });
 
 test('the flags are rewritten from source, not read back off disk', async () => {
   // A brief only reaches the *next* session, so the one thing that must not happen is a
-  // launch pointing at a file the last boot wrote.
+  // launch pointing at a file the last boot wrote. Same for the settings file.
   await mod.writeSessionFiles();
   fs.writeFileSync(path.join(STATE, 'session-brief.md'), 'stale');
+  fs.writeFileSync(path.join(STATE, 'session-settings.json'), '{"permissions":{"allow":["stale"]}}');
   await mod.standaloneArgs();
   assert.equal(fs.readFileSync(path.join(STATE, 'session-brief.md'), 'utf8'), mod.sessionBrief());
+  assert.deepEqual(
+    JSON.parse(fs.readFileSync(path.join(STATE, 'session-settings.json'), 'utf8')),
+    mod.sessionSettings(),
+  );
 });
 
 /* -------------------------------------------------------------- the call sites --- */
