@@ -350,6 +350,48 @@ middle where the bench is down; the box stays open and each row shows where it h
 The saved snapshot is not touched — this reads the roster as it is right now, so pressing
 it never spends the bench you saved.
 
+### Briefs
+
+`briefs`, in the rail head between `snapshot` and `recent`, opens one read-only box with
+every brief a session on this Mac is launched reading.
+
+A **brief** is the text appended to Claude Code's own system prompt at launch
+(`--append-system-prompt-file`). It is what makes a lead a lead rather than an ordinary
+session in the same folder — the rules it keeps, the tools it is told it has, the forge and
+base branch it was generated against. Until this there was nowhere to read one: it is
+written to a file under the state dir at launch and nothing ever showed it.
+
+Four tabs:
+
+- **lead** — what the next team lead started in the chosen repository would read.
+- **worker** — what a dispatched build worker would read, with `<task>` standing in for the
+  task it has not been given yet.
+- **planner** — the same for a planner, including the plan file it is allowed to write.
+- **standalone** — the short standing brief every ordinary session the panel launches
+  carries. It is **one file for the whole machine**, so this tab has no repository picker:
+  there is nothing for one to change.
+
+The picker on the other three lists the repositories that have a team, and opens on the one
+the left-hand pane is looking at when that repository has a team. A repository with no team
+yet still renders, from the same defaults a dispatch would use — reading a brief never
+creates a team directory, a `team.json` or a `decisions.md`.
+
+The line under the tabs says what the brief above it was generated from: the base branch,
+the forge reading, and — on the worker and planner tabs — the placeholder task id. When a
+registered forge MCP server was refused for carrying a credential, that refusal is on the
+same line, because it is why a repository with a perfectly good remote can read `push only`.
+
+**It shows the next generation, not the running one**, and the note at the top says so.
+Briefs are generated per launch, so a session already running is on whatever was written
+when it started; changing a toggle, or upgrading the panel, reaches the *next* one. There
+is deliberately no refresh control — see the *known gap* in `CLAUDE.md` — because a button
+that regenerated a brief would reach nothing that is currently running, which is the
+opposite of what pressing it would look like.
+
+Everything in the box is read-only. There is no edit field, no launch button and no POST
+behind it; it is the same rule the task-brief modal keeps, for the same reason — a control
+here that started or changed something would be the panel doing the lead's job.
+
 ### Tool chips
 
 Tool calls stay one quiet line between messages, but each carries what you'd otherwise

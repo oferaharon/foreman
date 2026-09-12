@@ -58,7 +58,7 @@ There is no API. Everything is assembled from three places:
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
 `effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
-`rooms-line.js`, `session-launch.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
+`rooms-line.js`, `session-launch.js`, `briefs.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
 `team.js`, `room.js`, `worktree.js`, `setup-detect.js`, `forge.js`, `base-branch.js`, `watch.js`, `conflicts.js`,
 `gc.js` and `launch.js`. Run them before touching any of them, and note that `test/fixtures/` holds
 real `capture-pane` output, not reconstructions — and that the git wrappers are tested
@@ -1329,6 +1329,38 @@ subfolder and an allow that names only it (`plannerStance`). Any future "this se
 write exactly here" grant has the same shape — put the writable thing *below* the protected
 thing, and never try to subtract.
 
+**A brief is assembled in one place, and both halves of "one place" are load-bearing.**
+`server/briefs.js` is what `launchLead` calls and what `GET /api/briefs` calls, because the
+modal's claim is "this is what the next lead will read" and a second copy of the assembly
+would be a claim that decays: the two agree the day they are written and disagree at the
+first change to either, silently, since nothing on screen can say a brief is a generation
+behind. `test/briefs.test.js` pins byte-identical output and scans `index.js` for a direct
+`leadBrief(` call. Two things inside it are not obvious. The **forge must be demoted before
+the brief is written** — a credential-carrying MCP entry is refused and the forge drops to
+`push only` — so a route that resolved the forge and skipped the demotion would show a lead
+being handed tools it will not have; that is the one branch that had to move into the shared
+function rather than stay at the launch. And **the route creates nothing**: `ensureTeam` is
+deliberately not imported there, `readTeam` → `teamDefaults` answers for a repo with no team,
+and every path is computed. Opening a modal must not seed somebody a team directory.
+
+**…and marked eats the placeholders those briefs are full of.** `agent/<task>`, `gh pr merge
+<N>`, `task <id>` — not all of them sit inside backticks, and marked's default reads a bare
+`<task>` as raw HTML, so the browser makes an unknown element of it and the word simply
+**disappears**: measured in the panel, the worker brief's first line came back reading *"on
+branch agent/."* with nothing on screen to say a placeholder had been eaten. `briefHtml`
+(`web/app.js`) overrides the renderer's `html` hook to escape instead, which also stops a
+repo's own `git config user.name` becoming markup. Escaping the source text *before* parsing
+is the obvious alternative and is wrong — marked escapes `&` inside code spans, so every
+placeholder in a backtick comes back reading `&lt;task&gt;`.
+
+**A fifth button does not fit the rail head at the default width.** Measured on a scratch
+panel at `--rail: 20rem`: `+ new` / `snapshot` / `briefs` / `recent` / `settings` are 297px
+of buttons plus four 6.4px gaps against 284px of content width — 39px short, so `settings`
+wraps to a second line and the list loses a row. One line returns at 22.5rem. It is a state
+`.rail-actions` already supports (`flex-wrap` and a `row-gap` are both there deliberately),
+but that comment was written about the 14rem *floor*, and this now happens at the default.
+Anything adding a sixth control to that row is adding a third line, not a second.
+
 **A path permission rule must say `Edit`, and must double-slash.** Two traps welded
 together, both measured, both the silent kind. First: `Write(/abs/path/**)` with a plain
 absolute path **matches nothing** — the "denied" write succeeded. The shape is
@@ -2165,6 +2197,14 @@ default. Everything else in the room is machinery and stays `system`.
 one behind a confirmation, a folder icon opens the project in Finder, and `recent` drops the
 filing for one recency-ordered list.
 
+**The briefs modal** (`briefs` in the rail head, `server/briefs.js`, `GET /api/briefs`,
+`web/briefs-tabs.js`) shows all four briefs a session here is launched reading — lead,
+worker, planner and the machine-wide standalone one — for a chosen team repo, built by the
+functions the launch itself calls. Read-only, a GET and nothing beside it, and it creates
+nothing on disk: `ensureTeam` is deliberately absent, so opening it on a repo with no team
+renders from `teamDefaults` rather than seeding one. It shows the *next* generation and says
+so; the refresh control it does not have is the known gap above.
+
 **Rooms** (`server/rooms.js` the store, `server/rooms-line.js` the resolution and the
 envelope, the `group rooms` block in `server/index.js` the only part that touches a pane,
 `web/rooms-band.js` / `rooms-create.js` / `rooms-pane.js` the three pure modules the browser
@@ -2257,7 +2297,11 @@ standalone brief is in the same gap** — `server/session-launch.js` rewrites
 `session-brief.md` and `session-mcp.json` at boot and before every launch, so a change to
 either needs the restart *and* a relaunch of each session, and a session already running has
 neither the rooms instruction nor the `foreman` tool server. `relaunch all…` is the control
-that exists; a refresh is the one that does not.
+that exists; a refresh is the one that does not. The **briefs modal** (`briefs` in the rail
+head, `GET /api/briefs` → `server/briefs.js`) is where you read one, and it is read-only for
+exactly this reason: it shows the brief the *next* lead, worker, planner or standalone
+session would be launched with, which is not necessarily the one a running session is on,
+and its own note says so. A refresh button there would reach nothing that is running.
 
 **The panel runs under launchd** — `npm run install-agent` writes and bootstraps the plist,
 `npm run restart-panel` is the day-to-day restart. Its two log files are trimmed once at

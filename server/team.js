@@ -156,6 +156,39 @@ const DEFAULTS = {
  * over defaults so a team.json written before a new toggle existed still has it, visibly
  * at its default, rather than `undefined` deciding something.
  */
+/**
+ * One spelling of "config, with the defaults filled in".
+ *
+ * Three callers want the identical merge — the seeding `ensureTeam` does, the read-only
+ * `readTeam`, and `teamDefaults` for a repo that has no file at all — and a toggle added
+ * to `DEFAULTS` has to appear in every one of them or the three disagree about what is on
+ * by default. Which is the `isLeadName` lesson: a merge written out three times is three
+ * answers waiting to drift.
+ */
+function withDefaults(repo, stored = {}) {
+  return {
+    repo,
+    ...DEFAULTS,
+    ...stored,
+    toggles: { ...DEFAULTS.toggles, ...(stored.toggles || {}) },
+    ui: { ...DEFAULTS.ui, ...(stored.ui || {}) },
+  };
+}
+
+/**
+ * The config a repo with **no** team.json would get — pure defaults, nothing read and
+ * nothing written.
+ *
+ * For the read-only briefs modal, which renders a repo nobody has started a team on: it
+ * must show what a lead launched there *would* read, and finding that out by calling
+ * `ensureTeam` would seed a team directory for a repo whose only crime was being looked
+ * at. `readTeam(repo) || teamDefaults(repo)` is the shape; `ensureTeam` stays the only
+ * thing that creates anything.
+ */
+export function teamDefaults(repo) {
+  return withDefaults(repo);
+}
+
 export function ensureTeam(repo) {
   const dir = teamDir(repo);
   fs.mkdirSync(dir, { recursive: true });
@@ -170,13 +203,7 @@ export function ensureTeam(repo) {
   } catch {
     /* first touch */
   }
-  const config = {
-    repo,
-    ...DEFAULTS,
-    ...stored,
-    toggles: { ...DEFAULTS.toggles, ...(stored.toggles || {}) },
-    ui: { ...DEFAULTS.ui, ...(stored.ui || {}) },
-  };
+  const config = withDefaults(repo, stored);
   fs.writeFileSync(configFile, JSON.stringify(config, null, 2));
 
   const decisions = path.join(dir, 'decisions.md');
@@ -463,13 +490,7 @@ export function setSlate(repo, seq) {
 export function readTeam(repo) {
   try {
     const stored = JSON.parse(fs.readFileSync(path.join(teamDir(repo), 'team.json'), 'utf8'));
-    return {
-      repo,
-      ...DEFAULTS,
-      ...stored,
-      toggles: { ...DEFAULTS.toggles, ...(stored.toggles || {}) },
-      ui: { ...DEFAULTS.ui, ...(stored.ui || {}) },
-    };
+    return withDefaults(repo, stored);
   } catch {
     return null;
   }
