@@ -3015,7 +3015,8 @@ body.row-dragging * { cursor: row-resize !important; }
 .icon-btn.is-busy { color: var(--working); cursor: default; }
 .icon-btn.is-error { color: var(--decision); }
 
-/* The forge's mark on a lead's header, between the session name and the model/ctx text.
+/* The forge's mark on a pane header — every session, not only a lead — between the session
+   name and the model/ctx text.
    No border and no accent — the controls to its right are things you *do* to the session
    and this only points at where the code lives, so it stays a mark rather than becoming a
    fifth button. `flex: none` because the `h1` beside it ellipsises: a long session name

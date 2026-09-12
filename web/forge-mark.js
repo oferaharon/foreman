@@ -1,7 +1,7 @@
 /*
  * The forge's mark — the GitHub octicon for a GitHub repo, a plain git-graph glyph for
- * everything else — shared between the desktop's lead header (`syncForgeLink` in
- * `web/app.js`) and the phone's Leads-tab card (`web/m/app.js`), so the two surfaces draw
+ * everything else — shared between the desktop's pane header (`syncForgeLink` in
+ * `web/app.js`, on every session) and the phone's Leads-tab card (`web/m/app.js`), so the two surfaces draw
  * the exact same two icons instead of growing near-identical hand copies that drift apart.
  *
  * Markup strings rather than DOM nodes, on purpose: a string is testable in plain Node —

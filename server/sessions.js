@@ -10,6 +10,7 @@ import { probe } from './transcript.js';
 import { slugFor, isLeadName } from './launch.js';
 import { OPEN_STATES } from './tasks.js';
 import { rememberGhost } from './ghost.js';
+import { forgeSummary } from './forge.js';
 
 /*
  * A lead is recognised by the naming contract, not by a stored flag — `isLeadName` in
@@ -84,6 +85,45 @@ export function workerTeam(task, stuck = false) {
 
 /** Queue identity for change detection — which items, and whether any failed. */
 const queueSig = (items = []) => items.map((i) => `${i.id}:${i.error ? 1 : 0}`).join(',');
+
+/**
+ * Which forge each of these folders is on — `{reading, webUrl}` per folder, for the mark
+ * in a pane's header.
+ *
+ * **Per distinct folder, never per pane.** The roster poll runs every tick over every
+ * Claude pane on the machine, and a folder held by three panes — a lead and its two
+ * workers, a split, a duplicate — is one repository with one `origin`. `resolveForge`'s
+ * own minute-long cache is what makes the repeat calls cheap *between* polls; deduping
+ * here is what makes them cheap *within* one, before the cache is even asked.
+ *
+ * The resolver is a parameter for the usual reason — the real one shells out and reads
+ * the user's `~/.claude.json`, and a test wants neither — and `forgeSummary` is the whole
+ * of what a header needs: the reading names the mark, `webUrl` is the link, and the
+ * server has already applied the maintainer's ruling that `push only` and `no remote`
+ * carry no link at all.
+ *
+ * **Nothing throws out of here.** A folder that is not a git repo is the ordinary case on
+ * this machine, not an error: `git remote get-url origin` fails, `readRemote` answers
+ * null, and the reading is `no remote` with a null url — a row that draws nothing. A
+ * resolver that throws anyway yields `null` for *that* folder and leaves the rest alone;
+ * the roster must not fail to build over a header decoration.
+ *
+ * @param {Array<string|null|undefined>} dirs each pane's launch folder, duplicates and all
+ * @param {(dir: string) => Promise<{reading: string, webUrl: string|null}|null>} resolve
+ */
+export async function forgesFor(dirs, resolve = forgeSummary) {
+  const out = new Map();
+  await Promise.all(
+    [...new Set((dirs || []).filter(Boolean))].map(async (dir) => {
+      try {
+        out.set(dir, (await resolve(dir)) ?? null);
+      } catch {
+        out.set(dir, null);
+      }
+    }),
+  );
+  return out;
+}
 
 /**
  * The model and context percentage this pane last showed, remembered across the polls where
@@ -386,13 +426,19 @@ export class SessionRegistry extends EventEmitter {
     // What the shell wrapper would have named each of these by default. A title equal
     // to it carries no ownership information — see binding.js.
     const wrapperAt = await shellConfigMtime();
-    await Promise.all(
-      panes.map(async (p) => {
-        p.defaultTitle = await defaultSessionTitle(p.cwd);
-        // Launched after the shell last changed, so it stamps its own label.
-        p.modernNamer = Boolean(p.createdMs && wrapperAt && p.createdMs > wrapperAt);
-      }),
-    );
+    // …and which forge each launch folder is on, alongside it rather than after it: both
+    // walks are per pane, neither needs the other's answer, and serialising them would put
+    // a second round of subprocesses in front of every poll for nothing.
+    const [, forges] = await Promise.all([
+      Promise.all(
+        panes.map(async (p) => {
+          p.defaultTitle = await defaultSessionTitle(p.cwd);
+          // Launched after the shell last changed, so it stamps its own label.
+          p.modernNamer = Boolean(p.createdMs && wrapperAt && p.createdMs > wrapperAt);
+        }),
+      ),
+      forgesFor(panes.map((p) => p.cwd)),
+    ]);
 
     const { bound: paneOf, unbound: unboundPanes } = bindPanes({
       panes,
@@ -493,6 +539,11 @@ export class SessionRegistry extends EventEmitter {
         // mid-conversation — so it is the wrong thing to relaunch into. `project` is this
         // one's basename, and the snapshot wants the whole path.
         paneCwd: bind.pane.cwd || null,
+        // Which forge this session's repository is on, for the mark in its header. Keyed
+        // on the *pane's* folder and never on `cwd` above: a session that `cd`s into a
+        // subfolder mid-conversation rewrites the transcript's `cwd`, and its repository
+        // has not moved. `null` for a pane with no folder at all.
+        forge: forges.get(bind.pane.cwd) ?? null,
         gitBranch: meta.gitBranch,
         transcriptPath: meta.path,
         size: meta.size,
@@ -575,6 +626,7 @@ export class SessionRegistry extends EventEmitter {
         project,
         cwd: pane.cwd,
         paneCwd: pane.cwd || null,
+        forge: forges.get(pane.cwd) ?? null,
         gitBranch: null,
         transcriptPath: null,
         size: 0,
@@ -659,6 +711,12 @@ export class SessionRegistry extends EventEmitter {
         // nothing else on it — without this the rail would go on naming a dead ticket
         // until some unrelated field happened to move.
         JSON.stringify(prev.team) !== JSON.stringify(s.team) ||
+        // A `git remote add` under a running session, or a `gh` installed while the panel
+        // is up, changes the header's mark and nothing else on the row — and the roster is
+        // only broadcast on a diff, so without this the answer would land in the map and
+        // never reach a browser. `resolveForge` caches for a minute, so this is what the
+        // poll after that minute is for.
+        JSON.stringify(prev.forge) !== JSON.stringify(s.forge) ||
         prev.transcriptPath !== s.transcriptPath
       ) {
         return true;

@@ -8996,11 +8996,6 @@ function createPane(slot, host) {
         const team = await res.json();
         if (!res.ok) throw new Error(team.error || 'No team config.');
         roomView.config = team;
-        // This is the one request that ever learns the forge, and the header was built
-        // before it went out — so the answer has to be carried back up there rather than
-        // waited for. Deliberately not a second fetch from `buildHead`: one request per
-        // folder is already in flight for exactly this.
-        paintForge();
       } catch (err) {
         elm.textContent = err.message;
         // A block folded shut over an error is an error nobody reads. There is nothing
@@ -10924,40 +10919,39 @@ function createPane(slot, host) {
 
     head.append(meta);
     // Last, because it goes *between* the name and `.head-meta` and needs both on the
-    // page to place itself. Usually draws nothing on this first pass: the forge arrives
-    // with the team config, which `buildRoomPanel` has not asked for yet — see
-    // `syncForgeLink`.
+    // page to place itself. The forge rides on the roster row, so unlike the version that
+    // waited on the team config this draws on the first pass — see `syncForgeLink`.
     syncForgeLink(head, s);
     return head;
   }
 
   /**
-   * The forge's mark in a lead's header, linking to the repository's own web page.
+   * The forge's mark in a session's header, linking to the repository's own web page.
    *
    * Add-or-drop rather than build-once, for the reason the attach button beside it is:
    * `renderHead` patches this header in place on every roster beat and never rebuilds it,
-   * so a control whose *presence* changes has to be synced rather than drawn. Here it
-   * changes for a reason nothing else in the header has — the header is appended by
-   * `renderMain` **before** `syncRoom` and `buildSettings` have fetched the team config,
-   * so at first draw the forge is simply not known yet. `paintForge` is what calls this
-   * again when the answer lands; the roster beat is the backstop.
+   * so a control whose *presence* changes has to be synced rather than drawn. A session
+   * moved into a folder with an `origin`, or a `gh` installed while the panel is up, adds
+   * one; nothing else in this header appears for a reason outside the session itself.
    *
-   * Two guards worth keeping:
+   * **The answer is the row's, and the row's only.** It used to come from
+   * `roomView.config.forgeResolved` — the team config, fetched per lead — which made this
+   * a lead-only mark and needed a guard that the config on hand belonged to the repo on
+   * screen, because `renderMain` builds a header before `syncRoom` has cleared the
+   * previous team's answer. `s.forge` is on every roster row, resolved server-side from
+   * the pane's *launch* folder, so there is one source rather than two that could
+   * disagree and nothing to match up. The lead's aside still fetches the team config for
+   * its own settings block; that is a different reader of the same fact, not this one.
    *
-   *   - **The config is matched against the repo it belongs to.** `roomView.config` is
-   *     per pane and cleared by `syncRoom` — but `renderMain` builds the header first, so
-   *     on the beat a second lead is opened it still holds the *previous* team's answer.
-   *     Without the `roomView.repo === s.paneCwd` test one lead's header would link to
-   *     another lead's repository for a frame, which is the panel's oldest rule broken in
-   *     miniature: showing nothing beats showing something wrong.
-   *   - **`webUrl` is the whole test.** The server has already refused it for `push only`
-   *     and `no remote`, so there is no reading to re-decide here and no second place for
-   *     that ruling to be spelled differently.
+   * **`webUrl` is the whole test.** The server has already refused it for `push only` and
+   * `no remote` — the maintainer's ruling that a link on a forge the panel has no tools
+   * for implies support it does not have — so there is no reading to re-decide here and
+   * no second place for that ruling to be spelled differently.
    */
   function syncForgeLink(head, s) {
     if (!head) return;
     const existing = head.querySelector('.head-forge');
-    const forge = s?.isLead && roomView.repo && roomView.repo === s.paneCwd ? roomView.config?.forgeResolved : null;
+    const forge = s?.forge || null;
     const url = forge?.webUrl || null;
     if (!url) return existing?.remove();
     if (existing?.dataset.url === url) return; // already this link — the common beat
@@ -11046,12 +11040,6 @@ function createPane(slot, host) {
     btn.hidden = false;
     btn.title = 'Open a second session beside this one (⌘\\)';
     btn.onclick = () => openSplit(); // never the click event — it now takes options
-  }
-
-  /** Redraw the header's forge link now that the team config has an answer. */
-  function paintForge() {
-    const s = current();
-    if (s) syncForgeLink(host.querySelector('.main-head'), s);
   }
 
   /**
