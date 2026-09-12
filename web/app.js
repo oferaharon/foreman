@@ -95,6 +95,12 @@ import { ageText, groupSummary } from './group-summary.js';
 // `renderRail` lifts nested workers out before that count is taken, so a busy worker in a
 // closed team group used to light nothing until the stuck timer fired.
 import { orderWorkers } from './worker-order.js';
+// The briefs modal's two rules: which of the four tabs is a function of a repository, and
+// which repo a freshly opened modal lands on. The twelfth pure module under `web/`, and the
+// reason it is one is that both render perfectly when re-derived wrongly — a repo picker on
+// the standalone tab is a control that changes nothing, and a default that ignores the open
+// pane makes the first thing a reader does a correction.
+import { BRIEF_KINDS, cacheKey, defaultRepo, needsRepo } from './briefs-tabs.js';
 // What the team room draws, given the slate the server holds — the `clear` / `show all`
 // pointer. Its own module for the reason every other pure one under `web/` is: the filter
 // is a rule ("from the divider on, divider included") that a node test can hold, and the
@@ -345,6 +351,7 @@ const el = {
   newSession: document.getElementById('newSession'),
   settings: document.getElementById('settings'),
   snapshot: document.getElementById('snapshot'),
+  briefs: document.getElementById('briefs'),
   flatRail: document.getElementById('flatRail'),
   railQuota: document.getElementById('railQuota'),
   railList: document.getElementById('railList'),
@@ -2479,6 +2486,330 @@ async function openSnapshot() {
 
   summary();
 }
+/* ------------------------------------------------------------ briefs --- */
+
+/**
+ * Every brief a session launched on this Mac is given, read-only, in one box.
+ *
+ * The question it answers is "what is this thing actually *told*" — asked as often about a
+ * lead that has just done something surprising as about a worker before you dispatch one.
+ * Until this there was no answer: a brief is written at launch into a file under the state
+ * dir and nothing ever showed it, so the only way to read one was to go and find it on
+ * disk, and the only way to know whether today's code would generate a different one was
+ * to launch a session and look.
+ *
+ * **It shows the next generation, not the running one, and it says so.** Briefs are
+ * generated per launch (`launchLead`, the dispatch path, `writeSessionFiles`), so what
+ * comes back here is what the *next* lead, worker, planner or ordinary session started in
+ * that repo would read. A session already running is on whatever was written when it
+ * started. There is deliberately no refresh control — CLAUDE.md's "known gap" — and this
+ * modal does not invent one: a button that regenerated a brief would reach nothing that is
+ * running, which is the opposite of what pressing it would look like.
+ *
+ * **Read-only all the way down.** `GET /api/briefs` and nothing else: no POST beside it,
+ * no `ensureTeam`, so opening this on a repo with no team creates no team directory. The
+ * same rule `openTaskBrief` keeps one floor up, for the same reason — a control that
+ * started or changed something would be the panel doing what the lead is for.
+ *
+ * Four tabs and a repo picker on three of them; which three is `briefs-tabs.js`'s rule, not
+ * this function's. One fetch answers all four kinds for a repo, so changing tab never
+ * re-fetches and changing repo fetches once — and the cache is a `Map` that dies with the
+ * modal, because a brief held over from this morning shown without a word would be exactly
+ * the stale-and-confident failure the note at the top is about.
+ */
+async function openBriefs() {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  const box = document.createElement('div');
+  box.className = 'modal is-wide briefs';
+
+  const h = document.createElement('h2');
+  h.textContent = 'Briefs';
+
+  // The one caveat that changes what the reader should believe, so it is above the tabs
+  // rather than in a footnote under a brief nobody scrolls to the end of.
+  const note = document.createElement('p');
+  note.className = 'field-hint briefs-caveat';
+  note.textContent =
+    'Generated at launch. This is what the next session started here would read — one already running is on the brief it started with.';
+
+  const head = document.createElement('div');
+  head.className = 'briefs-head';
+  const tabs = document.createElement('div');
+  tabs.className = 'briefs-tabs';
+  tabs.setAttribute('role', 'tablist');
+  tabs.setAttribute('aria-label', 'Which brief');
+  const picker = document.createElement('span');
+  picker.className = 'team-select briefs-repo';
+  const select = document.createElement('select');
+  select.setAttribute('aria-label', 'Which repository');
+  picker.append(select);
+  head.append(tabs, picker);
+
+  // Base branch, forge and the placeholder task id — the inputs the brief above was
+  // generated from, so a reader can tell a `master` repo's brief from a `main` one's
+  // without hunting for the word in four thousand of them.
+  const facts = document.createElement('p');
+  facts.className = 'field-hint briefs-facts';
+
+  const body = document.createElement('div');
+  body.className = 'briefs-body plan-md';
+  body.setAttribute('role', 'tabpanel');
+
+  const row = document.createElement('div');
+  row.className = 'modal-row';
+  const done = document.createElement('button');
+  done.className = 'ghost-btn';
+  done.textContent = 'close';
+  row.append(done);
+
+  box.append(h, note, head, facts, body, row);
+
+  const close = () => {
+    back.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+  document.addEventListener('keydown', onKey, true);
+  done.onclick = close;
+  back.onmousedown = (e) => {
+    if (e.target === back) close();
+  };
+  back.append(box);
+  document.body.append(back);
+  done.focus();
+
+  /* ---- state: one kind, one repo, and a cache that dies with the box ---- */
+
+  let kind = 'lead';
+  let repo = null;
+  /** `cacheKey(repo, kind)` → the brief's markdown. Never `localStorage`: see the header. */
+  const cache = new Map();
+  /** `repo` → the facts line's inputs, cached beside the briefs from the same response. */
+  const meta = new Map();
+
+  const tabNodes = new Map();
+  for (const t of BRIEF_KINDS) {
+    const b = document.createElement('button');
+    b.className = 'briefs-tab';
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.textContent = t.label;
+    b.onclick = () => pick(t.kind);
+    tabs.append(b);
+    tabNodes.set(t.kind, b);
+  }
+
+  // Roving tabindex and arrow keys, because `role="tablist"` promises both: a tab strip a
+  // keyboard has to Tab through one control at a time is a tab strip that lied about what
+  // it is. Home/End included — four is few enough that they are nearly free and exactly
+  // what a reader who uses them expects.
+  tabs.onkeydown = (e) => {
+    const order = BRIEF_KINDS.map((t) => t.kind);
+    const at = order.indexOf(kind);
+    let next = null;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = order[(at + 1) % order.length];
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = order[(at - 1 + order.length) % order.length];
+    else if (e.key === 'Home') next = order[0];
+    else if (e.key === 'End') next = order[order.length - 1];
+    if (!next) return;
+    e.preventDefault();
+    pick(next);
+    tabNodes.get(next)?.focus();
+  };
+
+  function paintTabs() {
+    for (const [k, node] of tabNodes) {
+      const on = k === kind;
+      node.setAttribute('aria-selected', String(on));
+      node.classList.toggle('is-on', on);
+      // Roving: only the selected tab is in the Tab order.
+      node.tabIndex = on ? 0 : -1;
+    }
+    picker.hidden = !needsRepo(kind);
+  }
+
+  /** Plain text in the body, for "loading…" and for an error — never markdown, so a
+   *  message that happens to contain a `#` does not come back as a heading. */
+  function say(text, cls = '') {
+    body.className = `briefs-body plan-md ${cls}`.trim();
+    body.textContent = text;
+  }
+
+  function paintFacts() {
+    const m = needsRepo(kind) ? meta.get(repo) : null;
+    if (!m) {
+      facts.textContent = '';
+      facts.classList.remove('warn');
+      return;
+    }
+    const bits = [`base ${m.base}`, m.forge];
+    if (kind !== 'lead') bits.push(`task ${m.taskId}`);
+    if (!m.hasTeam) bits.push('no team here yet — defaults');
+    // A refused MCP entry is why a brief says `push only` over a forge that plainly has a
+    // remote, and it is the one thing on this screen a reader would otherwise read as a
+    // bug in detection. Same sentence the launch puts in the room.
+    const notes = (m.notes || []).join(' ');
+    facts.textContent = bits.filter(Boolean).join(' · ') + (notes ? ` — ${notes}` : '');
+    facts.classList.toggle('warn', Boolean(notes));
+  }
+
+  function paint() {
+    paintTabs();
+    const key = cacheKey(repo, kind);
+    const md = cache.get(key);
+    if (md === undefined) {
+      say('loading…', 'is-quiet');
+      paintFacts();
+      return;
+    }
+    body.className = 'briefs-body plan-md';
+    body.innerHTML = briefHtml(md);
+    // A tab switch starts at the top of the new brief, not wherever the last one was
+    // scrolled to — two documents sharing one offset reads as the box having lost its place.
+    body.scrollTop = 0;
+    paintFacts();
+  }
+
+  function pick(next) {
+    if (next === kind) return;
+    kind = next;
+    paint();
+    load();
+  }
+
+  /* ---- one fetch per repo, answering all four kinds ---- */
+
+  let inflight = null;
+  async function load() {
+    const want = needsRepo(kind) ? repo : null;
+    if (cache.has(cacheKey(want, kind))) return;
+    const token = {};
+    inflight = token;
+    try {
+      const res = await fetch(`/api/briefs${want ? `?repo=${encodeURIComponent(want)}` : ''}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      for (const [k, text] of Object.entries(data.briefs || {})) {
+        cache.set(cacheKey(want, k), text);
+      }
+      if (want) {
+        meta.set(want, {
+          base: data.base,
+          forge: data.forge,
+          taskId: data.taskId,
+          hasTeam: data.hasTeam,
+          notes: data.notes,
+        });
+      }
+    } catch (err) {
+      // Only the request that is still current may speak: a slow repo answering after the
+      // reader has moved on must not paint an error over a brief that loaded fine.
+      if (inflight === token) {
+        say(`Could not read the briefs: ${err.message}`, 'is-err');
+        return;
+      }
+      return;
+    }
+    if (inflight === token) paint();
+  }
+
+  /* ---- the repo list, and which one the box opens on ---- */
+
+  paintTabs();
+  say('loading…', 'is-quiet');
+
+  let teams = [];
+  try {
+    const res = await fetch('/api/teams');
+    teams = (await res.json())?.teams || [];
+  } catch {
+    /* The list is how you *change* repo; the default below still works without it, and an
+       error here must not stand in for the brief's own. */
+  }
+  repo = defaultRepo(teams, openPaneRepo());
+  for (const t of teams) {
+    const opt = document.createElement('option');
+    opt.value = t.repo;
+    opt.textContent = t.name || t.repo;
+    opt.title = t.repo;
+    select.append(opt);
+  }
+  if (repo && !teams.some((t) => t.repo === repo)) {
+    // The open pane's repo has a team dir the list did not carry, or there are no teams at
+    // all and this is the folder you are in. Either way it is the honest default, so it
+    // goes in the picker rather than being silently swapped for something else.
+    const opt = document.createElement('option');
+    opt.value = repo;
+    opt.textContent = shortPath(repo);
+    opt.title = repo;
+    select.prepend(opt);
+  }
+  select.value = repo || '';
+  select.disabled = select.options.length < 2;
+  select.onchange = () => {
+    repo = select.value || null;
+    paint();
+    load();
+  };
+
+  if (!repo && needsRepo(kind)) {
+    say('No repository to show a brief for. Start a team, or open a session in one.');
+    return;
+  }
+  load();
+}
+
+/**
+ * The repo the briefs box opens on: whatever slot `a` is looking at.
+ *
+ * Slot `a` rather than the focused pane, deliberately — the rail head is above both panes
+ * and belongs to neither, so "the pane I am in" is not a thing the button can mean. `a` is
+ * the pane every session opens into unless a thread took it, which makes it the stable
+ * answer rather than the one that moves as focus does.
+ */
+function openPaneRepo() {
+  const a = panes.find((p) => p.slot === 'a') || panes[0];
+  const id = a?.selected?.();
+  const s = id ? state.sessions.find((x) => x.id === id) : null;
+  return s?.paneCwd || s?.cwd || null;
+}
+
+/**
+ * A brief rendered as markdown, with raw HTML shown rather than run.
+ *
+ * Two reasons, and the first one is a plain bug the default renderer has here. Briefs carry
+ * literal placeholders — `agent/<task>`, `gh pr merge <N>`, `task <id>` — and not all of
+ * them sit inside backticks. `marked`'s default treats `<task>` as raw HTML, so the browser
+ * makes an unknown element out of it and the word simply **disappears** from the sentence:
+ * the worker brief's first line would read "on branch agent/." with nothing on screen to
+ * say a placeholder had been eaten.
+ *
+ * The second is that a brief is assembled from things this panel does not control — the
+ * repo path, the repo's own `git config user.name`, the decisions file's location — and
+ * `innerHTML` is the one place a name with a tag in it would become markup rather than
+ * text. Marked removed its own `sanitize` option, so the renderer's `html` hook is where
+ * that is caught. Escaping the source text *before* parsing is the obvious alternative and
+ * is wrong: marked escapes `&` inside code spans, so every placeholder in a backtick would
+ * come back reading `&lt;task&gt;`.
+ *
+ * Code spans, fences and autolinks are untouched — marked escapes those itself, which is
+ * why the hook is narrow rather than a sweep over the output. The `withBlankTargets` wrap
+ * is the one every `marked.parse` in this repo carries (`test/anchor-target.test.js` scans
+ * for exactly this call shape), and it lives *inside* this function so the one place a
+ * brief becomes HTML is also the one place both rules are applied.
+ */
+function briefHtml(md) {
+  const renderer = new marked.Renderer();
+  renderer.html = (token) => {
+    const raw = typeof token === 'string' ? token : (token?.raw ?? token?.text ?? '');
+    return String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  };
+  return withBlankTargets(marked.parse(String(md ?? ''), { renderer }));
+}
+
 
 /* ------------------------------------------------------------- menus --- */
 
@@ -15426,6 +15757,7 @@ document.addEventListener('keydown', (e) => {
 el.newSession.onclick = openNewSession;
 el.settings.onclick = openSettings;
 el.snapshot.onclick = openSnapshot;
+el.briefs.onclick = openBriefs;
 // The one way into the shared room. Bound once, at boot, because the row is markup rather
 // than something a repaint rebuilds — see `renderSharedRow` for why it is patched in place.
 if (el.railShared) el.railShared.onclick = openSharedRoom;

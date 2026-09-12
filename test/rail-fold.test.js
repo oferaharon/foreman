@@ -229,10 +229,19 @@ test('the div answers Enter and Space, and Space does not scroll the rail', () =
 test('`aria-selected` is gone, and `aria-current` says which row is open', () => {
   // `aria-selected` was invalid on the `<button>` it sat on and is invalid on
   // `role="button"` too — it belongs to `option`, `tab` and friends.
-  assert.ok(
-    !/setAttribute\('aria-selected'/.test(app),
-    'web/app.js must not set `aria-selected` on a rail row',
-  );
+  //
+  // Scoped to the rail's own builders rather than swept over the whole file, which is what
+  // it was until a `role="tab"` strip arrived elsewhere in `web/app.js` (the briefs modal).
+  // A tab is the "and friends" this comment already names, so a file-wide ban would have
+  // been this rule refusing the one element the attribute is *for* — and the fix for that
+  // would have been spelling it some other way to dodge a scan, which is worse than the
+  // defect. The rule was always about rail rows; now it says so.
+  for (const name of ['sessionRow', 'foldedTitle']) {
+    assert.ok(
+      !/setAttribute\('aria-selected'/.test(fn(name)),
+      `${name} must not set \`aria-selected\` on a rail row`,
+    );
+  }
   assert.match(fn('sessionRow'), /btn\.setAttribute\('aria-current', 'true'\)/);
 });
 

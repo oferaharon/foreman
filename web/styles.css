@@ -459,6 +459,114 @@ body.row-dragging * { cursor: row-resize !important; }
   overflow-wrap: anywhere;
 }
 
+/* ------------------------------------------------------------ briefs --- */
+
+/* The briefs box is the one modal here that is a **fixed frame around one scroller**, and
+   that is the whole of its layout: the tabs and the repo picker have to hold still while a
+   seventeen-thousand-character lead brief moves under them, or switching tab means finding
+   the strip again first.
+
+   So it is a flex column with `.briefs-body` as the only thing that gives (`flex: 1;
+   min-height: 0`) — and `min-height: 0` is load-bearing, because a flex item's automatic
+   minimum is its content, which for a brief this long is "taller than the screen" and the
+   box would grow past the backdrop instead of scrolling inside it. `.modal.is-wide`'s own
+   `overflow-y: auto` stays as the backstop it already was; with this in place it never
+   fires, and it is what catches a viewport short enough that the chrome alone overflows.
+
+   The CLAUDE.md trap this deliberately steps around: flex-shrinking `.plan-md` was tried
+   once before, inside a `<details>`, and its light children sit in a UA shadow slot that
+   sizes to content and ignores the flex-resolved height. There is no `<details>` here —
+   `.briefs-body` is a plain child — which is why the same shape works. */
+.modal.is-wide.briefs {
+  display: flex;
+  flex-direction: column;
+  /* The long tab is the lead brief; a box that resized itself when you moved between the
+     four would be a strip that moved too. Tall enough to be worth the trip, capped so the
+     close button is never off screen. */
+  height: min(46rem, calc(100vh - 2rem));
+}
+
+/* Above the tabs, not under the brief: it changes what the reader should believe about
+   everything below it, and a caveat at the foot of a document nobody scrolls to the end of
+   is a caveat nobody read. */
+.briefs-caveat { margin: 0 0 0.7rem; }
+
+.briefs-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex: none;
+}
+
+.briefs-tabs { display: flex; gap: 0.25rem; }
+
+/* The rail's own button type, one size down — these sit inside a card rather than on the
+   panel's ground, and matching `.new-session` exactly would read as four more controls
+   that do something. */
+.briefs-tab {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 3px 3px 0 0;
+  padding: 0.2rem 0.5rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.briefs-tab:hover { color: var(--ink); }
+
+/* Colour *and* an edge, never colour alone: the tab strip has to read as a selection at a
+   glance and from across a room, and accent-on-muted alone is the contrast step
+   `--row-open` was rebuilt for one floor down. */
+.briefs-tab.is-on {
+  color: var(--accent);
+  border-color: var(--rule-strong);
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.briefs-tab:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* `hidden` on the picker is the standalone tab's whole story — the brief there is one file
+   for the machine and a repo would change nothing — and `.team-select` carries an
+   unconditional `display: inline-flex` that outranks the `[hidden]` UA default. Same fix,
+   scoped the same way, as `.files-grid[hidden]` and `.menu-item[hidden]` before it. */
+.briefs-repo { max-width: 55%; }
+.briefs-repo[hidden] { display: none; }
+
+/* The inputs the brief above was generated from — base branch, forge reading, the
+   placeholder task id. One line, and empty when there is nothing true to put in it. */
+.briefs-facts { margin: 0.4rem 0 0.6rem; flex: none; }
+
+/* The one scroller. `overscroll-behavior: contain` so a wheel that reaches the end of a
+   brief does not chain out and start moving the page behind the backdrop.
+
+   **Two classes in the selector, and that is the whole point of it** — exactly as
+   `.task-brief-body.plan-md` one block up. `.plan-md` gives the brief its typography and
+   also a `max-height: 40vh`, and it is declared *later* in this file, so at equal
+   specificity it wins: written as `.briefs-body` alone the body would cap at 40vh and the
+   flex column's remaining space would sit empty under a brief that scrolls anyway. The
+   extra class is what buys the override regardless of source order. `max-height: none`
+   rather than a number, because the flex line is what decides the height here. */
+.briefs-body.plan-md {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+}
+
+/* Two states that are not a brief, told apart by colour rather than by wording alone. */
+.briefs-body.is-quiet { color: var(--ink-faint); }
+.briefs-body.is-err { color: var(--decision); }
+
 .field-cap,
 .field-check {
   display: flex;

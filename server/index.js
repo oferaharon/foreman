@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 
-import { PORT, HOST, HOST_SOURCE, SESSION_PREFIX, SESSION_PREFIX_SOURCE, STATE_DIR, STATE_DIR_SOURCE, HOME, USER_CLAUDE_CONFIG, CONFIG_FILE, CONFIG_NOTES, ALLOWED_ORIGINS, TRIGGER_TOKEN, TRIGGER_SOURCE, TRIGGER_NOTES, TRIGGER_DEDUPE_MS, VERSION, REPO_URL } from './config.js';
+import { PORT, HOST, HOST_SOURCE, SESSION_PREFIX, SESSION_PREFIX_SOURCE, STATE_DIR, STATE_DIR_SOURCE, HOME, CONFIG_FILE, CONFIG_NOTES, ALLOWED_ORIGINS, TRIGGER_TOKEN, TRIGGER_SOURCE, TRIGGER_NOTES, TRIGGER_DEDUPE_MS, VERSION, REPO_URL } from './config.js';
 import { StatusEngine } from './status.js';
 import { SessionRegistry } from './sessions.js';
 import { ReadState } from './read-state.js';
@@ -59,11 +59,12 @@ import { TaskStore, TASK_KINDS } from './tasks.js';
 import { createWorktree, removeWorktree, pruneWorktrees, runSetup, tidyLabel, WORKTREES_DIR } from './worktree.js';
 import { writeWorkerSettings, answerTrustGate, resolveWorkerModel, WORKER_MODELS } from './dispatch.js';
 import { ensureTeam, readTeam, setSlate, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
+import { assembleLead, briefsFor, foremanEntry, mcpFilePath } from './briefs.js';
 import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
 import { collectQueue, composition, mergeLine, prName, prNumber } from './merge-queue.js';
 import { mergeVerdict } from './merge-check.js';
 import { resolveSetup } from './setup-detect.js';
-import { resolveForge, credentialKeys, READINGS, forgeSummary } from './forge.js';
+import { resolveForge, forgeSummary } from './forge.js';
 import { resolveBaseBranch, bareBase } from './base-branch.js';
 import { createTeamWatch } from './watch.js';
 import { createConflictScanner } from './conflicts.js';
@@ -85,7 +86,6 @@ import {
   EXPOSURE_KEYS,
 } from './settings-file.js';
 import { humanName } from './human-name.js';
-import { leadBrief } from './lead-brief.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
 // The envelope primitives, from the module they were lifted into — the lift happened while
@@ -973,88 +973,37 @@ async function launchLead(folder, { terminal, resume = null }) {
     throw err;
   }
 
-  // What this repo actually has, detected from its own origin — never a setting, never a
-  // stored token (decisions.md, 2026-08-30). Everything below hangs off this one answer,
-  // so the brief, the tool surface and the permission stance cannot disagree about which
-  // forge the lead is on. `fresh` because a launch is rare and a minute-stale cache is
-  // exactly wrong on the launch that follows `git remote add`.
-  const forge = await resolveForge(folder, { fresh: true });
-  const base = (await resolveBaseBranch(folder)).branch;
-  // What could not be given, said out loud in the launch result rather than dropped: a
-  // tool that silently isn't there is a lead that fails at the far end of a task.
-  const notes = [];
+  // What this repo actually has, what the lead can reach with it, and what it will read —
+  // one call, in `briefs.js`, because `GET /api/briefs` shows the maintainer exactly this
+  // brief and a second copy of the assembly would be a claim that decays. Everything below
+  // hangs off the one answer, so the brief, the tool surface and the permission stance
+  // cannot disagree about which forge the lead is on.
+  //
+  // Three things it does that reading the call alone would not tell you. The forge is
+  // **detected** from the repo's own origin — never a setting, never a stored token
+  // (decisions.md, 2026-08-30). `fresh` because a launch is rare and a minute-stale cache
+  // is exactly wrong on the launch that follows `git remote add` — the modal passes no
+  // such thing, which is the one input the two callers deliberately differ on. And `forge`
+  // comes back **demoted**: a credential-carrying MCP entry has already been refused by
+  // here, so the brief, the settings and `mcp.json` are all written from the same answer
+  // and the brief never promises a tool the file beside it does not contain.
+  //
+  // `notes` is what could not be given, said out loud in the launch result rather than
+  // dropped: a tool that silently isn't there is a lead that fails at the far end of a
+  // task.
+  const { brief, forge: effective, base, notes, mcpServers } = await assembleLead({
+    repo: folder,
+    teamDir: tDir,
+    decisionsFile,
+    config,
+    fresh: true,
+  });
 
-  // The lead's tools: the panel's own MCP server, scoped to this repo by env, plus the
-  // user's entry for *this repo's* forge if one is registered — read from ~/.claude.json,
-  // never written. A GitHub repo's lead never sees the gitea server and vice versa, which
-  // is also a small containment win: a lead cannot call a forge its repo has nothing to
-  // do with.
-  const mcpServers = {
-    foreman: {
-      type: 'stdio',
-      command: process.execPath,
-      args: [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'mcp', 'foreman.js')],
-      env: { FOREMAN_PORT: String(PORT), FOREMAN_REPO: folder, FOREMAN_ROLE: 'lead' },
-    },
-  };
-  // The forge the lead will actually be *able* to use. It starts as what was detected and
-  // is demoted below if the entry that would have carried it is refused — the brief, the
-  // settings and mcp.json are then all written from the same demoted answer, rather than
-  // the brief promising a tool the file does not contain.
-  let effective = forge;
-  if (forge.forge && forge.via === 'mcp') {
-    try {
-      const userCfg = JSON.parse(await fsp.readFile(USER_CLAUDE_CONFIG, 'utf8'));
-      const entry = userCfg?.mcpServers?.[forge.forge];
-      // `mcp.json` is written with the default umask — `-rw-r--r--`, measured — and this
-      // copies the user's entry verbatim. The maintainer's gitea entry is `{type, url}` and
-      // carries nothing; the standard GitHub MCP server carries
-      // GITHUB_PERSONAL_ACCESS_TOKEN in its `env`. Copying that would write a personal
-      // access token world-readable into the team folder, by the feature whose ruling says
-      // never store a token. So it is refused, and the refusal is reported — `gh` is the
-      // supported GitHub path exactly because its credential lives in the keychain and
-      // never in a config file.
-      const secrets = credentialKeys(entry?.env);
-      if (entry && secrets.length) {
-        notes.push(
-          `The registered \`${forge.forge}\` MCP server carries ${secrets.join(', ')} in its env, and ${path.basename(mcpFilePath(tDir))} is world-readable — it was not copied. ${forge.forge === 'github' ? 'Install `gh` and log in: its credential stays in the keychain.' : 'Move the credential into the MCP server process, or the lead has no forge tools.'}`,
-        );
-        effective = { ...forge, reading: READINGS.push, forge: null, via: null };
-      } else if (entry) {
-        mcpServers[forge.forge] = entry;
-      } else {
-        effective = { ...forge, reading: READINGS.push, forge: null, via: null };
-      }
-    } catch {
-      // No readable user config at launch time, whatever detection saw a moment ago.
-      // Demote rather than promise: the brief must describe the tools in the file.
-      effective = { ...forge, reading: READINGS.push, forge: null, via: null };
-    }
-  }
   const mcpFile = mcpFilePath(tDir);
   await fsp.writeFile(mcpFile, JSON.stringify({ mcpServers }, null, 2));
 
   const briefFile = path.join(tDir, 'brief.md');
-  // Who this team reports to — detected from the repo's own `git config user.name`
-  // (`human-name.js`), resolved here and threaded in, never read inside the brief. A repo
-  // can carry its own `user.name`, and a brief is generated per repo.
-  await fsp.writeFile(
-    briefFile,
-    leadBrief({
-      repo: folder,
-      teamDir: tDir,
-      decisionsFile,
-      forge: effective,
-      base,
-      human: humanName(folder),
-      // The self-merge paragraphs, and `effective` above is why they are honest: a
-      // credential-carrying MCP entry has already demoted the forge to `push only` by
-      // here, so a brief never promises a tool the `mcp.json` beside it does not contain.
-      // Written at launch like everything else in this block, so a flip reaches the
-      // *next* lead — the panel's copy says so beside the toggle.
-      selfMerge: Boolean(config.toggles?.leadDecidesMerges),
-    }),
-  );
+  await fsp.writeFile(briefFile, brief);
 
   // The lead never writes code — enforced, not requested. Deny the checkout, allow
   // the team dir; the shape lives in `leadSettings` (team.js), where it is tested. The
@@ -1093,11 +1042,6 @@ async function launchLead(folder, { terminal, resume = null }) {
     pins.set(created.paneId, true, { paneCreatedMs: await paneBirthday(created.paneId) });
   }
   return { created, config, forge: effective, base, notes };
-}
-
-/** One spelling of the lead's MCP config path, because two places name it. */
-function mcpFilePath(tDir) {
-  return path.join(tDir, 'mcp.json');
 }
 
 app.post('/api/launch', async (req, res) => {
@@ -1480,6 +1424,33 @@ app.get('/api/teams', async (_req, res) => {
 });
 
 /**
+ * The four briefs a session launched here would read — read-only, and that is the whole
+ * design.
+ *
+ * **It is a GET and it creates nothing.** `briefsFor` computes every path and reads the
+ * team's config through `readTeam` → `teamDefaults`, never `ensureTeam`: opening a modal
+ * must not seed a team directory, a `team.json` or a `decisions.md` for a repo nobody has
+ * started a team on. There is no POST beside this and no refresh control — a brief is
+ * generated at launch, so what comes back here is what the *next* lead, worker, planner
+ * or standalone session would read, which is not necessarily what a running one is on.
+ * The modal says so in its own words; CLAUDE.md's "known gap" is the long version.
+ *
+ * `repo` is optional. Without one the standalone brief still comes back, because that one
+ * is a single file for the whole machine and has no repo to be about.
+ *
+ * The forge read this costs is cached (`resolveForge`'s TTL) and deliberately not `fresh`
+ * — that flag belongs to the launch, where a minute-stale cache is exactly wrong on the
+ * launch after a `git remote add`. Here it is a page somebody opened.
+ */
+app.get('/api/briefs', async (req, res) => {
+  try {
+    res.json(await briefsFor(String(req.query.repo || '').trim() || null));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
  * One row of `GET /api/teams`: the repo, its folder name for display, and the forge link
  * for the phone's Leads tab. `forgeSummary` (`server/forge.js`) carries `webUrl: null` for
  * `push only` / `no remote`, and is `null` outright only when resolution itself throws —
@@ -1715,16 +1686,7 @@ app.post('/api/team/dispatch', async (req, res) => {
     await fsp.writeFile(
       wMcpFile,
       JSON.stringify(
-        {
-          mcpServers: {
-            foreman: {
-              type: 'stdio',
-              command: process.execPath,
-              args: [path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'mcp', 'foreman.js')],
-              env: { FOREMAN_PORT: String(PORT), FOREMAN_REPO: repo, FOREMAN_ROLE: 'worker', FOREMAN_TASK: label },
-            },
-          },
-        },
+        { mcpServers: { foreman: foremanEntry({ repo, role: 'worker', task: label }) } },
         null,
         2,
       ),
