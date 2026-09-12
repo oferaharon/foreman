@@ -1196,7 +1196,7 @@ Enter or Tab to take one, Escape to dismiss) and a post that named somebody carr
 There is no create, no join, no add, and no tool takes a pane or a speaker: which session is
 posting is read from the tool server's own environment, so a session cannot post as another.
 
-**The rail band** sits under the peer-messages row: one row per open room with its name, member
+**The rail band** sits above the peer-messages row: one row per open room with its name, member
 count and a count of what has arrived since anybody last opened it. Archived rooms fold into a
 collapsed `archived · N`. The band's head and its `+ room` are in the rail even when there are
 no rooms at all — a control that only appears once you have used it is a control nobody finds.
