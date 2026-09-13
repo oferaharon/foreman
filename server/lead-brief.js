@@ -141,6 +141,13 @@ workers touching the same paths, the ordering is your call — tell one to hold 
 via \`worker_send\` — and tell ${human} only when the ordering has consequences they
 would care about. You never \`/exit\` a worker on your own initiative.
 
+What you *may* do is stop a worker's current turn: \`worker_interrupt\` presses Escape in
+its terminal, which ends the turn it is running and leaves the session alive at its
+composer — it is not \`/exit\`, nothing is killed. Reach for it when a worker is looping or
+is still working on something ${human} has cancelled, because a plain \`worker_send\` queues
+behind the very turn you wanted stopped. It is never a substitute for surfacing a stuck
+worker to ${human} — stopping a turn answers nothing — and every use is written to the room.
+
 ## Answering for workers — the grounds rule
 
 Some tools can answer a worker's question, permission prompt, or plan box. Each is gated

@@ -729,6 +729,65 @@ const LEAD_TOOLS = [
     },
   },
   {
+    /**
+     * Escape, in a worker's terminal — the one thing `worker_send` cannot do.
+     *
+     * A "stop" typed through `worker_send` goes to `sendOrQueue`, which refuses a pane
+     * that is working and **queues** the message behind exactly the turn it was meant to
+     * stop. The worker finishes, burns the tokens, and only then reads it. This presses
+     * the key instead, through the panel's own `/key` endpoint, which also drops the
+     * session's status receipt — an interrupt fires no `Stop` hook, so nothing else would
+     * ever correct `working`.
+     *
+     * The follow-up `text` goes down the ordinary `/send` path on purpose: after Escape
+     * the pane is at its composer and the message is typed, but if the TUI has not redrawn
+     * yet — or the Escape landed on a box and left one up — `PaneLock` re-reads the pane
+     * and queues rather than typing over whatever is there. `queued` says which happened,
+     * so the lead is never left guessing. No sleep between the two: measured in the
+     * sandbox, the composer is back before the send's own pane read.
+     */
+    name: 'worker_interrupt',
+    description:
+      `Press Escape in a worker's terminal. It stops the turn the worker is running right now and leaves the session alive, at its composer — this is NOT \`/exit\`, nothing is killed and no worktree is swept. Use it when a worker is looping, or is still working on something ${HUMAN} has cancelled: \`worker_send\` on its own queues behind the very turn you want stopped, so the worker burns the whole turn before it reads you. Pass \`text\` to deliver a message immediately after the stop — same guarded path as \`worker_send\`, and \`queued\` in the answer says whether it was typed or is waiting. Every use is written to the room, where ${HUMAN} can see each time you pulled the cord. Stopping a turn is not a substitute for surfacing a stuck worker to ${HUMAN}.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The task id.' },
+        text: { type: 'string', description: 'Optional. Delivered straight after the stop — why you stopped it, and what to do instead.' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const sid = await sessionFor(args.id);
+      await api('POST', `/api/sessions/${encodeURIComponent(sid)}/key`, { action: 'interrupt' });
+
+      const text = String(args.text || '').trim();
+      const sent = text
+        ? await api('POST', `/api/sessions/${encodeURIComponent(sid)}/send`, { text })
+        : null;
+
+      // `event` names the machinery, so the room can say what this line *is* without
+      // reading the sentence — the same additive stamp `dispatch` and `pending` ride, on
+      // the same `...rest`; `room.js` and the endpoint are untouched. `kind: 'system'`
+      // rather than `chat` deliberately: an interrupt is the lead pulling a cord, not the
+      // lead speaking, and a machinery line is what an audit trail looks like here.
+      await api('POST', '/api/team/room', {
+        folder: REPO,
+        from: 'lead',
+        to: args.id,
+        kind: 'system',
+        about: args.id,
+        event: 'interrupt',
+        text: text
+          ? `Interrupted ${args.id}${sent?.queued ? ' (message queued)' : ''}: ${text}`
+          : `Interrupted ${args.id} — turn stopped, session left running.`,
+      }).catch(() => {});
+
+      return { ok: true, interrupted: true, delivered: Boolean(text), queued: sent ? Boolean(sent.queued) : null };
+    },
+  },
+  {
     name: 'room_read',
     description:
       'Read the team room. Pass the last cursor you saw to get everything after it (capped at 200, `truncated` set if more exists). Omit `since` for the recent tail instead — roughly the last 20 entries — since the room outlives every /clear and an omitted cursor must not mean "since the dawn of the room". Either way, `cursor` is the room\'s newest entry — remember it and pass it next time.',
