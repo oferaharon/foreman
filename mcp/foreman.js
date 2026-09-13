@@ -46,6 +46,17 @@ const BASE = `http://127.0.0.1:${PORT}`;
 // panel, where briefs are generated for many.
 const HUMAN = humanName(REPO);
 
+/**
+ * How long `worker_interrupt` waits between Escape and its follow-up message.
+ *
+ * Measured, not chosen: after `POST /key` answers, the pane goes on parsing as `working`
+ * for 57–76ms while the TUI redraws its composer (9 runs on a scratch panel against a
+ * working session in the sandbox's `alpha`, at 220 columns and at 70 — width made no
+ * difference). This is that window with room over it, and nothing depends on it being
+ * enough: `PaneLock` re-reads the pane anyway and a slower redraw simply queues.
+ */
+const SETTLE_MS = 250;
+
 // Fail closed, not open. An absent FOREMAN_ROLE used to default to 'lead' — the more
 // powerful of the two surfaces — which meant a misconfigured launch silently became a
 // lead instead of refusing. Every launch path must name its role explicitly now.
@@ -726,6 +737,75 @@ const LEAD_TOOLS = [
         folder: REPO, from: 'lead', to: args.id, kind: 'chat', text: args.text,
       }).catch(() => {});
       return sent;
+    },
+  },
+  {
+    /**
+     * Escape, in a worker's terminal — the one thing `worker_send` cannot do.
+     *
+     * A "stop" typed through `worker_send` goes to `sendOrQueue`, which refuses a pane
+     * that is working and **queues** the message behind exactly the turn it was meant to
+     * stop. The worker finishes, burns the tokens, and only then reads it. This presses
+     * the key instead, through the panel's own `/key` endpoint, which also drops the
+     * session's status receipt — an interrupt fires no `Stop` hook, so nothing else would
+     * ever correct `working`.
+     *
+     * The follow-up `text` goes down the ordinary `/send` path on purpose: `PaneLock`
+     * re-reads the pane and will queue rather than type over whatever is there, so the
+     * message can never land on a box the Escape left up. `queued` says which happened, so
+     * the lead is never left guessing.
+     *
+     * **The beat between the two is measured, not guessed.** Escape is delivered before
+     * `/key` answers, but the TUI has not redrawn yet — benched on a scratch panel against
+     * a working session in the sandbox's `alpha`, the pane went on parsing as `working` for
+     * **57–76ms** after `/key` returned (9 runs, at 220 columns and again at 70; width made
+     * no difference). Sent with no beat at all it queued every time, which is safe and
+     * honest but makes `queued` say "waiting" in the ordinary case and delays the worker
+     * reading you by a roster tick. `SETTLE_MS` is that window with room over it. Nothing
+     * depends on it being enough: a redraw slower than this queues, the flusher delivers it
+     * at the next tick — measured end to end, the worker read it and answered — and the
+     * lead is told `queued: true`.
+     */
+    name: 'worker_interrupt',
+    description:
+      `Press Escape in a worker's terminal. It stops the turn the worker is running right now and leaves the session alive, at its composer — this is NOT \`/exit\`, nothing is killed and no worktree is swept. Use it when a worker is looping, or is still working on something ${HUMAN} has cancelled: \`worker_send\` on its own queues behind the very turn you want stopped, so the worker burns the whole turn before it reads you. Pass \`text\` to deliver a message immediately after the stop — same guarded path as \`worker_send\`, and \`queued\` in the answer says whether it was typed or is waiting. Every use is written to the room, where ${HUMAN} can see each time you pulled the cord. Stopping a turn is not a substitute for surfacing a stuck worker to ${HUMAN}.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The task id.' },
+        text: { type: 'string', description: 'Optional. Delivered straight after the stop — why you stopped it, and what to do instead.' },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const sid = await sessionFor(args.id);
+      await api('POST', `/api/sessions/${encodeURIComponent(sid)}/key`, { action: 'interrupt' });
+
+      const text = String(args.text || '').trim();
+      if (text) await new Promise((r) => setTimeout(r, SETTLE_MS));
+      const sent = text
+        ? await api('POST', `/api/sessions/${encodeURIComponent(sid)}/send`, { text })
+        : null;
+
+      // `event` names the machinery, so the room can say what this line *is* without
+      // reading the sentence — the same additive stamp `dispatch` and `pending` ride, on
+      // the same `...rest`; `room.js` and the endpoint are untouched. `kind: 'system'`
+      // rather than `chat` deliberately: an interrupt is the lead pulling a cord, not the
+      // lead speaking, and a machinery line is what an audit trail looks like here.
+      await api('POST', '/api/team/room', {
+        folder: REPO,
+        from: 'lead',
+        to: args.id,
+        kind: 'system',
+        about: args.id,
+        event: 'interrupt',
+        text: text
+          ? `Interrupted ${args.id}${sent?.queued ? ' (message queued)' : ''}: ${text}`
+          : `Interrupted ${args.id} — turn stopped, session left running.`,
+      }).catch(() => {});
+
+      return { ok: true, interrupted: true, delivered: Boolean(text), queued: sent ? Boolean(sent.queued) : null };
     },
   },
   {

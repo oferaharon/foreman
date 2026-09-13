@@ -205,6 +205,11 @@ picker, or the startup trust gate would take `/exit` as six characters typed *in
 themselves*. `interrupt` — the button above the composer's box — is the way out of those
 first.
 
+That button is the only way a human reaches the interrupt, but not the only way it is
+reached: a team lead has `worker_interrupt`, which hits the same endpoint for one of its
+own workers and optionally types a message straight after. It ends a turn and never a
+session — see [the team's docs](team.md#stuck-silent-looping).
+
 ### Groups
 
 The rail's folder headings are derived — one per `basename(cwd)`, and it has no idea

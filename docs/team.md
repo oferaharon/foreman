@@ -285,6 +285,20 @@ Each fires once per episode and re-arms when the worker's state changes. **Nothi
 a worker automatically**, ever; ending a session is your call, or an explicit
 instruction.
 
+What the lead *can* do without asking you is stop a **turn**. `worker_interrupt` presses
+Escape in a worker's terminal — the same key the panel's own interrupt button sends, down
+the same endpoint — ending the turn the worker is running and leaving the session alive at
+its composer. It is not `/exit`: nothing is killed, no worktree is swept, and the worker
+reads its next message as though the turn had simply finished. It exists because a
+`worker_send` reading "stop" is handed to the send queue and waits behind the very turn it
+was meant to end, so the worker burns that turn first and only then reads you. The lead
+reaches for it when a worker is looping or is still working on something you have
+cancelled, and it can carry a message to deliver straight after the stop. **Nothing calls
+it automatically** — no watcher, no loop detector: it is the lead's own judgment, per
+worker, and every call writes one line to the room, so each time it pulled the cord is
+visible to you. Stopping a turn is not a substitute for surfacing a stuck worker, and the
+brief says so in those words.
+
 ### Conflicts
 
 Two workers editing the same paths is the one thing they genuinely need to know about

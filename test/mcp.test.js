@@ -83,6 +83,10 @@ const stubState = {
   added: [],
   groupPosts: [],
   groupReads: [],
+  // Ordered, because the *order* is the whole point of `worker_interrupt`: a stop that
+  // arrives after its own follow-up message has been typed has stopped nothing.
+  paneCalls: [],
+  sendQueued: false,
 };
 
 function makeChild(env) {
@@ -193,6 +197,12 @@ test.before(async () => {
       } else if (req.url === '/api/team/room' && req.method === 'POST') {
         stubState.roomPosts.push(parsed);
         res.end(JSON.stringify({ ok: true, entry: parsed }));
+      } else if (req.url === '/api/sessions/sess-1/key' && req.method === 'POST') {
+        stubState.paneCalls.push({ what: 'key', body: parsed });
+        res.end(JSON.stringify({ ok: true }));
+      } else if (req.url === '/api/sessions/sess-1/send' && req.method === 'POST') {
+        stubState.paneCalls.push({ what: 'send', body: parsed });
+        res.end(JSON.stringify({ ok: true, queued: stubState.sendQueued }));
       } else if (req.url === '/api/sessions/sess-1/question' && req.method === 'POST') {
         stubState.questionAnswers.push(parsed);
         res.end(JSON.stringify({ ok: true }));
@@ -298,7 +308,7 @@ test('the lead surface: dispatch, status, read, send, close, the room, and the g
       'plan_read', 'room_post', 'room_read', 'task_add', 'task_close', 'task_dispatch',
       'task_merge_check', 'task_set_pr', 'task_start', 'team_status',
       'worker_answer_permission', 'worker_answer_question', 'worker_approve_plan',
-      'worker_read', 'worker_send',
+      'worker_interrupt', 'worker_read', 'worker_send',
     ],
   );
 });
@@ -396,6 +406,93 @@ test('room_read with an explicit since:0 is a real cursor, not "no cursor"', asy
   assert.equal(out.entries.length, 25, 'the whole room, not trimmed to the tail');
   assert.equal(out.cursor, 25);
   assert.equal(out.truncated, false);
+});
+
+/*
+ * `worker_interrupt`, and the reason it is not `worker_send` with a shorter message.
+ *
+ * A "stop" sent the ordinary way is handed to `sendOrQueue`, which refuses a working pane
+ * and queues — behind the very turn it was meant to end. So the key has to go first, and
+ * these pin the order rather than merely pinning that both calls happened: a stop that
+ * lands after its own follow-up has stopped nothing.
+ */
+test('worker_interrupt presses Escape first, then delivers the message', async () => {
+  stubState.paneCalls.length = 0;
+  stubState.roomPosts.length = 0;
+  stubState.sendQueued = false;
+  const res = await lead.rpc({
+    jsonrpc: '2.0', id: 90, method: 'tools/call',
+    params: { name: 'worker_interrupt', arguments: { id: 'one', text: 'stop — that scope was cancelled' } },
+  });
+  assert.deepEqual(
+    stubState.paneCalls.map((c) => c.what),
+    ['key', 'send'],
+    'the key precedes the send, which is the whole difference from worker_send',
+  );
+  assert.deepEqual(stubState.paneCalls[0].body, { action: 'interrupt' }, 'the only action the endpoint takes');
+  assert.equal(stubState.paneCalls[1].body.text, 'stop — that scope was cancelled');
+  const out = JSON.parse(res.result.content[0].text);
+  assert.equal(out.interrupted, true);
+  assert.equal(out.delivered, true);
+  assert.equal(out.queued, false, 'typed, not queued — the lead is told which');
+});
+
+test('every interrupt writes one machinery line to the room, stamped with its own event', () => {
+  const posts = stubState.roomPosts.filter((p) => p.event === 'interrupt');
+  assert.equal(posts.length, 1, 'one line per call, no more');
+  const [post] = posts;
+  assert.equal(post.from, 'lead');
+  assert.equal(post.to, 'one');
+  assert.equal(post.about, 'one');
+  // `system`, not `chat`: pulling a cord is machinery, and the room colours a line on what
+  // the poster said it *is* rather than on how the sentence reads.
+  assert.equal(post.kind, 'system');
+  assert.match(post.text, /stop — that scope was cancelled/);
+});
+
+test('a queued follow-up is reported as queued rather than quietly called sent', async () => {
+  stubState.paneCalls.length = 0;
+  stubState.roomPosts.length = 0;
+  stubState.sendQueued = true;
+  const res = await lead.rpc({
+    jsonrpc: '2.0', id: 91, method: 'tools/call',
+    params: { name: 'worker_interrupt', arguments: { id: 'one', text: 'hold there' } },
+  });
+  const out = JSON.parse(res.result.content[0].text);
+  assert.equal(out.queued, true);
+  assert.match(stubState.roomPosts.find((p) => p.event === 'interrupt').text, /message queued/);
+  stubState.sendQueued = false;
+});
+
+test('an interrupt with no message stops the turn and types nothing', async () => {
+  stubState.paneCalls.length = 0;
+  stubState.roomPosts.length = 0;
+  const res = await lead.rpc({
+    jsonrpc: '2.0', id: 92, method: 'tools/call',
+    params: { name: 'worker_interrupt', arguments: { id: 'one' } },
+  });
+  assert.deepEqual(stubState.paneCalls.map((c) => c.what), ['key'], 'no send at all');
+  const out = JSON.parse(res.result.content[0].text);
+  assert.equal(out.delivered, false);
+  assert.equal(out.queued, null, 'nothing was sent, so there is nothing to say about queueing');
+  assert.equal(stubState.roomPosts.filter((p) => p.event === 'interrupt').length, 1, 'still audited');
+});
+
+test('a worker cannot interrupt anything — worker_interrupt is the lead\'s alone', async () => {
+  stubState.paneCalls.length = 0;
+  const res = await worker.rpc({
+    jsonrpc: '2.0', id: 93, method: 'tools/call',
+    params: { name: 'worker_interrupt', arguments: { id: 'one' } },
+  });
+  assert.ok(res.error, 'refused at the protocol layer — the tool does not exist for this role');
+  assert.equal(stubState.paneCalls.length, 0, 'and no key reached any pane');
+});
+
+test('the tool says plainly that it is not /exit, so it is never read as a softer kill', async () => {
+  const res = await lead.rpc({ jsonrpc: '2.0', id: 94, method: 'tools/list' });
+  const tool = res.result.tools.find((t) => t.name === 'worker_interrupt');
+  assert.match(tool.description, /NOT `\/exit`/);
+  assert.match(tool.description, /written to the room/);
 });
 
 test('worker_read resolves a task id to its session', async () => {

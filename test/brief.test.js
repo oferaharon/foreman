@@ -150,6 +150,27 @@ test('every variant carries the close gate, because every variant can force-dele
   }
 });
 
+/*
+ * `worker_interrupt` is the one tool that stops a worker mid-turn, and the two sentences
+ * around it are what keep it from being read as a softer `/exit` or as a way to *handle* a
+ * stuck worker rather than surface it. Pinned by name, the way the forbidden merge flags
+ * are: a rewrite that drops the contrast leaves a lead with a stop button and no rule
+ * about when it is the wrong one.
+ */
+test('the lead brief names worker_interrupt, and keeps it apart from /exit and from surfacing', () => {
+  for (const forge of [
+    { forge: 'gitea', via: 'mcp', reading: 'Gitea' },
+    { forge: 'github', via: 'gh', reading: 'GitHub' },
+    null,
+  ]) {
+    const brief = briefFor(forge);
+    assert.match(brief, /`worker_interrupt`/, 'the tool is named');
+    assert.match(brief, /it is not `\/exit`, nothing is killed/, 'and told apart from the one it is not');
+    assert.match(brief, /never a substitute for surfacing a stuck\s+worker/, 'stopping a turn is not handling it');
+    assert.match(brief, /You never `\/exit` a worker on your own initiative\./, 'the older rule is untouched');
+  }
+});
+
 const forgeSectionOf = (forge, human) => forgeSection({ forge, base: 'main', human });
 
 test('the brief is one template literal, and a bare backtick would break the module', async () => {

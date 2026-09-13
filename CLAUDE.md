@@ -962,6 +962,25 @@ the registry's id, which agree except for the beat after a `/clear`, so both spe
 cleared. With it, the button flips in **0.77s** — the next roster refresh, which the
 `changed` event triggers.
 
+**…and the pane does not stop being `working` when the endpoint answers — 57–76ms, and it
+is the whole reason `worker_interrupt` has a beat in it.** Escape is delivered before
+`POST /key` returns, but the TUI has not redrawn, so `parsePane` goes on saying `working`
+while the composer is drawn. Measured on a scratch panel against a working session in the
+sandbox's `alpha`, polled through the real `parsePane`: **57–76ms** from the endpoint's
+answer to the first `idle` read, nine runs, at 220 columns and again at **70** — width made
+no difference here, which is worth knowing because it is the one parser input that usually
+does. So a follow-up message fired the instant the interrupt returns is read by
+`PaneLock#claim` as landing on a busy pane and **queues** — benched, every time, with the
+queue flusher then delivering it at the next roster tick and the worker answering it
+normally. Safe, and still wrong to ship: `queued` is the lead's only signal for "typed or
+waiting", and a flag that says *waiting* in the ordinary case has stopped saying anything.
+`SETTLE_MS` in `mcp/foreman.js` is that window with room over it, and it is a best effort
+rather than a guarantee — a slower redraw queues, which is the same safe path. Note it is
+**not** the ~1.8s spinner window one paragraph down: that one is `idle` read while working,
+this one is `working` read while idle, and they are opposite errors on the same scrape.
+Roster-side, the same runs put the flip off `working` at **482ms–1.6s** — the receipt drop
+plus the next refresh, which is the 0.77s above measured a second way.
+
 **…and the live pane read now decides a claim, which is looser in exactly one measured
 window.** `PaneLock#claim` asks the lock, then reads the pane, and the pane's answer is
 final. The version before it asked the *roster* first (`session.status !== 'idle'`) and only
