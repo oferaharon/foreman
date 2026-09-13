@@ -245,7 +245,10 @@ just stored: a worker whose pane is holding a question reads `blocked`, and one 
 been blocked or silent past the team's timer reads `stuck` and pulses. Rows carry the
 branch, a link to the PR once there is one, and a `✕` that abandons the task behind a
 two-click confirmation — which refuses, with the reason on screen, while that worker has
-anything open in its terminal.
+anything open in its terminal. The lead's own `team_status` tool mirrors this list in its own
+context, but only for open and pending tasks — a closed one comes back as a count plus a
+short recent list, never its full record, so a long-lived team's merged history doesn't ride
+along on every call.
 
 ![The task list: one task blocked with a link to its PR, two pending, one done and carrying
 a deployed pill, one done plan task — each with its state as a chip and its branch
