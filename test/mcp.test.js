@@ -69,6 +69,73 @@ const GROUP_ENTRIES = Array.from({ length: 25 }, (_, i) => ({
   seq: i + 1, ts: i + 1, from: 'beta-main', kind: 'peer', text: `group entry ${i + 1}`, handed: [],
 }));
 
+/*
+ * A second repo, sized like the production bug report: a handful of open/pending tasks
+ * beside a pile of closed ones, each closed record carrying the plumbing (`selfMerge`,
+ * `changed`) that made the old, untrimmed `team_status` unusable at scale. `updatedAt` is
+ * strictly increasing so "the last 10" has one deterministic answer.
+ */
+const BIG_REPO = '/Users/x/Code/Big';
+
+const BIG_OPEN_TASKS = [
+  { id: 'p1', repo: BIG_REPO, state: 'pending', kind: 'build', body: 'Add a retry to the sync job.', updatedAt: 100 },
+  {
+    id: 'o1', repo: BIG_REPO, state: 'working', kind: 'build', branch: 'agent/o1',
+    body: 'Migrate the queue store.', updatedAt: 101, live: { sessionId: 'sess-3', status: 'working' },
+  },
+  { id: 'o2', repo: BIG_REPO, state: 'review', kind: 'build', branch: 'agent/o2', body: 'Tighten the retry backoff.', updatedAt: 102 },
+];
+
+// 25 done, 3 failed, 2 abandoned — 30 closed tasks in all.
+const CLOSED_MIX = [
+  ...Array.from({ length: 25 }, () => 'done'),
+  ...Array.from({ length: 3 }, () => 'failed'),
+  ...Array.from({ length: 2 }, () => 'abandoned'),
+];
+const BIG_CLOSED_TASKS = CLOSED_MIX.map((state, i) => ({
+  id: `c${i + 1}`,
+  repo: BIG_REPO,
+  state,
+  kind: 'build',
+  branch: `agent/c${i + 1}`,
+  pr: 200 + i,
+  // Every real brief opens with a heading — the measured shape of the bug, not a
+  // contrived one (see the `## Why` fixture on task 'one' above).
+  body: `## Why\n\n${'Real work happened here. '.repeat(20)}`,
+  selfMerge: {
+    mergeable: true,
+    checks: 'green',
+    reason: 'x'.repeat(300),
+    evidence: 'y'.repeat(300),
+    suiteQuote: 'z'.repeat(300),
+  },
+  changed: ['server/index.js', 'web/app.js', 'test/mcp.test.js'],
+  updatedAt: 200 + i,
+}));
+
+/**
+ * A minimal mirror of `mcp/foreman.js`'s own `briefOf`/`summarizeTask` — unexported, since
+ * that file is a script over stdio, not a library — kept only so the size test below can
+ * compute what the OLD, untrimmed `team_status` shape would have cost without duplicating
+ * the fix's own code path. Same spirit as `memberMatches` below.
+ */
+function briefOfMirror(body) {
+  const lines = String(body || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const isStructural = (l) =>
+    /^#{1,6}(\s|$)/.test(l) || /^(-{3,}|\*{3,}|_{3,})$/.test(l) || /^(?:[-*+]|\d+[.)])$/.test(l);
+  const line = (lines.find((l) => !isStructural(l)) ?? lines[0] ?? '')
+    .replace(/^(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)+/, '');
+  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
+}
+function summarizeTaskMirror(t) {
+  return {
+    id: t.id, kind: t.kind, state: t.state, branch: t.branch, pr: t.pr, model: t.model,
+    modelReason: t.modelReason, startedBy: t.startedBy, staleBase: t.staleBase,
+    brief: briefOfMirror(t.body), selfMerge: t.selfMerge, live: t.live,
+    deploy: t.deploy && { state: t.deploy.state, deployed: t.deploy.deployed },
+  };
+}
+
 /** The store's own `memberMatches`, mirrored — the stub is the contract here, the way it
  *  mirrors the room endpoint's 200 cap above. */
 const memberMatches = (m, key) => m.tmuxSession === key || m.paneId === key || m.name === key;
@@ -158,6 +225,8 @@ test.before(async () => {
                 live: { sessionId: 'sess-1', status: 'needs-decision' },
               },
               { id: 'other-repo', repo: '/elsewhere', state: 'working', live: null },
+              ...BIG_OPEN_TASKS,
+              ...BIG_CLOSED_TASKS,
             ],
           }),
         );
@@ -366,6 +435,61 @@ test('team_status brief skips a leading heading instead of previewing it verbati
   const [row] = JSON.parse(res.result.content[0].text).tasks;
   assert.notEqual(row.brief, '## Why', 'a body opening with a heading must not preview as the heading');
   assert.ok(!row.brief.startsWith('#'), 'the heading marker is gone too, not just skipped past');
+});
+
+test('team_status trims closed tasks to counts + a recent tail, and keeps open/pending in full', async () => {
+  const bigLead = makeChild({ FOREMAN_ROLE: 'lead', FOREMAN_REPO: BIG_REPO });
+  try {
+    const res = await bigLead.rpc({
+      jsonrpc: '2.0', id: 900, method: 'tools/call',
+      params: { name: 'team_status', arguments: {} },
+    });
+    const out = JSON.parse(res.result.content[0].text);
+
+    // Open + pending: present, in full, exactly as before this task existed.
+    assert.deepEqual(out.tasks.map((t) => t.id).sort(), ['o1', 'o2', 'p1'], 'the 3 open/pending tasks, and only them');
+    assert.equal(out.tasks.find((t) => t.id === 'p1').state, 'pending');
+    assert.deepEqual(
+      out.tasks.find((t) => t.id === 'o1').live,
+      { sessionId: 'sess-3', status: 'working' },
+      'an open task keeps its live status',
+    );
+
+    // Closed: counted, not carried — none of the 30 `cN` ids leak into `tasks`.
+    assert.ok(!out.tasks.some((t) => t.id.startsWith('c')), 'closed tasks are not in the full list');
+    assert.equal(out.closed.total, 30);
+    assert.equal(out.closed.done, 25);
+    assert.equal(out.closed.failed, 3);
+    assert.equal(out.closed.abandoned, 2);
+    assert.equal(out.closed.recent.length, 10, 'the last 10, not all 30');
+    assert.deepEqual(
+      out.closed.recent.map((r) => r.id),
+      ['c30', 'c29', 'c28', 'c27', 'c26', 'c25', 'c24', 'c23', 'c22', 'c21'],
+      'newest by updatedAt first',
+    );
+    for (const r of out.closed.recent) {
+      assert.deepEqual(
+        Object.keys(r).sort(), ['id', 'pr', 'state', 'updatedAt'],
+        'a recent record carries exactly these four fields — no brief, no selfMerge, no changed',
+      );
+    }
+
+    // Size: what the OLD shape (every one of the 33 scoped tasks mapped through the full
+    // per-task trim) would have cost, versus what the new one actually sends. A quarter is
+    // a generous bound — measured, the real ratio here is over 15x — chosen so a regression
+    // back to "map everything" trips it while leaving room for incidental field changes.
+    const oldShapeSize = JSON.stringify({
+      repo: BIG_REPO,
+      tasks: [...BIG_OPEN_TASKS, ...BIG_CLOSED_TASKS].map(summarizeTaskMirror),
+    }).length;
+    const actualSize = JSON.stringify(out).length;
+    assert.ok(
+      actualSize < oldShapeSize / 4,
+      `expected the trimmed shape (${actualSize} chars) under a quarter of the untrimmed one (${oldShapeSize} chars)`,
+    );
+  } finally {
+    bigLead.child.kill();
+  }
 });
 
 test('room_read with no cursor returns a tail, not the whole room', async () => {

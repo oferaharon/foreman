@@ -3,6 +3,7 @@ import readline from 'node:readline';
 
 import { MAX_MESSAGE_TEXT } from '../server/envelope.js';
 import { humanName } from '../server/human-name.js';
+import { TASK_STATES, OPEN_STATES } from '../server/tasks.js';
 
 /**
  * The team's hands — a stdio MCP server over the panel's HTTP API, serving three very
@@ -252,6 +253,26 @@ function summarizeTask(t) {
   };
 }
 
+/**
+ * Everything not `pending` and not in `OPEN_STATES` — a task nobody is waiting on any
+ * more. Derived rather than a literal `['done', 'failed', 'abandoned']` so a future state
+ * addition to `TASK_STATES` lands here or in `OPEN_STATES` by the same rule the rest of
+ * the panel already uses, never by a copy of the list going stale in this file too.
+ */
+const CLOSED_STATES = TASK_STATES.filter((s) => s !== 'pending' && !OPEN_STATES.has(s));
+
+/**
+ * A closed task, trimmed to the four fields worth naming once it is done: which one, what
+ * it ended as, where its PR landed, and when. Everything else on a closed record — the
+ * brief, `selfMerge`, `changed`, the deploy tracker — is exactly what made `team_status`
+ * unusable at scale (256 tasks, 243 of them done, came back as 190k characters): a merged
+ * task's full record is worth reading once, off the panel's own `tasks.json`, not on every
+ * status call for the rest of the project's life.
+ */
+function closedRecord(t) {
+  return { id: t.id, state: t.state, pr: t.pr, updatedAt: t.updatedAt };
+}
+
 /** Resolve the lead's chosen options (labels or indexes) against the live box, and build
  *  the `expect` list so the endpoint can still refuse a box that moved. */
 function resolvePicks(box, options) {
@@ -483,12 +504,26 @@ const LEAD_TOOLS = [
   {
     name: 'team_status',
     description:
-      'The whole team at a glance: every task on this repo with its stored state and, when the worker is alive, its live status, model, and whether it is waiting on a human. Each task carries `brief` — a short preview of its recorded body, not the whole thing — since this is a roster, not a document store; read the full brief off the panel’s own `tasks.json` when one actually matters. The list includes PENDING tasks — ones recorded with task_add that have no worker, no branch and no session — so this, not your own memory, is where the backlog lives; it survives your /clear and your memory does not. Call this before reporting status or deciding anything.',
+      'The team at a glance: `tasks` is every OPEN task on this repo (queued, dispatched, working, review) plus every PENDING one — ones recorded with task_add that have no worker, no branch and no session — each with its stored state and, when the worker is alive, its live status, model, and whether it is waiting on a human. Each carries `brief`, a short preview of its recorded body, not the whole thing. PENDING tasks are why this, not your own memory, is where the backlog lives; it survives your /clear and your memory does not. Closed tasks (done, failed, abandoned) are NOT listed here in full — `closed` gives you `{total, done, failed, abandoned, recent}`, `recent` being the last 10 by update time as `{id, state, pr, updatedAt}` and nothing more. A closed task\'s full record — brief, selfMerge, changed paths — lives in the panel\'s own `tasks.json` (or `GET /api/team/tasks`), not here: a team with years of merged history would otherwise hand you its whole shut record on every call. Call this before reporting status or deciding anything.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => {
       const { tasks } = await api('GET', '/api/team/tasks');
       const scoped = REPO ? tasks.filter((t) => t.repo === REPO) : tasks;
-      return { repo: REPO, tasks: scoped.map(summarizeTask) };
+      const open = scoped.filter((t) => !CLOSED_STATES.includes(t.state));
+      const closed = scoped.filter((t) => CLOSED_STATES.includes(t.state));
+      const counts = Object.fromEntries(CLOSED_STATES.map((s) => [s, 0]));
+      for (const t of closed) counts[t.state] = (counts[t.state] || 0) + 1;
+      const RECENT = 10;
+      const recent = closed
+        .slice()
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, RECENT)
+        .map(closedRecord);
+      return {
+        repo: REPO,
+        tasks: open.map(summarizeTask),
+        closed: { total: closed.length, ...counts, recent },
+      };
     },
   },
   {

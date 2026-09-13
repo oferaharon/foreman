@@ -2330,9 +2330,10 @@ a maintainer's state file is not a code change's call, and leaving it makes a re
 the middle rung between an issue on a tracker and a dispatched worker: added via `task_add`,
 promoted only on a second, explicit yes via `task_start`. Every task row opens a read-only
 brief modal on click, showing a planner's plan alongside its brief where one exists and
-rendering both as markdown rather than raw text. The lead's own `room_read` / `team_status`
-return a tail rather than the whole log, so a long-running lead's context doesn't fill up on
-its own room.
+rendering both as markdown rather than raw text. The lead's own `room_read` returns a tail
+rather than the whole log, and `team_status` the same for closed tasks — open and pending
+ones in full, `done`/`failed`/`abandoned` as counts plus a 10-record recent list — so a
+long-running lead's context doesn't fill up on its own history either way.
 
 **A known gap: there is no "refresh brief" control.** A brief change needs a panel restart
 *and* a lead relaunch to take effect. `plannerBrief` reaches a planner at its next dispatch,
