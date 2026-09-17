@@ -4,6 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+import { bandEntries } from '../web/rooms-band.js';
+import { byRecent } from '../web/m/recent.js';
 import {
   archiveQuestion,
   archiveWord,
@@ -237,6 +239,122 @@ test('the body signature is the list signature, one spelling', () => {
   // Two functions answering "has this list changed" is how a row stops repainting on a real
   // change; `roomsListView` asks `roomsSig` rather than assembling its own.
   assert.equal(roomsListView([room()]).sig, `rm:${roomsSig([room()], { archivedOpen: false })}`);
+});
+
+/* ═══════════════════════════════════════════════════ the order (real) ═══ */
+
+/*
+ * Newest first on the phone, and only on the phone — the maintainer's ruling of 2026-09-16:
+ * *"On mobile only I'd like the standalone and rooms lists to be sorted by recent at the
+ * top."* The desktop's rail band keeps the store's creation order and `test/rooms-band.test.js`
+ * holds it there; what these pin is that the phone's sort is real, is applied to the one array
+ * both the signature and the nodes read, and does not reach across the archived fold.
+ */
+
+/** The room ids the tab draws, in order, read back out of the body's own signature — which is
+ *  the string the repaint guard actually compares, rather than a re-derivation of it. */
+const drawnIds = (list, opts) =>
+  roomsListView(list, opts)
+    .sig.replace(/^rm:/, '')
+    .split('~')
+    .map((row) => row.split('|'))
+    .filter((f) => f[0] === 'room')
+    .map((f) => f[1]);
+
+test('the rooms list draws newest first', () => {
+  const list = [
+    room({ id: 'old', name: 'old', lastAt: 10 }),
+    room({ id: 'new', name: 'new', lastAt: 30 }),
+    room({ id: 'mid', name: 'mid', lastAt: 20 }),
+  ];
+  assert.deepEqual(drawnIds(list), ['new', 'mid', 'old']);
+  // Whatever order the store handed them over in — the sort is the list's, not the frame's.
+  assert.deepEqual(drawnIds(list.slice().reverse()), ['new', 'mid', 'old']);
+});
+
+test('two rooms that genuinely tie are broken by id, not left to the frame', () => {
+  const tie = [room({ id: 'beta', name: 'b', lastAt: 7 }), room({ id: 'alpha', name: 'a', lastAt: 7 })];
+  assert.deepEqual(drawnIds(tie), ['alpha', 'beta']);
+  assert.deepEqual(drawnIds(tie.slice().reverse()), ['alpha', 'beta'], 'and it does not depend on the input order');
+});
+
+test('a room nobody has spoken in sorts to the bottom, never anywhere random', () => {
+  const list = [
+    room({ id: 'quiet', name: 'quiet', lastAt: null }),
+    room({ id: 'spoken', name: 'spoken', lastAt: 5 }),
+    room({ id: 'zero', name: 'zero', lastAt: 0 }),
+  ];
+  // `lastAt` is `null` on a room the store has never had a post in — the ordinary state for a
+  // room somebody made a minute ago, not an edge case.
+  assert.deepEqual(drawnIds(list), ['spoken', 'quiet', 'zero']);
+});
+
+test('recency orders within the fold’s sections and never across them', () => {
+  const list = [
+    room({ id: 'live-old', name: 'live old', lastAt: 10 }),
+    room({ id: 'arch-new', name: 'arch new', lastAt: 99, archivedAt: 4 }),
+    room({ id: 'live-new', name: 'live new', lastAt: 20 }),
+    room({ id: 'arch-old', name: 'arch old', lastAt: 1, archivedAt: 4 }),
+  ];
+
+  // Through the body itself, with the fold shut — which is where it starts. The archived
+  // rooms are behind it and the live ones are newest first, the newest of all being archived.
+  assert.deepEqual(drawnIds(list), ['live-new', 'live-old']);
+
+  /*
+   * With the fold open. `archivedOpen` is this module's own state and not an argument, so the
+   * open case is driven through the two lines `roomsListView` is — the sort, then
+   * `bandEntries` — rather than through a parameter the function does not have. The test
+   * above pins that those really are its two lines.
+   */
+  const ordered = list.slice().sort(byRecent('lastAt'));
+  const open = bandEntries(ordered, { archivedCollapsed: false })
+    .filter((e) => e.kind === 'room')
+    .map((e) => e.room.id);
+  assert.deepEqual(open, ['live-new', 'live-old', 'arch-new', 'arch-old']);
+  // The point of that list: `arch-new` is the most recent room there is and stays under every
+  // live one. Archiving is a section; recency orders inside a section and never lifts across.
+});
+
+test('a reorder repaints, and a stamp that moves nothing does not', () => {
+  /*
+   * The trap in this whole change. The home signature deliberately carries no raw timestamp,
+   * so what has to make a *reorder* repaint is the order itself — and it does, by
+   * construction: `roomsSig` spells each room's id out in list order.
+   */
+  const before = [room({ id: 'a', name: 'a', lastAt: 20 }), room({ id: 'b', name: 'b', lastAt: 10 })];
+  const after = [room({ id: 'a', name: 'a', lastAt: 20 }), room({ id: 'b', name: 'b', lastAt: 30 })];
+  assert.notEqual(
+    roomsListView(before).sig,
+    roomsListView(after).sig,
+    'b overtaking a must get through the guard',
+  );
+  assert.deepEqual(drawnIds(after), ['b', 'a']);
+
+  // …and the other half: the room already at the top saying something again moves nothing a
+  // reader could see, and must not repaint the list under a thumb.
+  const bumped = [room({ id: 'a', name: 'a', lastAt: 999 }), room({ id: 'b', name: 'b', lastAt: 10 })];
+  assert.equal(roomsListView(before).sig, roomsListView(bumped).sig);
+});
+
+test('one array, sorted once — the signature and the nodes cannot disagree', () => {
+  /*
+   * The sort is in `roomsListView`, applied where `list` is made, so `roomsSig(list)` and
+   * `bandEntries(list)` are two reads of one ordered array. A second sort inside `roomsSig`
+   * would be a second place the order is decided, and the two would agree until they did not.
+   */
+  const body = between(roomsCode, 'export function roomsListView', 'function listHead');
+  assert.match(body, /const list = \(Array\.isArray\(rooms\) \? rooms : \[\]\)\.slice\(\)\.sort\(byRecent\('lastAt'\)\);/);
+  assert.equal(roomsCode.match(/\.sort\(/g).length, 1, 'exactly one sort in the module');
+  assert.ok(
+    !/\.sort\(/.test(between(roomsCode, 'export function roomsSig', 'export function roomsListView')),
+    'and it is not in the signature',
+  );
+  // The phone never asks the shared module for an order — there is no option to ask with.
+  assert.ok(
+    !/bandEntries\([^)]*recent/.test(roomsCode),
+    'the phone sorts what it hands over; it does not opt the shared module in',
+  );
 });
 
 /* ═══════════════════════════════════════════════════ the composer (real) ═══ */

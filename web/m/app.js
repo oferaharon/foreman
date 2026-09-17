@@ -63,6 +63,10 @@ import { roomParticipants, rowName } from '../rooms-create.js';
    and a worker is found where it was last time. See `workerLines`. */
 import { orderWorkers } from '../worker-order.js';
 import { mountLead, updateLead } from './lead.js';
+/* Newest first, on the phone and only on the phone — the maintainer's ruling of 2026-09-16.
+   One comparator for both lists that take it, so the Standalones tab and the Rooms tab cannot
+   end up disagreeing about the tie-break or about where a missing stamp lands. */
+import { byRecent } from './recent.js';
 /* The Rooms tab's list and the room screen. Its own module with its own state — a phone
    shows one thing at a time, and that stays true only if the second screen is a second
    module rather than a `kind` field bolted onto the first one's `view`. */
@@ -1069,28 +1073,28 @@ function standaloneRows() {
 }
 
 /**
- * The same rows, in the order the tab draws them.
+ * The same rows, in the order the tab draws them: **most recent first.**
  *
  * Membership and order are kept apart on purpose: `roleRefusal` asks the *membership*
  * function, so nothing about a sort can widen or narrow who may be opened.
  *
- * Sorted by facts that do not move — the launch folder, then the name, then the id. The
- * roster's own order is urgency-first (blocked, then replied-and-unread, then recency),
- * which is right for the desktop rail and wrong under a thumb: the row you are reaching for
- * jumps to the top the instant something else blocks. The Leads tab sorts by name for the
- * same reason (`loadTeams`) — an order is a promise about where a row will be. The id
- * breaks the last tie so two sessions sharing a name in one folder cannot swap places
- * between frames.
+ * Sorted by the roster's `lastActivity` — the transcript's last timestamp, or the pane's
+ * creation time for a row that has not spoken yet — newest at the top, with the id breaking
+ * a tie so two sessions sharing a millisecond cannot swap places between frames, and a
+ * missing or zero stamp sorting to the bottom. `byRecent` is the one spelling of all three
+ * rules and the Rooms tab asks the same function.
+ *
+ * **This list used to be ordered by facts that do not move** — folder, then name, then id —
+ * and the comment here argued for that at length: the roster's own order is urgency-first, so
+ * a recency order means the row you are reaching for can slide away the instant another
+ * session says something. The maintainer overruled it on **2026-09-16**, for this list and the
+ * Rooms list, on the phone only: *"On mobile only I'd like the standalone and rooms lists to
+ * be sorted by recent at the top."* The cost is exactly the one that reasoning named and it
+ * was accepted; the Leads tab still sorts by name (`loadTeams`) and the desktop rail is
+ * untouched.
  */
 function standaloneSorted() {
-  return standaloneRows()
-    .slice()
-    .sort(
-      (a, b) =>
-        String(a.project || '').localeCompare(String(b.project || ''), 'en') ||
-        rowName(a).localeCompare(rowName(b), 'en') ||
-        String(a.id).localeCompare(String(b.id), 'en'),
-    );
+  return standaloneRows().slice().sort(byRecent('lastActivity'));
 }
 
 /**
@@ -1331,6 +1335,15 @@ function standalonesView() {
   // Everything a reader could see, as rendered strings and booleans. `need` is in it beside
   // `dot` because the two say different things: the dot is whether it is lit, `need` is what
   // it says when it is touched, and the trust gate changes only the second.
+  //
+  // **The order is in here too, and only by construction** — this is an array of arrays, in
+  // list order, each beginning with the row's id, so two rows swapping places spell a
+  // different string and the guard lets the repaint through. That is what makes a recency
+  // order (`standaloneSorted`, since 2026-09-16) safe without a raw `lastActivity` anywhere
+  // near this signature: a stamp advancing without moving a row is not a change a reader
+  // could see, and a stamp in here would repaint on almost every roster frame. Keep the id
+  // first and keep the shape an ordered array; a `Set`, a sort, or a keyed object here would
+  // silently stop the list ever reordering again.
   const sig =
     'sa::' +
     JSON.stringify(rows.map((r) => [r.id, r.name, r.folder, r.word, r.dot, r.need, r.working]));

@@ -52,7 +52,11 @@
  *
  * **Only rendered strings in a signature.** No raw `lastAt`, no `Date.now()` — the home
  * screen's guard is what stops the list being rebuilt under a thumb twice a second, and a
- * timestamp in it retires the guard entirely.
+ * timestamp in it retires the guard entirely. Since the list became recency-ordered
+ * (2026-09-16) that rule has a second half worth stating: what makes the *reorder* repaint is
+ * that `roomsSig` spells every room's id out in list order, so two rooms swapping places
+ * spell a different string while a `lastAt` advancing at the top of the list spells the same
+ * one. The order is in the signature; the stamp that produced it is not.
  *
  * **Membership is who may type into whose terminal**, which is why the picker is an
  * allow-list on role and never "not a worker": `roomParticipants` is asked rather than
@@ -107,6 +111,10 @@ import {
   roomOrdered,
 } from '../rooms-pane.js';
 import { colourFor } from '../session-colour.js';
+/* Newest first, the phone's own order — see `roomsListView`. The same comparator the
+   Standalones tab takes, so the two lists cannot disagree about the tie-break or about where
+   a room nobody has spoken in lands. */
+import { byRecent } from './recent.js';
 
 /** Close enough to the bottom to count as caught up, in px. `lead.js`'s own figure — one
  *  device, one idea of "at the bottom". */
@@ -170,6 +178,11 @@ export function memberStrip(room, limit = STRIP_NAMES) {
  * Joined with real punctuation — `|` within a row, `~` between them. `mergeSig` on the
  * desktop once joined with what read in every editor as an empty string and was three
  * literal control bytes, so two different lists could spell one signature.
+ *
+ * It describes **what it is given, in the order it is given it** — the recency sort lives in
+ * `roomsListView` and is applied once, to the one array this and the nodes both read. That is
+ * deliberate rather than an omission: a sort in here as well would be a second place for the
+ * order to be decided, and the two would agree until the day they did not.
  */
 export function roomsSig(rooms = [], { archivedOpen: open = false } = {}) {
   return bandEntries(rooms, { archivedCollapsed: !open })
@@ -210,7 +223,26 @@ export function roomsListView(rooms, { onOpen, onChange, sessions = () => [] } =
     return { sig: 'rm:loading', startable: 0, nodes: () => [note('Loading rooms…')] };
   }
 
-  const list = Array.isArray(rooms) ? rooms : [];
+  /*
+   * **Newest first, and sorted here rather than in `bandEntries`.**
+   *
+   * The maintainer's ruling of 2026-09-16 — *"On mobile only I'd like the standalone and
+   * rooms lists to be sorted by recent at the top"* — is about the phone. `bandEntries` and
+   * `partitionRooms` are shared with the desktop's rail band, whose own header explains at
+   * length why it keeps the store's creation order: a band that reordered itself every time
+   * anybody spoke would take a row out from under a cursor on its way to press it. So the
+   * phone sorts the array it hands over and the shared module is untouched, which is also the
+   * only version of this that is provable — there is no option to pass and therefore no way
+   * for the desktop to be handed one by accident.
+   *
+   * Sorting *before* the partition keeps the archived fold exactly where it was:
+   * `partitionRooms` preserves the order of what it is given, so recency orders **within**
+   * each section and never lifts an archived room above a live one.
+   *
+   * One array, sorted once, and both the signature below and the nodes beside it read it —
+   * two sorts of the same list is two places to disagree.
+   */
+  const list = (Array.isArray(rooms) ? rooms : []).slice().sort(byRecent('lastAt'));
   if (!list.length) {
     return {
       sig: 'rm:empty',

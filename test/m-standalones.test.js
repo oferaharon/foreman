@@ -4,6 +4,11 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+/* The phone's one comparator, driven for real. `web/m/app.js` cannot be imported here, which
+   is exactly why the sort does not live inside it any more: a tie-break that can only be read
+   out of the source is a tie-break nothing ever runs. */
+import { byRecent, recentStamp } from '../web/m/recent.js';
+
 /*
  * The phone's Standalones tab, and the session screen behind it.
  *
@@ -40,6 +45,16 @@ const app = text('web/m/app.js');
 const lead = text('web/m/lead.js');
 const css = text('web/m/m.css');
 
+/** The source with its prose taken out — `test/rooms-band.test.js`'s helper, for its reason.
+ *  Several checks below are *negative* ("no raw timestamp in the signature") and the phrase
+ *  they forbid is exactly the word the comment recording the rule has to use. */
+const strip = (src) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*)/.test(l))
+    .join('\n');
+
 /* ──────────────────────────────────────────────────── the list is a allow-list ─── */
 
 test('the Standalones list is roomParticipants minus the leads, and nothing else', () => {
@@ -58,14 +73,71 @@ test('the Standalones list is roomParticipants minus the leads, and nothing else
   assert.ok(!/workerOf\s*==\s*null/.test(app), 'and no spelling of it off workerOf either');
 });
 
-test('the order is the list’s own and cannot change who is in it', () => {
-  // Folder, then name, then id — all facts that do not move. The roster's order is
-  // urgency-first, which would jump a row to the top the instant something else blocked.
-  assert.match(app, /function standaloneSorted\(\) \{\s*return standaloneRows\(\)\s*\.slice\(\)/);
-  assert.match(app, /String\(a\.project \|\| ''\)\.localeCompare/);
-  assert.match(app, /String\(a\.id\)\.localeCompare\(String\(b\.id\), 'en'\)/);
+test('the order is recency, and it still cannot change who is in it', () => {
+  /*
+   * Newest first since the maintainer's ruling of **2026-09-16**: *"On mobile only I'd like
+   * the standalone and rooms lists to be sorted by recent at the top."* This list was ordered
+   * by folder, then name, then id, and the docstring argued for that at length — the roster's
+   * own order is urgency-first, so recency means the row you are reaching for can slide away
+   * the instant another session speaks. Overruled, deliberately, and the cost accepted.
+   *
+   * What has *not* changed is the split: this is the order, `standaloneRows` is the
+   * membership, and `roleRefusal` asks the second of them. A sort can never widen who may be
+   * opened.
+   */
+  assert.match(
+    app,
+    /function standaloneSorted\(\) \{\s*return standaloneRows\(\)\.slice\(\)\.sort\(byRecent\('lastActivity'\)\);\s*\}/,
+  );
+  assert.match(app, /import \{ byRecent \} from '\.\/recent\.js';/);
   // `.slice()` first, so the roster array the shell holds is never sorted in place.
   assert.ok(!/standaloneRows\(\)\.sort\(/.test(app), 'the roster is copied before it is sorted');
+  // And the old order is gone rather than left behind as a second opinion.
+  assert.ok(!/String\(a\.project \|\| ''\)\.localeCompare/.test(app), 'the folder sort is gone');
+});
+
+test('newest first, ties broken by id, and a missing stamp at the bottom', () => {
+  const row = (id, lastActivity) => ({ id, lastActivity });
+  const order = (rows) => rows.slice().sort(byRecent('lastActivity')).map((r) => r.id);
+
+  // Newest first, whatever order the roster handed them over in.
+  assert.deepEqual(order([row('a', 10), row('b', 30), row('c', 20)]), ['b', 'c', 'a']);
+  assert.deepEqual(order([row('b', 30), row('c', 20), row('a', 10)]), ['b', 'c', 'a']);
+
+  // A genuine tie is broken by the id, so two rows cannot swap places between frames. Both
+  // input orders answer the same thing — which is the whole of what "deterministic" means
+  // here, and what a comparator returning 0 would fail.
+  assert.deepEqual(order([row('beta', 7), row('alpha', 7)]), ['alpha', 'beta']);
+  assert.deepEqual(order([row('alpha', 7), row('beta', 7)]), ['alpha', 'beta']);
+
+  // A missing, zero or unparseable stamp sorts to the **bottom**, not anywhere random — and
+  // those rows are then ordered among themselves by id.
+  assert.deepEqual(
+    order([row('gone'), row('live', 5), row('zero', 0), row('junk', 'soon'), row('null', null)]),
+    ['live', 'gone', 'junk', 'null', 'zero'],
+  );
+  assert.equal(recentStamp(undefined), 0);
+  assert.equal(recentStamp(null), 0);
+  assert.equal(recentStamp(0), 0);
+  assert.equal(recentStamp(-1), 0, 'a negative stamp is nonsense and lands with the missing');
+  assert.equal(recentStamp(NaN), 0);
+  assert.equal(recentStamp('1700000000000'), 1700000000000, 'a numeric string still counts');
+  assert.equal(recentStamp(1700000000000), 1700000000000);
+});
+
+test('one comparator, so the two phone lists cannot disagree about recency', () => {
+  // The Rooms tab takes the same function on its own field. Two spellings of a tie-break is
+  // two tie-breaks, which is the lesson `isLeadName` keeps paying for.
+  assert.match(text('web/m/rooms.js'), /import \{ byRecent \} from '\.\/recent\.js';/);
+  assert.match(text('web/m/rooms.js'), /\.sort\(byRecent\('lastAt'\)\)/);
+  const recent = text('web/m/recent.js');
+  assert.equal(recent.match(/export function/g).length, 2, 'the stamp and the comparator');
+  // Pure: it is imported in node above, so anything reaching for a browser would have thrown
+  // on import — this pins that it stays that way.
+  assert.ok(
+    !/document|window|localStorage/.test(strip(recent)),
+    'the comparator module touches no browser API',
+  );
 });
 
 test('the tab mark and the row ask the same question, and it is needsKind', () => {
@@ -210,7 +282,17 @@ test('the row joins the home signature as rendered strings', () => {
   // A raw stamp in there would differ on almost every roster frame and retire the guard.
   const view = app.slice(app.indexOf('function standalonesView('), app.indexOf('function roomsView('));
   assert.ok(view.length > 200, 'standalonesView must still exist, above roomsView');
-  assert.ok(!/lastActivity/.test(view), 'no raw timestamp in the standalone signature');
+  assert.ok(
+    !/lastActivity/.test(strip(view)),
+    'no raw timestamp in the standalone signature',
+  );
+  /*
+   * …and what makes the *reorder* repaint, now that the order moves: the signature is an
+   * array of arrays in list order, each beginning with the row's id, so two rows swapping
+   * places spell a different string. A stamp advancing without moving a row spells the same
+   * one, which is correct — nothing a reader could see has changed.
+   */
+  assert.match(view, /JSON\.stringify\(rows\.map\(\(r\) => \[r\.id,/);
   // The nodes are a thunk, so nothing is built for a paint the guard turns away.
   assert.match(view, /nodes: \(\) => rows\.map\(sessionNode\)/);
 });

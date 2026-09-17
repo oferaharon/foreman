@@ -58,6 +58,16 @@ export function memberLabel(m) {
  * which is stable across every frame; sorting on `lastAt` would make the band reorder
  * itself under a cursor every time anybody said anything, which is the cost the whole
  * patch-in-place rule exists to avoid.
+ *
+ * **The phone does sort, and the Mac does not — say it that way round.** Since the
+ * maintainer's ruling of 2026-09-16 the phone's Rooms tab draws its list newest first, and it
+ * does so by sorting the array it hands to `bandEntries` (`roomsListView`, `web/m/rooms.js`),
+ * never by asking this module for it. There is deliberately **no option to pass**: an opt-in
+ * flag here is a flag the rail could one day be handed by accident, and the whole value of
+ * the split is that the desktop's order cannot be changed from a phone-side edit. What this
+ * function does carry for both of them is that the partition preserves the order it is given,
+ * so the phone's sort orders *within* the open and archived sections and never lifts an
+ * archived room above a live one.
  */
 export function partitionRooms(rooms = []) {
   const list = Array.isArray(rooms) ? rooms : [];
