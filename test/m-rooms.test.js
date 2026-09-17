@@ -260,8 +260,23 @@ test('an empty archived room does not offer the box it has not got', () => {
   assert.doesNotMatch(quietText(room({ archivedAt: 5 })), /type below/);
   assert.match(quietText(room({ archivedAt: 5 })), /nothing more can be/);
   assert.match(quietText(null, { answered: true }), /no room with that id/);
-  // Before the server has answered, nothing is claimed either way.
-  assert.match(quietText(null, { answered: false }), /Nothing said in here yet/);
+  /*
+   * Before the server has answered, nothing is claimed either way — and that now means
+   * **null**, not the ordinary sentence. This assertion used to read the other way while
+   * the comment above it read this way, and the comment was right: an empty `entries` at
+   * mount is a room we have not been told about, so "Nothing said in here yet" over a room
+   * with a hundred lines in it was the panel showing something wrong, and it was visible
+   * (measured on a scratch panel over loopback: the sentence up at 14.9ms, the entries
+   * replacing it at 19.8ms).
+   *
+   * It also makes this function agree with `composerRefusal` one test down, which has
+   * always answered `null` for the unanswered case. Two functions describing one screen and
+   * disagreeing about one flag is the very thing the test this sits inside was written for.
+   * `test/m-transcript-empty.test.js` holds the whole rule, this screen and the transcript
+   * together.
+   */
+  assert.equal(quietText(null, { answered: false }), null);
+  assert.equal(quietText(room(), { answered: false }), null, 'a real room, still unanswered');
 });
 
 test('an id that names nothing is a third answer, not an empty room', () => {
