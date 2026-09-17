@@ -200,6 +200,21 @@ export function mountLead(host, ctx) {
     kind: ctx.kind === 'session' ? 'session' : 'lead',
     id: ctx.sessionId,
     messages: [],
+    /*
+     * Whether the `transcript` frame has landed — which is a different fact from
+     * `messages.length === 0` and is the only thing that can tell "this session has said
+     * nothing" from "we have not been told yet".
+     *
+     * Without it the mount below paints an empty list as the empty *state*, so every
+     * session opened on this phone claimed for one socket round trip to have no history
+     * — measured on a scratch panel at 13–39ms over loopback, and a LAN round trip plus a
+     * transcript window is a good deal more than that, which is what makes it a visible
+     * second paint rather than a theoretical one. It is the same three-state rule
+     * `standalonesView`, `leadsView` and `roomsListView` already keep one file over:
+     * `null` is not loaded, `[]` is loaded and empty, and only the second may be said out
+     * loud.
+     */
+    loaded: false,
     hasEarlier: false,
     follow: true,
     tab: 'chat',
@@ -227,6 +242,11 @@ export function mountLead(host, ctx) {
     if (msg.sessionId !== ctx.sessionId) return;
     view.messages = msg.messages || [];
     view.hasEarlier = Boolean(msg.hasEarlier);
+    // The one frame that answers how much history there is, so the one place this is set.
+    // `messages` and `earlier` both carry a *part* of it and neither can say the list is
+    // complete; a second writer here would be a second opinion on the only question the
+    // empty state below is allowed to answer.
+    view.loaded = true;
     view.error = null;
     // A `transcript` frame is either the first paint or a re-subscribe after the socket
     // came back. Both want the newest message, so both pin to the bottom.
@@ -1472,7 +1492,14 @@ function renderStream({ pin = false } = {}) {
     if (node) frag.append(node);
   }
 
-  if (!view.messages.length && !view.error) {
+  /*
+   * `view.loaded` and not just the count: an empty list before the frame lands is silence,
+   * not a fact about the session. Nothing is drawn in that window on purpose — the header's
+   * own connection indicator is what says a socket is down, and a "loading…" line here
+   * would only trade one flash of text for another. Prefer showing nothing over showing
+   * something wrong.
+   */
+  if (view.loaded && !view.messages.length && !view.error) {
     const empty = document.createElement('div');
     empty.className = 'm-lead-empty';
     empty.textContent = 'Nothing said yet. Type below and it starts here.';

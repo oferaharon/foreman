@@ -880,7 +880,14 @@ function renderLog() {
   const entries = roomOrdered(view.entries);
 
   if (!entries.length) {
-    el.inner.replaceChildren(quiet());
+    /*
+     * `quiet()` answers null until the `group-room` frame has landed, and an empty log is
+     * then drawn as an empty box rather than as a sentence — see `quietText`. The count
+     * bookkeeping below is unchanged either way: zero entries are zero entries whether or
+     * not we have been told so.
+     */
+    const box = quiet();
+    el.inner.replaceChildren(...(box ? [box] : []));
     view.painted = 0;
     view.unseen = 0;
     paintNew();
@@ -917,15 +924,34 @@ function renderLog() {
  * over a composer that had correctly refused to exist.
  */
 export function quietText(room, { answered = true } = {}) {
-  if (answered && !room) return 'There is no room with that id. It may have been opened from a stale link.';
+  /*
+   * **Null, not a sentence, until the frame has landed.** `mountRoom` paints before the
+   * `group-room` frame arrives — deliberately, because everything under it measures itself
+   * — and `entries` is `[]` at that moment for a room with a hundred lines in it as much as
+   * for one with none. Saying *"Nothing said in here yet"* there is the panel showing
+   * something wrong, and it is visible: measured on a scratch panel over loopback, the
+   * sentence went up at 14.9ms and the entries replaced it at 19.8ms, and the phone reaches
+   * this panel over the LAN.
+   *
+   * This is the same three-state rule `standalonesView`, `leadsView` and `roomsListView`
+   * keep — `null` is not told yet, `[]` is a fact — and `renderStream`'s `view.loaded` in
+   * `lead.js` is the transcript's half of the identical fix. `answered` already existed
+   * and only gated the *"no room with that id"* branch; it decides the whole answer now,
+   * because two rules about one flag is how one of them stops being applied.
+   */
+  if (!answered) return null;
+  if (!room) return 'There is no room with that id. It may have been opened from a stale link.';
   if (room?.archivedAt) return 'Nothing was said in here before it was archived, and nothing more can be.';
   return 'Nothing said in here yet. Anything a member posts — or anything you type below — is typed into every other member’s terminal.';
 }
 
+/** The box an empty log stands under, or **null** while there is nothing honest to say. */
 function quiet() {
+  const text = quietText(view.room, { answered: view.answered });
+  if (text === null) return null;
   const box = document.createElement('div');
   box.className = 'm-room-quiet';
-  box.textContent = quietText(view.room, { answered: view.answered });
+  box.textContent = text;
   return box;
 }
 
