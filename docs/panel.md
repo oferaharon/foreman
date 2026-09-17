@@ -1332,19 +1332,30 @@ opened from the phone** — a worker's prompt is its lead's to answer, not somet
 around the lead for.
 
 **Standalones** lists every live session that belongs to nobody's team, including one you just
-launched that hasn't spoken yet. Tapping one opens the same conversation screen a lead gets,
-minus the parts that only a team has — no tasks tab, no merge queue. The folder-trust gate is
-refused there exactly as everywhere else, with no button drawn. If a session's identity turns
-out to belong to a worker or a lead instead, the screen shows it as gone rather than a
-conversation the phone was never meant to display.
+launched that hasn't spoken yet, **most recent at the top** — whatever last said something, or
+was last opened if it has not spoken at all. Tapping one opens the same conversation screen a
+lead gets, minus the parts that only a team has — no tasks tab, no merge queue. The
+folder-trust gate is refused there exactly as everywhere else, with no button drawn. If a
+session's identity turns out to belong to a worker or a lead instead, the screen shows it as
+gone rather than a conversation the phone was never meant to display.
 
-**Rooms** lists open rooms, with an `archived (N)` fold underneath. Open one for the log and a
-composer: a post from the phone is your own word, typed into every other member's terminal
-prefixed `| `, exactly as if you had typed it on the Mac. Enter in the composer writes a
-newline, not a send — the button is the send. `+ room` makes a room from a name and a pick of
-the leads and standalone sessions in reach, never a worker; a room's own `+` adds or removes a
-member and archives the room, each of the last two behind an in-place confirmation before
-anything that takes something away. Renaming a room is not on the phone.
+**Rooms** lists open rooms **most recent at the top**, with an `archived (N)` fold underneath —
+recency orders the live rooms and, inside the fold, the archived ones; it never lifts an
+archived room above a live one, and a room nobody has spoken in yet sits at the bottom of its
+own section. Open one for the log and a composer: a post from the phone is your own word, typed
+into every other member's terminal prefixed `| `, exactly as if you had typed it on the Mac.
+Enter in the composer writes a newline, not a send — the button is the send. `+ room` makes a
+room from a name and a pick of the leads and standalone sessions in reach, never a worker; a
+room's own `+` adds or removes a member and archives the room, each of the last two behind an
+in-place confirmation before anything that takes something away. Renaming a room is not on the
+phone.
+
+**Newest-first is the phone's order and the Mac's lists are unchanged.** The rail still orders
+sessions by urgency and the rail's rooms band still draws rooms in the order they were made,
+both for the reason recency is wrong there: a list that reorders itself while you are moving a
+cursor across it takes the row out from under the press. On a phone the trade goes the other
+way — you open it to find whatever just happened — and it is the maintainer's own call, taken
+knowing a row can move under a thumb.
 
 It installs to the Home Screen the same way the panel installs to the Dock — **Share → Add to
 Home Screen** in Safari — under the name **Foreman**, the same name the desktop uses; the two
