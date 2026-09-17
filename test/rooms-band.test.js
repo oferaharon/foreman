@@ -196,6 +196,55 @@ test('the store’s order is kept — the band never re-sorts on `lastAt`', () =
   );
 });
 
+test('the desktop default is untouched by the phone’s recency order', () => {
+  /*
+   * The maintainer's ruling of **2026-09-16** put the *phone's* Rooms tab into recency order
+   * (`roomsListView`, `web/m/rooms.js`). This module is shared with the rail band, so the one
+   * thing that had to stay true is that the Mac's order did not move — and that the phone got
+   * there without an option here, because an opt-in flag is a flag the rail can one day be
+   * handed by accident.
+   *
+   * The fixture is chosen so a recency sort would be *visible*: creation order and `lastAt`
+   * order disagree on every row, in both sections.
+   */
+  const rooms = [
+    room('r1', 'oldest word', { lastAt: 1 }),
+    room('r2', 'newest word', { lastAt: 900 }),
+    room('r3', 'never spoken', { lastAt: null }),
+    room('r4', 'archived, old', { archivedAt: 5, lastAt: 2 }),
+    room('r5', 'archived, new', { archivedAt: 6, lastAt: 800 }),
+  ];
+
+  const ids = (entries) => entries.map((e) => (e.kind === 'fold' ? 'fold' : e.room.id));
+  assert.deepEqual(ids(bandEntries(rooms)), ['r1', 'r2', 'r3', 'fold']);
+  assert.deepEqual(ids(bandEntries(rooms, { archivedCollapsed: false })), [
+    'r1',
+    'r2',
+    'r3',
+    'fold',
+    'r4',
+    'r5',
+  ]);
+
+  // `partitionRooms` hands both halves back in the order it was given them, which is the
+  // property the phone's sort-before-partition leans on: recency orders *within* a section.
+  const { open, archived } = partitionRooms(rooms);
+  assert.deepEqual(open.map((r) => r.id), ['r1', 'r2', 'r3']);
+  assert.deepEqual(archived.map((r) => r.id), ['r4', 'r5']);
+
+  // And the module offers nothing to opt in with. `bandEntries` takes exactly one option.
+  const sorted = [...rooms].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
+  assert.notDeepEqual(ids(bandEntries(sorted)), ids(bandEntries(rooms)), 'the fixture would show a sort');
+  assert.ok(
+    !/lastAt/.test(fn('bandEntries', band)) && !/lastAt/.test(fn('partitionRooms', band)),
+    'neither function so much as reads `lastAt`',
+  );
+  assert.ok(
+    !/recent|newest/i.test(strip(band).replace(/'[^']*'/g, '')),
+    'no recency option was added to the shared module',
+  );
+});
+
 /* ------------------------------------------------------------- the fold --- */
 
 test('with no archived rooms there is no fold at all', () => {
