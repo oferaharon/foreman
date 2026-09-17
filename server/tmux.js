@@ -65,6 +65,50 @@ export async function tmuxPath() {
   return tmuxPathPromise;
 }
 
+/** The memoised answer, once there is one, and the single in-flight ask. */
+let socketPath = null;
+let socketPathPromise;
+
+/**
+ * Absolute path to the tmux socket this panel is polling, resolved once and memoised the
+ * way `tmuxPath()` is — and `null` when there is no server to ask.
+ *
+ * A tmux pane id is only meaningful relative to one server. Every server numbers its panes
+ * from `%0`, so a second one — a bench's scratch server, `env -u TMUX` plus its own
+ * `TMUX_TMPDIR` — hands out `%0` and `%1` again while the real server's `%0` and `%1`
+ * belong to somebody else entirely. The status hook carries a bare `$TMUX_PANE` and, until
+ * now, nothing that said which server minted it, which is how a scratch session came to own
+ * the real panel's pane bindings. `StatusEngine#ingest` refuses a receipt from a foreign
+ * socket, and this is the value it compares against.
+ *
+ * **Read from tmux, never reconstructed.** `$TMUX_TMPDIR`, `/tmp` against `/private/tmp`,
+ * the uid in `tmux-<uid>` and a `-L`/`-S` override all feed the real answer, and a guess
+ * that got any of them wrong would refuse every receipt the panel depends on.
+ * `#{socket_path}` is the direct read, and it is answered by the *same* server `listPanes`
+ * polls by construction: neither call passes `-L` or `-S`, and both inherit the same `$TMUX`
+ * (unset under launchd, so both fall through to the default socket).
+ *
+ * **Only a real answer is memoised.** The panel usually boots before any tmux server
+ * exists, and caching that `null` would leave the guard permanently unable to judge — so a
+ * miss is retried on the next ask. A failure answers `null` rather than throwing, because
+ * every caller's response to not knowing is the same: accept the receipt (see `ingest`).
+ */
+export async function tmuxSocketPath() {
+  if (socketPath) return socketPath;
+  socketPathPromise ||= (async () => {
+    try {
+      const out = (await tmux(['display-message', '-p', '#{socket_path}'])).trim();
+      if (out) socketPath = out;
+      return socketPath;
+    } catch {
+      return null; // no server, or no tmux at all — the caller fails open
+    } finally {
+      socketPathPromise = undefined;
+    }
+  })();
+  return socketPathPromise;
+}
+
 async function tmux(args) {
   try {
     const { stdout } = await run(await tmuxPath(), args, { maxBuffer: 4 * 1024 * 1024, env: TMUX_ENV });
