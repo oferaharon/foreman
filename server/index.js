@@ -298,7 +298,17 @@ app.post('/hook', (req, res) => {
     const event = payload.hook_event_name || req.get('X-Hook-Event') || '';
     const pane = req.get('X-Tmux-Pane') || null;
     const paneId = pane && pane !== '' ? pane : null;
-    status.ingest(event, payload, paneId);
+    /*
+     * Which tmux server that pane id came from. A header rather than a body field, for
+     * the same reason the pane id is one: the body is Claude Code's, arriving on the
+     * hook's stdin, and the installer's curl cannot add a key to it without a JSON tool
+     * it has no business depending on. Empty is `null` — a session outside tmux expands
+     * the variable to nothing, and an older hook entry sends no header at all. Both are
+     * accepted; see `foreignTmuxServer` in `status.js` for why that asymmetry is the fix
+     * rather than a hole in it.
+     */
+    const socket = req.get('X-Tmux-Socket') || null;
+    status.ingest(event, payload, paneId, socket || null);
 
     /*
      * …and, additively, the shared room's fast path.

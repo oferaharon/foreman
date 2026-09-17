@@ -619,8 +619,78 @@ dropped there: `~/.foreman/panes/` held not one receipt, no session ever read
 `hook` as its status source, and the authoritative binding rule — the whole reason the
 hook exists — had never once fired. The panel had been running entirely on pane scraping
 and looked fine doing it, which is why nobody noticed. `/hook` now parses any
-content-type; the installer sends the header too, which only matters for a fresh install
-since an entry already in `settings.json` is never rewritten.
+content-type; the installer sends the header too — and it now **replaces an entry it wrote
+before** rather than skipping the event, which is what stopped that header (and every later
+fix to the command) from reaching a machine that had already run the installer once. See the
+socket trap below for the second half of the same lesson.
+
+**A pane id is only meaningful relative to one tmux server, and the hook used not to say
+which — so a bench's scratch session owned the real panel's bindings.** MEASURED on
+2026-09-16. Every tmux server numbers its panes from `%0`, so a scratch server (`env -u
+TMUX` plus its own `TMUX_TMPDIR`, which is how every bench here is isolated) hands out `%0`
+and `%1` again while the real server's `%0` and `%1` belong to somebody else entirely. The
+hook is registered **globally** in `~/.claude/settings.json` against a hardcoded
+`127.0.0.1:48770`, so those throwaway sessions posted `UserPromptSubmit`/`Stop` receipts at
+the real panel carrying a bare `$TMUX_PANE` — and the hook is the *authoritative* binding
+rule, so it won. `~/.foreman/panes/_0.json` held a sandbox session's transcript while the
+pane the panel drew it under was a real one in another folder. Every heuristic in
+`binding.js` behaved correctly throughout; it never got a say.
+
+Three things about it. It is **reads and display only** — sends resolve the pane from the
+live roster, off real `tmux list-panes`, so nothing has ever been typed into the wrong
+session by this. It **flip-flops**, whichever server last fired a hook for a given number
+owning that pane's transcript, so it self-heals within minutes and reads as an intermittent
+binding bug rather than as a hook that should never have been accepted — both receipts from
+the measured incident had already healed by the time the fix was benched. And it is **not a
+one-off**: every bench this repo has ever run on a scratch tmux server did it, which is
+almost certainly what produced the 2026-09-06 "wrong transcript in pane" screenshot.
+
+So the hook says which server it came from. `install-hook.js` sends
+`-H "X-Tmux-Socket: ${TMUX%%,*}"` — `$TMUX` is `<socket path>,<server pid>,<session id>` and
+that expansion is POSIX, verified in sh, bash and zsh, so it needs no `jq`, no `cut` and no
+subshell; it is a **header rather than a body key** because the body is Claude Code's own
+JSON arriving on the hook's stdin and curl cannot add a field to it, which is the same
+reason `X-Tmux-Pane` already travels this way. `tmuxSocketPath()` (`tmux.js`) reads the
+panel's own with `display-message -p '#{socket_path}'` — **read, never reconstructed**:
+`$TMUX_TMPDIR`, `/tmp` against `/private/tmp`, the uid in `tmux-<uid>` and a `-L`/`-S`
+override all feed the real answer, and a guess that got any of them wrong would refuse every
+receipt the panel depends on. It is answered by the *same* server `listPanes` polls by
+construction, since neither call passes `-L` or `-S`. It memoises only a **real** answer and
+retries a miss, because the panel usually boots before any tmux server exists and caching
+that `null` would disarm the guard permanently.
+
+**The asymmetry is the fix, and it is deliberate rather than an oversight.** A receipt
+carrying **no** socket is accepted exactly as before — every session already running was
+launched under the old entry, and refusing those would trade an intermittent
+wrong-transcript bug for a total loss of binding. A socket that is **present and different**
+is refused whole: no binding, no state, no receipt on disk, every event including
+`SessionEnd`. The panel not yet knowing its *own* socket is the same "cannot judge" and
+answers the same way, which is the beat between boot and the first tmux server. What keeps
+the fail-open window short rather than permanent is that **Claude Code re-reads its hook
+config while running** — already in this file, and this is what it buys.
+
+Two consequences worth knowing. The refusal is **logged once per foreign socket**, because
+the alternative is a line per tool call of every session on that server, and a silent
+refusal is precisely the shape this panel has already been bitten by one trap up. And
+`install-hook.js` had to learn to **replace its own entry** — it skipped any event that
+already had one, so this fix would have reached nothing until somebody deleted the entry by
+hand, with nothing on screen saying so. Ours is recognised by the **shape it writes** (a
+curl at this panel's own `:<port>/hook`), never by a byte match on the command: match on the
+bytes and the entry we wrote yesterday reads as a stranger's and rots beside the new one.
+A hook pointing anywhere else is still left strictly alone, and the backup in front of every
+write is what makes replacing a hand-edited one recoverable.
+
+The bench is `ingest`'s own decision rather than an end-to-end round trip, for the reason
+this file keeps choosing: proving it end to end would mean registering a hook globally, and
+that reaches every session on the Mac. So `test/status.test.js` pins accept/refuse/absent
+with an injected socket, `test/install-hook.test.js` drives the real installer as a
+subprocess against a throwaway `HOME`, and the live half was the installer's own curl
+command fired at a scratch panel (scratch port, scratch state dir): a foreign socket wrote
+nothing to that panel's `panes/`, the panel's own socket wrote `_0.json`, a second foreign
+receipt did not take `%0` back, and `env -u TMUX` was accepted. A sink on its own port
+confirmed what the wire actually carries rather than inferring it —
+`content-type: application/json`, `x-tmux-pane: "%12"`,
+`x-tmux-socket: "/private/tmp/tmux-501/default"`.
 
 **A transcript's `cwd` moves; the folder it lives in doesn't.** Claude Code stamps `cwd`
 on every record and rewrites it when a session changes directory mid-conversation — so
@@ -1750,9 +1820,18 @@ once at boot on purpose.
 
 **Plist backups go to the state dir, not beside the original.** A second file in
 `~/Library/LaunchAgents` carrying the same `Label` as the live plist is a duplicate job
-waiting for the next login, so `install-agent.js` backs up into `STATE_DIR` — the same
-habit `install-hook.js` has for `settings.json` — rather than writing a `.bak` next to the
-file launchd actually reads.
+waiting for the next login, so `install-agent.js` backs up into `STATE_DIR` rather than
+writing a `.bak` next to the file launchd actually reads.
+
+**…and the settings installers go the other way, deliberately.** `install-hook.js` and
+`install-statusline.js` both copy `~/.claude/settings.json` aside **beside itself**, as
+`settings.backup-foreman-<ms>.json`: one habit, one place to look, and somebody hunting for
+what they had before should not have to know which of two installers touched it last. The
+plist reasoning above does not carry over — a second settings-shaped file in `~/.claude/` is
+read by nothing, since Claude Code reads `settings.json` and `settings.local.json` and no
+other name in that directory. This paragraph used to describe the state dir as *"the same
+habit `install-hook.js` has"*, which was never true of any version of that file, and a later
+task inherited the claim as an instruction before it was checked.
 
 **Renaming a launchd log rotates nothing, and looks exactly like it worked — VERIFIED.**
 launchd opens `StandardOutPath`/`StandardErrorPath` once and holds the descriptor, so

@@ -41,10 +41,14 @@ written into your repositories. Beyond that:
 - It **reads** `~/.claude.json` for the MCP servers you have registered, which is how a
   team's forge is worked out (`server/config.js:20`, `server/forge.js:254`). Read only, and
   no credential is ever copied out of it.
-- It **writes** `~/.claude/settings.json` once, at `npm run install-hook`, to register the
-  status hook. The file is copied to a timestamped backup beside itself first, and
-  registration only ever *appends* to the arrays already there, so other hooks are
-  untouched (`server/install-hook.js:42`). `npm run uninstall-hook` removes it again.
+- It **writes** `~/.claude/settings.json` at `npm run install-hook`, to register the status
+  hook. The file is copied to a timestamped backup beside itself first. Registration
+  *appends* to the arrays already there, so **a hook you registered yourself is untouched**;
+  the one thing it will overwrite is an entry it wrote itself on an earlier run, recognised
+  by pointing at this panel's own `/hook` — that is how a fix to the hook command reaches a
+  machine that has already run the installer (`server/install-hook.js`). Re-running it with
+  nothing to change rewrites nothing and takes no backup. `npm run uninstall-hook` removes
+  it again.
 - `npm run install-statusline` **writes** the same `settings.json`'s `statusLine` key —
   optional, separate from the hook, and the source of the [rate-limit
   gauges](panel.md#rate-limit-gauges). It backs the file up the same way first, and every
