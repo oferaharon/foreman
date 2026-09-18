@@ -3,8 +3,9 @@
 The evidence behind the **launchd** block of [`CLAUDE.md`](../../CLAUDE.md)'s Traps index —
 facts about this machine rather than about a file in this repo, which is why they are filed
 under the tool's name and not a path: the plist, the label's three copies, the job's `PATH`,
-the log rotation, the state dir's four rungs and Homebrew's own rename. Each section below
-is one trap, opening with the bold sentence its index line quotes.
+the log rotation, the state dir's four rungs, Homebrew's own rename, and the tmux server
+every session on this Mac shares. Each section below is one trap, opening with the bold
+sentence its index line quotes.
 
 ## `launchctl kickstart -k` does not re-read the plist
 
@@ -198,3 +199,16 @@ the second is read from the process's own environment. `jobEnvironment()` was wr
 job wrote to scratch logs while the panel inside it computed the default paths: the first
 bench of the rotation would have deleted the real panel's history. Found while setting the
 bench up, not by it. Anything else derived from the label has the same shape.
+
+## A scratch tmux server unsets $TMUX
+
+**`$TMUX` is set inside a worker, and it defeats `TMUX_TMPDIR`.** A worker session runs
+*inside* tmux, so `$TMUX` is already in its environment — and tmux prefers it, ignoring the
+`TMUX_TMPDIR` a bench sets to get its own server. One worker's first bench attempt therefore
+minted its "isolated" scratch session on the **real** tmux server, where every session on this
+Mac lives; it was killed and everything re-run under `env -u TMUX` on a scratch socket. So a
+scratch tmux server is `env -u TMUX` **plus** `TMUX_TMPDIR`, never `TMUX_TMPDIR` alone, and
+the check afterwards is that the real server still holds what it held before. Note the second
+habit that made that recoverable: seeding the scratch config with this Mac's own
+`sessionPrefix` means the server-global pbcopy rewrite writes a byte-identical binding, so the
+launch changes nothing and the check afterwards is a one-line "unchanged".

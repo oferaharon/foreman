@@ -3,8 +3,8 @@
 The evidence behind the **Rail and groups** block of [`CLAUDE.md`](../../CLAUDE.md)'s Traps
 index — the rail is a flat list of siblings, and everything drawn on it (the indent, the
 tint, the spine, the fold, the group colours, a team row's third line) is built on top of
-that one fact. Each section below is one trap, opening with the bold sentence its index line
-quotes.
+that one fact; the front end's own cascade traps are here too. Each section below is one
+trap, opening with the bold sentence its index line quotes.
 
 ## The shared shell and the pane factory
 
@@ -296,3 +296,18 @@ wraps to a second line and the list loses a row. One line returns at 22.5rem. It
 `.rail-actions` already supports (`flex-wrap` and a `row-gap` are both there deliberately),
 but that comment was written about the 14rem *floor*, and this now happens at the default.
 Anything adding a sixth control to that row is adding a third line, not a second.
+
+## The phone's five stylesheets
+
+**The phone loads five stylesheets into one `<head>`, so a class the shell shares with a
+screen is a class the screen wins.** `web/m/index.html` links `m.css` then `lead.css`, and
+each is owned by a different build item precisely so they never collide in that head — but
+the guarantee is about *files*, not about *names*. `lead.css` already owned `.m-tab` for the
+lead screen's own chat/tasks pair, so a tab bar added to the shell under the same name came
+up wearing the lead screen's colours and its 34px height, while the shell's own declarations
+leaked back onto the lead screen's tabs in return. Neither screen looked broken: only one of
+them is ever on screen at a time, which is exactly what makes this cost nothing until it
+costs an hour. Caught by measuring a target written `min-height: 44px` and reading back 34.
+The shell's controls are `.m-nav-*` for that reason, and the general rule is that a new class
+in `m.css` is grepped against the four sheets below it before it is written — the cascade,
+not the file split, is what decides.

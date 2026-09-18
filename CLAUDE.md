@@ -354,84 +354,6 @@ once. Evidence: [`docs/traps/exposure.md`](docs/traps/exposure.md).
   `Origin: null` is refused while an absent header is allowed.
   [exposure#a-websocket-handshake-is-exempt-from-cors](docs/traps/exposure.md#a-websocket-handshake-is-exempt-from-cors)
 
-**A GitLab remote read as `Gitea`, because "not GitHub" is not the same as "Gitea" —
-found on the bench.** The forge is derived per repo from `git remote get-url origin`
-(`forge.js`), and detection is deliberately **two independent questions**: what the origin
-points at, and whether tooling for it is installed. Matching the remote's host against the
-registered MCP server's URL is *not* a detector — on the machine this was found on, a Gitea
-remote and a registered Gitea MCP server shared an IP by coincidence and differed in port,
-and a forge's MCP server need not live on its git host at all. Four readings come out of the pair, and the words are
-deliberately chosen and are not to be paraphrased: `GitHub`, `Gitea`, `push only`, `no remote`.
-
-The trap is in the second question's *else*. Written as "any non-GitHub host is a
-self-hosted forge, and a registered `gitea` server means we have tools for it", a
-`gitlab.com` repo reads **Gitea** on any machine that has a `gitea` server registered at
-all — and its lead is then handed gitea tools for a forge that has never heard of them. So
-`push only`, the reading that exists for exactly that case — a GitLab or Bitbucket repo on
-a machine with no tooling for it — could never fire on such a machine. `NOT_GITEA_HOSTS` names the public forges that are
-neither, `codeberg.org` among them because it runs **Forgejo** — whose API is close enough
-to Gitea's that it may well work, which is precisely why it must not be *implied* to.
-The limit the list cannot fix is written beside it: a **self-hosted** GitLab is
-indistinguishable from a self-hosted Gitea by host alone, so it reads `Gitea` and fails at
-the lead's first tool call — loudly, in the lead's hands, never quietly.
-
-Two more things that hang off the same answer. `<teamDir>/mcp.json` is world-readable and
-the panel copies the user's registered entry into it verbatim, so an entry carrying a
-credential in its `env` (the standard GitHub MCP server carries a PAT) is **refused**, with
-the refusal reported in the launch result and the room — and the brief is then written from
-the *demoted* forge, so it never promises a tool the file does not contain. `gh` is
-preferred for GitHub for that reason alone: its login is in the keychain. And `gh`'s login
-is **not git's** — without `gh auth setup-git` a worker's plain `git push` fails with
-*"could not read Username for 'https://github.com'"*, measured on a bench repo. `README.md`
-and `docs/running.md` state it as a prerequisite.
-
-**"Done" force-deletes a branch, so the endpoint checks before it sweeps.** `task_close`
-with outcome `done` runs `git branch -D`, and until this existed the only thing in front of
-that was a sentence in the lead's brief — with no forge in the loop, nothing checked at
-all. `POST /api/team/tasks/:id/close` now requires the branch to be an ancestor of the base
-(`mergedInto` in `deployed.js`), checked against **both** `origin/<base>` and local
-`<base>`, fetching first: a forge merge lands on the box and the local branch lags it,
-while a no-forge merge is local and there may be no remote. It fails **closed** — a check
-that could not run refuses — and the refusal names `abandon`, which is the word for
-discarding work deliberately. A planner's branch and an already-deleted branch are the two
-exemptions, and both are exemptions because there is nothing there to protect.
-
-**A self-merge is decided on facts the panel cannot check, and every one of them has a
-trap in it — all measured by the planner against real PRs, none of them guessable.** The
-first is the load-bearing one and it is about *this* code, not about GitHub: **the panel
-cannot read a forge, and `merge-check.js` must never start.** Every instinct while
-building or extending it says "the endpoint should just call `gh pr view`"; it holds no
-credential, makes no network call, and the 2026-08-30 ruling says it never will. Whoever
-touches this next will be tempted exactly once, which is why the module's own header says
-so first.
-
-Then the four the brief has to teach a lead, because the lead is the only party that *can*
-look. **A merged GitHub PR reads `mergeable: UNKNOWN`** — full read on a merged PR:
-`state: MERGED`, `mergeable: UNKNOWN`, `mergeStateStatus: UNKNOWN`, `statusCheckRollup:
-[]`. So `state` is read **before** `mergeable`, or a PR that is already done reads as "not
-computed yet" and gets retried forever. **`UNKNOWN` is lazy and is never a pass**: the
-first query starts the computation and returns it, a second a moment later has the answer
-— so re-read a few times a couple of seconds apart, and if it is *still* unknown, refuse.
-**`statusCheckRollup: []` is two different
-facts** and `gh` cannot tell them apart on its own: either the repo configures no checks,
-or checks exist and none has reported on this head. `mergeStateStatus` disambiguates —
-`CLEAN` means no checks (which is `checks: 'none'`, and then the worker's own quoted suite
-result is what stands in for CI), `BLOCKED` means a required one has not reported, and
-`UNSTABLE` means one is red. And **Gitea's `merge_when_checks_succeed` is auto-merge by
-another name** — a real argument on `pull_request_write`, beside `force_merge`, that arms a
-merge to fire later on green with nobody looking. It is `mergePRs` in tool form, one
-argument away from a lead that means well, which is why the brief forbids it *by name*
-along with `--admin`, `--auto` and `force_merge`, and why `test/brief.test.js` pins each
-name rather than pinning "says something about flags".
-
-**`main` was hardcoded in four places, and that made the team feature unusable on `master`.**
-`worktree.js`, `deployed.js` and two sites in `index.js` all defaulted to `main`/`origin/main`,
-so a repo on `master` or `trunk` failed its first dispatch with `No such base branch:
-origin/main` and no explanation. `base-branch.js` detects it from `origin/HEAD`, falling back
-to the checkout's current branch (refusing an `agent/` one, which inside a worktree would
-branch every future task off another task's work), and it is shown read-only in the team panel
-beside the forge. The sandbox's `gamma` is on `master` deliberately — it is the test.
-
 ### Transcript records
 
 What a `.jsonl` record really is before `normalize.js` is done with it: slash command
@@ -601,7 +523,8 @@ be cached, and the gallery that reads the whole file. Evidence:
 
 The rail is a flat list of siblings, and everything drawn on it — the indent, the tint, the
 spine, the fold, the group colours, a team row's third line — is built on top of that one
-fact. Evidence: [`docs/traps/rail-and-groups.md`](docs/traps/rail-and-groups.md).
+fact; the front end's own cascade traps are here too. Evidence:
+[`docs/traps/rail-and-groups.md`](docs/traps/rail-and-groups.md).
 
 - `web/app.js` (`createPane`) — **`web/app.js` is one shared shell plus a `createPane`
   factory.** Everything per-session lives inside the factory, because split view means two of
@@ -692,15 +615,42 @@ fact. Evidence: [`docs/traps/rail-and-groups.md`](docs/traps/rail-and-groups.md)
   button does not fit the rail head at the default width.** Anything adding a sixth control to
   that row is adding a third line, not a second.
   [rail-and-groups#a-fifth-button-in-the-rail-head](docs/traps/rail-and-groups.md#a-fifth-button-in-the-rail-head)
+- `web/m/index.html` · `web/m/m.css` · `web/m/lead.css` (`.m-tab`, `.m-nav-*`) — **The phone
+  loads five stylesheets into one `<head>`, so a class the shell shares with a screen is a
+  class the screen wins.** The build split guarantees *files*, not names; a new class in
+  `m.css` is grepped against the four sheets below it before it is written.
+  [rail-and-groups#the-phones-five-stylesheets](docs/traps/rail-and-groups.md#the-phones-five-stylesheets)
 
 ### Team machinery
 
-The machinery a team runs on and the rules a session is launched holding: how a brief is
-assembled, how a permission path rule has to be spelled, what the auto-mode classifier does
-to a tool nobody declared, what the task store does with a record it cannot read, and how
-the panel tells "merged" from "running here". Evidence:
+The machinery a team runs on and the rules a session is launched holding: how the forge is
+detected, how a brief is assembled, how a permission path rule has to be spelled, what the
+auto-mode classifier does to a tool nobody declared, what the task store does with a record
+it cannot read, how the panel tells "merged" from "running here", and what the merge queue
+in front of the composer may and may not depend on. Evidence:
 [`docs/traps/team-machinery.md`](docs/traps/team-machinery.md).
 
+- `server/forge.js` (`NOT_GITEA_HOSTS`) · `<teamDir>/mcp.json` · `server/briefs.js` — **A
+  GitLab remote read as `Gitea`, because "not GitHub" is not the same as "Gitea" — found on the
+  bench.** Detection is two independent questions, the four readings' words are fixed, and a
+  credential-carrying MCP entry is refused before the brief is written.
+  [team-machinery#a-gitlab-remote-read-as-gitea](docs/traps/team-machinery.md#a-gitlab-remote-read-as-gitea)
+- `POST /api/team/tasks/:id/close` · `server/deployed.js` (`mergedInto`) — **"Done"
+  force-deletes a branch, so the endpoint checks before it sweeps.** Ancestry is checked
+  against both `origin/<base>` and local `<base>`, it fails closed, and the refusal names
+  `abandon`.
+  [team-machinery#done-force-deletes-a-branch](docs/traps/team-machinery.md#done-force-deletes-a-branch)
+- `server/merge-check.js` · `server/lead-brief.js` (`selfMergeSection`) · `test/brief.test.js`
+  — **A self-merge is decided on facts the panel cannot check, and every one of them has a trap
+  in it — all measured by the planner against real PRs, none of them guessable.** The panel
+  holds no credential and `merge-check.js` must never start; the other four are the lead's to
+  read.
+  [team-machinery#a-self-merge-is-decided-on-facts-the-panel-cannot-check](docs/traps/team-machinery.md#a-self-merge-is-decided-on-facts-the-panel-cannot-check)
+- `server/base-branch.js` · `server/worktree.js` · `server/deployed.js` · `server/index.js` —
+  **`main` was hardcoded in four places, and that made the team feature unusable on `master`.**
+  Detected from `origin/HEAD`, falling back to the checkout's current branch and refusing an
+  `agent/` one; the sandbox's `gamma` is on `master` deliberately, and is the test.
+  [team-machinery#main-was-hardcoded-in-four-places](docs/traps/team-machinery.md#main-was-hardcoded-in-four-places)
 - `server/team.js` (`plannerStance`, `pathRule`) — **Deny beats allow, so a narrow write
   grant has to be a subfolder, not a carve-out.** Put the writable thing *below* the protected
   thing, and never try to subtract.
@@ -730,14 +680,24 @@ the panel tells "merged" from "running here". Evidence:
   the evidence is recorded while the branch still exists, and "no tip recorded" draws no pill
   at all.
   [team-machinery#merged-versus-live-here](docs/traps/team-machinery.md#merged-versus-live-here)
-
-**`git status --porcelain` collapses an untracked directory to `dir/`.** A new file in a
-new folder is reported as its parent, so two workers editing the same fresh path never
-compare equal and the conflict scan misses them entirely. `-uall` is the fix, and it is
-not optional — `conflicts.js` unions the porcelain read with the branch diff precisely
-because a mid-task worker's changes are mostly *uncommitted*, which makes this the half
-that matters. Git also quotes paths containing spaces; strip the quotes or they never
-match diff output. `test/conflicts.test.js` pins both.
+- `web/app.js` (`composerSig`, `renderMergeQueue`, `renderHead`) — **`composerSig` does not
+  know about tasks, and a merge block built inside `buildComposer` would freeze on stale
+  data.** Task state must never join that signature — it would tear the whole textarea down
+  under a reader's cursor every time a worker reported done.
+  [team-machinery#composersig-does-not-know-about-tasks](docs/traps/team-machinery.md#composersig-does-not-know-about-tasks)
+- `web/app.js` (`renderMergeQueue`) · `web/styles.css` (`.composer-above`) — **The interrupt
+  row's design is that it never moves, and the merge block is the first thing ever placed above
+  it.** The block is appended and removed rather than hidden, so `.composer-above:empty` still
+  fires — checked by SHA-256 on the cropped region, not by eye.
+  [team-machinery#the-interrupt-row-never-moves](docs/traps/team-machinery.md#the-interrupt-row-never-moves)
+- `server/merge-queue.js` (`mergePaths`, `shaOf`) — **Cache a three-dot diff on both shas, not
+  the branch tip alone.** `base...branch` changes its answer when *main* moves even though the
+  branch tip did not, and main moves at every merge — this feature's whole subject.
+  [team-machinery#cache-a-three-dot-diff-on-both-shas](docs/traps/team-machinery.md#cache-a-three-dot-diff-on-both-shas)
+- `web/app.js` (`mergeSig`) — **A signature can be joined with what reads as an empty string
+  and is not.** Three literal control bytes inside the quotes are valid JavaScript, throw
+  nothing, and look like an empty-string join in every editor.
+  [team-machinery#a-signature-joined-with-an-invisible-character](docs/traps/team-machinery.md#a-signature-joined-with-an-invisible-character)
 
 ### Rooms
 
@@ -789,8 +749,9 @@ clamp, how a member is resolved, and what `@name` does and does not change. Evid
 
 Facts about this machine rather than about a file here, which is why they are filed under
 the tool's name and not a path — the plist, the label's three copies, the job's `PATH`, the
-log rotation, the state dir's four rungs and Homebrew's own rename. Read them before
-changing the plist, the label or the log paths. Evidence:
+log rotation, the state dir's four rungs, Homebrew's own rename, and the tmux server every
+session on this Mac shares. Read them before changing the plist, the label or the log paths.
+Evidence:
 [`docs/traps/platform-launchd.md`](docs/traps/platform-launchd.md).
 
 - **launchd** (`launchctl kickstart`/`bootout`/`bootstrap`, `server/install-agent.js`'s
@@ -848,293 +809,102 @@ changing the plist, the label or the log paths. Evidence:
   scratch `FOREMAN_AGENT_LABEL` has to reach the job, not just the plist.** The running panel
   reads it from its own environment to decide which two files it truncates.
   [platform-launchd#a-scratch-foremanagentlabel-has-to-reach-the-job](docs/traps/platform-launchd.md#a-scratch-foremanagentlabel-has-to-reach-the-job)
+- **tmux** (`$TMUX`, `TMUX_TMPDIR`, a scratch socket) — **`$TMUX` is set inside a worker, and
+  it defeats `TMUX_TMPDIR`.** A scratch tmux server is `env -u TMUX` *plus* `TMUX_TMPDIR`,
+  never `TMUX_TMPDIR` alone, and the check afterwards is that the real server still holds what
+  it held before.
+  [platform-launchd#a-scratch-tmux-server-unsets-tmux](docs/traps/platform-launchd.md#a-scratch-tmux-server-unsets-tmux)
 
-**`git diff` and `git status` quote paths differently, and the fix has its own trap
-inside it.** Measured in a throwaway repo: `diff --name-only` leaves a space bare
-(`web/my file.js`) but quotes *and* octal-escapes non-ASCII (`"web/caf\303\251.js"`);
-`status --porcelain -uall` quotes and escapes both. `conflicts.js` stripped outer quotes
-on the **porcelain side only**, so the two spellings of `web/café.js` differed by exactly
-the two quote characters and never compared equal — while the space case came out right,
-which is why its tests passed and nobody noticed. Two workers editing `web/café.js` were
-never flagged, and nothing-found is indistinguishable from nothing-there. Both sides now
-read **`-z`**, which returns raw bytes with no quoting and no escaping, the same reasoning
-`merge-queue.js`'s `mergePaths` and `deployed.js`'s `branchFacts` already carry. Note
-stripping quotes on *both* sides would also have made those two strings equal and is still
-wrong: the path kept is then `web/caf\303\251.js`, and that escaped spelling is what the
-room post puts in front of a human.
+### Git
 
-**And `-z` changes the porcelain rename encoding, which is the silent half.** A rename is
-`XY new\0old\0` — two NUL-separated fields, **new first** — not the `XY old -> new` arrow
-of the plain form. Split on NUL and treat every field as an entry and the original path is
-read as a status line: `web/old-name.js` becomes the code `we` and the path
-`/old-name.js`, on exactly the entries a rename produces, with nothing on screen saying
-so. `parsePorcelainZ` in `conflicts.js` is the one place that parse lives, and it is a
-named export for that reason alone. Two things it pins that reasoning would get wrong:
-`R`/`C` ride in the **index** column only (`RM` is renamed-in-index, modified-in-worktree,
-and no unmerged code carries either letter), and an *unstaged* move is not a rename to git
-at all — it arrives as two ordinary entries, ` D old` and `?? new`. `test/conflicts.test.js`
-pins the non-ASCII match, the space case as a regression guard, and the rename; all three
-against real throwaway repos, and all three verified to fail against the old parse.
+What git actually prints as against what a reader of it expects: the porcelain's collapse of an
+untracked directory, the two quotings, the `-z` rename encoding and the rename detection three
+separate readers depend on. Evidence: [`docs/traps/git.md`](docs/traps/git.md).
 
-**…and rename detection is the same asymmetry from the other end.** `diff --name-only`
-detects renames **by default**, so a *committed* rename reports only the new name while the
-porcelain side reports both — a worker that committed
-`web/x.js` → `web/y.js` shared no path at all with one editing `web/x.js`, and was never
-flagged. `--no-renames` is the fix and it is one flag on three diffs, because all three
-sites ask a question a vanished old name answers wrongly: `conflicts.js` (two workers on
-one file *right now*), `merge-queue.js` (would these two PRs compose — git will either
-carry the edit onto the new name or conflict, and either way a human must be told
-before one press stands for both), and `deployed.js`, where it is the **restart** answer
-it protects: a branch that moved `server/x.js` out to `web/x.js` reported `changed:
-['web']` and `needsRestart` said no for a branch that plainly took a file out of `server/`.
-Measured — default gives `web/y.js`, `--no-renames` gives `web/x.js` and `web/y.js`, and it
-overrides a `diff.renames` config of `true` or `copies`, so it is a flag rather than a
-setting somebody could switch back. No `-M0` and no `--diff-filter`: `--no-renames` alone
-makes a rename read as a delete of the old path plus an add of the new. The flag can only
-ever *add* the old name, so every one of the three widens what it warns about and never
-narrows it — the direction all three files already prefer. Each has a test built on real
-throwaway repos, and each was run against the old code first to see it fail.
+- `server/conflicts.js` · `test/conflicts.test.js` — **`git status --porcelain` collapses an
+  untracked directory to `dir/`.** `-uall` is the fix and it is not optional, because a
+  mid-task worker's changes are mostly uncommitted — which makes that the half that matters.
+  [git#porcelain-collapses-an-untracked-directory](docs/traps/git.md#porcelain-collapses-an-untracked-directory)
+- `server/conflicts.js` (`parsePorcelainZ`) · `server/merge-queue.js` · `server/deployed.js` ·
+  `test/conflicts.test.js` — **`git diff` and `git status` quote paths differently, and the fix
+  has its own trap inside it.** Both sides read `-z`, which silently changes the porcelain
+  rename encoding to `XY new\0old\0`; `--no-renames` on all three diffs is the other half.
+  [git#git-diff-and-git-status-quote-paths-differently](docs/traps/git.md#git-diff-and-git-status-quote-paths-differently)
 
-**`composerSig` does not know about tasks, and a merge block built inside `buildComposer`
-would freeze on stale data.** The composer is only rebuilt when that signature changes,
-which happens on a prompt/mode/dialog change, not on a task closing. `renderMergeQueue`
-is its own function, called from `renderHead` on the roster beat instead — the same shape
-as `renderQueue`. Task state must never join `composerSig` itself: that would tear the
-whole textarea down under a reader's cursor every time a worker reported done, for a
-block that only needed its own repaint.
+### Browser and notifications
 
-**The interrupt row's design is that it never moves, and the merge block is the first
-thing ever placed above it.** Two things make that affordable, and both have to keep
-holding: PRs arrive minutes apart rather than per reply, so the block repaints rarely; and
-it is *appended and removed* from `.composer-above` rather than hidden, so
-`.composer-above:empty` still fires and a session with nothing to merge stays
-byte-identical to before the feature existed — checked by SHA-256 on the cropped
-screenshot region, not by eye, because "looks the same" is not evidence a selector still
-fires.
+What a browser and a phone do with what the panel hands them: the two manifests, the three icon
+geometries, the notification permission and the secure context it needs, and the one control
+the page does not paint at all. Evidence: [`docs/traps/browser.md`](docs/traps/browser.md).
 
-**Cache a three-dot diff on both shas, not the branch tip alone.** `base...branch`
-changes its answer when *main* moves even though the branch tip did not — and main moves
-at every merge, which is this feature's whole subject. `conflicts.js` keys its own cache
-on the branch sha alone and is right to, for its own question ("what has this worker
-changed"); this file's question is "what would land next to what", which the same key
-would answer with a diff taken before the thing that mattered moved. The key here is
-`${repo}:${branchSha}:${baseSha}`, both resolved to shas via `shaOf`.
+- `web/manifest.webmanifest` · `web/m/manifest.webmanifest` · `scripts/make-icons.mjs` ·
+  `test/icons.test.js` — **Two manifests on one origin with the same `id` are one app, and the
+  second one installed replaces the first.** Omitted, `id` defaults to `start_url`, which reads
+  like it would settle it and does not — and the Apple touch icons are a third geometry again.
+  [browser#two-manifests-on-one-origin](docs/traps/browser.md#two-manifests-on-one-origin)
+- `scripts/make-icons.mjs` · `server/index.js` (`express.static`) — **A `.webmanifest` already
+  serves as `application/manifest+json`, and `sips` cannot read an SVG.** No server change and
+  no restart; the icons are rasterized in `node:zlib` rather than by Quick Look or a browser.
+  [browser#webmanifest-and-sips](docs/traps/browser.md#webmanifest-and-sips)
+- `web/app.js` (`paintNotify`, `notifyArmed`) — **A stored preference is not a granted
+  permission, and printing the first over the second reads as a bug.** Every state a two-source
+  control can be in wants a rendering, and the contradictory one is the state nobody writes a
+  test for.
+  [browser#a-stored-preference-is-not-a-granted-permission](docs/traps/browser.md#a-stored-preference-is-not-a-granted-permission)
+- `web/notify.js` · `web/app.js` (the settings section) — **`Notification` needs a secure
+  context, and Chrome will not even *grant* it otherwise.** `http://127.0.0.1` is secure by
+  specification and `http://<a LAN address>` is not, so the control cannot work from the phone
+  — which follows from the exposure ruling rather than being a gap in it.
+  [browser#notification-needs-a-secure-context](docs/traps/browser.md#notification-needs-a-secure-context)
+- `web/notify.js` (`needsKind`) · `server/sessions.js` (`#diff`) · `test/notify.test.js` —
+  **The needs-you notification is derived from the roster, and must not be derived from
+  `needsYou`.** That field also counts "it replied and you haven't looked", which would fire on
+  every finished turn; `needsKind` asks about the trust gate first.
+  [browser#the-needs-you-notification](docs/traps/browser.md#the-needs-you-notification)
+- `web/styles.css` (`.field-check`, `.team-toggle-row`) · `web/rooms-create.js` — **A stock
+  checkbox is drawn by the browser from the *browser's* colour scheme, not the page's
+  `data-theme` — so an unticked box read as ticked.** The UA paints that control and
+  `data-theme` is not a signal it reads; `.field-check` is still exposed.
+  [browser#a-stock-checkbox-is-painted-by-the-browser](docs/traps/browser.md#a-stock-checkbox-is-painted-by-the-browser)
 
-**A signature can be joined with what reads as an empty string and is not.** `mergeSig`
-(`web/app.js`) is what decides whether the merge block repaints — and its first version
-joined every field with `''`. Not a bug you can see: three literal control bytes (U+0001,
-U+0002, U+0003) had ended up inside the quotes, which is valid JavaScript, throws nothing,
-and looks like an empty-string join in every editor. The consequence is the same as an
-empty join would be — two different queues can come out spelled identically, and a real
-change stops repainting. Ordinary punctuation now (`|` within a row, `~` between rows), and
-`kind` was folded in too, since a row's `plan` chip is drawn from it and wasn't part of the
-signature at all. Same lesson `normalize.js` already carries about the ESC byte in its ANSI
-regex, in new clothes: an invisible character in source lasts until the next careless edit.
+### Rate limits and the status line
 
-**Two manifests on one origin with the same `id` are one app, and the second one installed
-replaces the first.** `/manifest.webmanifest` and `/m/manifest.webmanifest` are two
-installable apps — the panel and the phone view — and `id` is what a browser keys an
-installed app on. Omitted, it **defaults to `start_url`**, which reads like it would settle
-it and does not always: a browser matching on the resolved id would see two apps whose
-scopes differ but whose identity was never stated. Both spell `id` out, `/` and `/m/`, and
-`test/icons.test.js` pins that they differ along with the short names. Verified through
-Chrome's own parser rather than by reading the spec — `Page.getAppManifest` over CDP returns
-what Chrome made of each file plus its error list, and both came back with `errors: []`,
-distinct ids, and every icon fetching 200.
+What the status line does on a quiet bench, what an idle sender re-posts, what the payload's
+own fields mean, and what is deliberately never kept out of it. Evidence:
+[`docs/traps/rate-limits.md`](docs/traps/rate-limits.md).
 
-**…and `apple-touch-icon` transparency is filled in by iOS with a colour you did not
-choose.** The `any` icons are a rounded tile with transparent corners, which is what makes
-them sit correctly in the Dock under Chrome's installed `.app`; the Apple touch icons are
-the same mark **flattened opaque and unrounded**, because iOS applies its own mask and
-composites whatever is behind the alpha itself. A maskable icon is the third shape again —
-full-bleed square with the content pulled into the middle 80%, since the platform crops it
-to something it does not announce in advance. Three purposes, three geometries, one
-`GEOMETRY` constant; `scripts/make-icons.mjs` is the only description of any of it and
-`npm run icons` moves all of them at once.
+- `server/install-statusline.js` · `server/rate-limits.js` — **The status line is event-driven,
+  and the wrapper's whole reason to touch `refreshInterval` is that this makes the gauges go
+  stale for hours on a quiet bench.** The key is set only when it is absent — and that same
+  interval is what broke a naive latest-payload-wins merge, live, on one account.
+  [rate-limits#the-status-line-is-event-driven](docs/traps/rate-limits.md#the-status-line-is-event-driven)
+- `server/rate-limits.js` — **`resets_at` is Unix seconds, not milliseconds, and
+  `used_percentage` isn't the payload's only name for itself.** A wrong answer that renders
+  without complaint rather than throwing, so every reader multiplies by 1000 first.
+  [rate-limits#unix-seconds-not-milliseconds](docs/traps/rate-limits.md#unix-seconds-not-milliseconds)
+- `server/rate-limits.js` (`ingest`) — **The payload carries a dollar figure, and none of it is
+  ever kept.** Enforced by what the store's `ingest` reads out of the body, not by a filter on
+  the route — the endpoint hands the whole payload through unfiltered on purpose.
+  [rate-limits#the-dollar-figure-is-never-kept](docs/traps/rate-limits.md#the-dollar-figure-is-never-kept)
 
-**A `.webmanifest` already serves as `application/manifest+json`, and `sips` cannot read an
-SVG.** Two things that would each have cost a detour. Express's `send` resolves the type
-from `mime-db`, which knows the extension — measured on a scratch panel, both manifests came
-back with the right type off plain `express.static`, so no server change and no restart. And
-this Mac has `sips` and `qlmanage` and nothing else — no `rsvg-convert`, no ImageMagick, no
-PIL, no cairosvg — while `sips` has no SVG decoder at all. Rasterizing four rounded
-rectangles in `node:zlib` and about a hundred lines of arithmetic beat both the Quick Look
-route (whose output is a *thumbnail*, sized to its own taste) and the headless-Chrome route
-(which would make regenerating an icon depend on a browser).
+### MCP and naming
 
-**A stored preference is not a granted permission, and printing the first over the second
-reads as a bug.** The notifications opt-in lives in `localStorage`; the permission belongs
-to the browser and can go back to `default` on its own — a new profile, cleared site data, a
-reset. The first version of `paintNotify` (`web/app.js`) read the stored flag for its status
-line and `notifyArmed()` for the checkbox, so a browser in that state drew **"On, in this
-browser"** over an empty box. Nothing fired, correctly; the box just said the opposite.
-Caught by looking at a screenshot of the settings section, not by any assertion — which is
-the general lesson: every state a two-source control can be in wants a rendering, and the
-contradictory one is the state nobody writes a test for. There are three now (never asked,
-armed, remembered-but-not-granted) and `bench-states` walked all three.
+The tool names a session is handed and the environment the MCP child is handed with them: why
+group rooms are spelled `group_*`, what a stdio child inherits, and what `--strict-mcp-config`
+would cost an ordinary session. Evidence:
+[`docs/traps/mcp-and-naming.md`](docs/traps/mcp-and-naming.md).
 
-**`Notification` needs a secure context, and Chrome will not even *grant* it otherwise.**
-`http://127.0.0.1` is a secure context by specification and `http://<a LAN address>` is not,
-so the notifications control works in the panel opened on this Mac and cannot work from the
-phone — which follows from the 2026-08-27 exposure ruling rather than being a gap in it.
-Measured both ways on a scratch panel bound wide: at the LAN address `isSecureContext` is
-false, the checkbox disables itself and prints which gate is shut, and every session
-blocking at once still fired nothing; the same browser at `127.0.0.1` turned it on
-normally. `Browser.grantPermissions` over CDP **refuses** the LAN origin outright
-(*"Permission can't be granted in current context"*), which is the same fact from the other
-side. This is not an argument for putting TLS in front of the panel; it is why the phone's
-half of that issue was an icon.
-
-**The needs-you notification is derived from the roster, and must not be derived from
-`needsYou`.** Every transition it fires on — a permission prompt, a question, a plan, the
-trust gate, a worker's task reaching `review` — is already a field on the roster row and
-already in `sessions.js`'s `#diff`, so no socket event and no endpoint were needed and
-nothing needs restarting to pick it up. What is tempting and wrong is the field with the
-matching name: `needsYou` also counts *"it replied and you haven't looked"*, which is an
-unread badge in the rail and would put a notification on somebody's screen every time any
-session finished a turn. `needsKind` in `web/notify.js` is the narrower rule, it asks about
-the trust gate **first** (that screen is a fully-parsed permission box, so the general
-question answers it wrongly and sends the reader to a card with deliberately no button on
-it), and it applies the rail's own `quietWorker` so a worker's prompt stays its lead's
-until the stuck timer fires. The module is pure for the usual reason: `test/notify.test.js`
-runs it in node, the way `trust-gate.js` is tested.
-
-**The status line is event-driven, and the wrapper's whole reason to touch
-`refreshInterval` is that this makes the gauges go stale for hours on a quiet bench.**
-Measured: 2 renders in 5m43s, zero across 90 seconds of idle. `npm run install-statusline`
-sets `statusLine.refreshInterval` to 60 **only when the key is absent** — a value already
-there is somebody's own decision and is never overwritten, and `uninstall-statusline`
-restores the whole `statusLine` object from the sidecar exactly as it was found, which
-puts the key back either way. 60 rather than something snappier because the thing being
-re-run every tick is the *user's own script*, whatever it is; once a minute per session is
-negligible, once every few seconds plainly isn't.
-
-**…and that same interval is what broke a naive "latest payload wins" merge, live, on one
-account.** Once `refreshInterval` is set, a session idle for hours re-posts its
-*last-known* payload every minute — stale percentages, and no `five_hour` key at all once
-that window's own reset had passed, because Claude Code had already dropped it from the
-payload that sleeping session was holding. Replacing the whole stored record with whatever
-arrived last let one idle re-post blank a live five-hour bar every sixty seconds. The
-weekly window took longer to notice because it is long enough that a sleeping session's
-copy still matches its `resetsAt` exactly — only the percentage tells the two readings
-apart — and it flapped 9% → 5% → 9% on the same idle re-post the five-hour fix had already
-solved for. `server/rate-limits.js` now merges **per window**: the later `resetsAt` wins
-across windows, the **higher** percentage wins within one window (usage only climbs until
-a reset mints a new one), and a window the incoming payload simply doesn't mention is left
-alone — the only thing that ever removes a window is its own `resetsAt` actually passing.
-Wholesale latest-wins is the trap; per-field, per-window is the only shape that survives an
-idle sender.
-
-**`resets_at` is Unix seconds, not milliseconds, and `used_percentage` isn't the payload's
-only name for itself.** `new Date(1788571200)` is January 1970 — a wrong answer that
-renders without complaint rather than throwing — so every reader multiplies by 1000 before
-comparing against `Date.now()`. And every window is read as `used_percentage ?? utilization`:
-the capture used the first, but the binary's own string table sits `utilization` right next
-to `five_hour`, which makes the fallback cheap insurance against a rename rather than dead
-code.
-
-**The payload carries a dollar figure, and none of it is ever kept.** `cost.total_cost_usd`
-rides in the same JSON as `rate_limits` — measured `0.3027715` on one real turn — and it is
-meaningless against a subscription, so `server/rate-limits.js` extracts only the two
-windows and nothing else: no cost, no session id, no model. Ruling of 2026-09-04, and it is
-enforced by what the store's `ingest` reads out of the body, not by a filter on the route —
-the endpoint hands the whole payload through unfiltered on purpose, for issue #52.
-
-**`room_post` and `room_read` were already taken, and so were `room-append` and
-`markRoomRead` — so group rooms are `group_*` in every spelling they have.**
-`mcp/foreman.js` registers `room_post` / `room_read` for the **team** room (and `room_post`
-on `WORKER_TOOLS` as well), and one MCP server cannot register two tools under one name; the
-socket already spells `subscribe-room` / `room` / `room-append`, keyed by `repo`, and
-`web/app.js` switches on the frame's `type` and *then* filters on `msg.repo` — so a
-group-room frame arriving under `room-append` with a `roomId` and no `repo` is silently
-swallowed today, and breaks the **team** room the day somebody adds a group handler under
-that name. Renaming the team-room tools was never an option: every lead and worker brief
-names them and `test/brief.test.js` pins them.
-
-So: tools `group_list` / `group_post` / `group_read`, frames `group-room` /
-`group-room-append`, messages `subscribe-group-room` / `unsubscribe-group-room` /
-`markGroupRoomRead`, store class `GroupRoomStore` beside `room.js`'s `RoomStore`, and the
-pane kind `group-room` because `room` is the team room's word. **What is refused is a
-*sibling* name, not the word "room"** — `rooms_post` beside `room_post`, or `RoomsStore`
-beside `RoomStore`, is one letter between two things that do different things, which is a
-wrong call waiting to happen and is the `isLeadName` lesson in yet another costume. The HTTP
-routes are allowed to be `/api/rooms` precisely because no team-room route is spelled that
-way. And note the split it deliberately refuses: giving standalones `room_*` and leads
-`group_*` would mean a lead and a standalone in one room reading their own briefs and
-disagreeing about what the tool is called.
-
-**An MCP stdio child inherits `TMUX_PANE`, which is why one static config serves every
-session — and why `--strict-mcp-config` must never be copied onto it.** Both measured on
-Claude Code v2.1.257, in a scratch tmux session in the sandbox's `alpha`, against a stub
-stdio MCP server that dumped its own environment.
-
-The stub's environment carried `TMUX_PANE=%213` and
-`TMUX=/private/tmp/tmux-501/default,65729,213`, and `%213` was exactly the pane tmux
-reported for that session; it also carried `CLAUDE_CODE_SESSION_ID` and
-`CLAUDE_PROJECT_DIR`. So the identity is readable at **run time** and nothing about who a
-session is has to be baked in at launch: `server/session-launch.js` writes **one**
-`session-brief.md` and **one** `session-mcp.json` under `STATE_DIR` for the whole machine —
-no per-session artefact, nothing to garbage-collect, nothing that goes stale across a
-`/clear` (the pane does not change), and a live MCP process can never name a *stale* pane
-because it cannot outlive its own. Benched through the real launcher: `group_list` from a
-freshly launched session answered `{"you":"%0","rooms":[]}`, and the duplicate of it
-answered `{"you":"%1","rooms":[]}` — one file, two identities. `mcp/foreman.js` fails closed
-when `TMUX_PANE` is absent, twice over: a `session` with no pane refuses to start at all
-(those three tools are its whole surface) and a lead refuses per call and keeps its other
-fifteen tools.
-
-The second half is the expensive one. **`--mcp-config` merges; `--strict-mcp-config` makes
-it a replacement.** `launchLead` passes the strict flag and is right to — a lead should hold
-`foreman` and its forge and nothing else — but copying that line into the standalone path
-would silently strip every connector the user has registered off **every ordinary session
-the panel launches**, with nothing on screen saying so. Measured twice and both answers were
-**11 servers** with the merge: the planner's stub run and the launch bench. The two
-enumerations of that 11 differ by one connector — the bench listed the user's `gitea`, seven
-`claude.ai` connectors, `claude-in-chrome`, `computer-use` and `foreman`, the earlier run
-listed eight connectors — so the **count** is the measurement and the breakdown is not.
-`standaloneArgs()` is the one helper, it passes `--append-system-prompt-file` and
-`--mcp-config` and never `--strict-mcp-config`, and there are **four** call sites, not three:
-`/api/launch`'s non-lead branch, the duplicate endpoint, and `restoreSessions`' `startSession`
-in *both* snapshot restore and relaunch-all. `test/session-launch.test.js` reads
-`server/index.js`, balances parens round every `createSession(` and refuses one that carries
-neither the helper nor a named exemption — proven non-vacuous by deleting the flags from one
-site and watching it name the line.
-
-**A stock checkbox is drawn by the browser from the *browser's* colour scheme, not the page's
-`data-theme` — so an unticked box read as ticked.** Found on the create-room modal's bench:
-with the panel in **light** theme and the browser in **dark**, an unticked native checkbox
-came back a solid dark square, which in a multi-select list is exactly what "chosen" looks
-like. Nothing about the page was wrong and no test would have caught it; the UA paints that
-control and `data-theme` is not a signal it reads. The room picker's boxes are now drawn by
-the panel — `appearance: none`, a box and a rotated-rectangle check, every colour a token —
-which is `.team-toggle-row`'s own precedent. **The same exposure is still live on
-`.field-check`**, the bare native checkbox in the `+ new` and settings modals; it was flagged
-rather than fixed because it was out of that task's scope, and it is the next person's to
-take.
-
-**The phone loads five stylesheets into one `<head>`, so a class the shell shares with a
-screen is a class the screen wins.** `web/m/index.html` links `m.css` then `lead.css`, and
-each is owned by a different build item precisely so they never collide in that head — but
-the guarantee is about *files*, not about *names*. `lead.css` already owned `.m-tab` for the
-lead screen's own chat/tasks pair, so a tab bar added to the shell under the same name came
-up wearing the lead screen's colours and its 34px height, while the shell's own declarations
-leaked back onto the lead screen's tabs in return. Neither screen looked broken: only one of
-them is ever on screen at a time, which is exactly what makes this cost nothing until it
-costs an hour. Caught by measuring a target written `min-height: 44px` and reading back 34.
-The shell's controls are `.m-nav-*` for that reason, and the general rule is that a new class
-in `m.css` is grepped against the four sheets below it before it is written — the cascade,
-not the file split, is what decides.
-
-**`$TMUX` is set inside a worker, and it defeats `TMUX_TMPDIR`.** A worker session runs
-*inside* tmux, so `$TMUX` is already in its environment — and tmux prefers it, ignoring the
-`TMUX_TMPDIR` a bench sets to get its own server. One worker's first bench attempt therefore
-minted its "isolated" scratch session on the **real** tmux server, where every session on this
-Mac lives; it was killed and everything re-run under `env -u TMUX` on a scratch socket. So a
-scratch tmux server is `env -u TMUX` **plus** `TMUX_TMPDIR`, never `TMUX_TMPDIR` alone, and
-the check afterwards is that the real server still holds what it held before. Note the second
-habit that made that recoverable: seeding the scratch config with this Mac's own
-`sessionPrefix` means the server-global pbcopy rewrite writes a byte-identical binding, so the
-launch changes nothing and the check afterwards is a one-line "unchanged".
+- `mcp/foreman.js` (`room_*` vs `group_*`) · `server/rooms.js` (`GroupRoomStore`) ·
+  `web/app.js` (the socket frames) — **`room_post` and `room_read` were already taken, and so
+  were `room-append` and `markRoomRead` — so group rooms are `group_*` in every spelling they
+  have.** What is refused is a *sibling* name, not the word "room".
+  [mcp-and-naming#group-rooms-and-the-sibling-name](docs/traps/mcp-and-naming.md#group-rooms-and-the-sibling-name)
+- `mcp/foreman.js` (`TMUX_PANE`) · `server/session-launch.js` (`standaloneArgs`) ·
+  `test/session-launch.test.js` — **An MCP stdio child inherits `TMUX_PANE`, which is why one
+  static config serves every session — and why `--strict-mcp-config` must never be copied onto
+  it.** One brief and one config file for the whole machine; the strict flag on the standalone
+  path would silently strip every connector the user has registered.
+  [mcp-and-naming#an-mcp-stdio-child-inherits-the-pane-id](docs/traps/mcp-and-naming.md#an-mcp-stdio-child-inherits-the-pane-id)
 
 ---
 
