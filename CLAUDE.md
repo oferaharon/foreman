@@ -460,6 +460,18 @@ them to a browser. Evidence:
   re-subscribes every open pane, and the slot is claimed before the read — a subscription
   that outlives its slot doubles every message.
   [transcript#a-subscription-dies-with-the-socket](docs/traps/transcript.md#a-subscription-dies-with-the-socket)
+- `server/index.js` (`subscribe`) · `web/app.js` — **A subscription is keyed by socket *and
+  slot*.** Every `transcript` / `messages` / `earlier` / `rebound` frame carries its slot; a
+  frame without one means slot `a`.
+  [transcript#a-subscription-is-keyed-by-socket-and-slot](docs/traps/transcript.md#a-subscription-is-keyed-by-socket-and-slot)
+- `server/sessions.js` (the synthetic id) · `web/app.js` — **tmux pane ids contain `%`.**
+  `pane:%19` in a URL path is read as a percent-escape, so synthetic session ids use
+  `pane-19`.
+  [transcript#tmux-pane-ids-in-urls](docs/traps/transcript.md#tmux-pane-ids-in-urls)
+- `server/transcript.js` (`probe`) · `server/sessions.js` — **`probe` only samples head and
+  tail.** Unread is *accumulated* across polls rather than recomputed; don't "simplify" that
+  back.
+  [transcript#probe-samples-head-and-tail](docs/traps/transcript.md#probe-samples-head-and-tail)
 
 ### Launch and relaunch
 
@@ -912,17 +924,6 @@ by a server route, which a bare static file server over `web/` doesn't have. The
 quiet: the page paints its static HTML, the module import 404s in the console, and nothing
 in the rail ever renders, which reads like a fixture problem rather than a missing file. Copy
 `marked.esm.js` into the static copy's own `vendor/marked.js` before benching anything.
-
-**A subscription is keyed by socket *and slot*.** `subs` is `ws -> Map(slot -> sub)`, and
-every `transcript` / `messages` / `earlier` / `rebound` frame carries its slot. A frame
-without one means slot `a`, which is how the panel behaved before there were two.
-
-**tmux pane ids contain `%`.** `pane:%19` in a URL path is read as a percent-escape.
-Synthetic session ids use `pane-19`.
-
-**`probe` only samples head and tail.** A burst of tool calls pushes earlier replies out
-of the window, so unread is *accumulated* across polls rather than recomputed. Don't
-"simplify" that back.
 
 **Deny beats allow, so a narrow write grant has to be a subfolder, not a carve-out.** The
 planner may write its plan and must not touch `decisions.md` — the human record of every
