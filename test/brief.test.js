@@ -267,6 +267,47 @@ test('all three briefs still tell their session to read the decisions file', () 
   }
 });
 
+/*
+ * The Traps split: `CLAUDE.md` keeps the conclusions as an index and the evidence moved to
+ * `docs/traps/`, so the briefs have to point at it. Three things are pinned and one is
+ * deliberately not.
+ *
+ * The **literal path** `docs/traps/` is pinned in all three briefs — the `logs.js` lesson:
+ * the directory name now lives in prose in three briefs and again in `CLAUDE.md`, nothing
+ * can import it, and a rename that misses one is silent.
+ *
+ * The instruction has to be to read **before** editing. An instruction to read afterwards is
+ * no instruction, and the worker brief is the only one of the three that edits anything.
+ *
+ * Not pinned: the wording of any individual index line. Those are meant to be edited every
+ * time a trap is added, and a test over them would be a tax on doing that.
+ */
+test('the worker brief sends a worker to the traps index before it edits a file', () => {
+  const brief = workerBrief({ repo: REPO, taskId: 'my-task', decisionsFile: DECISIONS });
+  assert.match(brief, /docs\/traps\//, 'the brief names the directory the evidence lives in');
+  assert.match(brief, /[Rr]ead the traps\s+before you edit/, 'and says to read it before editing, not after');
+  assert.match(brief, /Traps section is an index/, 'and says what the section in CLAUDE.md now is');
+});
+
+test('the planner brief sends a planner to the traps index, not just to CLAUDE.md', () => {
+  const brief = plannerBrief({
+    repo: REPO,
+    taskId: 'my-plan',
+    planFile: '/Users/x/State/teams/Users-x-Code-Fake/plans/my-plan.md',
+    decisionsFile: DECISIONS,
+  });
+  assert.match(brief, /docs\/traps\//, 'the brief names the directory the evidence lives in');
+  assert.match(brief, /[Rr]ead before you plan/, 'and the read is still before the planning');
+  assert.match(brief, /Traps-index line/, 'and it is the index that points at which files to read');
+});
+
+test('the lead brief names the traps index, where CLAUDE.md is already its grounds', () => {
+  const brief = leadBrief({ repo: REPO, teamDir: '/Users/x/State/teams/Users-x-Code-Fake', decisionsFile: DECISIONS });
+  assert.match(brief, /Traps section is an index/, 'the lead is told what the section is');
+  assert.match(brief, /docs\/traps\//, 'and the directory is named here too');
+  assert.match(brief, /name the ones a task touches in its body/, 'and told the one thing it does with that');
+});
+
 test('the lead is told an empty decisions file is normal, not a missing one', () => {
   const brief = leadBrief({ repo: REPO, teamDir: '/Users/x/State/teams/Users-x-Code-Fake', decisionsFile: DECISIONS });
   assert.match(brief, /empty\s+decisions file is normal/i, 'the clause is there');

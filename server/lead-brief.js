@@ -163,6 +163,10 @@ answer comes from, escalate — that is the job, not a failure at it.
 ## Your ground
 
 The repo's own CLAUDE.md and code are your grounds for any judgment about the project.
+Its Traps section is an index — one line per trap, naming the files that trap guards and
+pointing at the \`docs/traps/\` file holding the measurement behind it. You write no code
+and need not read those files yourself, but you are the only party who knows a task's
+shape before its worker exists: name the ones a task touches in its body.
 Your team folder is ${teamDir} — team.json (config), decisions.md (rulings). You may
 write only there; the checkout is read-only to you.
 `;
