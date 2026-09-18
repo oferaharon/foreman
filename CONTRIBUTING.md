@@ -7,6 +7,32 @@ Before anything else, read [CLAUDE.md](CLAUDE.md). It is not a style guide: it i
 of things that have already gone wrong in this codebase and what each one cost, and it is
 why the rules below are rules rather than preferences.
 
+## Where a new trap goes
+
+`CLAUDE.md`'s Traps section is an **index**, not the evidence. Every entry is one line: the
+surface first so it can be grepped, then the trap's conclusion in bold, then a plain
+markdown link into `docs/traps/`. The measurement that proves it — the capture, the
+version, the widths, the numbers — goes in the trap file, which is opened only by whoever
+is about to touch that code. The whole file is read by every session started in this
+folder before it knows what it is about to do; that is how it reached 200 KB.
+
+So: **the index line is the conclusion and the file is the evidence.** Add a section to the
+file its subsystem already has, and one entry pointing at it. A new file is fine too — the
+test refuses one that nothing points at, which is what stops a trap being written where
+nobody reads it.
+
+The index line's bold sentence is **lifted verbatim** from the trap's own opening sentence.
+Not paraphrased and not tightened: over sixty comments in `server/`, `web/` and `test/`
+cite traps by name, and retitling one while moving it breaks all of them at once and
+silently.
+
+**`@path` imports are forbidden in `CLAUDE.md`.** They are inlined into the system prompt
+at load time, not read on demand — measured, so an `@docs/traps/x.md` costs exactly as much
+as pasting the file inline while looking like the fix. Claude Code's own `/init` recommends
+them for precisely this situation, so the suggestion will keep arriving; use a plain
+markdown link. `test/traps-index.test.js` holds all of this together — the links both ways,
+the shape of the section, and the `@` refusal.
+
 ## Run the tests
 
 ```

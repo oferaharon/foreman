@@ -123,7 +123,8 @@ is refused whole: no binding, no state, no receipt on disk, every event includin
 `SessionEnd`. The panel not yet knowing its *own* socket is the same "cannot judge" and
 answers the same way, which is the beat between boot and the first tmux server. What keeps
 the fail-open window short rather than permanent is that **Claude Code re-reads its hook
-config while running** — already in this file, and this is what it buys.
+config while running** — measured, and recorded under *Working here* in
+[`CLAUDE.md`](../../CLAUDE.md); this is what it buys.
 
 Two consequences worth knowing. The refusal is **logged once per foreign socket**, because
 the alternative is a line per tool call of every session on that server, and a silent

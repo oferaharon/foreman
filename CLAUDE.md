@@ -967,9 +967,12 @@ away. Four things are load-bearing. A group holds **folders**, not sessions — 
 with `/clear`, folders don't. A folder is in exactly one group, enforced in `assign`, because
 the one thing worse than an unsorted rail is a session drawn twice. Collapse is safe for
 ordinary sessions and leads because the inbox hoists anything blocked or unread *out* of its
-folder first — no longer true of **workers**, which hoist only once `stuck` fires; see the
-trap above for what a collapsed team group can hide and for the measurement of what the dot
-does and doesn't cover. And **a group the panel made for a team is the only kind it will ever
+folder first — no longer true of **workers**, which hoist only once `stuck` fires. What a
+collapsed team group can hide is
+[rail-and-groups#what-a-collapsed-group-hides](docs/traps/rail-and-groups.md#what-a-collapsed-group-hides),
+and the measurement of what the dot does and doesn't cover is
+[rail-and-groups#the-collapsed-groups-dot](docs/traps/rail-and-groups.md#the-collapsed-groups-dot).
+And **a group the panel made for a team is the only kind it will ever
 delete**: `auto` on the record says which, set only by `teamGroup()`, and those hold
 worktrees the panel itself removes at close, so without reaping the heading outlives
 everything under it, permanently. Not pruning stays right for a group *you* made — a folder
@@ -1088,7 +1091,10 @@ frames, `.shared-*` and `rail-shared` all still say `shared`. That is the 2026-0
 read the safe way rather than a rename somebody abandoned: renaming a store class and three
 socket frames for a label is a large diff whose failure mode is **silent** — a frame the
 client no longer switches on — and `peer_*` beside `peers.js` would be exactly the sibling
-name the `room_*` / `group_*` rule above refuses. `server/shared-room.js`'s header says the
+name the `room_*` / `group_*` rule refuses
+([mcp-and-naming#group-rooms-and-the-sibling-name](docs/traps/mcp-and-naming.md#group-rooms-and-the-sibling-name),
+and [one-spelling](docs/traps/one-spelling.md) for the family it belongs to).
+`server/shared-room.js`'s header says the
 same thing from the store's end; do not "fix" the mismatch without deciding to.
 
 **Links are retired, and a room is what replaced them.** The panel used to run *links*: a
