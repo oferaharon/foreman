@@ -315,40 +315,44 @@ pane width every one of them depends on. Evidence:
   without re-reading the review.**
   [pane-parsers#never-submit-a-multi-select-unread](docs/traps/pane-parsers.md#never-submit-a-multi-select-unread)
 
-**Exposure is the one thing a LAN peer may not change, and the check is the socket, not
-the header.** `PATCH /api/config` — the settings modal — writes `bindHost` and
-`allowedOrigins`, and both decide who can reach this panel at all. The no-auth stance says
-a LAN peer gets everything else; it does not say a LAN peer may *widen its own reach*,
-so those two keys are gated on `req.socket.remoteAddress` being loopback (`isLoopbackRemote`
-in `settings-file.js`, 127/8, `::1` and the IPv4-mapped `::ffff:127.0.0.1` a dual-stack
-listener hands you for a plain `curl 127.0.0.1`). **A loopback `Origin` would prove
-nothing** — `origin.js` allows a request with *no* `Origin` at all, by construction, so
-curl, the hook and `mcp/foreman.js` need no allowlist, which means a LAN peer holding curl
-sails through it. And **never an `X-Forwarded-For` rung**: a header is written by the
-caller, the peer address by the kernel, and the whole value of the guard is that it cannot
-be spelled. It fails closed — no address is not loopback. The modal disables its own
-controls off `canEditExposure` from the GET, and the PATCH re-decides it server-side, so
-re-enabling them in devtools still gets the 403; measured both ways on a scratch panel
-bound wide. This is not authentication and must not grow into it.
+### Exposure
 
-**…and `sessionPrefix` is in that file but is not writable from it.** It resolves once at
-boot and is the *only* prefix the panel recognises, so a value written here takes effect at
-the next restart — at which point every session minted under the old one keeps running,
-stays in the rail, and stops being *named*: `slugFor` yields nothing so `⧉` auto-numbers,
-`isLeadName` stops matching the lead, and a snapshot cannot restore a row under its own
-name. `validateConfigPatch` refuses it by name with that reason (`PREFIX_REFUSAL`), ahead
-of the generic unknown-key refusal, because a person who tries it deserves the *why* rather
-than "not a key". The modal shows it read-only with the same sentence on hover.
+Who can reach this panel and who may widen that: the bind host, the settings writes that
+decide it, the origin guard the socket needed, and the two servers that can hold one port at
+once. Evidence: [`docs/traps/exposure.md`](docs/traps/exposure.md).
 
-**A settings write merges; a boot read does not.** `readConfigFile` answers `{}` for a file
-it could not parse — right for a boot (settings that are not there, fall back to loopback,
-loudly) and catastrophic for a write, because merging into `{}` and writing back replaces a
-file with a typo in it, recoverable in any editor, with a two-key file that has thrown the
-rest away. `writeConfigFile` therefore **refuses** an unparseable file with a 409, and
-otherwise merges so a key this version has never heard of survives. Temp file **in the same
-directory** then `rename`, because rename is only atomic within one filesystem and a temp
-dir on another volume degrades silently to copy-then-delete — and the reader that must
-never see half a file is a boot deciding what to bind.
+- `server/settings-file.js` (`isLoopbackRemote`, `validateConfigPatch`, `PREFIX_REFUSAL`) ·
+  `PATCH /api/config` · `web/app.js` (the settings modal) — **Exposure is the one thing a
+  LAN peer may not change, and the check is the socket, not the header.** A loopback `Origin`
+  would prove nothing, and `sessionPrefix` sits in the same file and is refused by name.
+  [exposure#exposure-is-the-one-thing-a-lan-peer-may-not-change](docs/traps/exposure.md#exposure-is-the-one-thing-a-lan-peer-may-not-change)
+- `server/settings-file.js` (`readConfigFile`, `writeConfigFile`) — **A settings write
+  merges; a boot read does not.** An unparseable file is refused with a 409 rather than
+  replaced, and the temp file goes in the same directory because `rename` is only atomic
+  within one filesystem.
+  [exposure#a-settings-write-merges-a-boot-read-does-not](docs/traps/exposure.md#a-settings-write-merges-a-boot-read-does-not)
+- `server/config.js` (`HOST`, `HOST_SOURCE`) · `server/settings-file.js` (`bindHost`) —
+  **The panel can be bound wider than loopback, and it has no authentication — a stated
+  non-goal, not a gap.** Do not add an auth requirement or a boot guard that refuses a wide
+  bind; the origin check is a *browser* guard and must not grow into one.
+  [exposure#the-panel-can-be-bound-wider-than-loopback](docs/traps/exposure.md#the-panel-can-be-bound-wider-than-loopback)
+- `server/install-agent.js` (`jobEnvironment`) · `server/settings-file.js` (`seedConfigFile`,
+  `resolveBindHost`) — **The installer must not hardcode the bind, and the panel records the
+  one it is actually using.** The host is resolved, the plist carries the key only when it is
+  not loopback, and the panel seeds `config.json` at its first boot.
+  [exposure#the-installer-must-not-hardcode-the-bind](docs/traps/exposure.md#the-installer-must-not-hardcode-the-bind)
+- `server/index.js` (`portAnswering`, the boot block before `server.listen`) ·
+  `server/install-agent.js` (`KeepAlive`) — **Two node servers can bind the same port at
+  once, silently, and split traffic by interface — VERIFIED.** The guard is an HTTP probe of
+  loopback, never a bind attempt — a bind attempt is precisely the check that does not detect
+  this — and `process.exit(0)` is a contract with the plist.
+  [exposure#two-node-servers-can-bind-the-same-port-at-once](docs/traps/exposure.md#two-node-servers-can-bind-the-same-port-at-once)
+- `server/origin.js` · `server/index.js` (`verifyClient`, the non-`GET` `app.use`) ·
+  `POST /hook` — **A WebSocket handshake is exempt from CORS, so `/ws` was the whole hole —
+  and the guard that closes it is a *browser* guard, not authentication.** It restricts nobody
+  on the local network, `GET` is deliberately not gated, the address filter is a filter, and
+  `Origin: null` is refused while an absent header is allowed.
+  [exposure#a-websocket-handshake-is-exempt-from-cors](docs/traps/exposure.md#a-websocket-handshake-is-exempt-from-cors)
 
 **A GitLab remote read as `Gitea`, because "not GitHub" is not the same as "Gitea" —
 found on the bench.** The forge is derived per repo from `git remote get-url origin`
@@ -1034,344 +1038,115 @@ which reads as "nothing to restart for"; the review-time file list wins when tha
 "No tip recorded" draws no pill at all — the rule about showing nothing over showing
 something wrong applies to a green badge more than to anything else here.
 
-**The room's box moves under its own scroll, and nothing says so.** `renderRoom` pinned
-to the bottom on every paint, which was both too much and not enough. Too much: a full
-repaint fires on every incoming post, so a worker's report — now a bubble you can spend a
-minute reading — yanked you to the newest line mid-read. Not enough: the tasks list and
-the settings block above it arrive over HTTP a beat after the aside mounts, and each one
-*shrinks* the room, so a scrollTop set while the box was 947px tall is 454px short of the
-bottom once it is 493 — silently, with no scroll event, on every single open since the
-aside existed. Following is now an intention flipped only by a real scroll, and the two
-things that resize that box call `pinRoom` when they repaint. A `ResizeObserver` is the
-general answer and was tried; it never fired, and neither did `requestAnimationFrame`,
-because **an automated Chrome window reports `visibilityState: 'hidden'`** and Chrome
-suspends both there. Worth knowing before you spend an hour blaming your own code:
-`document.visibilityState` is the first thing to check when a callback that should be
-free never arrives on a bench.
+### Rooms
 
-**…and a room that doesn't yank you needs to say what you're missing.** The other half of
-the same rule: leaving the scroll alone means arrivals land off-screen with nothing to mark
-them. A muted `N new below ↓` pill hangs off the room's bottom edge (absolutely positioned
-against `.room-panel`, so it never reflows the list under the reader), exists only while
-`follow` is false, and clicking it rejoins. The condition on it was "keep it quiet" —
-muted ink, no accent, no motion. The counter is floored at zero on purpose: a full `room`
-frame can *shrink* the list, and a negative count would hide a hint that was due.
+The room panel's scroll and repaint rules, what a line's colour is keyed on, the five-line
+clamp, how a member is resolved, and what `@name` does and does not change. Evidence:
+[`docs/traps/rooms.md`](docs/traps/rooms.md).
 
-**A room line's colour is keyed on what the poster said it is, never on how it reads.**
-A dispatch line was asked for in green, the way a conflict is amber — and there was nothing
-on the entry to tell one system line from another. `about` looks like the key
-and is not: it is the *task id*, carried by every task-scoped system line, so a dispatch and
-the `→ working` transition a minute later are identical by it. Every `kind: 'system'` post
-in the repo (gc.js, watch.js's `postSystem`, and index.js's dispatch, model, PR and close
-lines) carries exactly `{from, to, kind, about, text}` plus `alert`. So the dispatch post
-gained `event: 'dispatch'` — riding the same `...rest` that `conflict`, `report` and `alert`
-already use, `room.js` untouched — and `roomEntryNode` matches it exactly, so adding `event:
-'pr'` later colours nothing by accident. **Do not match the sentence.** The text is a
-message to a human and will be reworded; the day it is, a string-matched colour turns off
-silently and the room looks fine. Two consequences worth knowing: this half is a `server/`
-change, so it needs a panel restart, and `room.jsonl` is append-only history — lines already
-written carry no `event` and stay grey, so the colour starts at the next dispatch rather
-than filling in behind itself.
+- `web/app.js` (`renderRoom`, `pinRoom`, `pinRooms`) — **The room's box moves under its own
+  scroll, and nothing says so.** Following is an intention flipped only by a real scroll, and
+  the two things that resize that box repin it — a `ResizeObserver` never fired.
+  [rooms#the-rooms-box-moves-under-its-own-scroll](docs/traps/rooms.md#the-rooms-box-moves-under-its-own-scroll)
+- `web/app.js` (`roomEntryNode`) · `server/index.js` (the dispatch post) — **A room line's
+  colour is keyed on what the poster said it is, never on how it reads.** The key is `event`;
+  `about` looks like it and is the task id every task-scoped system line carries.
+  [rooms#a-room-lines-colour](docs/traps/rooms.md#a-room-lines-colour)
+- `web/app.js` (`renderRoom`) — **A repaint that measures anything stops holding the reader's
+  place.** `scrollTop` is held across the whole paint and read *before* `replaceChildren`, and
+  nothing is drawn until it is known to be needed.
+  [rooms#a-repaint-that-measures-anything](docs/traps/rooms.md#a-repaint-that-measures-anything)
+- `web/styles.css` (`.room-clamp`) — **A clamp that can't be measured can't be trusted.** The
+  standard `line-clamp` is deliberately not set beside `-webkit-line-clamp`; add it the day it
+  can be measured, not the day it parses.
+  [rooms#a-clamp-that-cant-be-measured](docs/traps/rooms.md#a-clamp-that-cant-be-measured)
+- `web/app.js` (`renderRoom`, `renderTasks`, `renderMain`) — **A list painted at build time
+  paints nothing, and a quiet feature hides it.** Paint after the container is in the document;
+  a busy room self-heals in seconds while a quiet one stays blank for hours.
+  [rooms#a-list-painted-at-build-time](docs/traps/rooms.md#a-list-painted-at-build-time)
+- `server/rooms-line.js` (`resolveMember`) · `web/rooms-pane.js` (`memberRow`) ·
+  `test/rooms-pane.test.js` — **A room member is resolved `tmuxSession` first, and the
+  recorded decision said the opposite.** A stored pane id can be live and belong to somebody
+  else, which is a post typed into a stranger.
+  [rooms#a-room-member-is-resolved-tmuxsession-first](docs/traps/rooms.md#a-room-member-is-resolved-tmuxsession-first)
+- `server/index.js` (`sendOrQueue`, `roomTurn`) · `server/rooms.js` (`rateFault`) ·
+  `web/rooms-pane.js` — **`handed` is not `delivered`, and the window between checking and
+  writing it down had to be closed by hand.** Every surface says `handed`, and the order is
+  forced — check, fan out, append — so the posts to one room are serialised.
+  [rooms#handed-is-not-delivered](docs/traps/rooms.md#handed-is-not-delivered)
+- `web/app.js` (`groupEntryNode`, `sharedEntryNode`, `addressedNames`) — **`to` means two
+  different things one pane apart, and both are built by near-identical functions in one
+  file.** Anchor on the node's own class prefix, never on the shape the two share.
+  [rooms#to-means-two-different-things-one-pane-apart](docs/traps/rooms.md#to-means-two-different-things-one-pane-apart)
+- `server/rooms-line.js` (`mentionsIn`, `memberLabel`) · `POST /api/rooms/:id/post` ·
+  `web/app.js` (the composer's `@` menu) — **`@name` in a room is a signal, and the ruling
+  that makes it one is easy to optimise away.** The fan-out has no branch on `to` at all: a
+  mention changes what each recipient is told, never who gets a copy.
+  [rooms#name-in-a-room-is-a-signal](docs/traps/rooms.md#name-in-a-room-is-a-signal)
 
-**A repaint that measures anything stops holding the reader's place.** The room got the
-scroll rules above without ever preserving `scrollTop` across a paint, and it didn't need
-to: `replaceChildren` followed by a run of appends never forces a layout, so the old offset
-survived the swap untouched. Then the five-line clamp added a measurement — every candidate
-is marked clamped, appended, and only *then* read — and that read is a layout, after which
-every height settled above the reader slides the list under them. Measured at **66px per
-incoming line**, which is exactly the four `view more` buttons that sat above the fold
-during the measured layout and were taken away after it; with no scroll event to notice it
-by, this box's signature failure. Two halves to the fix and both are load-bearing: nothing
-is drawn until it is known to be needed (the button is built in the write pass, for the
-three entries in twenty that overflow, instead of built for all twenty and removed from
-seventeen), and `renderRoom` holds `scrollTop` across the whole paint. Note **where** that
-read has to happen — `list.scrollTop` *after* `replaceChildren` is a forced layout on an
-emptied box, which clamps the answer to 0 before you have read it, and the first draft put
-the reader at the top of the room on every arriving line. Read it before the swap.
+### launchd
 
-**A clamp that can't be measured can't be trusted.** `-webkit-line-clamp` is what the room
-uses, and the standard `line-clamp` is deliberately *not* set beside it: Chrome 151 answers
-`CSS.supports('line-clamp','5')` with false, so it is inert today — and the shape it will
-ship is `continue: discard`, which removes the clamped lines from the box rather than
-hiding them. The overflow test is `scrollHeight > clientHeight`; discard the lines and
-those two are equal, every entry reads as fitting, and the control silently stops
-appearing on exactly the entries that need it. Add the property the day it can be measured,
-not the day it parses.
+Facts about this machine rather than about a file here, which is why they are filed under
+the tool's name and not a path — the plist, the label's three copies, the job's `PATH`, the
+log rotation, the state dir's four rungs and Homebrew's own rename. Read them before
+changing the plist, the label or the log paths. Evidence:
+[`docs/traps/platform-launchd.md`](docs/traps/platform-launchd.md).
 
-**A list painted at build time paints nothing, and a quiet feature hides it.** Everything
-in `web/app.js` that renders through an `isConnected` guard — `renderRoom`, `renderTasks`
-— must be called *after* its container is in the document, not inside the builder that
-creates it. `renderMain` mounts the lead's aside and then paints. Get it backwards and
-the guard silently skips, and the next repaint only arrives with the next incoming
-message: a busy room self-heals in seconds and looks perfect, while a quiet one stays
-blank for hours. That is exactly how it shipped and how it was caught — seven entries in
-`room.jsonl`, none on screen. The general lesson is about benches, not guards: a feature
-proven against a *busy* fixture is not proven against a quiet one.
-
-**The panel can be bound wider than loopback, and it has no authentication — a stated
-non-goal, not a gap.** `bindHost` decides who can reach it: `127.0.0.1` by default, and a
-wider bind is something an operator records deliberately. What a wide bind grants, spelled
-out because it is easy to under-read: anything that can reach the port can launch sessions,
-type arbitrary text into any session on the machine, `/exit` them, dispatch workers, answer
-permission prompts, and read every transcript over `/ws` — which is not read-only in spirit,
-it carries `markRead`. The team endpoints live on the same port, so the merge path is
-reachable too. And `0.0.0.0` is **every** interface the machine has, not one network: a
-machine that later joins another network is on that one as well.
-
-None of that is an oversight. Authentication was argued for this panel, the cost of leaving
-it out was named, and the project's stance is that it stays out — so **do not quietly add an
-auth requirement, or a boot guard that refuses a wide bind.** The origin check below is the
-only thing here that resembles one, and it is a *browser* guard: it must not grow into
-authentication. The stance can be revisited, but deliberately, not by a guard slipped in
-under a bug fix.
-
-The bind used to live only in the shell that started the process, so a plain `npm start` put
-it back on loopback silently. It now rides in the LaunchAgent's own job environment
-(`npm run install-agent`), so it survives a crash, a reboot, and the routine restart
-(`npm run restart-panel`). `npm start` by hand still binds loopback only — correct and
-expected, because the panel that matters isn't the one `npm start` starts.
-
-**The installer must not hardcode the bind, and the panel records the one it is actually
-using.** `jobEnvironment()` used to put a literal `FOREMAN_HOST: '0.0.0.0'` into *every*
-plist it generated, unconditionally — so anybody running the installer got a LAN-exposed
-panel without being asked. The code default has always been loopback (`config.js`), which
-made the installer the whole of the exposure. The host is now **resolved** — `$FOREMAN_HOST`
-→ `<STATE_DIR>/config.json`'s `bindHost` → `127.0.0.1` — and the plist carries the key only
-when it is not loopback, the same omit-when-default rule `FOREMAN_PORT` and
-`FOREMAN_STATE_DIR` already followed. A wide bind survives an upgrade by having been
-*recorded* rather than by being everyone's default: the panel **seeds `config.json` at its
-first boot** with the host it is actually using, so an install whose plist already carries a
-wide host writes that fact down without anybody doing anything. That seeding is the belt to
-a brace: renaming the environment variable killed the key any older plist spells, and only a
-*reinstall* writes the replacement — so a restart at the wrong moment produces a panel that
-comes up perfectly, on loopback, with nothing in any log and a phone that has simply stopped
-answering. If the seeding is ever removed, doing the rename and the reinstall in one sitting
-is the only thing left guarding that. `server/settings-file.js` is the module and its header
-is the long version.
-
-**Two node servers can bind the same port at once, silently, and split traffic by
-interface — VERIFIED.** `SO_REUSEADDR` plus macOS letting a specific bind sit beside a
-wildcard one means a process on `0.0.0.0:48770` and one on `127.0.0.1:48770` both succeed,
-in either order, with no error from either `listen()` call. They then answer differently
-depending on which interface the request arrived on — `curl 127.0.0.1:48770` reaches one,
-`curl <lan-address>:48770` reaches the other — and only `lsof -iTCP:48770` shows two
-`LISTEN` rows; nothing on either process's own output says so. Worse than "two panels":
-the hook posts to `127.0.0.1` (`install-hook.js`) and `mcp/foreman.js` calls
-`http://127.0.0.1:${PORT}`, so all hook traffic and every lead tool call reach whichever
-panel is bound to loopback while a phone on the LAN reaches the other — which is
-meanwhile polling tmux, flushing the same `queue.json`, and running its own worktree GC
-against real tasks. This is why the boot guard (`index.js`, before `server.listen`) is an
-HTTP probe of `127.0.0.1:<port>`, never a bind attempt — a bind attempt is precisely the
-check that does not detect this. Anything answering there means refuse and
-`process.exit(0)`; refused, timed out, or threw all mean go ahead. The exit code is a
-contract with the plist's `KeepAlive: {SuccessfulExit: false}` (`install-agent.js`) — 0
-means "I deliberately declined to start", not a crash, so launchd stands down instead of
-looping.
-
-**A WebSocket handshake is exempt from CORS, so `/ws` was the whole hole — and the guard
-that closes it is a *browser* guard, not authentication.** `new WebSocketServer({server,
-path:'/ws'})` had no `verifyClient`, and a handshake triggers no preflight: any `http://`
-page a browser visited could open `ws://<host>:48770/ws`, be handed the full roster the
-moment it connected, `subscribe` to any transcript and send `markRead`. The roster's `id`
-is the session UUID `/hook` accepts as `text/plain` (also no preflight), so the same page
-could then write false status for any session — `/hook` alone was nearly harmless because
-the ids are UUIDs and the socket is what hands them out. `server/origin.js` is one pure
-decision with three call sites: an `app.use` gating every non-GET, `verifyClient`, and
-`/hook` (a POST, so the gate covers it — confirmed against the running route, not assumed).
-
-Four things about it that a later reader will want to undo, each for a reason:
-
-- **It restricts nobody on the local network.** The no-auth stance above holds: no header,
-  no check — curl, the hook's curl and `mcp/foreman.js` are allowed *by construction*, not
-  by a list. A device on the local network is allowed by clause 3, derived at run time, so a
-  DHCP lease that moves fixes itself. This is not a boot guard and must never grow into auth.
-- **`GET` is deliberately not gated.** A cross-origin page can send one but cannot read the
-  response, because no `Access-Control-Allow-Origin` is ever sent. The socket is the
-  exception and that is why it has its own call site.
-- **The address filter is a filter, not "everything non-internal".** RFC-1918 and
-  `fc00::/7` in; `fe80::/10` out, because on macOS most non-internal addresses are
-  link-local and some of those interfaces are peer-to-peer ones a browser has no business
-  reaching across; and `utun*` out, because that is where VPN and overlay-network
-  interfaces land, and allowing every tunnel ships a panel reachable from every VPN the
-  machine ever joins with nobody having decided that. A tunnel that should be reachable is
-  a *named* addition to the list, never a side effect of a loose filter.
-- **`Origin: null` is refused and an absent header is allowed** — they are not the same
-  case. `null` is a sandboxed iframe or a `data:` URL, which is attacker-reachable.
-
-The boot prints the origins it resolved, one line each with the interface and the reason,
-because this clause was first written from a *description* of `os.networkInterfaces()`
-rather than its output, and a derived list nobody looks at is how that comes back.
-
-**`launchctl kickstart -k` does not re-read the plist — VERIFIED.** A job was
-bootstrapped, its `EnvironmentVariables` edited on disk, then `kickstart -k`'d — the
-process came back holding the *old* value; only `bootout` + `bootstrap` picked up the
-change. `npm run restart-panel` is `kickstart -k` and is correct for anything under
-`server/`, because the process re-imports its own files fresh and nothing about the job
-changed. A change to the job itself — the host, an env var, the injected `PATH` — needs
-`npm run install-agent` again, and `install()` (`install-agent.js`) always `bootout`s a
-live job before it `bootstrap`s a new one for exactly this reason: a reinstall that only
-kickstarts is a reinstall that did nothing. It is also why the trigger token
-(`config.js`'s `TRIGGER_TOKEN_FILE`) lives in a file under `STATE_DIR` rather than in the
-plist's `EnvironmentVariables` — rotating a plist-held secret would hit this same trap,
-silently keeping the old value alive through the documented restart.
-
-**launchd's `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin` and nothing else — VERIFIED.** Bare
-`git` works (`/usr/bin/git` ships with macOS); bare `node` and bare `tmux` do not. tmux is
-resolved absolutely for that reason (`tmuxPath()`, in `tmux.js`, memoised); the plist's
-injected `PATH` (`jobPath()` in `install-agent.js`) is still
-load-bearing beyond that, because `runSetup` (`worktree.js`) shells a worktree's prepare
-command — typically `npm install` — through `exec()` with the inherited environment, and
-fails
-*quietly*: `{ok: false}`, a line under `worker-logs/`, dispatch carries on as if nothing
-happened. `jobPath()` builds the injected `PATH` from the installing shell's own `PATH`
-plus the Homebrew/local/system directories, deduped, with npm's own `node_modules/.bin`
-chain filtered back out — those directories are an artifact of running `npm run
-install-agent`, not a fact about the Mac, and would let a long-lived daemon resolve
-binaries out of a checkout that can later be deleted.
-
-**A bare program name in `ProgramArguments` fails with exit 78 `EX_CONFIG` and writes
-nothing — VERIFIED.** Both `StandardOutPath` and `StandardErrorPath` come back empty,
-`log show` has nothing, and the label simply doesn't show up as running — from outside,
-the job never existed. `install-agent.js` captures an absolute node path at install time
-rather than trusting `PATH` to resolve it inside the job. `process.execPath` is the
-obvious source (`index.js` already uses it for the MCP config) but resolves through the
-Homebrew symlink to a versioned Cellar path that `brew upgrade node` deletes — which
-reproduces the same silent exit 78 after the next upgrade — so the installer prefers the
-stable `/opt/homebrew/bin/node` spelling whenever `realpathSync` proves it points at the
-same binary `process.execPath` did.
-
-**Stopping the job does not kill the tmux server — VERIFIED, and worth it as a
-reassurance.** The obvious fear: if the panel is first to touch tmux after a reboot, does
-`bootout` take every Claude session down with the job? No — the tmux server daemonizes to
-`ppid 1` and leaves the job's process tree entirely, so `bootout`, a fresh `bootstrap`,
-and `kickstart -k` against a job holding a tmux server all leave a running session
-untouched. Measured against a throwaway job on its own tmux socket, all three operations
-run in sequence against it.
-
-**The launchd label has three copies and two of them are not JavaScript, so only a test
-holds them together.** `server/logs.js` owns `DEFAULT_AGENT_LABEL`; `scripts/backup-state.sh`
-hardcodes it as the fallback for when the repo is not beside the script; and `package.json`
-bakes it into `restart-panel` and `stop-panel`. Rename one and miss the others and **`npm run
-restart-panel` kickstarts a job that does not exist** — no error, no output, nothing
-restarted — while the backup silently captures the wrong plist or none. `test/logs.test.js`
-reads `package.json` and the shell script and asserts both against the exported constant,
-which is the only mechanism available: neither of the other two can import anything. Same
-family as `isLeadName`, except there are three of them and they are in three languages.
-Measured on a scratch install under the default label: `restart-panel` took the job from one
-PID to another, `stop-panel` left `launchctl list` with nothing and the port free.
-
-**An orphaned plist runs the *current* code under an older label, and the detector for it
-must be by shape rather than by name.** `ProgramArguments` is `[node, <checkout>/server/index.js]`
-— a **path**, not a name — so a plist written under a label this repo no longer uses goes on
-starting that same file at every login. Both jobs then bind the one port (the two-panels trap
-above, which is silent), and `restart-panel` kickstarts whichever is not holding it. So
-`install()` sweeps first, on two rungs that both mean *this plist starts a copy of this panel
-that is not the one being installed*: its `…/server/index.js` **no longer exists** (the
-checkout moved out from under it), or it **is this very file** by `realpath`.
-
-Three things about it that will matter again. **No legacy label is named in the code and
-none should be** — the rule is structural, and a *list* of superseded labels is exactly the
-residue the naming rule forbids. **The rung that matters most is the
-refusal:** a plist whose program exists and is a *different* file is left strictly alone, and
-that single condition is what stops an installer benched from inside a worktree — where
-`server/index.js` is a copy — from booting out the real job. Verified read-only against a
-real `~/Library/LaunchAgents` from a worktree: `legacyJobs()` returned `[]`. And it is
-**`bootout`, never a signal**: `KeepAlive: {SuccessfulExit: false}` reads a signal death as a
-crash and starts the job straight back up, so `--takeover`'s SIGTERM is a fight launchd wins.
-The sweep runs *before* the port refusal, deliberately — the orphan may be the thing holding
-the port, and refusing there would leave the very plist the step exists to remove.
-
-**Homebrew renamed its own launchd label prefix, so the brew plist has two names and the
-panel carries both.** `brew services` used to write `homebrew.mxcl.<formula>.plist`; it now
-writes `sh.brew.<formula>.plist` — measured on 6.0.21 while the v0.4.0 formula was being
-proved, and read out of the installed source on 6.0.22, where `canonical_plist_name` is the
-new spelling and `legacy_plist_name` the old. `BREW_LAUNCHD_LABEL` was one hardcoded string
-of the old shape, so on a current Homebrew `scripts/backup-state.sh` went looking for a file
-that does not exist and skipped it silently: the same class of bug the label fix was for in
-the first place, reopened by somebody else's rename. `BREW_LAUNCHD_LABELS` is now a **list of
-two, newest first**, and `existingBrewPlists` (`server/homebrew.js`) answers whichever of
-them is really in `~/Library/LaunchAgents` — none, one, or **both**, since an upgrade can
-write the new plist and leave the old one behind. A list rather than a detector because there
-is nothing to detect it from except the file's own existence: the panel is not installed by
-Homebrew's code, and `brew --version` would be a version number standing in for a fact on
-disk — an install predating the rename keeps its old plist through every upgrade. Homebrew
-reaches the same answer, its `plist_names` being `[canonical, legacy]`. Swapping one
-hardcoded name for the other would only have moved the bug onto every older install; the
-backup now captures every plist that is there, each under its own basename in the archive.
-
-**The state dir is resolved on four rungs, and the third is the only place the old spelling
-survives in this code.** `$FOREMAN_STATE_DIR` → `~/.foreman` if it exists → the directory an
-older build used if *that* exists → `~/.foreman`. It is a **path**, not a name anything reads
-as configuration, it is dead on a machine that has never run the older build, and it is
-`LEGACY_STATE_DIR_NAME` in `config.js` so nothing spells it twice. **It is not a migration and
-must never become one** — nothing moves, copies or merges, because the failure mode of a
-half-finished automatic move is one person's task history in two directories with no way to
-tell which is live; `test/state-dir.test.js` pins that as directly as it pins which directory
-wins. `scripts/backup-state.sh` carries the same rungs in bash for the same reason it carries
-the label, and the same test file pins those too. The boot prints `State: <dir> (<rung>)`,
-because a resolver that quietly picked the other directory is indistinguishable from a panel
-whose tasks, room and rulings have vanished.
-
-**…and a test that sets `FOREMAN_STATE_DIR` above its imports is still pointed at the real
-one, because ESM hoists.** Every static `import` is evaluated before *any* statement in the
-file, so `process.env.FOREMAN_STATE_DIR = mkdtempSync(...)` on line 12 runs after
-`config.js` has already frozen `STATE_DIR` on line 14 — and the comment above it saying
-"above the imports" is true of the source and false of the execution order, which is why it
-survived review twice. `base-branch.test.js` and `worktree.test.js` both had it: every
-`npm test` cut scratch worktrees (`repo-first-task`, `no-main-nope`) straight into the
-maintainer's own `~/.foreman/worktrees/` beside live workers', and the suites' teardown
-removed only the empty temp dir they had made, so nothing was ever left behind to notice.
-Caught by polling the real directory during a run. The fix is `const { … } = await
-import('…')` after the assignment — test files are ESM, top-level await is fine — and the
-guard in `test/state-dir.test.js` is a source scan that refuses **any** static relative
-import in a file that sets the variable, rather than a list of modules known to reach
-`config.js`: the import graph moves, and a module that is pure today reaches it tomorrow.
-Do not answer this by making `config.js` re-read the env lazily; the running panel resolves
-once at boot on purpose.
-
-**Plist backups go to the state dir, not beside the original.** A second file in
-`~/Library/LaunchAgents` carrying the same `Label` as the live plist is a duplicate job
-waiting for the next login, so `install-agent.js` backs up into `STATE_DIR` rather than
-writing a `.bak` next to the file launchd actually reads.
-
-**…and the settings installers go the other way, deliberately.** `install-hook.js` and
-`install-statusline.js` both copy `~/.claude/settings.json` aside **beside itself**, as
-`settings.backup-foreman-<ms>.json`: one habit, one place to look, and somebody hunting for
-what they had before should not have to know which of two installers touched it last. The
-plist reasoning above does not carry over — a second settings-shaped file in `~/.claude/` is
-read by nothing, since Claude Code reads `settings.json` and `settings.local.json` and no
-other name in that directory. This paragraph used to describe the state dir as *"the same
-habit `install-hook.js` has"*, which was never true of any version of that file, and a later
-task inherited the claim as an instruction before it was checked.
-
-**Renaming a launchd log rotates nothing, and looks exactly like it worked — VERIFIED.**
-launchd opens `StandardOutPath`/`StandardErrorPath` once and holds the descriptor, so
-`mv foreman.log foreman.log.1` does not make the daemon reopen anything: the
-renamed file goes on collecting every line, and the path you are tailing never comes back
-at all. Benched against a real job — the moved file grew by the daemon's next 60 bytes
-while the live path stayed absent. So `logs.js` **copies aside and then truncates in
-place**, which is what an open descriptor does follow: measured on the real job, the fd
-was sitting at a 6 MB offset, the file was truncated under it, and the next write landed
-at byte 0 with no sparse hole — launchd opens these `O_APPEND`. Copy *first*: a truncate
-whose copy failed has thrown the history away for nothing. One `.1`, overwritten; no `.2`.
-
-Three things about where it runs. It is in the boot block **after the single-instance
-probe and before the panel prints anything** — a panel about to stand down must not rotate
-the running panel's logs, they are the same two files, and a rotation after the boot lines
-would copy them into `.1` and truncate away the one boot somebody was watching. It is
-boot-only, because the copy→truncate window loses anything appended inside it, and at boot
-the writer is this process and it has not written yet. And the paths come from `logs.js`,
-which owns the label too — `install-agent.js` imports them rather than the reverse,
-because that file runs `install()` at the bottom and importing it from the boot path would
-install the LaunchAgent on every start.
-
-**A scratch `FOREMAN_AGENT_LABEL` has to reach the job, not just the plist.** The label decides
-both the plist's log paths *and*, now, which two files the running panel truncates — and
-the second is read from the process's own environment. `jobEnvironment()` was writing
-`FOREMAN_PORT` and `FOREMAN_STATE_DIR` into `EnvironmentVariables` but not the label, so a bench
-job wrote to scratch logs while the panel inside it computed the default paths: the first
-bench of the rotation would have deleted the real panel's history. Found while setting the
-bench up, not by it. Anything else derived from the label has the same shape.
+- **launchd** (`launchctl kickstart`/`bootout`/`bootstrap`, `server/install-agent.js`'s
+  `install`, `package.json`'s `restart-panel`) — **`launchctl kickstart -k` does not re-read
+  the plist — VERIFIED.** A change to the job itself needs `npm run install-agent` again; a
+  reinstall that only kickstarts is a reinstall that did nothing.
+  [platform-launchd#launchctl-kickstart--k-does-not-re-read-the-plist](docs/traps/platform-launchd.md#launchctl-kickstart--k-does-not-re-read-the-plist)
+- **launchd** (`jobPath` in `server/install-agent.js`, `tmuxPath` in `server/tmux.js`,
+  `runSetup` in `server/worktree.js`) — **launchd's `PATH` is `/usr/bin:/bin:/usr/sbin:/sbin`
+  and nothing else — VERIFIED.** Bare `git` works and bare `node` and `tmux` do not, and a
+  worktree's prepare command fails *quietly* when they don't resolve.
+  [platform-launchd#launchds-path](docs/traps/platform-launchd.md#launchds-path)
+- **launchd** (`ProgramArguments`, `nodeBinary` in `server/install-agent.js`) — **A bare
+  program name in `ProgramArguments` fails with exit 78 `EX_CONFIG` and writes nothing —
+  VERIFIED.** From outside the job never existed, so the installer captures an absolute node
+  path — and prefers the stable Homebrew spelling over the Cellar path an upgrade deletes.
+  [platform-launchd#a-bare-program-name-in-programarguments](docs/traps/platform-launchd.md#a-bare-program-name-in-programarguments)
+- **launchd** (`bootout`, `bootstrap`, `kickstart -k`) — **Stopping the job does not kill the
+  tmux server — VERIFIED, and worth it as a reassurance.** The tmux server daemonizes to
+  `ppid 1` and leaves the job's process tree entirely.
+  [platform-launchd#stopping-the-job-does-not-kill-the-tmux-server](docs/traps/platform-launchd.md#stopping-the-job-does-not-kill-the-tmux-server)
+- `server/logs.js` (`DEFAULT_AGENT_LABEL`) · `package.json` (`restart-panel`, `stop-panel`) ·
+  `scripts/backup-state.sh` · `test/logs.test.js` — **The launchd label has three copies and
+  two of them are not JavaScript, so only a test holds them together.** Rename one and miss
+  the others and `npm run restart-panel` kickstarts a job that does not exist, silently.
+  [platform-launchd#the-launchd-label-has-three-copies](docs/traps/platform-launchd.md#the-launchd-label-has-three-copies)
+- `server/install-agent.js` (`legacyJobs`, `install`) — **An orphaned plist runs the
+  *current* code under an older label, and the detector for it must be by shape rather than
+  by name.**
+  No legacy label is named in the code; the rung that matters most is the refusal, and it is
+  `bootout`, never a signal.
+  [platform-launchd#an-orphaned-plist-under-an-older-label](docs/traps/platform-launchd.md#an-orphaned-plist-under-an-older-label)
+- `server/homebrew.js` (`BREW_LAUNCHD_LABELS`, `existingBrewPlists`) ·
+  `scripts/backup-state.sh` — **Homebrew renamed its own launchd label prefix, so the brew
+  plist has two names and the panel carries both.** An upgrade can write the new plist and
+  leave the old one behind, so the answer is none, one, or both.
+  [platform-launchd#homebrew-renamed-its-own-launchd-label-prefix](docs/traps/platform-launchd.md#homebrew-renamed-its-own-launchd-label-prefix)
+- `server/config.js` (`STATE_DIR`, `resolveStateDir`, `LEGACY_STATE_DIR_NAME`) ·
+  `scripts/backup-state.sh` · `test/state-dir.test.js` — **The state dir is resolved on four
+  rungs, and the third is the only place the old spelling survives in this code.** It is not a
+  migration and must never become one — and a test that sets `FOREMAN_STATE_DIR` above its
+  imports is still pointed at the real one, because ESM hoists.
+  [platform-launchd#the-state-dir-is-resolved-on-four-rungs](docs/traps/platform-launchd.md#the-state-dir-is-resolved-on-four-rungs)
+- `server/install-agent.js` · `server/install-hook.js` · `server/install-statusline.js` —
+  **Plist backups go to the state dir, not beside the original.** A second file in
+  `~/Library/LaunchAgents` carrying the live `Label` is a duplicate job waiting for the next
+  login; the settings installers go the other way, deliberately.
+  [platform-launchd#plist-backups-go-to-the-state-dir](docs/traps/platform-launchd.md#plist-backups-go-to-the-state-dir)
+- **launchd** (`StandardOutPath`/`StandardErrorPath`, `rotateLogs` in `server/logs.js`, the
+  boot block in `server/index.js`) — **Renaming a launchd log rotates nothing, and looks
+  exactly like it worked — VERIFIED.** Copy aside and truncate in place, copy first, one
+  `.1`, and boot-only — after the single-instance probe and before the panel prints anything.
+  [platform-launchd#renaming-a-launchd-log-rotates-nothing](docs/traps/platform-launchd.md#renaming-a-launchd-log-rotates-nothing)
+- `server/install-agent.js` (`jobEnvironment`) · `server/logs.js` (`AGENT_LABEL`) — **A
+  scratch `FOREMAN_AGENT_LABEL` has to reach the job, not just the plist.** The running panel
+  reads it from its own environment to decide which two files it truncates.
+  [platform-launchd#a-scratch-foremanagentlabel-has-to-reach-the-job](docs/traps/platform-launchd.md#a-scratch-foremanagentlabel-has-to-reach-the-job)
 
 **`git diff` and `git status` quote paths differently, and the fix has its own trap
 inside it.** Measured in a throwaway repo: `diff --name-only` leaves a space bare
@@ -1623,79 +1398,6 @@ in *both* snapshot restore and relaunch-all. `test/session-launch.test.js` reads
 `server/index.js`, balances parens round every `createSession(` and refuses one that carries
 neither the helper nor a named exemption — proven non-vacuous by deleting the flags from one
 site and watching it name the line.
-
-**A room member is resolved `tmuxSession` first, and the recorded decision said the
-opposite.** The ruling said "by pane + name", and pane id is the *weakest* of the three ids
-here: a session id rotates on `/clear` (so the store keeps none), a **pane id survives
-`/clear` and not a relaunch** — relaunch-all can take the tmux server down and pane ids then
-restart at `%0`, which `queue.js` already prunes on `paneCreatedMs` for — and a tmux session
-name survives all of it, being minted before the pane exists and put back under the same
-name by relaunch-all. So a stored `%12` can be **live and belong to somebody else**, which
-is a post typed into a stranger.
-
-`resolveMember` (`server/rooms-line.js`) is therefore `tmuxSession` → `paneId` **and** `name`
-together → nothing, and two edges are pinned by name. One tmux session can hold more than one
-Claude pane (a user split), and then `tmuxSession` names two rows — settled only by an exact
-`paneId`, because `label` is *derived from the tmux session name* and both rows carry the
-same label, title and project by construction, so no name witness can ever break that tie; a
-set it cannot settle falls through and resolves to nothing. And the fallback needs **both**
-witnesses, never one, because a session relaunched under a name a different session has since
-taken is exactly what one witness would match. `participant()` is applied **after** the
-resolution and never as a filter in front of it: filtering first would let a member whose row
-has become a worker fall through and match some *other* row. `web/rooms-pane.js`'s `memberRow`
-mirrors the same order for its status dot and cannot import the real one (that pulls in
-`server/observe.js`), so `test/rooms-pane.test.js` drives both against one set of fixtures and
-asserts they agree — held together by a test rather than by a comment.
-
-**`handed` is not `delivered`, and the window between checking and writing it down had to be
-closed by hand.** `sendOrQueue` types or queues; a queued copy waits for a pane to go idle,
-which may be hours and may be never, and `queue.prune` silently drops everything for a pane
-that has gone away or come back with a different birthday. Nothing writes back to an
-append-only log, so **an entry that says `queued` says it forever** — that is the state, not a
-bug, and the retired `/api/shared-room/message` made the call first, in a comment that went
-with it. Every surface says
-`handed`: the log entry's key, the room pane's line under a bubble, the tool description, and
-`test/rooms-pane.test.js` greps for the word. Making a dropped copy visible (a `dropped` event
-out of `queue.prune`, a `system` line in the room) was costed and deliberately left unbuilt,
-so that it stays a decision rather than a side effect.
-
-The machinery beside it is the part the plan did not ask for. The refusals must gate the
-typing — `rateFault` is public for exactly that — but the handoff marks ride on the entry, so
-the order is forced: **check → fan out → append**. That leaves a window where two posts to one
-room both pass `rateFault`, both type into every pane, and the second is then refused by
-`post()` with the copies already delivered and nothing written down. For a single poster the
-limiter only ever gets more forgiving as time passes, so the window needs a *second* poster —
-which is precisely what a room is for. `roomTurn` in `server/index.js` is a promise chain per
-room, the way `PaneLock` serialises per pane.
-
-**`to` means two different things one pane apart, and both are built by near-identical
-functions in one file.** A group-room entry carries `to` as an **array of member names** — who
-an `@name` post addressed — while a shared-room entry carries `to` as an **object**,
-`{name, cwd}`, naming the one session a native message went to. `groupEntryNode` and
-`sharedEntryNode` are three hundred lines apart in `web/app.js` and read the same: a `.*-meta`
-row, a name pill, an optional tag, a timestamp appended, then `wrap.append(meta)`. So the
-obvious anchor for "put the new span after the timestamp" matches the **wrong one first**, and
-it did — the mentions label was built into the shared room, where `e.to` is an object, and
-drew nothing while looking entirely correct in the diff. What made it harmless rather than a
-wrong label is `addressedNames`' `Array.isArray` guard, which is therefore load-bearing and
-not defensive noise: it is the only thing standing between these two fields. When adding
-anything to either node, anchor on that node's **own** class prefix (`group-time`,
-`shared-time`) rather than on the shape they share, and read back which one you edited.
-
-**`@name` in a room is a signal, and the ruling that makes it one is easy to optimise away.**
-Every member still receives a copy of every post; a mention changes only *what each recipient
-is told* — the addressee is told to answer in the room, everybody else is told it is theirs to
-know rather than to answer. Typing only into the named sessions was asked for and **refused**:
-the room is the shared record, and a question two members cannot see is a side conversation
-nobody can catch up on. So the fan-out in `POST /api/rooms/:id/post` has no branch on `to` at
-all, and the composer's `@` menu is not the retired peer-message picker in disguise — that one
-*chose a destination* and lifted the token back out of the text, this one types a name **into**
-the body and the send still carries `{text}` and nothing else. Two details behind it: the parse
-matches the **stored** member label (`memberLabel`), never the live row's name, because the
-endpoint's per-copy "is this recipient an addressee" test asks the same function and two
-spellings would address a post to a member no copy is ever told about; and it is
-**longest-name-first**, or a room holding both `alpha` and `alpha-main` reads `@alpha-main` as
-`@alpha`. A name nobody in the room answers to is plain text, never an error.
 
 **A stock checkbox is drawn by the browser from the *browser's* colour scheme, not the page's
 `data-theme` — so an unticked box read as ticked.** Found on the create-room modal's bench:
