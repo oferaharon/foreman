@@ -464,6 +464,18 @@ them to a browser. Evidence:
   re-subscribes every open pane, and the slot is claimed before the read — a subscription
   that outlives its slot doubles every message.
   [transcript#a-subscription-dies-with-the-socket](docs/traps/transcript.md#a-subscription-dies-with-the-socket)
+- `server/index.js` (`subscribe`) · `web/app.js` — **A subscription is keyed by socket *and
+  slot*.** Every `transcript` / `messages` / `earlier` / `rebound` frame carries its slot; a
+  frame without one means slot `a`.
+  [transcript#a-subscription-is-keyed-by-socket-and-slot](docs/traps/transcript.md#a-subscription-is-keyed-by-socket-and-slot)
+- `server/sessions.js` (the synthetic id) · `web/app.js` — **tmux pane ids contain `%`.**
+  `pane:%19` in a URL path is read as a percent-escape, so synthetic session ids use
+  `pane-19`.
+  [transcript#tmux-pane-ids-in-urls](docs/traps/transcript.md#tmux-pane-ids-in-urls)
+- `server/transcript.js` (`probe`) · `server/sessions.js` — **`probe` only samples head and
+  tail.** Unread is *accumulated* across polls rather than recomputed; don't "simplify" that
+  back.
+  [transcript#probe-samples-head-and-tail](docs/traps/transcript.md#probe-samples-head-and-tail)
 
 ### Launch and relaunch
 
@@ -518,487 +530,206 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   columns and at 70, and the answer endpoint returns 409 with the pane still on the gate.
   [launch#demonstrated-not-asserted](docs/traps/launch.md#demonstrated-not-asserted)
 
-**Nothing may be typed without claiming the pane first.** The roster is a poll behind, so
-five messages fired in one second all saw `idle` and all landed on the same prompt line.
-The lock lives in `claim.js` — `PaneLock` takes it *before* re-reading the pane and holds it
-for a beat after delivery. Both the send endpoint and the queue flusher go through it;
-neither types directly.
+### Sending and claiming
 
-**An interrupt fires no hook, and the receipt it leaves behind lasts ten minutes —
-VERIFIED.** `Escape` is not a natural stop, so Claude Code's `Stop` hook never runs and the
-status engine's last word on that session stays `working` for the whole `STATUS_STALE_MS`.
-Nothing else was ever going to correct it: the hook is the only thing that writes `states`,
-and the one that would have has already declined to fire. Measured on a scratch panel with
-the fix disabled — ninety seconds after an interrupt the roster still said `working`, the
-composer button still read `queue`, and a message sent into a session plainly sitting at its
-composer went to the queue instead of the pane. It was hit live, and the tell is that the
-tmux window was the faster route.
+Nothing types into a pane without claiming it first, what an interrupt leaves behind, and
+the two windows in which the pane's own answer and the roster's disagree. Evidence:
+[`docs/traps/sending.md`](docs/traps/sending.md).
 
-So the **interrupt endpoint** drops that session's receipt (`StatusEngine#interrupted`),
-because the panel is the only party that knows. Three things about it. It **drops** rather
-than writing `idle` — `stateOf` answers `unknown` for a session it has never heard of, and
-`unknown` is the one word `sessions.js`'s precedence hands straight back to the pane
-scrape; writing `idle` would assert an outcome nobody observed, and the Escape may have
-landed on a box. The precedence at `sessions.js:398` is **not** the bug and must not be
-inverted — the hook still beats the scrape for everything that is not a prompt, plan or
-dialog, for the three separate reasons above. And the **join is the part that silently does
-nothing**: `states` is keyed by the hook's `session_id` while the caller holds a pane id and
-the registry's id, which agree except for the beat after a `/clear`, so both spellings are
-cleared. With it, the button flips in **0.77s** — the next roster refresh, which the
-`changed` event triggers.
+- `server/claim.js` (`PaneLock`) · `server/queue.js` (the flusher) ·
+  `POST /api/sessions/:id/send` — **Nothing may be typed without claiming the pane first.**
+  The roster is a poll behind, so the lock is taken *before* the pane is re-read and held for
+  a beat after delivery; neither the endpoint nor the flusher types directly.
+  [sending#claiming-the-pane](docs/traps/sending.md#claiming-the-pane)
+- `server/status.js` (`StatusEngine#interrupted`) · `server/claim.js` (`PaneLock#claim`) ·
+  `server/tmux.js` (`WORKING_RE`) · `mcp/foreman.js` (`SETTLE_MS`) — **An interrupt fires no
+  hook, and the receipt it leaves behind lasts ten minutes — VERIFIED.** The endpoint drops
+  that session's receipt rather than writing `idle`, and the two scrape errors either side of
+  it are opposite — `working` read while idle after the endpoint answers, `idle` read while
+  working at the top of a turn.
+  [sending#an-interrupt-fires-no-hook](docs/traps/sending.md#an-interrupt-fires-no-hook)
 
-**…and the pane does not stop being `working` when the endpoint answers — 57–76ms, and it
-is the whole reason `worker_interrupt` has a beat in it.** Escape is delivered before
-`POST /key` returns, but the TUI has not redrawn, so `parsePane` goes on saying `working`
-while the composer is drawn. Measured on a scratch panel against a working session in the
-sandbox's `alpha`, polled through the real `parsePane`: **57–76ms** from the endpoint's
-answer to the first `idle` read, nine runs, at 220 columns and again at **70** — width made
-no difference here, which is worth knowing because it is the one parser input that usually
-does. So a follow-up message fired the instant the interrupt returns is read by
-`PaneLock#claim` as landing on a busy pane and **queues** — benched, every time, with the
-queue flusher then delivering it at the next roster tick and the worker answering it
-normally. Safe, and still wrong to ship: `queued` is the lead's only signal for "typed or
-waiting", and a flag that says *waiting* in the ordinary case has stopped saying anything.
-`SETTLE_MS` in `mcp/foreman.js` is that window with room over it, and it is a best effort
-rather than a guarantee — a slower redraw queues, which is the same safe path. Note it is
-**not** the ~1.8s spinner window one paragraph down: that one is `idle` read while working,
-this one is `working` read while idle, and they are opposite errors on the same scrape.
-Roster-side, the same runs put the flip off `working` at **482ms–1.6s** — the receipt drop
-plus the next refresh, which is the 0.77s above measured a second way.
+### Files and images
 
-**…and the live pane read now decides a claim, which is looser in exactly one measured
-window.** `PaneLock#claim` asks the lock, then reads the pane, and the pane's answer is
-final. The version before it asked the *roster* first (`session.status !== 'idle'`) and only
-then read the pane, so the live read could veto a send and never rescue one — which defeats
-the reason it is there. What that ordering was quietly covering, and now isn't: **the first
-spinner frame of a turn does not match `WORKING_RE`.** Claude Code draws `✢ Burrowing…`
-with no parenthesised suffix, and the pattern is `/⎿\s+Running…|\S+…\s*\(/` — it wants the
-`(`. Sampled at 120ms against a real session: **~1.8 seconds** at the top of every turn
-where `parsePane` says `idle` and the session is working. Once the `(3s · ↓ 12 tokens)` tail
-appears it is `working` for the rest of the run — 280 of 280 samples through a two-minute
-tool call. So a message flushed inside that window is typed into a session that has just
-started; Claude Code absorbs it as a follow-up rather than losing it, and `COOLOFF_MS`
-(1500ms) covers most of the window when the panel is what submitted the prompt. It is not
-covered when a human typed in the terminal. Widening `WORKING_RE` is the real fix and was
-left alone deliberately — it changes the roster status of every session in the panel and
-wants its own fixture. Weigh that 1.8s against the ten minutes it bought.
+What a session produced for a human to read — images, `Write`-created documents,
+attachments: the ordinal that addresses one, the readers that must agree about it, what may
+be cached, and the gallery that reads the whole file. Evidence:
+[`docs/traps/files-and-images.md`](docs/traps/files-and-images.md).
 
-**An image in a transcript is addressed by an ordinal, and exactly one function may
-compute it.** A screenshot arrives as ~60KB of base64 — 9 of them were 19% of one 2.9MB
-file — so a normalized message names `{uuid, index, media}` and the bytes come over HTTP
-(`/api/sessions/:id/image/:uuid/:index`), never over the socket. `index` is the image's
-position in a depth-first walk of the record, and `imageBlocks` in `normalize.js` is that
-walk for *both* ends: the message that names an image and the endpoint that reads it back.
-Two walks that could disagree about what "the second image" means is the `isLeadName`
-lesson in a different costume. Note the ordinal is assigned **before** anything is
-filtered, so a block the panel declines to serve (a `url` source, an unexpected media
-type) still consumes its number — renumber the survivors and the endpoint quietly hands
-back the wrong picture, only in records that had a refused block. Measured across 429
-transcripts on this Mac: 1027 image blocks, every one `source.type === 'base64'`, only
-`image/jpeg` (704) and `image/png` (323), and **not one on a sidechain record** — so the
-decision to keep sidechain images (flagged, not filtered) is about the shape of the data
-rather than anything on disk.
+- `server/normalize.js` (`imageBlocks`) · `GET /api/sessions/:id/image/:uuid/:index` — **An
+  image in a transcript is addressed by an ordinal, and exactly one function may compute
+  it.** The ordinal is assigned *before* anything is filtered, so a block the panel declines
+  to serve still consumes its number.
+  [files-and-images#image-ordinals](docs/traps/files-and-images.md#image-ordinals)
+- `server/outputs.js` (`outputBlocks`, `readOutput`, `revealablePath`) — **The ordinal rule
+  now has a second reader.** One index space per record: an image keeps the ordinal
+  `imageBlocks` gave it, and a `Write` or `SendUserFile` entry is numbered from the
+  pre-filter image count.
+  [files-and-images#the-ordinal-rules-second-reader](docs/traps/files-and-images.md#the-ordinal-rules-second-reader)
+- `server/index.js` (`GET /api/sessions/:id/output/:uuid/:index`) · `server/outputs.js` —
+  **`Cache-Control: immutable` is right for a transcript record and wrong for a disk file.**
+  A `sendfile` attachment is bytes on disk that can be overwritten between two opens, so it
+  gets `no-store` plus an `ETag` instead.
+  [files-and-images#the-caching-split](docs/traps/files-and-images.md#the-caching-split)
+- `server/outputs.js` (`outputBlocks`) — **A `Write` of an existing path is `update`, not
+  `create`.** Key on `toolUseResult.type`, never on whether `filePath` exists.
+  [files-and-images#a-write-of-an-existing-path](docs/traps/files-and-images.md#a-write-of-an-existing-path)
+- `web/styles.css` (`.files-grid`, `.files-list`) — **`.files-grid`/`.files-list` carry a
+  `display` that beats `[hidden]`.** An author `display` rule outranks the `[hidden]` UA
+  default regardless of specificity, so each container needs its own `[hidden]` rule.
+  [files-and-images#the-files-views-two-containers](docs/traps/files-and-images.md#the-files-views-two-containers)
+- `web/app.js` (`scanOutputs`) · `web/files-new.js` (`anyNewOutput`) — **The refresh must
+  key on the `toolUseResult` record landing, not the tool call going out.** That record is
+  not in the transcript until the result lands, so a refresh on the `Write` frame runs the
+  scan a beat early.
+  [files-and-images#when-the-files-view-refreshes](docs/traps/files-and-images.md#when-the-files-view-refreshes)
+- `test/session-launch.test.js` · `server/session-launch.js` —
+  **`test/session-launch.test.js` greps the serialised MCP config for `PAT` and trips on any
+  worktree whose path contains "path."** `PAT` is a substring of `PATH`, and the
+  serialisation carries the absolute path to `mcp/foreman.js`, worktree directory included.
+  [files-and-images#the-pat-substring-in-a-worktree-path](docs/traps/files-and-images.md#the-pat-substring-in-a-worktree-path)
+- `server/images.js` (`scanImages`, `readImage`) — **The gallery has to read the whole file,
+  and nothing else here does.** The tailer, `loadEarlier` and `probe` each read a window, and
+  every one of them would make a gallery that is a subset while looking complete.
+  [files-and-images#the-gallery-reads-the-whole-file](docs/traps/files-and-images.md#the-gallery-reads-the-whole-file)
+- `web/styles.css` (`.img-thumb img`) — **A thumbnail with `width: auto` is zero pixels wide
+  until its bytes land.** Hence the `min-width` floor — and `loading="lazy"` never resolves
+  in an automated window until something forces a frame.
+  [files-and-images#thumbnails](docs/traps/files-and-images.md#thumbnails)
 
-**The ordinal rule now has a second reader.** `outputBlocks` (`server/outputs.js`) is
-`imageBlocks` widened: an image keeps the exact ordinal `imageBlocks` gave it, and a
-`Write`-created document or a `SendUserFile` attachment is then numbered starting from the
-pre-filter image count — one index space per record, and still assigned **before** `accept()`
-filters anything, for `imageBlocks`'s own reason. `readOutput` and `revealablePath` are the
-two ends that walk it back to find bytes or a path; a third reader that disagreed about what
-index 1 means would hand back the wrong file rather than the wrong picture.
+### Rail and groups
 
-**`Cache-Control: immutable` is right for a transcript record and wrong for a disk file.**
-`GET /api/sessions/:id/output/:uuid/:index` splits its caching on where the bytes came from:
-an `image` or a `write` entry's bytes are a transcript record, written once, so `immutable`
-is genuinely true. A `sendfile` attachment is bytes on disk that can be overwritten between
-two opens, so it gets `no-store` plus an `ETag` off `mtime`+`size` instead — the same header
-on both would pin the first version of a screenshot in the browser forever.
+The rail is a flat list of siblings, and everything drawn on it — the indent, the tint, the
+spine, the fold, the group colours, a team row's third line — is built on top of that one
+fact. Evidence: [`docs/traps/rail-and-groups.md`](docs/traps/rail-and-groups.md).
 
-**A `Write` of an existing path is `update`, not `create`.** `outputBlocks` keys on
-`toolUseResult.type === 'create'`, never on "does `filePath` exist" — 65 of 851 `Write`s on
-the measured Mac were overwrites, and keying on the weaker test puts them in a view whose
-whole promise is "what did this session make," and quietly admits `Edit`'s calls the day
-somebody reuses the condition. `parseCommandOutput`, `parseTaskNotice` and `peerOrigin` all
-learned the same lesson about a result's own field beating its sentence.
+- `web/app.js` (`createPane`) — **`web/app.js` is one shared shell plus a `createPane`
+  factory.** Everything per-session lives inside the factory, because split view means two of
+  them at once; the roster, drafts and the thinking toggle stay shared outside it.
+  [rail-and-groups#the-shared-shell-and-the-pane-factory](docs/traps/rail-and-groups.md#the-shared-shell-and-the-pane-factory)
+- `web/app.js` (`renderRail`) · `web/styles.css` (`.shelf-label`, `.folder-label.in-group`,
+  `.session-row.in-group`) · `web/tokens.css` (`--shelf`, `--row-open`) — **The rail is a flat
+  list of siblings, and three things depend on it.** The indent is a class and not a
+  descendant selector, the sticky offset is hand-measured against the group header, and an
+  open group's tint is *tiled* from three full-width siblings.
+  [rail-and-groups#a-flat-list-of-siblings](docs/traps/rail-and-groups.md#a-flat-list-of-siblings)
+- `web/app.js` (`sessionRow`) · `server/sessions.js` (the roster's `team` field) — **A team
+  row is three lines tall, and every other row must stay two.** The extra line rides in the
+  meta line's grid columns, carries no margin that escapes the row, and is gated on
+  `OPEN_STATES`.
+  [rail-and-groups#a-team-row-is-three-lines-tall](docs/traps/rail-and-groups.md#a-team-row-is-three-lines-tall)
+- `server/snapshot.js` (`restoreSessions`) · `server/launch.js` (`isLeadName`, `launchLead`)
+  — **A role is launch flags, so anything that relaunches a session has to know the role.**
+  No new field says "this was a lead" — the rail and the restore both ask `isLeadName` — and
+  `launchLead` regenerates the brief, the MCP config and the settings.
+  [rail-and-groups#a-role-is-launch-flags](docs/traps/rail-and-groups.md#a-role-is-launch-flags)
+- `server/snapshot.js` (`benchEntries`, `drift`) — **A worker is not part of the bench, and
+  saving one tells the same lie twice.** The role test is written as an allow-list — no team,
+  or `lead` — and never as "not a worker", because kinds have already grown once.
+  [rail-and-groups#a-worker-is-not-part-of-the-bench](docs/traps/rail-and-groups.md#a-worker-is-not-part-of-the-bench)
+- `server/groups.js` (`retireWorktree`) · `server/index.js` (`task_dispatch`) · `web/app.js`
+  (`renderRail`) — **A group is filed by the name the rail draws, and the dispatch filed a
+  path.** Two spellings are on disk in front of a reader, so `retireWorktree` unfiles both —
+  and only reaches for the basename when the path is genuinely under `worktrees/`.
+  [rail-and-groups#how-a-group-is-filed](docs/traps/rail-and-groups.md#how-a-group-is-filed)
+- `web/app.js` (`renderRail`) — **A heading with nothing under it isn't drawn, and "nothing"
+  is measured after hoisting.** A group with nothing running anywhere has no heading, so
+  there is nothing to rename or delete it from until one of its folders wakes up.
+  [rail-and-groups#an-empty-heading-isnt-drawn](docs/traps/rail-and-groups.md#an-empty-heading-isnt-drawn)
+- `web/rail-fold.js` · `web/app.js` (`renderRail`) — **A collapsed group hides one thing for
+  ordinary rows and two for workers.** `working` is neither blocked nor unread, so it is the
+  one state the inbox never hoists out — and a worker row no longer hoists until `stuck`
+  fires.
+  [rail-and-groups#what-a-collapsed-group-hides](docs/traps/rail-and-groups.md#what-a-collapsed-group-hides)
+- `web/group-summary.js` (`groupSummary`) · `web/app.js` (`renderRail`) — **The dot used to
+  cover only the ordinary-row half of that trade, and now covers both.** The summary reads the
+  worker-inclusive set, so a collapsed team group now pulses when *only* a nested worker is
+  busy; the header's own `· N` still counts top-level rows alone.
+  [rail-and-groups#the-collapsed-groups-dot](docs/traps/rail-and-groups.md#the-collapsed-groups-dot)
+- `web/tokens.css` (`--row-open`, `--group-N`) · `web/styles.css` (`.session-row.in-group`) —
+  **The spine runs at half strength and the marker at full, and that split is measured, not
+  sketched.** 50% is the point that maximises the *weaker* of the spine's contrast against its
+  worst ground and the marker's step over the spine, rather than trading one for the other.
+  [rail-and-groups#the-spine-and-the-marker](docs/traps/rail-and-groups.md#the-spine-and-the-marker)
+- `web/app.js` (`sessionRow`) · `web/styles.css` (`.session`) — **A `▾` on the row's own path
+  can't be a `<button>`, because the row it sits inside already is one — or was.** Every row
+  is now `<div role="button" tabindex="0">` with its own `keydown` handler, and the invalid
+  `aria-selected` is now `aria-current` on the open row alone.
+  [rail-and-groups#the-row-is-not-a-button](docs/traps/rail-and-groups.md#the-row-is-not-a-button)
+- `web/rail-fold.js` · `web/app.js` (`sessionRow`) — **The fold's title split is bound to the
+  folder, never to the string's own last dash.** The split only fires when the title begins
+  with `${s.project}-`, so a session started by another launcher never folds.
+  [rail-and-groups#the-folds-title-split](docs/traps/rail-and-groups.md#the-folds-title-split)
+- `web/tokens.css` (`--group-N`) · `web/group-hue.js` (`GROUP_COLOUR_COUNT`) ·
+  `server/groups.js` (`assignColour`) — **The spine's ring is its own ten hues, measured to a
+  different rule than the room's seven, and the slot order is itself a measurement.** The ten
+  lines are ordered to maximise the gap between *consecutive* slots, since those are the pairs
+  a real rail draws next to each other.
+  [rail-and-groups#the-spines-ring-of-ten-hues](docs/traps/rail-and-groups.md#the-spines-ring-of-ten-hues)
+- `server/groups.js` (`GroupStore`, `#load`, `#flush`) — **`GroupStore` drops a field it has
+  never heard of, the same way `TaskStore` drops a whole record.** Back up `groups.json`
+  before rolling back past #145.
+  [rail-and-groups#groupstore-drops-an-unknown-field](docs/traps/rail-and-groups.md#groupstore-drops-an-unknown-field)
+- `web/styles.css` (`.menu-item`) — **`.menu-item`'s `display: flex` beat `[hidden]`, the same
+  way `.files-grid`'s did.** Scoped rather than a blanket `[hidden]` override, which would
+  have to be proven safe against every other `hidden` toggle in the stylesheet.
+  [rail-and-groups#the-menu-items-display-rule](docs/traps/rail-and-groups.md#the-menu-items-display-rule)
+- `web/styles.css` (`.shelf-label.collapsed`, `.shelf-summary`) — **Turning `flex-wrap` on
+  hands the container's own `gap` to the row gap as well, silently.** `.shelf-summary`'s
+  `row-gap: 0` sits beside the wrap for exactly that reason.
+  [rail-and-groups#turning-flex-wrap-on](docs/traps/rail-and-groups.md#turning-flex-wrap-on)
+- `web/app.js` (`sessionRow`) · `web/styles.css` (`.dot.working`) — **An automated Chrome
+  window answers no keyboard input and no CSS transition, and both bit this feature.**
+  `document.visibilityState` reads `hidden`, so keyboard proof goes through dispatched events
+  and anything transitioning has to be measured with `transition: none` forced.
+  [rail-and-groups#an-automated-chrome-window](docs/traps/rail-and-groups.md#an-automated-chrome-window)
+- `web/app.js` (its `/vendor/marked.js` import) · `web/index.html` — **A static copy of `web/`
+  needs `/vendor/marked.js` in place, or the page 404s silently while still looking fine.**
+  Copy `node_modules/marked/lib/marked.esm.js` into the static copy's own `vendor/marked.js`
+  before benching anything.
+  [rail-and-groups#a-static-copy-of-web](docs/traps/rail-and-groups.md#a-static-copy-of-web)
+- `web/styles.css` (`.rail-actions`, `--rail`) · `web/index.html` (the rail head) — **A fifth
+  button does not fit the rail head at the default width.** Anything adding a sixth control to
+  that row is adding a third line, not a second.
+  [rail-and-groups#a-fifth-button-in-the-rail-head](docs/traps/rail-and-groups.md#a-fifth-button-in-the-rail-head)
 
-**`.files-grid`/`.files-list` carry a `display` that beats `[hidden]`.** Both containers are
-always painted and only the `hidden` attribute decides which is on screen — a view toggle is
-a one-line repaint, never a second fetch — but each also carries an unconditional `display`
-rule, and an author rule always beats the `[hidden]` UA default regardless of specificity.
-Without `.files-grid[hidden], .files-list[hidden] { display: none; }` the losing container
-stayed on screen under the winning one. PR #138's bug; scoped to these two rather than a
-blanket `[hidden]` override, which would have to be proven safe against every other `hidden`
-toggle in the stylesheet.
+### Team machinery
 
-**The refresh must key on the `toolUseResult` record landing, not the tool call going out.**
-The files dot's own signal (`anyNewOutput`) answers on the tool *call* — right for a boolean
-— while `scanOutputs` needs the `toolUseResult` record, which is not in the transcript until
-the result lands. Refreshing on the `Write` frame ran the scan a beat early: it came back
-without the file, and the path in that sentence stayed plain until the pane was reopened.
-PR #142's fix re-asks at the one place a chip's own resolved-but-unlinked path can change its
-answer — where the matching `tool_result` patches the chip in place — which is also why it
-cannot loop: a refresh that finds nothing leaves the chip unlinked and nothing re-triggers
-until the next result.
+The machinery a team runs on and the rules a session is launched holding: how a brief is
+assembled, how a permission path rule has to be spelled, what the auto-mode classifier does
+to a tool nobody declared, what the task store does with a record it cannot read, and how
+the panel tells "merged" from "running here". Evidence:
+[`docs/traps/team-machinery.md`](docs/traps/team-machinery.md).
 
-**`test/session-launch.test.js` greps the serialised MCP config for `PAT` and trips on any
-worktree whose path contains "path."** The test asserts `session-mcp.json` never mentions a
-credential-shaped word, checked against the whole serialised file — which also contains the
-absolute path to `mcp/foreman.js`, worktree directory included. `PAT` is a substring of
-`PATH`, so a worktree named along the lines of `agent/paths-and-files` fails a test about
-credentials for a reason that has nothing to do with one. Known, not fixed here — the fix is
-anchoring the assertion to the `env` block rather than the whole serialisation.
-
-**The gallery has to read the whole file, and nothing else here does.** The tailer
-backfills a byte window, `loadEarlier` walks another one back, `probe` deliberately samples
-head and tail and never the middle. Every one of those is right, and every one of them
-would make a gallery that is a subset while looking complete — the specimen session proves
-it, 9 images and *none* of them in the window the panel opened on. `scanImages` streams the
-file and parses only lines containing `image`: 1,115 lines and 45 parses for a 2.9MB
-transcript at **~10ms**, 3,014 lines and 158 parses for the largest one on this Mac at 26MB
-at **~55ms**. Cheap enough to redo on every open, so nothing is cached and nothing goes
-stale. `readImage` streams the same way, guarded on the uuid — and the record's own `uuid`
-field is what decides, because every reply names its parent in `parentUuid` and a
-take-the-first-match would return the wrong image for any record that has children, which
-is all of them.
-
-**A thumbnail with `width: auto` is zero pixels wide until its bytes land.** Measured: a
-`0 x 86px` box. Every image in a strip pops into existence as it arrives, shoving the ones
-after it sideways, so `.img-thumb img` carries a `min-width` floor. And a related bench
-artifact that will cost you an hour: `loading="lazy"` defers until Chrome actually
-*renders* the page, which an automated window does not do until something forces a frame —
-so thumbnails plainly on screen read back `complete: false`, and a screenshot fixes them.
-Same family as the `requestAnimationFrame` / `ResizeObserver` trap the room panel hit;
-`document.visibilityState` is still the first thing to check. The strip loads eagerly
-anyway (one turn, one to three images, nothing to defer); the gallery keeps `lazy` because
-it can hold ninety.
-
-**`web/app.js` is one shared shell plus a `createPane` factory.** Everything per-session —
-the selected id, its messages, `streamEl`, `composerEl`, `chipNodes`, the completion popup
-— lives inside the factory, because split view means two of them at once. The roster,
-drafts and the thinking toggle stay shared outside it. Adding per-session state to module
-scope will work perfectly until someone opens a second pane.
-
-**The rail is a flat list of siblings, and three things depend on it.** There is no nesting
-for CSS to key off, so the indent inside a group is a class added in `renderRail`, not a
-descendant selector. `.folder-label.in-group`'s sticky `top` is a hand-measured offset for
-the group header's height — change that header's size and this moves too. And an open
-group's tint is *tiled* from three full-width siblings rather than painted on a container,
-which holds only while none of them carries a vertical margin: the gap between groups is
-`margin-top` on the next header, deliberately outside the tint, and the block's bottom edge
-is `in-group-last`, marked in JS because nothing in a flat list knows it is last.
-
-The spine — the 3px coloured bar a group's rows carry down their left edge — is a second
-tenant of that exact constraint, and got it for free: `.shelf-label`, `.folder-label.in-group`
-and `.session-row.in-group` all already pad *inside* their box, so their left borders land on
-the same x without anything new being measured, and the two places the tint breaks
-(`.shelf-label`'s `margin-top`, `.in-group-last`'s `padding-bottom`) are the two places the
-spine breaks too. The two heading kinds give back exactly the 3px the border adds, out of
-their own `padding-left`, so nothing they contain moves sideways when the border appears.
-And `.folder-label.in-group`'s sticky offset — hand-measured against the group header's own
-height, per the line above — was re-measured rather than assumed at two different points in
-the rail redesign, once when the spine first landed and once again after the header grew its
-`+` and `⋯` controls, and came back unchanged both times. That is the lesson worth keeping,
-not the figure: read the header's actual height off the DOM before trusting the offset,
-because anything that changes the header's padding — this one included — moves it, and a
-number copied out of an old PR body is exactly the kind of thing that goes stale here first.
-
-`--shelf` is `color-mix(in srgb, var(--ink) 4%, var(--surface))` on purpose: one line that
-darkens the light theme and lightens the dark one. It must not be `--surface-sunk`, which
-is what a row's hover uses — a tinted group whose rows stopped reacting to the cursor would
-be a bad trade.
-
-`--row-open` is the same trick and exists because the selected row has to be legible over
-**three** backgrounds at once: plain surface, `--shelf` inside an open group, and
-`--surface-sunk` under the cursor. It used to be `--accent-soft`, which is a button hover
-tint a couple of points off the surface, and against any of those three it was invisible —
-the bug report was a screenshot of the rail where you genuinely could not tell which row was
-open. 22% of the accent clears all three. Two things beside it: the 3px left border is
-carried by *every* row as transparent, because growing it on the open row alone steps that
-row's content sideways as the selection moves; and `.is-open` deliberately beats `:hover`
-(it is later in the file), since a selected row that changed under the cursor would flicker
-between two strong states every time the mouse crossed the rail.
-
-**A team row is three lines tall, and every other row must stay two.** `worker · agent/<id>`
-under a worker, `lead · N tasks` under a lead — chosen over a coloured stripe and over a
-fifth badge, and the *only* thing that makes it affordable is that it lands on nothing else. Generalising it to ordinary rows undoes the trade. Three things it
-has to respect: the extra line rides in the meta line's grid columns (`grid-column: 2 / -1`,
-auto row) so nothing above it moves; it carries no margin that escapes the row, because an
-open group's tint is tiled from full-width siblings and a gap anywhere would cut through it;
-and only the *fact* half ellipsises — the role chip never shrinks, since a branch name is
-long and the rail is 20rem. The `lead` badge was **moved** here, not copied: the meta line
-is for state and a role is not state, and a lead is exactly as findable as it was because it
-is the same chip one line down. The role comes off the roster's `team` field — `sessions.js`
-joins the task store on `tmuxSession` and `isLead`/`workerOf` are read back out of that one
-answer, so the rail cannot be told a row is a worker in one field and something else in
-another. It is gated on `OPEN_STATES`: a `done`, `failed` or `abandoned` task is not a task,
-and a row that kept naming one would name a branch that has been merged or swept. `team` is
-in `#diff` for the same reason — a task closing changes that line and nothing else on the
-row.
-
-**A role is launch flags, so anything that relaunches a session has to know the role.**
-Snapshot/restore replayed every saved entry through `createSession`, which is how a saved
-**team lead** came back as an ordinary session that merely happens to be called `lead` — no
-brief, no `foreman` tools, no permission stance — while the rail, which reads the role off the
-*name*, went on badging it as the lead and counting its tasks. The one row a reader would
-trust most was the one lying, and nothing on screen said so. Restore now sends a lead entry
-through `launchLead`. Three things about the fix that will matter again:
-
-- **No new field says "this was a lead".** `isLeadName` lives in `launch.js` (with the
-  naming contract it reads) and both the rail and the restore ask it, so the two cannot
-  disagree — a stored `lead: false` beside a `slug: 'lead'` would recreate this exact bug
-  in a form that survives every test that only checks the flag. It also means there was
-  nothing to migrate: a `snapshot.json` saved before the fix already carried `slug: 'lead'`.
-- **`startLead` takes a folder and nothing else.** `launchLead` deliberately doesn't plumb
-  `skipPermissions` — a bypass lead is not a thing — and the injected launcher's *shape* is
-  what keeps a saved flag from finding some other door in. Restoring an entry with
-  `skipPermissions: true` was benched: the lead came up `auto mode on`.
-- **`launchLead` regenerates the brief, the MCP config and the settings** from current code
-  and current `team.json`, which is right and not an accident of reuse — a restored lead
-  should be *today's* lead, not a replay of the one that was running before the reboot.
-
-**A worker is not part of the bench, and saving one tells the same lie twice.** A worker
-exists because a lead dispatched it against a task, in a worktree the panel deletes at
-close. Relaunched, it gets no worker brief and no tools, comes up joined to a task record
-that still says `working` — so the rail draws `worker · agent/<id>` over it and the lead's
-`worker_read` reads a session that has never heard of the task — and half the time its
-worktree has been swept, so the launch just fails. Planners are the same story: a
-`kind: 'plan'` task is still `role: 'worker'` to `sessions.js`, and the one thing you would
-want back — the plan — was never in the checkout anyway. `benchEntries` leaves them all out
-by **role** and by the folder being under `WORKTREES_DIR`, because the first goes null the
-moment the task closes while the pane is still sitting in the doomed checkout. Note the
-role test is written as an allow-list — no team, or `lead` — and not as "not a worker":
-kinds have already grown once, and the day a planner gets a role of its own, a negative
-test starts silently saving sessions nobody can restore. `drift` filters the live roster
-the same way, or every dispatch lights the rail's stale-snapshot dot and it stops meaning
-anything.
-
-**A group is filed by the name the rail draws, and the dispatch filed a path.** The rail
-keys folders by `basename(cwd)` — that is what `s.project` is — but `task_dispatch` filed
-`wt.dir`, the absolute worktree directory. It matched no session that has ever existed, so
-every team heading read `· 0` with its workers live three rows below it, and it looked
-exactly like the staleness bug it was found next to. Two spellings are now on disk in front
-of a reader, which is why `retireWorktree` unfiles both — and why it only reaches for
-the basename when the path is genuinely under `worktrees/`: closing a task must never
-quietly unfile a real project that happens to share the name.
-
-**A heading with nothing under it isn't drawn, and "nothing" is measured after hoisting.**
-`renderRail` skips a group whose `count` is 0 — computed from the rows it is *about* to
-draw, which is what makes it agree with the screen: a group whose only session is up in the
-inbox reads as empty here and is right to, because the row is on screen two headings
-higher. Note what it costs, since nothing on screen says it: a group with nothing running
-anywhere has no heading, so there is nothing to rename or delete it from until one of its
-folders wakes up. Its folders can still be re-filed from the folder menu, which lists every
-group. And when you remove rows from a flat list, check the tint: it is tiled from three
-full-width siblings, so a group must go as a whole block or its edges come apart —
-benched with a lone group first, last and alone between two hidden ones.
-
-**A collapsed group hides one thing for ordinary rows and two for workers.** For an
-ordinary session and for a lead, folding is safe because the inbox hoists anything blocked
-or unread *out* of its folder first — but **working** is neither, so a busy session is the
-one state a closed group can genuinely hide. Hence the pulsing dot on the heading, drawn
-only when collapsed, and now a second line beside it: `2 working · newest 4m · 3 tasks`.
-
-The hoisting rule then changed, for workers alone. A worker's permission prompt is its
-lead's to answer and its finished report is its lead's to read, so a worker row no longer
-hoists until `stuck` fires (`stuckAfterMinutes`, default 20) — a deliberate call, taken
-knowing that a blocked-but-not-yet-stuck worker inside a *collapsed* team group is therefore
-not visible. The trade was bought with the lead row's `N waiting` count, which names the
-same fact the inbox stopped showing, and backstopped by the stuck timer, which
-puts the row in the inbox for real once it has actually been abandoned there.
-
-**The dot used to cover only the ordinary-row half of that trade, and now covers both.**
-`renderRail` pulls nested workers out of `rest` before the folder map is built, so the
-group's own `count` — top-level rows only — was also, until this, the set the dot and
-`busy` were computed over: a worker working inside a collapsed team group lit nothing at
-all until the stuck timer fired twenty minutes later. `web/group-summary.js`'s
-`groupSummary` closes that hole by reading the **worker-inclusive** set instead — the same
-`expand()` the fold rule already builds, folded workers included — so the dot and the new
-summary line both count a busy worker the moment it starts, not twenty minutes after. `busy`
-itself is gone from the group loop; the module's `working` is what feeds the dot now. The
-accepted cost, taken on the maintainer's own ruling: a collapsed team group now pulses when
-*only* a nested worker is busy and every top-level row in it is idle — worth knowing before
-reading a quiet-looking heading as quiet. The header's own `· N` is untouched and still
-counts top-level rows alone, which is why it and the summary line one row down can
-legitimately disagree — `· 1` on the heading, `3 working` in the line below it, both true.
-
-**The spine runs at half strength and the marker at full, and that split is measured, not
-sketched.** `--row-open`'s own reasoning is three signals, not one — a filled band, an edge
-thick enough to read as a marker, and a title at full ink — and inside a group the edge
-would otherwise be the group's own hue against the group's own hue, no step at all: exactly
-the state `--row-open` was built to get *out* of. 50% is the point (within half a point of
-49.5%) that maximises the *weaker* of the two things pulling against each other — the
-spine's contrast against its worst ground and the marker's step over the spine — rather than
-trading one for the other. In dark theme the binding ground is `--shelf` (contrast 1.68 –
-3.09) and the marker's step over the spine is 1.96 – 2.70 (ΔE2000 18.0 – 27.2 minimum); light
-theme's binding ground is `--surface-sunk` (1.68 – 2.45) with a 1.65 – 2.98 marker step. The
-amended mockup's own drawing — spine and marker in one colour — was refused for exactly
-this reason once it was measured rather than eyeballed.
-
-**A `▾` on the row's own path can't be a `<button>`, because the row it sits inside already
-is one — or was.** Interactive content cannot nest, and a `<span role="button">` inside a
-real `<button>` is exactly as invalid as a nested `<button>` would be, since the restriction
-is on interactive content and not on the tag. So `.session` is now uniformly `<div
-role="button" tabindex="0">` with its own `keydown` handler answering Enter and Space by
-hand — every row, not only the folded ones, because two element types for one row kind is
-two focus behaviours and two stylesheets to keep honest. The one thing carried over from the
-`button {}` reset is `cursor: pointer`; nothing in the stylesheet ever selected
-`button.session`, every rule is a class. It also retired an invalid attribute that had been
-sitting there unnoticed: `aria-selected` belongs to `option`/`tab`, not a button or a
-`role="button"` div, and is now `aria-current` — set only on the open row, so a screen
-reader isn't walking past `aria-current="false"` on every other one.
-
-**The fold's title split is bound to the folder, never to the string's own last dash.** A
-row's title is `label || meta.title || project`, and `label` — the thing that would make a
-dash-split safe — is present only for sessions this panel itself minted; anything else falls
-back to Claude Code's own `customTitle`, which several launchers derive as `<repo>-<branch>`,
-CLAUDE.md's very first trap and the reason one folder on the machine this was built on held
-96 transcripts under one title. Splitting *that* on its last dash hands back a "path" that is
-a repo name, not the folder the row is actually filed under. So the split only fires when the
-title begins with `${s.project}-`, and a title that can't be split that way keeps its
-folder's heading rather than getting an invented path — honest rather than worked around,
-and it means a session started by another launcher never folds.
-
-**The spine's ring is its own ten hues, measured to a different rule than the room's seven,
-and the slot order is itself a measurement.** `--peer-N` is *text* on `--ground`, held to
-7:1; the spine is a **non-text graphic** sitting on `--surface`, `--shelf` and
-`--surface-sunk` at once, so it is held to WCAG 1.4.11's 3:1 against all three — light
-theme's binding ground is `--surface-sunk` (3.00 – 6.48), dark's is `--shelf` (3.66 – 8.27).
-Every one of the ten also has to clear a floor of ΔE2000 from `--working` / `--decision` /
-`--accent` / `--idle` / `--mode-edits`, the same reservation the peer ring makes, measured
-here at 12.50 (light) / 12.59 (dark) minimum. And because slots are handed out 1, 2, 3… in
-creation order (`assignColour`: least-used, ties by lowest index), the ten lines in
-`web/tokens.css` are not listed by hue — they're ordered to maximise the gap between
-*consecutive* slots, since consecutive slots are the pairs a real rail draws next to each
-other: 48.33 (light) / 50.22 (dark) ΔE2000 minimum between neighbours. `GROUP_COLOUR_COUNT`
-is spelled once in `web/group-hue.js` and `test/group-hue.test.js` pins it against the actual
-count of `--group-N` tokens, because CSS cannot import a constant and the two would otherwise
-drift silently.
-
-**`GroupStore` drops a field it has never heard of, the same way `TaskStore` drops a whole
-record.** `#load` rebuilds each group from named keys and `#flush` rewrites the file from
-that rebuild two seconds later, so a `colour` written by this feature and then rolled back
-past it is silently erased on the next flush — milder than the task-state version of this
-(there whole records vanish; here the colours re-assign themselves on the next boot), but
-the same family. **Back up `groups.json` before rolling back past #145.**
-
-**`.menu-item`'s `display: flex` beat `[hidden]`, the same way `.files-grid`'s did.** The
-group `+` menu's filter box hides non-matching rows by setting `.hidden`, and `.menu-item`
-carries an unconditional `display: flex` that outranks the `[hidden]` UA default — so a
-filtered-out item stayed on screen, just no longer clickable in the way its position
-implied. `.menu-item[hidden] { display: none }`, scoped rather than a blanket `[hidden]`
-override, is the same fix in the same shape.
-
-**Turning `flex-wrap` on hands the container's own `gap` to the row gap as well, silently.**
-`.shelf-label.collapsed` wraps so the new summary line can sit under the header's first row,
-and `.shelf-label`'s `gap` — measured for the items sitting on its *one* line — became the
-step between that line and the summary the moment wrapping was enabled, measured at 28px
-where 22 was asked for. `.shelf-summary`'s `row-gap: 0` sits beside the wrap for exactly that
-reason, and it is a trap worth remembering anywhere else in this stylesheet a `flex-wrap` is
-switched on after the fact.
-
-**An automated Chrome window answers no keyboard input and no CSS transition, and both bit
-this feature.** `document.visibilityState: 'hidden'` is what an automated window reports,
-which is the same fact the room panel's `ResizeObserver` trap and the files gallery's `lazy`
-trap already carry, in new clothes here: the window delivers no *trusted* keyboard event, so
-keyboard proof for the row's new `div role="button"` had to go through dispatched events
-rather than a real keypress, with mouse clicks proven separately; and it suspends CSS
-transitions and animations outright, so `getComputedStyle` on a transitioning opacity reads
-the *from* value forever and a hover/focus state measured against a live `transition` has to
-force `transition: none` first or the numbers are simply wrong. The same suspension is why a
-pulsing dot's presence has to be read off the DOM (is the node there, does it carry `.dot
-working`) rather than off whether it visibly pulses in a bench screenshot — the animation
-itself does not run in an automated window even when the element is drawn correctly.
-
-**A static copy of `web/` needs `/vendor/marked.js` in place, or the page 404s silently
-while still looking fine.** `app.js`'s first line is `import { marked } from
-'/vendor/marked.js'` — served in the real panel from `node_modules/marked/lib/marked.esm.js`
-by a server route, which a bare static file server over `web/` doesn't have. The failure is
-quiet: the page paints its static HTML, the module import 404s in the console, and nothing
-in the rail ever renders, which reads like a fixture problem rather than a missing file. Copy
-`marked.esm.js` into the static copy's own `vendor/marked.js` before benching anything.
-
-**A subscription is keyed by socket *and slot*.** `subs` is `ws -> Map(slot -> sub)`, and
-every `transcript` / `messages` / `earlier` / `rebound` frame carries its slot. A frame
-without one means slot `a`, which is how the panel behaved before there were two.
-
-**tmux pane ids contain `%`.** `pane:%19` in a URL path is read as a percent-escape.
-Synthetic session ids use `pane-19`.
-
-**`probe` only samples head and tail.** A burst of tool calls pushes earlier replies out
-of the window, so unread is *accumulated* across polls rather than recomputed. Don't
-"simplify" that back.
-
-**Deny beats allow, so a narrow write grant has to be a subfolder, not a carve-out.** The
-planner may write its plan and must not touch `decisions.md` — the human record of every
-ruling — which lives in the same team dir. There is no "all of this except those
-files": a deny on `<teamDir>/**` would swallow the one folder the planner exists to write
-to, and allow-plus-deny on overlapping paths resolves to denied. Hence `plans/` as a
-subfolder and an allow that names only it (`plannerStance`). Any future "this session may
-write exactly here" grant has the same shape — put the writable thing *below* the protected
-thing, and never try to subtract.
-
-**A brief is assembled in one place, and both halves of "one place" are load-bearing.**
-`server/briefs.js` is what `launchLead` calls and what `GET /api/briefs` calls, because the
-modal's claim is "this is what the next lead will read" and a second copy of the assembly
-would be a claim that decays: the two agree the day they are written and disagree at the
-first change to either, silently, since nothing on screen can say a brief is a generation
-behind. `test/briefs.test.js` pins byte-identical output and scans `index.js` for a direct
-`leadBrief(` call. Two things inside it are not obvious. The **forge must be demoted before
-the brief is written** — a credential-carrying MCP entry is refused and the forge drops to
-`push only` — so a route that resolved the forge and skipped the demotion would show a lead
-being handed tools it will not have; that is the one branch that had to move into the shared
-function rather than stay at the launch. And **the route creates nothing**: `ensureTeam` is
-deliberately not imported there, `readTeam` → `teamDefaults` answers for a repo with no team,
-and every path is computed. Opening a modal must not seed somebody a team directory.
-
-**…and marked eats the placeholders those briefs are full of.** `agent/<task>`, `gh pr merge
-<N>`, `task <id>` — not all of them sit inside backticks, and marked's default reads a bare
-`<task>` as raw HTML, so the browser makes an unknown element of it and the word simply
-**disappears**: measured in the panel, the worker brief's first line came back reading *"on
-branch agent/."* with nothing on screen to say a placeholder had been eaten. `briefHtml`
-(`web/app.js`) overrides the renderer's `html` hook to escape instead, which also stops a
-repo's own `git config user.name` becoming markup. Escaping the source text *before* parsing
-is the obvious alternative and is wrong — marked escapes `&` inside code spans, so every
-placeholder in a backtick comes back reading `&lt;task&gt;`.
-
-**A fifth button does not fit the rail head at the default width.** Measured on a scratch
-panel at `--rail: 20rem`: `+ new` / `snapshot` / `briefs` / `recent` / `settings` are 297px
-of buttons plus four 6.4px gaps against 284px of content width — 39px short, so `settings`
-wraps to a second line and the list loses a row. One line returns at 22.5rem. It is a state
-`.rail-actions` already supports (`flex-wrap` and a `row-gap` are both there deliberately),
-but that comment was written about the 14rem *floor*, and this now happens at the default.
-Anything adding a sixth control to that row is adding a third line, not a second.
-
-**A path permission rule must say `Edit`, and must double-slash.** Two traps welded
-together, both measured, both the silent kind. First: `Write(/abs/path/**)` with a plain
-absolute path **matches nothing** — the "denied" write succeeded. The shape is
-`Edit(//abs/path/**)`, double slash. Second, found in Wave E: Claude Code no longer
-matches `Write(path)` rules in file permission checks *at all*, and says so at launch —
-*"only Edit(path) rules are … Edit rules cover all file-editing tools."* So a `Write`
-rule is a warning banner over a hole. The lead's settings carried both halves for four
-waves; the Write halves were never doing anything. `pathRule` in `server/team.js` is
-the one place that builds these — don't hand-write them, and don't reach for `Write`.
-
-**A tool call with no matching allow rule goes to the auto-mode classifier, and the
-classifier can itself fail.** The maintainer hit this live: a standalone room member's
-`mcp__foreman__group_post` came back denied with *"Permission for this action was denied
-by the Claude Code auto mode classifier. Reason: Stage 2 classifier error — blocking based
-on stage 1 assessment (usually transient — retrying often succeeds)."* Nothing about the
-call was wrong and nothing this repo's own guards would have refused — the classifier
-simply errored on its own, on a tool nobody had told it about in advance. Every role now
-carries an explicit allow rule for the panel's own server (`mcp__foreman`, the bare
-whole-server form — confirmed against the installed Claude Code's own docs, `### MCP` on
-the permissions page, v2.1.257: "`mcp__puppeteer` matches any tool provided by the
-`puppeteer` server"), so a `foreman` tool call is decided before the classifier is ever
-asked. `leadSettings` (`server/team.js`), `writeWorkerSettings` (`server/dispatch.js`, so
-both build workers and planners), and the standalone `session-settings.json`
-(`server/session-launch.js`, via `--settings`) each carry it. This is an allow rule and
-nothing more: `assertNotBlocked`, `PaneLock`, every endpoint refusal, the merge-check wall,
-and the dispatch-confirmation discipline in the brief are all untouched — it removes the
-harness's flaky second opinion on tools the panel itself serves, and nothing else. The bare
-server form was chosen over a hand-copied per-tool list for the `isLeadName` reason: a tool
-added to `LEAD_TOOLS` or `WORKER_TOOLS` later needs no matching update here, because there
-is nothing to update.
+- `server/team.js` (`plannerStance`, `pathRule`) — **Deny beats allow, so a narrow write
+  grant has to be a subfolder, not a carve-out.** Put the writable thing *below* the protected
+  thing, and never try to subtract.
+  [team-machinery#deny-beats-allow](docs/traps/team-machinery.md#deny-beats-allow)
+- `server/briefs.js` · `server/index.js` (`GET /api/briefs`) · `server/launch.js`
+  (`launchLead`) · `web/app.js` (`briefHtml`) — **A brief is assembled in one place, and both
+  halves of "one place" are load-bearing.** The forge is demoted *before* the brief is
+  written, the route creates nothing — and marked eats a bare `<task>` placeholder unless the
+  renderer's `html` hook escapes it.
+  [team-machinery#a-brief-is-assembled-in-one-place](docs/traps/team-machinery.md#a-brief-is-assembled-in-one-place)
+- `server/team.js` (`pathRule`, `leadSettings`, `plannerStance`) · `server/dispatch.js` — **A
+  path permission rule must say `Edit`, and must double-slash.** A plain absolute path matches
+  nothing, and `Write(path)` rules are no longer matched in file permission checks at all.
+  [team-machinery#path-permission-rules](docs/traps/team-machinery.md#path-permission-rules)
+- `server/team.js` (`leadSettings`) · `server/dispatch.js` (`writeWorkerSettings`) ·
+  `server/session-launch.js` — **A tool call with no matching allow rule goes to the auto-mode
+  classifier, and the classifier can itself fail.** Every role allows the bare whole-server
+  form `mcp__foreman`; it is an allow rule and nothing more, and no panel guard is touched.
+  [team-machinery#the-auto-mode-classifier](docs/traps/team-machinery.md#the-auto-mode-classifier)
+- `server/tasks.js` (`TaskStore`, `TASK_STATES`, `TASK_KINDS`) — **A task state the store has
+  never heard of is deleted, not rejected.** `#flush` rewrites the whole file from the Map two
+  seconds later, so back up `~/.foreman/tasks.json` before any rollback of a commit that added
+  a state.
+  [team-machinery#an-unknown-task-state](docs/traps/team-machinery.md#an-unknown-task-state)
+- `server/deployed.js` (`mergedInto`, `branchFacts`) — **"Merged" and "live here" are
+  different facts, and the boot sha is how you tell.** The boot sha is read at *construction*,
+  the evidence is recorded while the branch still exists, and "no tip recorded" draws no pill
+  at all.
+  [team-machinery#merged-versus-live-here](docs/traps/team-machinery.md#merged-versus-live-here)
 
 **`git status --porcelain` collapses an untracked directory to `dir/`.** A new file in a
 new folder is reported as its parent, so two workers editing the same fresh path never
@@ -1007,36 +738,6 @@ not optional — `conflicts.js` unions the porcelain read with the branch diff p
 because a mid-task worker's changes are mostly *uncommitted*, which makes this the half
 that matters. Git also quotes paths containing spaces; strip the quotes or they never
 match diff output. `test/conflicts.test.js` pins both.
-
-**A task state the store has never heard of is deleted, not rejected.** `TaskStore.#load`
-(`tasks.js`) skips any record whose `state` is missing from `TASK_STATES`, and `#flush`
-rewrites the whole file from the Map two seconds later — so a panel *without* a state,
-started against a `tasks.json` *with* records in it, drops them on read and erases them on
-the next write. No error, nothing on screen, and the file it deleted them from is the only
-copy — benched with a two-record file, one state known and one not: the unknown one was
-absent from the Map on load and absent from the file after the next flush. That is the
-shape of every future revert past a state addition: `pending` shipped
-first and alone for exactly this reason, and **`~/.foreman/tasks.json` gets backed up
-before any rollback of a commit that added a state.** The same paragraph applies to
-`TASK_KINDS`, which is loaded more leniently (an unknown kind survives as itself) — the
-state list is the strict one.
-
-**"Merged" and "live here" are different facts, and the boot sha is how you tell.** A PR
-merges on the forge; the checkout on this machine and the panel running out of it know
-nothing until somebody pulls and restarts. `deployed.js` answers it by *ancestry*, never
-timestamps: the task's branch tip against local `HEAD` is "pulled", and against the sha
-the panel booted on is "running" — the second half only for this repo (another team's
-merge has no process here to be stale) and only when the change touched `server/`
-(`web/` is read off disk every load). Three things it cost. The boot sha must be read at
-**construction**, not on first use: nobody opens the team panel the second the server comes
-up, so a lazy read takes the *post-pull* HEAD as the boot sha and pronounces a stale panel
-deployed — the exact wrong answer, and the whole reason the file exists. The evidence has to
-be recorded **while the branch still exists** (on the review report, re-read at close before
-the worktree sweep deletes it) — after the merge there is no branch and no diff. And a
-three-dot diff taken at close, against a main that now *contains* the branch, is **empty**,
-which reads as "nothing to restart for"; the review-time file list wins when that happens.
-"No tip recorded" draws no pill at all — the rule about showing nothing over showing
-something wrong applies to a green badge more than to anything else here.
 
 ### Rooms
 
