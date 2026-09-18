@@ -129,3 +129,20 @@ client's `adopt` → `open` off the same roster frame. The slot is now claimed b
 and the tailer checks it still owns it afterwards; the second subscribe is harmless, it just
 supersedes. Proving it took a websocket that double-subscribes one slot and single-subscribes
 another as a control, against a live session — the panel cannot show you this from inside.
+
+## A subscription is keyed by socket and slot
+
+**A subscription is keyed by socket *and slot*.** `subs` is `ws -> Map(slot -> sub)`, and
+every `transcript` / `messages` / `earlier` / `rebound` frame carries its slot. A frame
+without one means slot `a`, which is how the panel behaved before there were two.
+
+## tmux pane ids in URLs
+
+**tmux pane ids contain `%`.** `pane:%19` in a URL path is read as a percent-escape.
+Synthetic session ids use `pane-19`.
+
+## probe samples head and tail
+
+**`probe` only samples head and tail.** A burst of tool calls pushes earlier replies out
+of the window, so unread is *accumulated* across polls rather than recomputed. Don't
+"simplify" that back.
