@@ -432,6 +432,7 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   not `-lc`, and the bare word `claude`, never an exec of the resolved path — and the prefix
   in that name is configuration (`sessionPrefix`), read by five sites from one export.
   [launch#the-name-a-launch-mints-is-a-contract](docs/traps/launch.md#the-name-a-launch-mints-is-a-contract)
+  · [one-spelling](docs/traps/one-spelling.md)
 - `server/config.js` (`SESSION_PREFIX`) · `server/sessions.js` · `server/launch.js`
   (`slugFor`, `isLeadName`) — **What a non-matching prefix costs is narrower than
   "invisible", and it was measured** — the row is still in the roster; what is lost is the
@@ -488,6 +489,7 @@ be cached, and the gallery that reads the whole file. Evidence:
   `imageBlocks` gave it, and a `Write` or `SendUserFile` entry is numbered from the
   pre-filter image count.
   [files-and-images#the-ordinal-rules-second-reader](docs/traps/files-and-images.md#the-ordinal-rules-second-reader)
+  · [one-spelling](docs/traps/one-spelling.md)
 - `server/index.js` (`GET /api/sessions/:id/output/:uuid/:index`) · `server/outputs.js` —
   **`Cache-Control: immutable` is right for a transcript record and wrong for a disk file.**
   A `sendfile` attachment is bytes on disk that can be overwritten between two opens, so it
@@ -589,6 +591,7 @@ fact; the front end's own cascade traps are here too. Evidence:
   lines are ordered to maximise the gap between *consecutive* slots, since those are the pairs
   a real rail draws next to each other.
   [rail-and-groups#the-spines-ring-of-ten-hues](docs/traps/rail-and-groups.md#the-spines-ring-of-ten-hues)
+  · [one-spelling](docs/traps/one-spelling.md)
 - `server/groups.js` (`GroupStore`, `#load`, `#flush`) — **`GroupStore` drops a field it has
   never heard of, the same way `TaskStore` drops a whole record.** Back up `groups.json`
   before rolling back past #145.
@@ -730,6 +733,7 @@ clamp, how a member is resolved, and what `@name` does and does not change. Evid
   recorded decision said the opposite.** A stored pane id can be live and belong to somebody
   else, which is a post typed into a stranger.
   [rooms#a-room-member-is-resolved-tmuxsession-first](docs/traps/rooms.md#a-room-member-is-resolved-tmuxsession-first)
+  · [one-spelling](docs/traps/one-spelling.md)
 - `server/index.js` (`sendOrQueue`, `roomTurn`) · `server/rooms.js` (`rateFault`) ·
   `web/rooms-pane.js` — **`handed` is not `delivered`, and the window between checking and
   writing it down had to be closed by hand.** Every surface says `handed`, and the order is
@@ -778,6 +782,7 @@ Evidence:
   two of them are not JavaScript, so only a test holds them together.** Rename one and miss
   the others and `npm run restart-panel` kickstarts a job that does not exist, silently.
   [platform-launchd#the-launchd-label-has-three-copies](docs/traps/platform-launchd.md#the-launchd-label-has-three-copies)
+  · [one-spelling](docs/traps/one-spelling.md)
 - `server/install-agent.js` (`legacyJobs`, `install`) — **An orphaned plist runs the
   *current* code under an older label, and the detector for it must be by shape rather than
   by name.**
@@ -899,12 +904,32 @@ would cost an ordinary session. Evidence:
   were `room-append` and `markRoomRead` — so group rooms are `group_*` in every spelling they
   have.** What is refused is a *sibling* name, not the word "room".
   [mcp-and-naming#group-rooms-and-the-sibling-name](docs/traps/mcp-and-naming.md#group-rooms-and-the-sibling-name)
+  · [one-spelling](docs/traps/one-spelling.md)
 - `mcp/foreman.js` (`TMUX_PANE`) · `server/session-launch.js` (`standaloneArgs`) ·
   `test/session-launch.test.js` — **An MCP stdio child inherits `TMUX_PANE`, which is why one
   static config serves every session — and why `--strict-mcp-config` must never be copied onto
   it.** One brief and one config file for the whole machine; the strict flag on the standalone
   path would silently strip every connector the user has registered.
   [mcp-and-naming#an-mcp-stdio-child-inherits-the-pane-id](docs/traps/mcp-and-naming.md#an-mcp-stdio-child-inherits-the-pane-id)
+
+### One spelling
+
+The one lesson here with no home of its own, because no single file owns it: it was learned
+eight times, in eight subsystems, and each story stays where it was learned. This file states
+the shared conclusion and links all eight. Evidence:
+[`docs/traps/one-spelling.md`](docs/traps/one-spelling.md).
+
+- `server/launch.js` (`sessionName`, `slugFor`, `isLeadName`, `uniqueSessionName`) ·
+  `server/logs.js` (`DEFAULT_AGENT_LABEL`, also spelled in `package.json` and
+  `scripts/backup-state.sh`) · `server/normalize.js` (`imageBlocks`) with
+  `server/outputs.js` (`outputBlocks`) · `server/rooms-line.js` (`resolveMember`) with
+  `web/rooms-pane.js` (`memberRow`) · `mcp/foreman.js` (`room_*` vs `group_*`) ·
+  `web/prefs.js` · `web/group-hue.js` (`GROUP_COLOUR_COUNT`) with `web/tokens.css`
+  (`--group-N`) · `server/room-header.js` — **Two spellings of one contract agree the day
+  they are written and diverge silently afterwards.** One spelling, imported, wherever an
+  import is possible; a test where it genuinely is not; and a *sibling* name one letter
+  apart refused outright, because nothing can hold that together.
+  [one-spelling](docs/traps/one-spelling.md)
 
 ---
 
@@ -942,9 +967,12 @@ away. Four things are load-bearing. A group holds **folders**, not sessions — 
 with `/clear`, folders don't. A folder is in exactly one group, enforced in `assign`, because
 the one thing worse than an unsorted rail is a session drawn twice. Collapse is safe for
 ordinary sessions and leads because the inbox hoists anything blocked or unread *out* of its
-folder first — no longer true of **workers**, which hoist only once `stuck` fires; see the
-trap above for what a collapsed team group can hide and for the measurement of what the dot
-does and doesn't cover. And **a group the panel made for a team is the only kind it will ever
+folder first — no longer true of **workers**, which hoist only once `stuck` fires. What a
+collapsed team group can hide is
+[rail-and-groups#what-a-collapsed-group-hides](docs/traps/rail-and-groups.md#what-a-collapsed-group-hides),
+and the measurement of what the dot does and doesn't cover is
+[rail-and-groups#the-collapsed-groups-dot](docs/traps/rail-and-groups.md#the-collapsed-groups-dot).
+And **a group the panel made for a team is the only kind it will ever
 delete**: `auto` on the record says which, set only by `teamGroup()`, and those hold
 worktrees the panel itself removes at close, so without reaping the heading outlives
 everything under it, permanently. Not pruning stays right for a group *you* made — a folder
@@ -1063,7 +1091,10 @@ frames, `.shared-*` and `rail-shared` all still say `shared`. That is the 2026-0
 read the safe way rather than a rename somebody abandoned: renaming a store class and three
 socket frames for a label is a large diff whose failure mode is **silent** — a frame the
 client no longer switches on — and `peer_*` beside `peers.js` would be exactly the sibling
-name the `room_*` / `group_*` rule above refuses. `server/shared-room.js`'s header says the
+name the `room_*` / `group_*` rule refuses
+([mcp-and-naming#group-rooms-and-the-sibling-name](docs/traps/mcp-and-naming.md#group-rooms-and-the-sibling-name),
+and [one-spelling](docs/traps/one-spelling.md) for the family it belongs to).
+`server/shared-room.js`'s header says the
 same thing from the store's end; do not "fix" the mismatch without deciding to.
 
 **Links are retired, and a room is what replaced them.** The panel used to run *links*: a
