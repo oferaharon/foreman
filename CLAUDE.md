@@ -189,31 +189,53 @@ watcher relearned that the expensive way.
 
 ## Traps, each of which cost real debugging
 
-**A `<repo>-<branch>` title proves nothing.** Claude Code stamps a `customTitle` on a
-session, and a launcher is free to derive it from the repo and branch — which several do,
-including the wrapper this project grew up beside. When it is derived that way, every
-session in one repo on one branch writes the *same* title: one folder on the machine this
-was found on held 96 transcripts all titled `<repo>-main`. **So a title is a hint, never an
-identity** — binding on it is a coin flip, and `binding.js` never does. A launcher that
-prefers the session's own *label* makes titles unique, but only for sessions started after
-it began doing so, and only while it recognises the name: an external launcher matching a
-literal prefix of its own stops producing unique titles the moment `sessionPrefix` is set to
-something it does not look for. That costs the titles and not the binding, which has other
-rules. `binding.js` handles the overlap; don't simplify it without reading the tests.
+### Binding
 
-**A label can collide with the branch.** A session labelled `main` in a repo on branch
-`main` produces `alpha-main` either way, so the title is identical whether it was derived
-from the branch or from the label. The guard against branch-derived titles must therefore
-only fire when a *sibling* could still be writing that default — see `modernNamer` in
-`sessions.js` / `wrapper.js`. Getting this wrong permanently blocks a legitimate binding.
+Which transcript belongs to which pane: titles, labels, siblings, freshness, the folder a
+transcript really lives in, and the hook receipts that overrule every heuristic. Evidence:
+[`docs/traps/binding.md`](docs/traps/binding.md).
 
-**Ambiguity comes from siblings, not names.** One pane in a folder means one live
-conversation, so a name mismatch there is harmless. Several panes means only an exact
-label match is safe. Over-tightening this blanked five working sessions.
-
-**Freshness is load-bearing.** A transcript last written *before* a pane existed cannot
-be that pane's. Without this guard a new session adopts yesterday's history, and a
-restarted one adopts its own previous run.
+- `server/binding.js` · `server/sessions.js` — **A `<repo>-<branch>` title proves nothing.**
+  Several launchers derive it from the repo and branch, so every session in one repo on one
+  branch writes the same one; a title is a hint, never an identity.
+  [binding#a-repo-branch-title-proves-nothing](docs/traps/binding.md#a-repo-branch-title-proves-nothing)
+- `server/sessions.js` (`modernNamer`) — **A label can collide with the branch.** The guard
+  against branch-derived titles must only fire when a *sibling* could still be writing that
+  default.
+  [binding#a-label-can-collide-with-the-branch](docs/traps/binding.md#a-label-can-collide-with-the-branch)
+- `server/binding.js` — **Ambiguity comes from siblings, not names.** One pane in a folder is
+  one conversation; several means only an exact label match is safe.
+  [binding#ambiguity-comes-from-siblings](docs/traps/binding.md#ambiguity-comes-from-siblings)
+- `server/binding.js` — **Freshness is load-bearing.** A transcript last written before a
+  pane existed cannot be that pane's.
+  [binding#freshness-is-load-bearing](docs/traps/binding.md#freshness-is-load-bearing)
+- `server/sessions.js` · `server/launch.js` (`slugFor`, `uniqueSessionName`) — **The
+  roster's `label` is not the label you launched with.** `slugFor` is the only correct way
+  back, and the row's `cwd` is the transcript's — `paneCwd` is what a relaunch has to use.
+  [binding#the-rosters-label-is-not-the-label-you-launched-with](docs/traps/binding.md#the-rosters-label-is-not-the-label-you-launched-with)
+- `server/binding.js` (`rememberedFor`) — **A binding survives a sibling.** The last poll's
+  answer is replayed, re-checked against cwd and freshness; hooks still overrule it, and on a
+  cold start rule 3 binds the leftovers.
+  [binding#a-binding-survives-a-sibling](docs/traps/binding.md#a-binding-survives-a-sibling)
+- `server/install-hook.js` · `server/status.js` (`ingest`) · `POST /hook` — **The hook
+  posts JSON without saying so — and that silently cost the panel its best evidence.**
+  `/hook` now parses any content-type, and the installer sends the header and replaces an
+  entry it wrote before rather than skipping the event.
+  [binding#the-hook-posts-json-without-saying-so](docs/traps/binding.md#the-hook-posts-json-without-saying-so)
+- `server/install-hook.js` (`X-Tmux-Socket`) · `server/tmux.js` (`tmuxSocketPath`) ·
+  `server/status.js` (`ingest`) — **A pane id is only meaningful relative to one tmux
+  server, and the hook used not to say which — so a bench's scratch session owned the real
+  panel's bindings.** The panel's own socket path is read off tmux, never reconstructed.
+  [binding#a-pane-id-is-only-meaningful-relative-to-one-tmux-server](docs/traps/binding.md#a-pane-id-is-only-meaningful-relative-to-one-tmux-server)
+- `server/status.js` (`ingest`) · `server/install-hook.js` — **The asymmetry is the fix, and
+  it is deliberate rather than an oversight.** A receipt carrying no socket is accepted
+  exactly as before; one that is present and different is refused whole.
+  [binding#the-asymmetry-is-the-fix](docs/traps/binding.md#the-asymmetry-is-the-fix)
+- `server/binding.js` (`sameWorkspace`) · `server/transcript.js` (`probe`) — **A
+  transcript's `cwd` moves; the folder it lives in doesn't.** Match on
+  `~/.claude/projects/<cwd with each slash as a dash>`, which is named at launch and never
+  rewritten.
+  [binding#a-transcripts-cwd-moves](docs/traps/binding.md#a-transcripts-cwd-moves)
 
 ### Pane parsers
 
@@ -406,390 +428,91 @@ to the checkout's current branch (refusing an `agent/` one, which inside a workt
 branch every future task off another task's work), and it is shown read-only in the team panel
 beside the forge. The sandbox's `gamma` is on `master` deliberately — it is the test.
 
-**The roster's `label` is not the label you launched with.** `sessions.js` slices only
-the session prefix, so `<prefix>alpha-main` arrives as `alpha-main` — folder and all.
-Feed that back into `uniqueSessionName` and you get `<prefix>alpha-alpha-main`, a session
-that no longer answers to the name anybody saved. `slugFor` in `launch.js` is the inverse of
-`sessionName` and the only correct way back; `test/launch.test.js` pins the round trip.
-The same row's `cwd` is the transcript's and moves (see below) — `paneCwd` is the launch
-folder, and it is what a relaunch has to use.
+### Transcript records
 
-**A binding survives a sibling.** A pane bound while alone in its folder used to come
-unbound the instant a second session opened there — the folder turned ambiguous and the
-panel blanked a transcript it had been reading for an hour. `rememberedFor` replays the
-last poll's answer, re-checked against cwd and freshness. Hooks still overrule it. On a
-cold start there is nothing to remember, so rule 3 also binds the leftovers: one unbound
-pane in a folder with exactly one unclaimed *live* transcript is arithmetic, not a guess.
-"Live" matters because `/clear` leaves a chain behind — a file whose last word predates
-another file's first is a rotation predecessor, and counting those as rivals is what kept
-an identifiable session reading "can't tell which history is this one's".
+What a `.jsonl` record really is before `normalize.js` is done with it: slash command
+output, task notices, peer messages, room deliveries, and the subscription that carries
+them to a browser. Evidence:
+[`docs/traps/transcript.md`](docs/traps/transcript.md).
 
-**The hook posts JSON without saying so — and that silently cost the panel its best
-evidence.** `install-hook.js` writes a `curl --data-binary @-` with no `Content-Type`, so
-curl labels the body `application/x-www-form-urlencoded`, `express.json()` skips it,
-`req.body` is `{}`, `ingest` finds no `session_id` and returns. Every hook ever sent was
-dropped there: `~/.foreman/panes/` held not one receipt, no session ever read
-`hook` as its status source, and the authoritative binding rule — the whole reason the
-hook exists — had never once fired. The panel had been running entirely on pane scraping
-and looked fine doing it, which is why nobody noticed. `/hook` now parses any
-content-type; the installer sends the header too — and it now **replaces an entry it wrote
-before** rather than skipping the event, which is what stopped that header (and every later
-fix to the command) from reaching a machine that had already run the installer once. See the
-socket trap below for the second half of the same lesson.
+- `server/normalize.js` (`parseCommandOutput`, `parseCommand`, `DROP_TYPES`) — **A slash
+  command's output is a transcript record, it carries ANSI, and it comes in two shapes.**
+  The ANSI regex is written as an explicit escape rather than the literal ESC byte, and the
+  match is anchored so a message *mentioning* the tag stays the user's words.
+  [transcript#a-slash-commands-output-is-a-transcript-record](docs/traps/transcript.md#a-slash-commands-output-is-a-transcript-record)
+- `server/normalize.js` (`parseTaskNotice`) — **A `type: 'user'` record is not proof a human
+  typed anything.** Detection is two witnesses that must both hold — a record field and an
+  anchored `^<task-notification>` envelope — never the sentence inside.
+  [transcript#a-type-user-record-is-not-proof-a-human-typed-anything](docs/traps/transcript.md#a-type-user-record-is-not-proof-a-human-typed-anything)
+- `server/normalize.js` (`peerOrigin`, `DROP_TYPES`) · `test/fixtures/peer-message-busy.jsonl`
+  — **One peer message, two records, and which one Claude Code writes depends on whether the
+  recipient was busy — MEASURED on v2.1.257, both shapes captured minutes apart in one
+  sandbox session.** The busy shape carries its `origin` a level deeper, inside `attachment`,
+  and fires no `UserPromptSubmit` hook at all.
+  [transcript#one-peer-message-two-records](docs/traps/transcript.md#one-peer-message-two-records)
+- `server/room-header.js` (`readRoomDelivery`) · `server/normalize.js` — **A room delivery
+  leaves the same record a typed message leaves, so the only witnesses are in the text —
+  MEASURED on v2.1.257, on a real delivery in the sandbox.** Both witnesses come out of the
+  text: the anchored header shape, and every remaining line carrying that speaker's prefix.
+  [transcript#a-room-delivery-leaves-the-same-record-a-typed-message-leaves](docs/traps/transcript.md#a-room-delivery-leaves-the-same-record-a-typed-message-leaves)
+- `server/index.js` (`subscribe`) · `web/app.js` (`ws.onopen`, `appendMessages`) — **A
+  subscription dies with the socket, and nothing on screen says so.** `ws.onopen`
+  re-subscribes every open pane, and the slot is claimed before the read — a subscription
+  that outlives its slot doubles every message.
+  [transcript#a-subscription-dies-with-the-socket](docs/traps/transcript.md#a-subscription-dies-with-the-socket)
 
-**A pane id is only meaningful relative to one tmux server, and the hook used not to say
-which — so a bench's scratch session owned the real panel's bindings.** MEASURED on
-2026-09-16. Every tmux server numbers its panes from `%0`, so a scratch server (`env -u
-TMUX` plus its own `TMUX_TMPDIR`, which is how every bench here is isolated) hands out `%0`
-and `%1` again while the real server's `%0` and `%1` belong to somebody else entirely. The
-hook is registered **globally** in `~/.claude/settings.json` against a hardcoded
-`127.0.0.1:48770`, so those throwaway sessions posted `UserPromptSubmit`/`Stop` receipts at
-the real panel carrying a bare `$TMUX_PANE` — and the hook is the *authoritative* binding
-rule, so it won. `~/.foreman/panes/_0.json` held a sandbox session's transcript while the
-pane the panel drew it under was a real one in another folder. Every heuristic in
-`binding.js` behaved correctly throughout; it never got a say.
+### Launch and relaunch
 
-Three things about it. It is **reads and display only** — sends resolve the pane from the
-live roster, off real `tmux list-panes`, so nothing has ever been typed into the wrong
-session by this. It **flip-flops**, whichever server last fired a hook for a given number
-owning that pane's transcript, so it self-heals within minutes and reads as an intermittent
-binding bug rather than as a hook that should never have been accepted — both receipts from
-the measured incident had already healed by the time the fix was benched. And it is **not a
-one-off**: every bench this repo has ever run on a scratch tmux server did it, which is
-almost certainly what produced the 2026-09-06 "wrong transcript in pane" screenshot.
+Starting a session, duplicating one, ending one, putting a whole bench back, the prefix
+every one of those names is built from, and the folder-trust gate a fresh launch lands on.
+Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
 
-So the hook says which server it came from. `install-hook.js` sends
-`-H "X-Tmux-Socket: ${TMUX%%,*}"` — `$TMUX` is `<socket path>,<server pid>,<session id>` and
-that expansion is POSIX, verified in sh, bash and zsh, so it needs no `jq`, no `cut` and no
-subshell; it is a **header rather than a body key** because the body is Claude Code's own
-JSON arriving on the hook's stdin and curl cannot add a field to it, which is the same
-reason `X-Tmux-Pane` already travels this way. `tmuxSocketPath()` (`tmux.js`) reads the
-panel's own with `display-message -p '#{socket_path}'` — **read, never reconstructed**:
-`$TMUX_TMPDIR`, `/tmp` against `/private/tmp`, the uid in `tmux-<uid>` and a `-L`/`-S`
-override all feed the real answer, and a guess that got any of them wrong would refuse every
-receipt the panel depends on. It is answered by the *same* server `listPanes` polls by
-construction, since neither call passes `-L` or `-S`. It memoises only a **real** answer and
-retries a miss, because the panel usually boots before any tmux server exists and caching
-that `null` would disarm the guard permanently.
-
-**The asymmetry is the fix, and it is deliberate rather than an oversight.** A receipt
-carrying **no** socket is accepted exactly as before — every session already running was
-launched under the old entry, and refusing those would trade an intermittent
-wrong-transcript bug for a total loss of binding. A socket that is **present and different**
-is refused whole: no binding, no state, no receipt on disk, every event including
-`SessionEnd`. The panel not yet knowing its *own* socket is the same "cannot judge" and
-answers the same way, which is the beat between boot and the first tmux server. What keeps
-the fail-open window short rather than permanent is that **Claude Code re-reads its hook
-config while running** — already in this file, and this is what it buys.
-
-Two consequences worth knowing. The refusal is **logged once per foreign socket**, because
-the alternative is a line per tool call of every session on that server, and a silent
-refusal is precisely the shape this panel has already been bitten by one trap up. And
-`install-hook.js` had to learn to **replace its own entry** — it skipped any event that
-already had one, so this fix would have reached nothing until somebody deleted the entry by
-hand, with nothing on screen saying so. Ours is recognised by the **shape it writes** (a
-curl at this panel's own `:<port>/hook`), never by a byte match on the command: match on the
-bytes and the entry we wrote yesterday reads as a stranger's and rots beside the new one.
-A hook pointing anywhere else is still left strictly alone, and the backup in front of every
-write is what makes replacing a hand-edited one recoverable.
-
-The bench is `ingest`'s own decision rather than an end-to-end round trip, for the reason
-this file keeps choosing: proving it end to end would mean registering a hook globally, and
-that reaches every session on the Mac. So `test/status.test.js` pins accept/refuse/absent
-with an injected socket, `test/install-hook.test.js` drives the real installer as a
-subprocess against a throwaway `HOME`, and the live half was the installer's own curl
-command fired at a scratch panel (scratch port, scratch state dir): a foreign socket wrote
-nothing to that panel's `panes/`, the panel's own socket wrote `_0.json`, a second foreign
-receipt did not take `%0` back, and `env -u TMUX` was accepted. A sink on its own port
-confirmed what the wire actually carries rather than inferring it —
-`content-type: application/json`, `x-tmux-pane: "%12"`,
-`x-tmux-socket: "/private/tmp/tmux-501/default"`.
-
-**A transcript's `cwd` moves; the folder it lives in doesn't.** Claude Code stamps `cwd`
-on every record and rewrites it when a session changes directory mid-conversation — so
-`alpha-secondary`, launched in `Alpha` and now working in `Alpha/alpha-dev/backend`,
-recorded a directory its pane could never match, and every binding rule (all of which
-filtered on `m.cwd === pane.cwd`) skipped it. A live session with a unique label read
-"can't tell which history is this one's" for as long as it stayed in the subfolder. The
-stable identity is the transcript's own folder, `~/.claude/projects/<cwd with each slash
-as a dash>`, which is named at launch and never rewritten — `sameWorkspace` in
-`binding.js`, off `projectDir` from `probe`. Note the mirror case it also fixes: a
-transcript that wandered *into* this pane's directory used to match on `cwd` and bind
-wrongly. The rail groups by the pane's launch folder for the same reason — a row must not
-hop headings, and out of the group you filed it under, mid-conversation.
-
-**A slash command's output is a transcript record, it carries ANSI, and it comes in two
-shapes.** `/model` writes `<local-command-stdout>Set model to \x1b[1mFable 5\x1b[22m for this
-session only</local-command-stdout>` — bold codes and all, invisible in a terminal and raw
-bytes in a browser. `parseCommandOutput` in `normalize.js` strips them, and its regex is
-written as an explicit `\u001b` rather than the literal ESC byte it started as: an invisible
-control character in source lasts until the next careless edit, after which the pattern
-quietly starts eating ordinary text shaped like `[1m`. The match is anchored `^…$` for a
-reason that is already live — a message *mentioning* the tag (this trap's own bug report did)
-must stay the user's words. Two shapes: 112 `user` records, which is what you see, and 222
-`system`/`local_command` records, which `DROP_TYPES` discards and always has; 190 of those
-are empty. Only the first was ever visible, so only the first was changed. And note
-`<command-name>` already carries the slash — the chip adds its own, which is why every
-command in the panel read `//model` until it was stripped in `parseCommand`.
-
-**A `type: 'user'` record is not proof a human typed anything.** When a subagent, a
-background command or a monitor finishes, Claude Code injects the result back as a
-**synthetic user turn** — a whole `<task-notification>` envelope — and the terminal draws
-one line for it. `normalize.js` drops only by `DROP_TYPES` and `isMeta`, so the panel drew
-every one as a full user bubble: a subagent's entire report, in the user's own voice,
-saying something they never typed, two screens tall. Measured across this Mac: 472 of them,
-median 425 bytes, p90 8.5 KB, largest 48 KB. `parseTaskNotice` reads them as a `notice`
-chip.
-
-Three measurements decided its shape and none of them is guessable. **`<summary>` is on all
-472 and is self-describing**, so it *is* the chip's line — and it is why the label says
-`notice` rather than the obvious `agent finished`: only 92 are agents, 263 are background
-commands and 94 are monitors, so that wording would be wrong on four rows in five.
-**`<result>` is on only 92 and `<event>` on 94**; the other ~290 are a status and a pointer
-to an output file, and their chip is deliberately unopenable rather than opening on nothing.
-And **detection is two witnesses that must both hold** — a record field (`origin.kind`, or
-`promptSource` for a record carrying no `origin`) *and* an anchored `^<task-notification>`
-envelope — never the sentence inside, which is Claude Code's wording and will be reworded.
-The conjunction is also the scope: a typed message quoting an envelope stays a bubble, and
-whatever else `promptSource: 'system'`
-grows to carry falls through unchanged, which is the right default for a shape nobody has
-read. Unread never counted these — it counts `assistant` records with text — so nothing
-about the inbox moved.
-
-**One peer message, two records, and which one Claude Code writes depends on whether the
-recipient was busy — MEASURED on v2.1.257, both shapes captured minutes apart in one
-sandbox session.** A native `SendMessage` delivered to an **idle** session lands as
-`type: 'user'` with `origin.kind: 'peer'` at the top level. Delivered to one **mid tool
-call** it is queued and then absorbed into the turn already running, and lands as
-`type: 'attachment'` / `attachment.type: 'queued_command'` — the `queue-operation` beside
-it says `reason: 'absorbed_mid_turn'` — carrying the **identical `origin` object one level
-deeper**, at `rec.attachment.origin`. It has no top-level `message`, no top-level `origin`
-and no top-level `isMeta` (that rides inside `attachment` too), so every test the first
-shape passes, the second fails. `peerOrigin` in `normalize.js` is the one place either is
-recognised; everything downstream is written once.
-
-Three things about it. **The busy shape is the common case, not an edge** — a worker
-telling its lead "done" is by definition talking to a session that is working, and it is a
-worker→lead completion message that first proved this traffic exists. **It fires no
-`UserPromptSubmit` hook at all**, measured against a scratch hook that caught the idle
-delivery from the same sender in the same session seconds earlier and never saw the busy
-one, so a collector watching the hook sees nothing and the transcript is the only path to
-these. And **`attachment` stays in `DROP_TYPES`**: the carve-out asks the parser rather
-than the type (`if (DROP_TYPES.has(type) && !peer)`), so exactly one shape comes back out
-and `total_tokens_reminder`, `output_style` and the rest are dropped on the next line as
-before. Note the shape is not what you get by messaging a session that merely *looks*
-occupied — a probe fired at one busy generating prose arrived as the ordinary `user`
-record, because the turn ended first. It takes a tool call in flight.
-`test/fixtures/peer-message-busy.jsonl` is the capture and `test/normalize.test.js` pins
-both spellings against it.
-
-**A room delivery leaves the same record a typed message leaves, so the only witnesses are
-in the text — MEASURED on v2.1.257, on a real delivery in the sandbox.** Every other message
-the panel types into a pane can be recognised off the record: a nudge carries a mark (and so
-did a link message, before links were retired — `LINK_MARK` in `normalize.js` outlived the
-feature so those records still read), a task notification carries `origin.kind`, a peer message
-carries `origin.kind: 'peer'`. A room copy carries **`type: 'user'`, `origin: {kind: 'human'}`,
-`promptSource: 'typed'`, `entrypoint: 'cli'`** — byte-for-byte what the maintainer typing at
-the keyboard leaves behind, because that is exactly what it is: text typed into a composer.
-So `readRoomDelivery` (`server/room-header.js`) is **two witnesses that both come out of the
-text**, and one of them being the sentence is unavoidable here in a way it never was for the
-notice: the first line must match the anchored header shape — a `room-<n>` id the store could
-have minted, ending in one of two *frozen* note clauses — **and** every remaining line must
-carry that speaker's prefix, with at least one line. Somebody quoting a delivery inside a
-message of their own breaks the second (their words are a line at column 0) or the first (the
-header is no longer first), and stays a bubble; `test/fixtures/room-delivery.jsonl` is a real
-capture of exactly that pair, side by side, which is why it is a capture and not a
-reconstruction. A verbatim paste of a whole delivery and nothing else does read as one, and
-that is accepted rather than defended against — it is indistinguishable by construction.
-
-**…and the module is a leaf because the obvious import is a cycle.** `normalize.js` has to
-read what `rooms-line.js` writes, and `rooms-line.js` → `observe.js` → `normalize.js` closes
-the loop. ESM would resolve it today — neither module touches the other's bindings at
-evaluation time — and that is the "it'll be fine" this file is a list of. `room-header.js`
-holds the writer and the reader together, imports only `envelope.js`, and is the reason the
-two spellings cannot drift; a test holding them apart was the alternative and is strictly
-weaker when an import is available.
-
-**A subscription dies with the socket, and nothing on screen says so.** The tailer holding
-a file offset is server state, so a dropped connection or a server restart ends it — while
-the roster keeps arriving, because that is broadcast to every client. The result is a rail
-that looks perfectly alive above a transcript that silently stopped minutes ago — found
-because the terminal had twenty minutes the panel didn't. `ws.onopen` re-subscribes
-**every open pane**; the version before split view re-subscribed `state.selected`, a variable
-the `createPane` refactor had already deleted, so it re-subscribed nothing at all.
-
-**…and a subscription that outlives its slot doubles every message.** `subscribe` used to
-claim the slot *after* `await tailer.start()`, leaving the slot empty for the length of a
-file read. A second subscribe landing in that window found nothing to stop, so the first
-tailer was never recorded anywhere and never stopped: it went on watching the same file and
-sending into the same slot for the life of the socket, and `appendMessages` in `web/app.js`
-appends without dedupe. Every record after that point drew twice. It hides well — the next
-full `transcript` frame replaces the list wholesale, so the screen "snaps into place" while
-the orphan keeps running, and the file was never wrong. `/clear` is what makes the race
-routine: a rotation fires **two** subscribes for one slot, the server's own rebound and the
-client's `adopt` → `open` off the same roster frame. The slot is now claimed before the read
-and the tailer checks it still owns it afterwards; the second subscribe is harmless, it just
-supersedes. Proving it took a websocket that double-subscribes one slot and single-subscribes
-another as a control, against a live session — the panel cannot show you this from inside.
-
-**A duplicate inherits bypass, and that is the point.** `⧉` on a rail row relaunches into
-`paneCwd` with the source's own slug (`slugFor`, so `alpha-main` → `alpha-main-2`) and
-with `skipPermissions` copied from `s.bypass`. A copy that quietly asked for permission
-where its original didn't would be worse than no button — but it is a real consequence for
-one hover-click, so the glyph takes the badge's colour on those rows. Note the guard beside
-it: `sessionRow` rebuilds from scratch on every roster broadcast, so `disabled` on the node
-is wiped long before the launch returns and the in-flight flag has to live in module scope
-(`duplicating`). Three fast clicks must make one session, not three.
-
-**Closing a session is `/exit`, and "blocked" is wider than `state === 'dialog'`.** The bin
-on a rail row types `/exit`, which ends Claude Code, takes the `zsh -ilc claude` with it and
-drops the tmux session — verified in a scratch run, and it works while the session is busy,
-so there is no wait-for-idle case. The guard is the part worth reading: a check written as
-`live.state === 'dialog'` walks straight past the startup trust gate, which sets no
-`dialog` at all, and types six characters into a security gate. Test every way a pane can
-be holding something — `prompt || plan || question || state === 'needs-decision' ||
-state === 'dialog'` — which is what `assertNotBlocked` already does and why `sendText` is
-the backstop underneath. (This paragraph used to say the gate parses as `needs-decision`
-with **no** `prompt` behind it and `dialog` *set*. Both halves were wrong; see the trap
-below. The conclusion about `assertNotBlocked` was right for a different reason — on that
-screen `prompt` and `needs-decision` are both true.)
-
-**`--resume` continues the *same* transcript file, and the launch flags beat the replayed
-conversation — VERIFIED, and both halves decided the shape of relaunch-all.** Measured on a
-scratch session before a line was written. The file: 42,438 bytes before the resume, 52,190
-after, one `sessionId` throughout, no second `.jsonl` — so a resumed session keeps the
-identity every rule in `binding.js` is written against, and nothing rotates, re-adopts or
-hops a rail heading. The flags: resumed against an `--append-system-prompt-file` whose
-contents had been *rewritten between the two runs*, the session answered out of the **new**
-file while still remembering the **old** conversation. That is the only reason a resumed
-team lead is honest — `launchLead` regenerates the brief, the MCP config and the settings
-from today's code, and a resume does not quietly replay yesterday's. Had it gone the other
-way the lead would be fresh-only, and the task said so. Re-checked end to end through the
-real launcher afterwards: the lead came back with `isLead`, its pin, its history, a working
-`room_post`, and its Bash write to the checkout still denied.
-
-**Relaunching the whole bench can take the tmux server down with it, and pane ids restart
-at `%0`.** Exit-all-then-restore-all means that for a moment nothing is running — and if
-the bench *is* the whole server, tmux shuts down and the next launch starts a fresh one
-numbering from zero. Harmless (session **names** are the contract, and they survive), and
-it is also what makes the wait-for-exit loop return instantly: `liveSessionNames()` answers
-`[]` for a server that no longer exists. Worth knowing before you read a pane-id reset as a
-bug. It does not happen when anything was skipped — benched both ways, with two blocked
-sessions surviving and the ids continuing from `%3`.
-
-**A relaunch into a folder whose trust was never recorded lands on the trust gate.** Not
-new behaviour and not the relaunch's fault — the panel has always shown that screen — but
-it is the state a relaunched session is most likely to come up in, because the record lives
-in `~/.claude.json` and three sessions answering their gates at once can lose one to the
-last writer. Benched: two folders came back straight into their history, the third came
-back on the gate and resumed correctly the moment it was answered.
-
-**The name a launch mints is a contract, so `launch.js` is a port and not a rewrite.**
-`server/launch.js` was ported line for line from an existing launcher rather than written
-fresh, because `sessions.js` reads the label back out of `<prefix><folder>-<label>` and the
-server-global pbcopy binding is guarded on the same prefix — change the spelling and the
-panel claims sessions it can no longer name. Two details in it look like noise and are not,
-and each cost a debugging session before they were understood. **`-ilc`, not `-lc`**: an
-*interactive* login shell is what sources the user's rc file, and without it `PATH` may not
-contain `claude` at all. **The bare word `claude`, never an exec of the resolved path**: a
-shell function named `claude` in the user's rc file is a common way to add flags such as
-`--name`, and execing the binary directly walks straight past it. Neither depends on any
-particular wrapper existing; both are what make the launch behave the way the user's own
-shell would. `test/launch.test.js` pins the naming.
-
-**…and the prefix in that name is configuration, not a literal.** `sessionPrefix` in
-`<STATE_DIR>/config.json`, default **`foreman-`**, resolved once at boot as
-`SESSION_PREFIX` (`config.js`) and printed on the `Config:` line. Five sites read it —
-`sessionName`/`slugFor`/`isLeadName`/`uniqueSessionName` in `launch.js`, the display name
-`attachTerminal` strips, the `#{m:<prefix>*,#{session_name}}` guard on the pbcopy bind, and
-the two label slices in `sessions.js` and `tmux.js` — and every one of them takes it from
-the same export, because two spellings of a naming contract is the `isLeadName` lesson in
-another costume. **One prefix, never two:** there is no compatibility mode that mints under
-one name and also answers to another, since a panel claiming sessions it cannot name back
-is a panel binding a transcript to the wrong pane.
-
-**What a non-matching prefix costs is narrower than "invisible", and it was measured**
-because the first draft of this paragraph said invisible and was wrong. A session whose
-name lacks the configured prefix is *still in the roster* — the panel lists every Claude
-pane on the machine and always has. Benched on a scratch panel against two sessions minted
-by a different launcher: configured with the prefix those sessions carry, both rows came
-back with their labels sliced; configured with a different one, the same two rows were
-still there with `label: null`. So what is lost is the **name**, and
-everything keyed on it: the rail falls back to the ambiguous `<repo>-<branch>` title,
-`slugFor` yields nothing so `⧉` auto-numbers and a snapshot cannot restore the row under
-its own name, `isLeadName` never matches so a lead among them is not badged, and the
-server-global pbcopy bind is rewritten to the configured prefix at the next launch. That is
-why an install whose sessions are also minted by some other tool records that tool's prefix
-in `config.json`, while a fresh install records nothing and takes the default.
-**An existing `config.json` is never seeded into** (`seedConfigFile` only writes an absent
-file), so a panel upgrading
-into this code mints under the default until somebody adds the line, and the boot line is
-the only place that shows. An invalid value is a warning and the default, never a refusal
-to boot, and it is never inferred from live tmux sessions — that would key a naming
-contract on whatever else the machine happened to be running. `server/snapshot.js`'s header
-traces what a saved bench does when the prefix changes under it.
-
-**A new folder's first session lands on the trust gate, and it does not look like anything
-you would guard against — MEASURED, on Claude Code v2.1.247, at 220 columns and at 70.**
-Claude Code asks before its composer exists, so `parsePane` reads `needs-decision`. What it
-reads it as is the trap: an ordinary, **fully populated permission box**.
-
-```
-state:  'needs-decision'      dialog:  null
-prompt: { title: 'Accessing workspace:', cursor: 1, options: [
-          {index: 1, label: 'Yes, I trust this folder', kind: 'approve', selected: true},
-          {index: 2, label: 'No, exit',                 kind: 'deny'} ] }
-```
-
-Both obvious tests for "a box the panel must not answer" therefore miss it. It has no
-`dialog`, so the picker test misses it; it has a prompt, so the unreadable-box test misses
-it. It is a box we read *perfectly* and refuse. `test/fixtures/pane-trust-gate.txt` and
-`pane-trust-gate-narrow.txt` are the captures, pinned in `test/pane.test.js`.
-
-**The wording changed in v2.1.247**, so don't write copy from memory. The screen no longer
-says "Do you trust the files in this folder?" It reads `Accessing workspace:` / *<path>* /
-`Quick safety check: Is this a project you created or one you trust? (Like your own code, a
-well-known open source project, or work from your team). If not, take a moment to review
-what's in this folder first.` / `Claude Code'll be able to read, edit, and execute files
-here.` / `1. Yes, I trust this folder` / `2. No, exit`.
-
-**And the panel shipped a button on it.** This file used to say the panel "shows it and
-stops there" and cited a function to prove it — a function that has never existed in this
-repo. The stance had been inherited as prose from a sibling tool rather than written as
-code here, and nobody checked. `buildDecisionBar` had no trust-gate case, so a rail row on
-that screen drew a full-width, unarmed, one-tap **"Yes, I trust this folder"** — one click, from any browser that can reach
-the panel, which under a wide bind is anything on the local network, granting read, edit and
-execute in a folder nobody vetted. The phone (`web/m/cards.js`) had the only correct
-handling and the only copy of the witness.
-
-`web/trust-gate.js` is now that witness, in one place, with three readers: the desktop
-composer, the phone's cards, and `POST /api/sessions/:id/answer`, which refuses the gate
-server-side so the stance is a property of the panel and not a habit of its front end. It
-is the only file under `web/` that `server/` imports, and the header says why. The witness
-is the label `Yes, I trust this folder` **or** `Accessing workspace` plus `safety check` —
-the same one `answerTrustGate` uses, loosened from *and* to *or* on purpose: that function
-decides whether to **answer** a gate and a miss costs a stalled dispatch, this one decides
-whether to **refuse** and a miss ships the button. `test/trust-gate.test.js` pins the card
-at both widths by walking it for anything pressable, and pins that the detector itself is
-not blind.
-
-**Demonstrated, not asserted.** A scratch panel (`FOREMAN_PORT=48771`, scratch `FOREMAN_STATE_DIR`)
-against a scratch session parked on a real gate, at 220 columns and again at 70: the card
-comes back `perm perm-refusal` with **zero** pressable nodes — only `DIV`, `SPAN` and `P` in
-the whole tree — the folder reads whole at both widths, and `POST /answer` with
-`{option: 1, expectLabel: 'Yes, I trust this folder'}` returns **409** with the pane still
-sitting on the gate. The phone's card was re-checked through the same live row after the
-witness moved out of `cards.js`.
-
-One thing the fix had to reach beyond the card: `updateComposerHint` said *"answer the
-prompt above — messages wait until you do"*, which under a card that has just refused to
-draw a button sends the reader hunting for it. That branch now names the gate and points at
-the Mac, and it sits ahead of the `dialog`/`working`/`needs-decision` chain for the same
-reason the card's own branch does.
-
-The gate is still one reason the launcher opens a Terminal window. The `+ new` box's tick for
-it is **off** by default despite this cost — recoverable via the pane header's attach button,
-but only if you notice. Verified originally by launching into an empty scratch folder.
+- `web/app.js` (`sessionRow`, `duplicating`) · `server/launch.js` (`slugFor`) — **A duplicate
+  inherits bypass, and that is the point.** The in-flight flag has to live in module scope,
+  because the row is rebuilt from scratch on every roster broadcast.
+  [launch#a-duplicate-inherits-bypass](docs/traps/launch.md#a-duplicate-inherits-bypass)
+- `server/tmux.js` (`assertNotBlocked`, `sendText`) · `web/app.js` (the rail row's bin) —
+  **Closing a session is `/exit`, and "blocked" is wider than `state === 'dialog'`.** Test
+  every way a pane can be holding something — the startup trust gate sets no `dialog` at all.
+  [launch#closing-a-session-is-exit](docs/traps/launch.md#closing-a-session-is-exit)
+- `server/launch.js` (`launchLead`) · `server/snapshot.js` (`restoreSessions`) —
+  **`--resume` continues the *same* transcript file, and the launch flags beat the replayed
+  conversation — VERIFIED, and both halves decided the shape of relaunch-all.** A resumed
+  lead answers out of today's brief, settings and MCP config while remembering yesterday's
+  conversation.
+  [launch#--resume-continues-the-same-transcript-file](docs/traps/launch.md#--resume-continues-the-same-transcript-file)
+- `server/snapshot.js` (`relaunchEntries`, `liveSessionNames`) — **Relaunching the whole
+  bench can take the tmux server down with it, and pane ids restart at `%0`.** Session
+  **names** are the contract and survive it; read a pane-id reset as expected, not as a bug.
+  [launch#relaunching-the-whole-bench-can-take-the-tmux-server-down](docs/traps/launch.md#relaunching-the-whole-bench-can-take-the-tmux-server-down)
+- `server/snapshot.js` (`restoreSessions`) · `~/.claude.json` — **A relaunch into a folder
+  whose trust was never recorded lands on the trust gate.** Three sessions answering their
+  gates at once can lose one to the last writer.
+  [launch#a-relaunch-into-a-folder-whose-trust-was-never-recorded](docs/traps/launch.md#a-relaunch-into-a-folder-whose-trust-was-never-recorded)
+- `server/launch.js` (`sessionName`, `slugFor`, `isLeadName`, `uniqueSessionName`) — **The
+  name a launch mints is a contract, so `launch.js` is a port and not a rewrite.** `-ilc`,
+  not `-lc`, and the bare word `claude`, never an exec of the resolved path — and the prefix
+  in that name is configuration (`sessionPrefix`), read by five sites from one export.
+  [launch#the-name-a-launch-mints-is-a-contract](docs/traps/launch.md#the-name-a-launch-mints-is-a-contract)
+- `server/config.js` (`SESSION_PREFIX`) · `server/sessions.js` · `server/launch.js`
+  (`slugFor`, `isLeadName`) — **What a non-matching prefix costs is narrower than
+  "invisible", and it was measured** — the row is still in the roster; what is lost is the
+  **name**, and everything keyed on it.
+  [launch#what-a-non-matching-prefix-costs](docs/traps/launch.md#what-a-non-matching-prefix-costs)
+- `web/trust-gate.js` · `server/tmux.js` (`parsePane`) ·
+  `test/fixtures/pane-trust-gate{,-narrow}.txt` — **A new folder's first session lands on the
+  trust gate, and it does not look like anything you would guard against — MEASURED, on
+  Claude Code v2.1.247, at 220 columns and at 70.** It parses as an ordinary, fully populated
+  permission box, so both obvious tests for a box the panel must not answer miss it.
+  [launch#the-trust-gate](docs/traps/launch.md#the-trust-gate)
+- `web/trust-gate.js` · `web/app.js` (`buildDecisionBar`, `updateComposerHint`) ·
+  `web/m/cards.js` — **The wording changed in v2.1.247** — so don't write copy from memory,
+  and note that the panel once shipped a full-width one-tap button on that screen.
+  [launch#the-wording-changed-and-the-panel-shipped-a-button-on-it](docs/traps/launch.md#the-wording-changed-and-the-panel-shipped-a-button-on-it)
+- `web/trust-gate.js` · `POST /api/sessions/:id/answer` · `test/trust-gate.test.js` —
+  **Demonstrated, not asserted.** The card comes back with zero pressable nodes at 220
+  columns and at 70, and the answer endpoint returns 409 with the pane still on the gate.
+  [launch#demonstrated-not-asserted](docs/traps/launch.md#demonstrated-not-asserted)
 
 **Nothing may be typed without claiming the pane first.** The roster is a poll behind, so
 five messages fired in one second all saw `idle` and all landed on the same prompt line.
