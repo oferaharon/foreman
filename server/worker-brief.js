@@ -48,6 +48,11 @@ ${decisionsSection}## How to work
   and a short summary of what you did. That is how the team knows you finished — saying
   it in conversation reaches nobody. If the push fails, report "review" anyway and say
   so in the summary; a local branch is still reviewable.
+- **Read the traps before you edit.** \`CLAUDE.md\`'s Traps section is an index, one line
+  per trap naming the files it guards. Before you edit a file, grep the index for it and
+  read the \`docs/traps/\` file any matching line points at. The index line is the
+  conclusion; the file is the measurement that proves it, and the measurement is usually
+  the part that stops you doing the plausible thing.
 
 ## Where you verify — the sandbox, and it is not optional
 
@@ -187,8 +192,10 @@ it is your working document until you report, not an append-only log.
 
 Read before you plan, and be specific about what you read. Skim the repo's own CLAUDE.md
 — a project's hard-won rules are exactly the thing a plan written from the outside gets
-wrong. Follow the code paths your task actually touches and name them by file, and by
-line where it helps.
+wrong — and read the \`docs/traps/\` file behind every Traps-index line that names a
+subsystem your plan touches: the index line is the conclusion, that file is the
+measurement proving it. Follow the code paths your task actually touches and name them by
+file, and by line where it helps.
 
 A plan that could have been written without opening the repo is worth nothing. The value
 you add over the lead thinking about this in conversation is that you *looked*.

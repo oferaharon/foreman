@@ -155,6 +155,27 @@ test('the brief names the three tools and both line prefixes, and names nobody',
   assert.equal(brief, mod.sessionBrief(), 'the file on disk is not what sessionBrief() returns');
 });
 
+/*
+ * The negative half of the Traps split, and it lives here rather than in `test/brief.test.js`
+ * because it is a fact about *this* file's subject. The lead, worker and planner briefs all
+ * gained an instruction to read `docs/traps/` before touching the files a trap guards. This
+ * one deliberately did not, and that is a finding rather than an oversight: `writeSessionFiles`
+ * writes **one** `session-brief.md` under the state dir for the whole machine, shared by every
+ * ordinary session the panel launches in any folder — so a Foreman-specific instruction in it
+ * would be wrong in every other folder on this Mac. A standalone session in this repo is served
+ * by `CLAUDE.md` itself, which is exactly why the index has to stand on its own without a brief
+ * telling anyone to use it.
+ *
+ * The day somebody notices the inconsistency and "fixes" it, this is what says why it is not one.
+ */
+test('the standalone brief says nothing about this repo\'s traps, because it is machine-wide', async () => {
+  await mod.writeSessionFiles();
+  const brief = fs.readFileSync(path.join(STATE, 'session-brief.md'), 'utf8');
+
+  assert.ok(!brief.includes('docs/traps/'), 'the machine-wide brief points at one repo\'s trap files');
+  assert.ok(!/CLAUDE\.md/.test(brief), 'the machine-wide brief names one repo\'s CLAUDE.md');
+});
+
 /* ------------------------------------------------------------------- the flags --- */
 
 test('the flags merge the MCP config and the settings, and never replace either', async () => {
