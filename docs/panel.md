@@ -175,8 +175,9 @@ binding, and the same Terminal window attached at the end.
 
 If claude dies on startup the pane is captured, quoted back to you, and killed, rather
 than leaving a Terminal window attached to a corpse. A brand-new folder will open on
-Claude Code's own "do you trust this folder?" gate — answer it in the Terminal window
-that just opened.
+Claude Code's own folder-trust gate — answer it in the Terminal window that just opened, or
+in the panel: the session's card shows the folder in full and what answering grants, with
+**Yes, I trust this folder** and **No, exit** as the two rows. The Yes asks twice.
 
 **Duplicating one.** Hover a rail row and there's a `⧉` under its pin: another session in
 the same folder, no dialog and no chooser, opened as soon as it's up. Everything `+ new`
@@ -1335,7 +1336,8 @@ around the lead for.
 launched that hasn't spoken yet, **most recent at the top** — whatever last said something, or
 was last opened if it has not spoken at all. Tapping one opens the same conversation screen a
 lead gets, minus the parts that only a team has — no tasks tab, no merge queue. The
-folder-trust gate is refused there exactly as everywhere else, with no button drawn. If a
+folder-trust gate gets its own card there exactly as everywhere else: the folder in full, what
+answering grants, and two rows — the Yes asking twice. If a
 session's identity turns out to belong to a worker or a lead instead, the screen shows it as
 gone rather than a conversation the phone was never meant to display.
 

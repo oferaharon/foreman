@@ -1,7 +1,8 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
-import { capturePane, sendKeys } from './tmux.js';
+import { trustOption } from '../web/trust-gate.js';
+import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
 
 /**
  * The pieces of dispatching a worker that aren't worktree or task bookkeeping: the
@@ -135,12 +136,20 @@ export async function writeWorkerSettings({ repo, label, allow = [], deny = [] }
  * nothing else.
  *
  * The gate fires once per fresh folder (measured, Wave 0), and every worktree is a fresh
- * folder, so dispatch eats it once per task. This is the one place the panel answers a
- * security gate, and the guard is the point: the capture must contain the gate's own
- * text, the *worktree's* name (so a gate for some other folder is never confirmed), and
- * the cursor must be sitting on the Yes row — then a single Enter confirms it, the same
- * key a human presses. Seeding `hasTrustDialogAccepted` into `~/.claude.json` was
- * rejected: every live session rewrites that file, and racing them risks all of it.
+ * folder, so dispatch eats it once per task. Since the 2026-09-19 ruling this is no longer
+ * the *only* place the panel answers a security gate — the cards and `/answer` do too —
+ * but it is still the only place it answers one **unattended**, which is why the guard is
+ * stricter here than anywhere else: the capture must read as the gate through `gatePrompt`,
+ * it must carry the *worktree's* own name (so a gate for some other folder is never
+ * confirmed), and the row that grants must name itself. Seeding `hasTrustDialogAccepted`
+ * into `~/.claude.json` was rejected: every live session rewrites that file, and racing
+ * them risks all of it.
+ *
+ * **It used to require `❯ 1.` and so it stopped working entirely.** Claude Code v2.1.257
+ * draws this box with unnumbered options and the cursor on **No**, so the old test could
+ * never pass and every dispatched worker sat on an unanswered gate. The answer is now the
+ * cursor walk — press, re-read, confirm the `❯` is on the trust row, then `Enter` — which
+ * `confirmGateOption` owns and which reads both layouts. See `web/trust-gate.js`.
  *
  * @returns {Promise<'answered'|'absent'|'unrecognised'>}
  */
@@ -150,11 +159,16 @@ export async function answerTrustGate(paneId, worktreeDir, { tries = 10, delayMs
   for (let i = 0; i < tries; i += 1) {
     const text = await capturePane(paneId, 60).catch(() => '');
     const flat = text.replace(/\s+/g, ' ');
-    const isGate = /Yes, I trust this folder/.test(flat) && /Do you trust|safety check/i.test(flat);
-    if (isGate) {
+    const prompt = gatePrompt(text);
+    if (prompt) {
       if (!flat.includes(base)) return 'unrecognised'; // a gate, but not ours — never answer it
-      if (!/❯\s*1\./.test(flat)) return 'unrecognised'; // cursor not on Yes — don't guess
-      await sendKeys(paneId, 'Enter');
+      const yes = trustOption(prompt);
+      if (!yes) return 'unrecognised'; // no row says it grants — don't guess which does
+      try {
+        await confirmGateOption(paneId, yes.label, { sleep });
+      } catch {
+        return 'unrecognised'; // the cursor would not land on it; nothing was confirmed
+      }
       return 'answered';
     }
     // No gate. If the composer is up, the folder was already trusted and there is

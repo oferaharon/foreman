@@ -42,6 +42,12 @@
    thing to act on, and the whole point of it is that there is no action here. */
 .m-card.is-refusal { border-left-color: var(--rule-strong); }
 
+/* The folder-trust gate. Amber rather than the decision red, and the distinction is the
+   point: red is "something is waiting on you", amber is "this one costs more than the call
+   in front of you". It is the only card on this phone whose answer outlives the session. */
+.m-card.is-gate { border-left-color: var(--working); }
+.m-card.is-gate .m-opts { margin-top: 0.6rem; }
+
 .m-card-head {
   display: flex;
   align-items: baseline;
@@ -61,6 +67,7 @@
 
 .m-card.is-plan .m-card-kind { color: var(--accent); }
 .m-card.is-refusal .m-card-kind { color: var(--ink-faint); }
+.m-card.is-gate .m-card-kind { color: var(--working); }
 
 /* The subject is the command, the file, the thing being asked about. It gets the room the
    header has left and is cut rather than wrapped — the question below carries the meaning,
@@ -153,6 +160,20 @@
   line-height: 1;
   color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The gate's rows, which have no digit to draw — v2.1.257 draws the folder-trust gate
+ * unnumbered, and a number the terminal does not show is a cross-check that checks nothing.
+ * The column is removed rather than left empty so the label starts where every other card's
+ * label does.
+ */
+.m-opt.no-digit {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.m-opt.no-digit .m-opt-body {
+  grid-column: 1;
 }
 
 .m-opt-body {
@@ -539,15 +560,17 @@
   border-radius: 8px;
 }
 
-/* ============================================== the boxes with no buttons === */
+/* ================================================ the gate's transcript === */
 
 /*
- * The trust gate, and any other box the panel will not answer.
+ * The folder-trust gate's screen, above its two answers.
  *
  * What is inside `.m-gate-screen` is a transcript of what the Mac is showing, not a set of
  * controls — flat text on a sunk ground, no borders, no rounded rows, nothing that invites
- * a thumb. Its options are listed for one reason: knowing that the terminal says
- * `1. Yes, I trust this folder / 2. No, exit` is exactly what makes the walk worth making.
+ * a thumb. It exists because this is the one box where what the answer *buys* is the whole
+ * question: the folder, in full, and the sentence that says read, edit and execute. Under
+ * the old stance it was all the card had; under the 2026-09-19 ruling it is what somebody
+ * decides on before tapping, which is a stronger reason to keep it, not a weaker one.
  */
 .m-gate-screen {
   padding: 0.6rem 0.7rem;
@@ -575,11 +598,3 @@
   overflow-wrap: anywhere;
 }
 
-.m-gate-opts {
-  margin-top: 0.55rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--rule);
-  color: var(--ink-faint);
-}
-
-.m-gate-opt { overflow-wrap: anywhere; }

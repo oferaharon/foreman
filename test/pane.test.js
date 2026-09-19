@@ -196,25 +196,37 @@ test('no mode line on screen is unknown, not off', () => {
 /*
  * ── The startup trust gate ───────────────────────────────────────────────────────────
  *
- * Real captures from Claude Code **v2.1.247** (the rest of this file is v2.1.232), taken
- * by launching a scratch session into a directory Claude Code had never seen, at the
- * launcher's 220 columns and again at 70. The gate was never answered — that is the
- * panel's standing stance and it is also the only way the state survives to be captured.
+ * Real captures from **two** Claude Code builds (the rest of this file is v2.1.232), each
+ * taken by launching a scratch session into a directory Claude Code had never seen, at the
+ * launcher's 220 columns and again at 70:
  *
- * The measurement contradicts CLAUDE.md, which says the gate "parses as `needs-decision`
- * with **no** `prompt` behind it and `dialog` set". It does not. On v2.1.247 it parses as
- * an ordinary permission box: a full `prompt` with two options and `dialog === null`. The
- * `/exit` guard is unaffected either way — `assertNotBlocked` refuses on `prompt` *or*
- * `needs-decision`, and here both are true — but anything that keys off "needs-decision
- * with nothing behind it" to detect an unanswerable box will not see this screen at all.
+ *   pane-trust-gate.txt / -narrow.txt                v2.1.257 — unnumbered, cursor on No
+ *   pane-trust-gate-2.1.247.txt / -2.1.247-narrow.txt v2.1.247 — numbered, cursor on Yes
+ *
+ * Both are kept and both are read, because nothing in this repo pins which Claude Code is
+ * installed. The v2.1.257 layout is what broke the panel's reading of this screen outright:
+ * `OPTION_RE` in `server/permission.js` requires an `N.`, so `parsePrompt` returned null,
+ * the gate arrived as a nameless `dialog`, and every reader of it — both cards and the
+ * needs-you notification — went silent. `parseTrustGate` in `web/trust-gate.js` is the
+ * fallback `parsePane` reaches for, and these tests pin that the two layouts come out the
+ * same shape.
+ *
+ * The measurement also contradicts an older CLAUDE.md, which said the gate "parses as
+ * `needs-decision` with **no** `prompt` behind it and `dialog` set". It does not, on either
+ * build: a full `prompt` with two options and `dialog === null`. The `/exit` guard is
+ * unaffected either way — `assertNotBlocked` refuses on `prompt` *or* `needs-decision`, and
+ * here both are true — but anything that keys off "needs-decision with nothing behind it"
+ * to detect an unanswerable box will not see this screen at all.
  *
  * These tests pin what was observed, not what was expected. If a later Claude Code
  * changes the screen, re-capture; do not adjust a parser to make them pass.
  */
 
 const TRUST_GATE = [
-  ['220 columns', 'pane-trust-gate.txt'],
-  ['70 columns', 'pane-trust-gate-narrow.txt'],
+  ['v2.1.257, 220 columns', 'pane-trust-gate.txt'],
+  ['v2.1.257, 70 columns', 'pane-trust-gate-narrow.txt'],
+  ['v2.1.247, 220 columns', 'pane-trust-gate-2.1.247.txt'],
+  ['v2.1.247, 70 columns', 'pane-trust-gate-2.1.247-narrow.txt'],
 ];
 
 for (const [width, file] of TRUST_GATE) {
@@ -222,10 +234,9 @@ for (const [width, file] of TRUST_GATE) {
     const state = parsePane(fixture(file));
     assert.equal(state.state, 'needs-decision');
     assert.equal(state.dialog, null, 'no dialog title — the prompt parse wins outright');
-    assert.ok(state.prompt, 'CLAUDE.md says there is no prompt here; there is');
+    assert.ok(state.prompt, 'CLAUDE.md once said there is no prompt here; there is');
     assert.equal(state.prompt.title, 'Accessing workspace:');
     assert.equal(state.prompt.question, null);
-    assert.equal(state.prompt.cursor, 1);
     assert.equal(state.plan, null);
     assert.equal(state.question, null);
     // No composer, so no footer to scrape either.
@@ -234,32 +245,55 @@ for (const [width, file] of TRUST_GATE) {
     assert.equal(state.bypass, null, 'unknown, not off — a box owns the mode line');
   });
 
-  test(`the trust gate's two options are parsed with their own digits (${width})`, () => {
-    // Note what this means for anything drawing buttons off `prompt.options`: option 1 is
-    // classed `approve` — a plain, unarmed yes — and pressing it grants Claude Code read,
-    // edit and execute on the folder. The panel deliberately never answers a security
-    // gate; this is the shape it would have to refuse.
+  test(`the trust gate's two options are parsed with a cursor on exactly one (${width})`, () => {
+    // Note what this means for anything drawing buttons off `prompt.options`: the trust row
+    // is classed `approve` — a plain, unarmed yes as far as `classify` is concerned — and
+    // pressing it grants Claude Code read, edit and execute on the folder. The card arms it
+    // on its own account (`gateButton` in `web/trust-gate.js`), never on the `kind`.
     const { options } = parsePane(fixture(file)).prompt;
     assert.equal(options.length, 2);
-    assert.deepEqual(options[0], {
-      index: 1,
-      label: 'Yes, I trust this folder',
-      kind: 'approve',
-      selected: true,
-    });
-    assert.deepEqual(options[1], {
-      index: 2,
-      label: 'No, exit',
-      kind: 'deny',
-      selected: false,
-    });
+    assert.deepEqual(options.map((o) => o.index), [1, 2]);
+    assert.deepEqual(
+      [...options].sort((a, b) => a.label.localeCompare(b.label)).map((o) => [o.label, o.kind]),
+      [
+        ['No, exit', 'deny'],
+        ['Yes, I trust this folder', 'approve'],
+      ],
+      'the same two rows on both builds — only the order and the cursor moved',
+    );
+    assert.equal(options.filter((o) => o.selected).length, 1);
   });
 }
 
-test('the trust gate fixtures keep the v2.1.247 wording they were captured with', () => {
-  // The screen no longer says "Do you trust the files in this folder?" — the phrase
-  // CLAUDE.md and the mobile plan's §2.6 both quote. Any copy that names this gate has to
-  // be written from these two lines, not from that one.
+test('v2.1.257 draws the gate unnumbered, with the cursor on No', () => {
+  // The regression this whole fixture pair exists for, stated as the measurement it is.
+  // A digit sent at this screen presses nothing; an Enter sent at it without moving the
+  // cursor first *exits the session*.
+  for (const file of ['pane-trust-gate.txt', 'pane-trust-gate-narrow.txt']) {
+    const text = fixture(file);
+    assert.doesNotMatch(text, /1\.\s*Yes, I trust this folder/, file);
+    assert.match(text, /❯ No, exit/, file);
+    const { options } = parsePane(text).prompt;
+    assert.equal(options[0].label, 'No, exit', file);
+    assert.equal(options[0].selected, true, file);
+    assert.equal(options[1].label, 'Yes, I trust this folder', file);
+  }
+});
+
+test('v2.1.247 draws it numbered, with the cursor on Yes', () => {
+  for (const file of ['pane-trust-gate-2.1.247.txt', 'pane-trust-gate-2.1.247-narrow.txt']) {
+    const text = fixture(file);
+    assert.match(text, /❯ 1\. Yes, I trust this folder/, file);
+    const { options, cursor } = parsePane(text).prompt;
+    assert.equal(options[0].label, 'Yes, I trust this folder', file);
+    assert.equal(cursor, 1, file);
+  }
+});
+
+test('the trust gate fixtures keep the wording they were captured with', () => {
+  // The screen no longer says "Do you trust the files in this folder?" — the phrase an
+  // older CLAUDE.md and the mobile plan's §2.6 both quote. Any copy that names this gate
+  // has to be written from these lines, not from that one.
   for (const [, file] of TRUST_GATE) {
     const text = fixture(file);
     assert.match(text, /Accessing workspace:/, file);
@@ -270,19 +304,19 @@ test('the trust gate fixtures keep the v2.1.247 wording they were captured with'
 
 test('the two widths agree on everything answerable and disagree only about the path', () => {
   // Pane width is an input to every parser here, so the divergence is pinned rather than
-  // smoothed over. The workspace path is one line at 220 columns and three at 70, and
-  // `readOptionBlock` takes the first line under the title as `subject` — so at 70 the
-  // subject is a *truncated* path and its remaining thirds land at the front of `detail`.
-  // Nothing that answers the box is affected; anything that *displays* the folder is.
+  // smoothed over. The workspace path is one line at 220 columns and three at 70, and the
+  // body walk takes the first line under the title as `subject` — so at 70 the subject is a
+  // *truncated* path and its remaining thirds land at the front of `detail`. Nothing that
+  // answers the box is affected; anything that *displays* the folder is.
   const wide = parsePane(fixture('pane-trust-gate.txt')).prompt;
   const narrow = parsePane(fixture('pane-trust-gate-narrow.txt')).prompt;
 
   assert.deepEqual(narrow.options, wide.options);
   assert.equal(narrow.title, wide.title);
 
-  assert.ok(wide.subject.endsWith('/trust-gate-fresh-5588'), 'whole path at 220 columns');
-  assert.ok(!narrow.subject.endsWith('/trust-gate-fresh-5588'), 'cut mid-path at 70');
+  assert.ok(wide.subject.endsWith('/alpha-trust-1'), 'whole path at 220 columns');
+  assert.ok(!narrow.subject.endsWith('/alpha-trust-1'), 'cut mid-path at 70');
   assert.equal(wide.detail.length, 3);
   assert.equal(narrow.detail.length, 8, 'the path tail and the wrapped paragraph');
-  assert.equal(narrow.detail[1], 'cratchpad/trust-gate-fresh-5588');
+  assert.equal(narrow.detail[1], '-trust-1');
 });

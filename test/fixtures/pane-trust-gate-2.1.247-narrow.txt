@@ -2,9 +2,9 @@
 ──────────────────────────────────────────────────────────────────────
  Accessing workspace:
 
- /private/tmp/foreman-bench/trust-gate-capture/claude-code-2-1-257/fi
- xtures-at-220-and-70-columns/a-folder-claude-code-has-not-seen/alpha
- -trust-1
+ /private/tmp/claude-501/-Users-alexmorgan--agenticdevui-worktrees-Ag
+ enticDevUI-trust-gate-fixture/fb8c4e50-400a-4194-a9af-b6f7ee45efb5/s
+ cratchpad/trust-gate-fresh-5588
 
  Quick safety check: Is this a project you created or one you trust?
  (Like your own code, a well-known open source project, or work from
@@ -15,8 +15,8 @@
 
  Security guide
 
- ❯ No, exit
-   Yes, I trust this folder
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
 
  Enter to confirm · Esc to cancel
 

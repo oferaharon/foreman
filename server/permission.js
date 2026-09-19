@@ -99,17 +99,19 @@ const TRUST_RE = /^yes,?\s+i trust\b/;
  *
  * **One carve-out**: the trust gate's `Yes, I trust this folder`. It is a qualified yes and
  * it is a standing decision, and it stays `approve` all the same, because that screen is
- * refused rather than classified. `web/trust-gate.js` is the witness — the desktop
- * composer, the phone's cards and `POST /api/sessions/:id/answer` all check it and hand
- * the gate a card with nothing on it to press — and it reads labels and copy, never a
- * `kind`, so nothing here decides whether that box is answerable. What a `kind` still
- * decides is what `test/pane.test.js` pins as the parser's measured output on those two
- * captures, and moving it would be changing a recorded measurement to no purpose.
+ * routed away from this card entirely rather than classified for it. `web/trust-gate.js` is
+ * the witness — `parsePane`, the desktop composer, the phone's cards, the answer endpoint
+ * and the dispatch all ask it — and it reads labels and copy, never a `kind`, so nothing
+ * here decides how that box is drawn or answered. Its card arms the Yes on its own account
+ * (`gateButton`), which is why a `kind` of `approve` on that row is not the loophole it
+ * looks like. What a `kind` still decides is what `test/pane.test.js` pins as the parser's
+ * measured output on those captures, and moving it would be changing a recorded measurement
+ * to no purpose.
  *
- * (An earlier draft of this paragraph credited the stance to `paneStartupPrompt`. That
- * function has never existed in this repo — it is the other launcher's, and the claim travelled
- * through `CLAUDE.md` as prose until the trust-gate work found the button still being
- * drawn. Cite `web/trust-gate.js`, which is code.)
+ * (An earlier draft of this paragraph credited the panel's stance on that screen to
+ * `paneStartupPrompt`. That function has never existed in this repo — it is the other
+ * launcher's, and the claim travelled through `CLAUDE.md` as prose until the trust-gate work
+ * found a one-tap grant still being drawn. Cite `web/trust-gate.js`, which is code.)
  */
 function classify(label) {
   const l = label.toLowerCase();

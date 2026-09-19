@@ -43,9 +43,11 @@
  *               and the `s` ("this session only") key inside /model still wrote it
  *               globally. Also measured, also restored from a backup.
  *
- * And neither does the **startup trust gate**, which is not a permission prompt however
- * much it parses like one. See `web/trust-gate.js` — it is the sharpest thing either this
- * file or the desktop's composer leans on, and it is now shared with both.
+ * And the **startup trust gate** is its own screen too, which is not a permission prompt
+ * however much it parses like one — different copy, no digits since v2.1.257, and an answer
+ * that is a cursor walk rather than a keystroke. See `web/trust-gate.js` — it is the
+ * sharpest thing either this file or the desktop's composer leans on, and it is shared with
+ * both.
  *
  * ── What is rebuilt, and what must not be ─────────────────────────────────────────────
  *
@@ -60,7 +62,7 @@
  * becomes the text (`test/fixtures/dialog-choice-typed.txt` is that state).
  */
 
-import { isTrustGate, trustPath, gateSentences } from '../trust-gate.js';
+import { isTrustGate, trustPath, gateSentences, trustOption } from '../trust-gate.js';
 import { withBlankTargets } from '../anchor-target.js';
 
 /**
@@ -197,28 +199,36 @@ function signature(s, kind) {
 /* ════════════════════════════════════════════════════ the trust gate ═══ */
 
 /*
- * The witness and the two copy-reassemblers moved to `web/trust-gate.js`. The desktop
- * composer needed exactly the same three answers this file needed, and the phone was the
- * only place in the panel that had them — which is how the desktop went on drawing a
- * one-tap `Yes, I trust this folder` long after the phone stopped. One measured fact,
- * three readers, one copy. The card below is still the phone’s own; only the witness is
- * shared. Read that file for what v2.1.247 actually puts on screen and why neither
- * obvious test for an unanswerable box catches it.
+ * The witness, the reader and the two copy-reassemblers all live in `web/trust-gate.js`.
+ * The desktop composer needed exactly the same answers this file needed, and the phone was
+ * once the only place in the panel that had them — which is how the desktop went on drawing
+ * a one-tap `Yes, I trust this folder` long after the phone stopped. One measured fact,
+ * five readers, one copy. The card below is still the phone’s own; only the shared parts are
+ * shared. Read that file for what v2.1.247 and v2.1.257 each put on screen, why the five screen
+ * parsers must keep refusing this one, and the 2026-09-19 ruling that made it answerable.
  */
 
 /**
- * The gate, said plainly and with nothing to press.
+ * The gate, transcribed and answerable.
  *
  * The copy is written off the real screen rather than off §2.6 of the plan, which quotes
- * "Do you trust the files in this folder?" — a sentence Claude Code no longer says. The
- * options are shown as inert text, not buttons: knowing that the Mac is showing
- * `1. Yes, I trust this folder / 2. No, exit` is exactly what makes the trip worth making.
+ * "Do you trust the files in this folder?" — a sentence Claude Code no longer says.
+ *
+ * **Why this is not just another `permissionCard`.** Two reasons, and both survive the
+ * ruling that added the buttons. The transcript above the rows — the folder in full and the
+ * gate's own two sentences — is what somebody decides *on*, and a phone is the surface most
+ * likely to be answering this from a pocket with no terminal within reach. And the rows
+ * carry **no digit**: v2.1.257 draws them unnumbered, so printing `1.` / `2.` beside them
+ * would invent a handle the terminal does not show and cannot be checked against. The
+ * `index` still travels to the endpoint; it is simply not a keystroke, and on this screen it
+ * never was — the answer is a cursor walk, `confirmGateOption` in `server/tmux.js`.
  */
 function trustCard(s) {
   const p = s.prompt;
-  const card = shell('m-card is-refusal');
+  const card = shell('m-card is-gate');
+  const err = errorLine();
 
-  card.append(head('waiting on something the panel will not answer'));
+  card.append(head('folder-trust gate'));
 
   const box = document.createElement('div');
   box.className = 'm-gate-screen';
@@ -243,23 +253,32 @@ function trustCard(s) {
     box.append(el);
   }
 
-  const opts = document.createElement('div');
-  opts.className = 'm-gate-opts';
-  for (const o of p.options || []) {
-    const row = document.createElement('div');
-    row.className = 'm-gate-opt';
-    row.textContent = `${o.index}. ${o.label}`;
-    opts.append(row);
-  }
-  box.append(opts);
   card.append(box);
 
-  card.append(
-    note(
-      "This is Claude Code's folder-trust gate. The panel never answers a security gate — " +
-        'it has to be answered at the Mac, in the terminal.',
-    ),
-  );
+  const yes = trustOption(p);
+  const opts = document.createElement('div');
+  opts.className = 'm-opts';
+  for (const o of p.options || []) {
+    opts.append(
+      optionButton({
+        label: o.label,
+        tone: o.kind,
+        // The one row that grants asks twice, the same rule every broad yes on this phone
+        // follows. `No, exit` goes on one tap — refusing is the cheap direction.
+        arm: o === yes,
+        armNote: 'tap again — this grants read, edit and execute in that folder, for good',
+        card,
+        err,
+        send: () => post(`/api/sessions/${encodeURIComponent(s.id)}/answer`, {
+          option: o.index,
+          // The label travels so the server can refuse if the box moved under us — and on
+          // this screen it is also what the cursor walk confirms before it presses Enter.
+          expectLabel: o.label,
+        }),
+      }),
+    );
+  }
+  card.append(opts, err);
   return card;
 }
 
@@ -836,13 +855,20 @@ function errorLine() {
  * disarms itself.
  */
 function optionButton({ digit, label, description, tone, primary, arm, armNote, card, err, send }) {
-  const btn = document.createElement('button');
-  btn.className = `m-opt tone-${tone || 'other'}${primary ? ' is-primary' : ''}${arm ? ' needs-arming' : ''}`;
+  // `digit` is omitted on exactly one screen: the folder-trust gate, which v2.1.257 draws
+  // with no numbers at all. Drawing one there would be inventing the cross-check this
+  // column exists to provide, so the column goes instead — `.no-digit` collapses it.
+  const noDigit = digit == null;
 
-  const num = document.createElement('span');
-  num.className = 'm-opt-num';
-  num.textContent = String(digit);
-  btn.append(num);
+  const btn = document.createElement('button');
+  btn.className = `m-opt tone-${tone || 'other'}${primary ? ' is-primary' : ''}${arm ? ' needs-arming' : ''}${noDigit ? ' no-digit' : ''}`;
+
+  if (!noDigit) {
+    const num = document.createElement('span');
+    num.className = 'm-opt-num';
+    num.textContent = String(digit);
+    btn.append(num);
+  }
 
   const body = document.createElement('span');
   body.className = 'm-opt-body';

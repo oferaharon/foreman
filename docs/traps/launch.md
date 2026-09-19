@@ -119,10 +119,20 @@ traces what a saved bench does when the prefix changes under it.
 
 ## The trust gate
 
-**A new folder's first session lands on the trust gate, and it does not look like anything
-you would guard against — MEASURED, on Claude Code v2.1.247, at 220 columns and at 70.**
-Claude Code asks before its composer exists, so `parsePane` reads `needs-decision`. What it
-reads it as is the trap: an ordinary, **fully populated permission box**.
+**A new folder's first session lands on the trust gate, and what it draws changed under
+the panel — MEASURED, on Claude Code v2.1.247 and again on v2.1.257, at 220 columns and at
+70.** Claude Code asks before its composer exists, so the screen arrives with no composer
+footer to read.
+
+**v2.1.247** drew an ordinary, fully populated permission box — numbered options, the
+cursor on Yes:
+
+```
+ ❯ 1. Yes, I trust this folder
+   2. No, exit
+
+ Enter to confirm · Esc to cancel
+```
 
 ```
 state:  'needs-decision'      dialog:  null
@@ -131,10 +141,45 @@ prompt: { title: 'Accessing workspace:', cursor: 1, options: [
           {index: 2, label: 'No, exit',                 kind: 'deny'} ] }
 ```
 
-Both obvious tests for "a box the panel must not answer" therefore miss it. It has no
-`dialog`, so the picker test misses it; it has a prompt, so the unreadable-box test misses
-it. It is a box we read *perfectly* and refuse. `test/fixtures/pane-trust-gate.txt` and
-`pane-trust-gate-narrow.txt` are the captures, pinned in `test/pane.test.js`.
+**v2.1.257** draws the same screen with the options **unnumbered** and the cursor on
+**No**:
+
+```
+ ❯ No, exit
+   Yes, I trust this folder
+
+ Enter to confirm · Esc to cancel
+```
+
+and that broke the panel's reading of the screen outright. `OPTION_RE` in
+`server/permission.js` requires an `N.`, so `parsePrompt` returned null, `parsePane` fell
+through to `{state: 'dialog', prompt: null, dialog: 'Accessing workspace:'}`, and every
+reader of the gate went silent at once: the desktop card, the phone card, and
+`needsKind → 'trust'` in `web/notify.js`. What a person saw instead was the generic
+*"Accessing workspace: is open in the terminal — messages wait for it"* hint, with nothing
+saying the session was stuck on a question only they could answer. `answerTrustGate` in
+`server/dispatch.js` broke the same way and more quietly: it required `❯\s*1\.`, which
+v2.1.257 never shows, so every dispatched worker sat on an unanswered gate.
+
+**The fix is `parseTrustGate` in `web/trust-gate.js`, and where it is *not* is the point.**
+It reads the unnumbered layout off the raw pane and synthesises the prompt shape
+`parsePrompt` already produced, so nothing downstream knows which build drew the screen;
+`parsePane` tries `parsePrompt` first and falls back to it. The shared `OPTION_RE` is
+untouched. Loosening it to admit a bare label would teach every screen in the panel to read
+a sentence as an option — the five screen parsers refuse each other's boxes by exactly that
+strictness, and `test/plan.test.js`, `test/model.test.js` and `test/effort.test.js` pin the
+refusals. It is the same shape of fix as the scrolling-window flattening in
+`server/model.js`: the odd layout is normalised inside the one file that knows about it.
+
+Both layouts stay live, because nothing here pins which Claude Code is installed. Four
+captures are committed: `test/fixtures/pane-trust-gate.txt` and `-narrow.txt` (v2.1.257),
+`pane-trust-gate-2.1.247.txt` and `-2.1.247-narrow.txt`. All four are pinned in
+`test/pane.test.js`.
+
+Both obvious tests for "a box the panel must not treat as an ordinary prompt" still miss
+this screen on both builds. It has no `dialog`, so the picker test misses it; it has a
+prompt, so the unreadable-box test misses it. It is a box we read *perfectly* and then
+handle specially.
 
 ## The wording changed, and the panel shipped a button on it
 
@@ -143,44 +188,88 @@ says "Do you trust the files in this folder?" It reads `Accessing workspace:` / 
 `Quick safety check: Is this a project you created or one you trust? (Like your own code, a
 well-known open source project, or work from your team). If not, take a moment to review
 what's in this folder first.` / `Claude Code'll be able to read, edit, and execute files
-here.` / `1. Yes, I trust this folder` / `2. No, exit`.
+here.` / `Security guide` / the two option rows. That copy is unchanged in v2.1.257; only
+the rows moved.
 
 **And the panel shipped a button on it.** This file used to say the panel "shows it and
 stops there" and cited a function to prove it — a function that has never existed in this
 repo. The stance had been inherited as prose from a sibling tool rather than written as
 code here, and nobody checked. `buildDecisionBar` had no trust-gate case, so a rail row on
-that screen drew a full-width, unarmed, one-tap **"Yes, I trust this folder"** — one click, from any browser that can reach
-the panel, which under a wide bind is anything on the local network, granting read, edit and
-execute in a folder nobody vetted. The phone (`web/m/cards.js`) had the only correct
-handling and the only copy of the witness.
+that screen drew a full-width, unarmed, one-tap **"Yes, I trust this folder"** — one click,
+from any browser that can reach the panel, which under a wide bind is anything on the local
+network, granting read, edit and execute in a folder nobody vetted. The phone
+(`web/m/cards.js`) had the only correct handling and the only copy of the witness.
 
-`web/trust-gate.js` is now that witness, in one place, with three readers: the desktop
-composer, the phone's cards, and `POST /api/sessions/:id/answer`, which refuses the gate
-server-side so the stance is a property of the panel and not a habit of its front end. It
-is the only file under `web/` that `server/` imports, and the header says why. The witness
-is the label `Yes, I trust this folder` **or** `Accessing workspace` plus `safety check` —
-the same one `answerTrustGate` uses, loosened from *and* to *or* on purpose: that function
-decides whether to **answer** a gate and a miss costs a stalled dispatch, this one decides
-whether to **refuse** and a miss ships the button. `test/trust-gate.test.js` pins the card
-at both widths by walking it for anything pressable, and pins that the detector itself is
-not blind.
+The fix then was to refuse the box everywhere: `web/trust-gate.js` became the one witness,
+with the desktop composer, the phone's cards and `POST /api/sessions/:id/answer` all asking
+it, the endpoint refusing server-side so the stance was a property of the panel and not a
+habit of its front end. The witness is the label `Yes, I trust this folder` **or**
+`Accessing workspace` plus `safety check`, looser than `answerTrustGate`'s test on purpose.
+
+**That stance was reversed by the maintainer on 2026-09-19, and the reasoning on both sides
+is worth keeping.** He was told plainly what it costs: the panel has no authentication by
+the 2026-08-27 ruling, it binds wider than loopback, and a button here is a one-click grant
+of read, edit and execute in a folder nobody vetted, reachable from anything on the LAN.
+His ruling is that Foreman must not force a user to open a terminal — *one panel to use
+instead of terminals* is the tool's whole narrative, and a screen the panel reads perfectly
+and will not answer sends him to the Mac for the one keystroke the tool exists to save. The
+exposure is accepted as it stands. **Do not re-derive the refusal, and do not reach for
+authentication to make it palatable**; both are decided, and both were decided with the
+cost spelled out.
+
+What the reversal did **not** change is as load-bearing as what it did. The gate still gets
+its own card rather than the permission bar: the folder in full, and the gate's own
+sentence about read, edit and execute, because that is what a person decides *on* — a card
+offering two buttons and no folder path would be asking for a signature on an unread page.
+The Yes still asks twice. And the rows carry **no digit**, because v2.1.257 draws none and
+a number printed beside a row would invent the one cross-check a reader has against the
+terminal.
+
+**The answer is the cursor, not a keystroke.** There is no digit on the unnumbered layout,
+so `confirmGateOption` (`server/tmux.js`) presses `Down`, re-reads the pane, and sends
+`Enter` only once the pane's own `❯` is on the row it was asked for. Written as
+press-and-re-read rather than a counted number of presses for a measured reason: **the list
+wraps** — `Down` from the last row lands on the first — so a miscount does not stall on the
+end of the list, it silently selects the other answer, and on this screen the other answer
+is either granting a folder or killing the session. `POST /api/sessions/:id/answer` routes
+the gate through it and never computes a digit for it; `answerTrustGate` uses the same walk,
+keeping its own stricter guard that the worktree's name is on screen.
 
 ## Demonstrated, not asserted
 
-**Demonstrated, not asserted.** A scratch panel (`FOREMAN_PORT=48771`, scratch `FOREMAN_STATE_DIR`)
-against a scratch session parked on a real gate, at 220 columns and again at 70: the card
-comes back `perm perm-refusal` with **zero** pressable nodes — only `DIV`, `SPAN` and `P` in
-the whole tree — the folder reads whole at both widths, and `POST /answer` with
-`{option: 1, expectLabel: 'Yes, I trust this folder'}` returns **409** with the pane still
-sitting on the gate. The phone's card was re-checked through the same live row after the
-witness moved out of `cards.js`.
+**Demonstrated, not asserted.** A scratch panel (`FOREMAN_PORT=48771`, scratch
+`FOREMAN_STATE_DIR`, scratch `FOREMAN_AGENT_LABEL`) on its own tmux server, against real
+Claude Code v2.1.257 sessions parked on real gates in throwaway folders — 220×50 and 70×40.
+The roster read both as `needs-decision` with the two options and the cursor on `No`. On the
+desktop the card came back with its transcript, the folder whole at both widths, and exactly
+two buttons; the first click on Yes armed it and sent nothing, showing *"sure? click again —
+this grants read, edit and execute in that folder, for good"* with the label still on screen;
+the second click trusted the folder and the pane landed on the composer. The phone's card
+did the same at 70 columns, from `/m/`. `No, exit` went on one click and ended the session —
+the tmux session was gone a moment later.
 
-One thing the fix had to reach beyond the card: `updateComposerHint` said *"answer the
-prompt above — messages wait until you do"*, which under a card that has just refused to
-draw a button sends the reader hunting for it. That branch now names the gate and points at
-the Mac, and it sits ahead of the `dialog`/`working`/`needs-decision` chain for the same
-reason the card's own branch does.
+The earlier bench, under the refusing stance, is what this replaced: the card came back
+`perm perm-refusal` with **zero** pressable nodes, and `POST /answer` with
+`{option: 1, expectLabel: 'Yes, I trust this folder'}` returned **409** with the pane still
+sitting on the gate.
 
-The gate is still one reason the launcher opens a Terminal window. The `+ new` box's tick for
-it is **off** by default despite this cost — recoverable via the pane header's attach button,
-but only if you notice. Verified originally by launching into an empty scratch folder.
+`test/trust-gate.test.js` holds the pure half — the witness, the raw-pane reader, and a card
+that must offer exactly the two rows and arm the Yes. `test/trust-gate-api.test.js` holds
+the endpoint against a real scratch panel and real tmux panes, and is a separate file for a
+reason worth knowing: `server/tmux.js` builds `TMUX_ENV` from `process.env` at module load,
+and a static import is hoisted above every statement that could set `TMUX_TMPDIR` — so a
+bench and a pure test in one file points the bench at the machine's real tmux server. Its
+pane program draws the committed capture and wraps its cursor the way the real box was
+measured to; what a simulation cannot prove is what Claude Code does with an `Enter`, which
+is why the paragraph above exists.
+
+One thing the fix had to reach beyond the card, and it changed twice: `updateComposerHint`
+once said *"answer the prompt above — messages wait until you do"*, which under a card that
+had just refused to draw a button sent the reader hunting for it; it then said *"answer it
+at the Mac"*, which now sends the reader past the button that exists. It names the gate and
+points at the card above it, and it sits ahead of the `dialog`/`working`/`needs-decision`
+chain for the same reason the card's own branch does.
+
+The gate is still one reason the launcher opens a Terminal window, though it is no longer
+the only way past it. The `+ new` box's tick for it is **off** by default — recoverable via
+the pane header's attach button, but only if you notice.

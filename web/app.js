@@ -1,6 +1,6 @@
 import { marked } from '/vendor/marked.js';
 import { withBlankTargets } from './anchor-target.js';
-import { isTrustGate, buildTrustNotice } from './trust-gate.js';
+import { isTrustGate, buildTrustCard } from './trust-gate.js';
 import { step, alertText } from './notify.js';
 import { forgeMarkupFor } from './forge-mark.js';
 // The files modal's two halves that can be tested without a browser: which pill an entry
@@ -123,7 +123,7 @@ import { colourFor } from './session-colour.js';
 // and how a row is patched rather than rebuilt. The sixth shared pure module in `web/`, for
 // the reason each of the five above it gives — the shape of the list and the punctuation of
 // the signature are things a node test can hold, and a render function inlined here is
-// neither. `patchBand` reaches for `document` the way `buildTrustNotice` does, and is
+// neither. `patchBand` reaches for `document` the way `buildTrustCard` does, and is
 // driven by the same kind of stub in its own test.
 import { patchBand, bandSig } from './rooms-band.js';
 // The create modal's arithmetic: who may be in a room, in what order they are offered, and
@@ -12706,13 +12706,14 @@ function createPane(slot, host) {
     // box fell through to "the prompt could not be read" while a perfectly parsed question
     // sat unused — and the plan approval did exactly the same thing one step further along.
     //
-    // The trust gate goes ahead of all of them because it is the branch that *refuses*, and
-    // a refusal reachable only after three other tests have declined is a refusal waiting
-    // to be bypassed. On the measured captures it would arrive here anyway (`plan` and
-    // `question` are both null on that screen — `test/pane.test.js`), so this is belt to
-    // `buildDecisionBar`'s braces, which refuses again on its own account.
+    // The trust gate goes ahead of all of them because it is the most specific screen of
+    // the four and the one whose card is not a permission bar: it transcribes the folder
+    // and the grant, and it is answered by moving a cursor rather than by a digit. On the
+    // measured captures it would arrive here anyway (`plan` and `question` are both null on
+    // that screen — `test/pane.test.js`), so this is belt to `buildDecisionBar`'s braces,
+    // which routes it the same way on its own account.
     if (isTrustGate(s.prompt) && s.interactive) {
-      inner.append(buildTrustNotice(s.prompt));
+      inner.append(buildTrustCard(s.prompt, (o) => answerPrompt(s.id, o)));
     } else if (s.plan && s.interactive) {
       inner.append(buildPlanCard(s));
     } else if (s.question && s.interactive) {
@@ -14141,12 +14142,13 @@ function createPane(slot, host) {
     const p = s.prompt;
 
     // Before anything else, including the unreadable-box branch. Claude Code's folder-trust
-    // gate parses as an ordinary permission prompt — `dialog: null`, a full `prompt`, option
-    // 1 `Yes, I trust this folder` classed `approve` — so neither of the two obvious tests
-    // for "a box the panel must not answer" sees it, and every version of this function
-    // before this one drew a full-width, unarmed, one-tap grant of read, edit and execute on
-    // a folder nobody vetted, reachable from anything on the LAN. See `web/trust-gate.js`.
-    if (isTrustGate(p)) return buildTrustNotice(p);
+    // gate parses as an ordinary permission prompt — `dialog: null`, a full `prompt`, a row
+    // `Yes, I trust this folder` classed `approve` — so neither of the two obvious tests for
+    // "a box that is not an ordinary prompt" sees it, and it must not be drawn as one. Its
+    // card carries the folder and the grant, and its Yes asks twice; the panel *may* answer
+    // it since the 2026-09-19 ruling, but never as an unremarkable row in a permission bar.
+    // See `web/trust-gate.js` for the ruling and the exposure it accepted.
+    if (isTrustGate(p)) return buildTrustCard(p, (o) => answerPrompt(s.id, o));
 
     if (!p) {
       // Something is blocking, but we could not read the box. Say so; offer nothing.
@@ -14383,11 +14385,11 @@ function createPane(slot, host) {
     } else if (!s.interactive) {
       hint.textContent = 'no tmux pane — read-only';
     } else if (isTrustGate(s.prompt)) {
-      // The card above this line says the panel will not answer that box. "Answer the
-      // prompt above" would send the reader looking for the button it just refused to
-      // draw — and the box is not answerable from a browser at all.
+      // Named rather than left to the generic `needs-decision` line, because this is the one
+      // box where what the answer *buys* is the point: read, edit and execute on a folder,
+      // for every session opened in it afterwards. The card above says the rest.
       hint.className = 'composer-hint warn';
-      hint.textContent = 'folder-trust gate — answer it at the Mac; messages wait until you do';
+      hint.textContent = 'folder-trust gate — read it, then answer above; messages wait until you do';
     } else if (s.status === 'dialog') {
       // The one the panel used to miss entirely: nothing is running, so this read as
       // `idle`, and the message went into the picker.

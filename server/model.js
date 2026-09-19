@@ -54,7 +54,8 @@ const FOOTER_RE = /to set as default\s*·\s*s to use this session only/i;
  *       2. No, go back
  *
  * and **nothing has changed yet**. It carries no key-hint footer at all, so it reads as
- * `needs-decision` with no prompt behind it — the trust-gate shape — and a panel that
+ * `needs-decision` with no prompt behind it — a shape this comment once attributed to the
+ * trust gate, wrongly; that screen has always carried a full prompt — and a panel that
  * reported success after `s` was reporting a switch that had not happened, over a session
  * now sitting blocked on a box nobody in the browser could see.
  *
