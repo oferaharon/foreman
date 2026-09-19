@@ -83,7 +83,7 @@ export function createTeamWatch({ registry, tasks, room, queue, readTeam, human 
       if (!live) continue;
       // "Blocked" is wider than one status — the CLAUDE.md rule about `/exit`'s guard,
       // and it bit here first: a question box reads as `dialog` with `question` set, a
-      // trust-gate shape reads as `needs-decision` with nothing behind it. Collapse the
+      // `Switch model?` confirm reads as `needs-decision` with nothing behind it. Collapse the
       // whole family into one word before comparing, or a worker on a question box never
       // produces a "blocked" line at all (measured — it didn't).
       const status =

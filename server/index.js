@@ -3914,9 +3914,10 @@ app.post('/api/sessions/:id/exit', async (req, res) => {
   if (!session?.paneId) return res.status(404).json({ error: 'Unknown or read-only session.' });
 
   // Every way a pane can be holding something, including the ones that read as
-  // `needs-decision` without a parsed box behind them — the startup trust gate is one, and
-  // testing only for `state === 'dialog'` would have walked straight past it. `sendText`
-  // refuses these too; this is here to say *which* rather than to be the guard.
+  // `needs-decision` without a parsed box behind them — the `Switch model?` confirm is one,
+  // and the startup trust gate sets no `dialog` at all, so testing only for
+  // `state === 'dialog'` would have walked straight past it. `sendText` refuses these too;
+  // this is here to say *which* rather than to be the guard.
   const live = await readPaneState(session.paneId);
   if (
     live.prompt ||

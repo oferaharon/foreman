@@ -43,9 +43,11 @@
  *               and the `s` ("this session only") key inside /model still wrote it
  *               globally. Also measured, also restored from a backup.
  *
- * And neither does the **startup trust gate**, which is not a permission prompt however
- * much it parses like one. See `web/trust-gate.js` — it is the sharpest thing either this
- * file or the desktop's composer leans on, and it is now shared with both.
+ * And the **startup trust gate** is its own screen too, which is not a permission prompt
+ * however much it parses like one — different copy, no digits since v2.1.257, and an answer
+ * that is a cursor walk rather than a keystroke. See `web/trust-gate.js` — it is the
+ * sharpest thing either this file or the desktop's composer leans on, and it is shared with
+ * both.
  *
  * ── What is rebuilt, and what must not be ─────────────────────────────────────────────
  *

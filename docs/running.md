@@ -147,7 +147,8 @@ mcp/
                   a worker gets exactly two, and can never touch another session
 web/
   index.html  styles.css  app.js   (app.js: shared shell + rail, then a createPane factory)
-  trust-gate.js   the one screen nothing may answer — the only web/ file server/ imports
+  trust-gate.js   the folder-trust gate: read, recognised, answered by cursor walk
+                  — the one file under web/ that server/ imports, twice
   notify.js       what is worth interrupting somebody for, and when it became true
   manifest.webmanifest  m/manifest.webmanifest   two installable apps, two ids
   icons/          the mark, generated — never hand-edited

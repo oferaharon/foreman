@@ -29,12 +29,18 @@ session-only path**: its Enter writes `effortLevel` for every future session). T
 alike on screen and answer nothing alike. `test/plan.test.js`, `test/model.test.js` and
 `test/effort.test.js` pin the cross-refusals; keep it that way.
 
-**And there is a sixth screen that is not a parser, because nothing may answer it.** The
-folder-trust gate parses as an ordinary permission box — full prompt, no `dialog`, option 1
-`Yes, I trust this folder` — so the panel has to *recognise* it in order to refuse it.
-`web/trust-gate.js` is that one witness, shared by the desktop composer, the phone and the
-answer endpoint. See the trap under Traps; it is the one screen where reading it correctly
-and offering a button are the same mistake.
+**And there is a sixth screen, which for a year nothing was allowed to answer.** The
+folder-trust gate looks like an ordinary permission box — full prompt, no `dialog`, a row
+`Yes, I trust this folder` — so the panel has to *recognise* it in order to treat it as
+anything else. `web/trust-gate.js` is that one witness and now also its reader, shared by
+`parsePane`, the desktop composer, the phone, the answer endpoint and the dispatch. Two
+things about it that a reader will otherwise re-derive wrongly. **Claude Code v2.1.257 draws
+it unnumbered with the cursor on `No`**, where v2.1.247 numbered it and started on `Yes`, so
+`OPTION_RE` cannot read it and `parseTrustGate` does — without loosening the shared regex,
+which is what keeps the five parsers refusing each other. And **the panel may answer it**,
+by the maintainer's ruling of 2026-09-19, made with the LAN exposure put to him plainly and
+reversing the standing refusal: the answer is a cursor walk, never a digit and never a blind
+`Enter`. See the trap under Traps before touching any of it.
 
 **And one seventh thing that is a parser but is not a screen.** `ghost.js` reads the
 composer's *suggested next prompt* — dim text inside the input line rather than a box over
@@ -438,19 +444,23 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   "invisible", and it was measured** — the row is still in the roster; what is lost is the
   **name**, and everything keyed on it.
   [launch#what-a-non-matching-prefix-costs](docs/traps/launch.md#what-a-non-matching-prefix-costs)
-- `web/trust-gate.js` · `server/tmux.js` (`parsePane`) ·
-  `test/fixtures/pane-trust-gate{,-narrow}.txt` — **A new folder's first session lands on the
-  trust gate, and it does not look like anything you would guard against — MEASURED, on
-  Claude Code v2.1.247, at 220 columns and at 70.** It parses as an ordinary, fully populated
-  permission box, so both obvious tests for a box the panel must not answer miss it.
+- `web/trust-gate.js` (`parseTrustGate`) · `server/tmux.js` (`parsePane`) ·
+  `server/permission.js` (`OPTION_RE`) · `test/fixtures/pane-trust-gate{,-narrow}.txt` —
+  **A new folder's first session lands on the trust gate, and what it draws changed under
+  the panel — MEASURED, on Claude Code v2.1.247 and again on v2.1.257, at 220 columns and at
+  70.** v2.1.257 drops the numbers and starts on `No`, which `parsePrompt` cannot read at
+  all; the fallback reader is the gate's own and the shared regex stays strict.
   [launch#the-trust-gate](docs/traps/launch.md#the-trust-gate)
 - `web/trust-gate.js` · `web/app.js` (`buildDecisionBar`, `updateComposerHint`) ·
-  `web/m/cards.js` — **The wording changed in v2.1.247** — so don't write copy from memory,
-  and note that the panel once shipped a full-width one-tap button on that screen.
+  `web/m/cards.js` · `server/tmux.js` (`confirmGateOption`) — **The wording changed in
+  v2.1.247** — so don't write copy from memory; the panel once shipped a full-width one-tap
+  button on that screen, then refused it outright, and the maintainer reversed the refusal on
+  2026-09-19 knowing the exposure.
   [launch#the-wording-changed-and-the-panel-shipped-a-button-on-it](docs/traps/launch.md#the-wording-changed-and-the-panel-shipped-a-button-on-it)
-- `web/trust-gate.js` · `POST /api/sessions/:id/answer` · `test/trust-gate.test.js` —
-  **Demonstrated, not asserted.** The card comes back with zero pressable nodes at 220
-  columns and at 70, and the answer endpoint returns 409 with the pane still on the gate.
+- `web/trust-gate.js` · `POST /api/sessions/:id/answer` · `test/trust-gate.test.js` ·
+  `test/trust-gate-api.test.js` — **Demonstrated, not asserted.** Real v2.1.257 sessions on
+  real gates at 220 and 70 columns: the Yes arms, the second click trusts the folder and the
+  pane lands on the composer, and `No, exit` ends the session on one click.
   [launch#demonstrated-not-asserted](docs/traps/launch.md#demonstrated-not-asserted)
 
 ### Sending and claiming

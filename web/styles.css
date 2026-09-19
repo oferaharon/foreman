@@ -4715,14 +4715,15 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .perm-gate-line { margin-top: 0.45rem; overflow-wrap: anywhere; }
 
-.perm-gate-opts {
-  margin-top: 0.55rem;
-  padding-top: 0.5rem;
-  border-top: 1px solid var(--rule);
+/* The read-only render's rows — `buildTrustCard` with no handler, which nothing in the
+   panel draws today. Flat text, because a card with no handler has nothing to press. */
+.perm-gate-opt {
+  margin-top: 0.3rem;
   color: var(--ink-faint);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
 }
-
-.perm-gate-opt { overflow-wrap: anywhere; }
 
 /* =============================================================== empty === */
 

@@ -1020,8 +1020,9 @@ function stateWord(row) {
  *
  * `blocked` is passed in rather than re-derived: both callers already hold `needsKind`'s
  * answer, and a word that asked the question its own way could read `idle` beside a lit
- * dot. `dialog` is a box the panel will not answer — `/model`, `/effort`, the trust gate's
- * cousins — and saying `idle` there would be a lie, as well as disagreeing with the dot.
+ * dot. `dialog` is a box the panel will not answer — `/model`, `/effort` and the other
+ * pickers — and saying `idle` there would be a lie, as well as disagreeing with the dot.
+ * The trust gate is no longer among them: it carries a prompt and reads `needs-decision`.
  */
 function liveStateWord(s, blocked) {
   if (blocked) return 'blocked';
