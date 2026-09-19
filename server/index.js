@@ -24,12 +24,14 @@ import {
   listPanes,
   PaneBlockedError,
   MODES,
+  confirmGateOption,
 } from './tmux.js';
 import { keyForOption } from './permission.js';
-// The one import in this directory that reaches outside it, and deliberately. The browser
-// needs this witness at a path that resolves both as a static file and in node, so it has
-// to live under `web/` — and one measured fact with three readers (the desktop composer,
-// the phone's cards, this endpoint) must not become three facts. See the file's header.
+// One of two imports in this directory that reach outside it, and deliberately (the other
+// is `server/tmux.js`'s, which needs the same file to read the gate off the pane at all).
+// The browser needs this witness at a path that resolves both as a static file and in node,
+// so it has to live under `web/` — and one measured fact with five readers must not become
+// five facts. See the file's header.
 import { isTrustGate } from '../web/trust-gate.js';
 import { parseQuestion, planAnswer, planChat, planFreeText } from './question.js';
 import { parsePlanPrompt, approvalKeys } from './plan.js';
@@ -595,31 +597,35 @@ app.post('/api/sessions/:id/answer', async (req, res) => {
     return res.status(409).json({ error: 'No permission prompt is open in this session.' });
   }
 
-  // The folder-trust gate parses as an ordinary permission box, so without this it is
-  // answerable here by anything that can reach the panel — which, by the 2026-08-27 ruling,
-  // is anything on the LAN. The card stopped drawing buttons for it; that alone would make
-  // "the panel never answers a security gate" a habit of the front end rather than a
-  // property of the panel, and every other guard on this path is written the other way
-  // round: the endpoint re-reads the pane and refuses rather than trusting its caller.
-  // Costs nothing — `answerTrustGate`, the one deliberate exception, sends its own key for
-  // a worktree the dispatch just created and has never come through here.
-  if (isTrustGate(prompt)) {
-    return res.status(409).json({
-      error:
-        'That is Claude Code’s folder-trust gate, not a permission prompt. The panel does ' +
-        'not answer security gates — answer it at the Mac, in the terminal.',
-    });
-  }
+  /*
+   * Two ways to answer, and which one is a property of the screen rather than of the caller.
+   *
+   * An ordinary permission box is answered by the option's own **digit**, which needs no
+   * knowledge of where the cursor sits — that is the whole reason `keyForOption` exists.
+   * The folder-trust gate has no digits on v2.1.257: it is answered by walking the cursor
+   * onto the row and pressing Enter, which `confirmGateOption` does press-and-re-read
+   * because the list wraps. Sending a digit there presses nothing; sending Enter blind
+   * presses whichever row the cursor happens to be on, and on that screen it starts on
+   * `No, exit`.
+   *
+   * This endpoint used to refuse the gate outright with a 409. The 2026-09-19 ruling
+   * reversed that — see `web/trust-gate.js`'s header for what was weighed and by whom. The
+   * exposure it accepted is unchanged and is not re-argued here.
+   */
+  const gate = isTrustGate(prompt);
 
   const index = Number(req.body?.option);
-  const key = keyForOption(prompt, index);
-  if (!key) {
+  const option = prompt.options?.find((o) => o.index === index);
+  const key = gate ? null : keyForOption(prompt, index);
+  if (!option || (!gate && !key)) {
     return res.status(400).json({ error: `Option ${req.body?.option} is not on screen.` });
   }
 
-  // Guard against answering a prompt that changed between render and click.
+  // Guard against answering a prompt that changed between render and click. The gate gets
+  // this *and* `confirmGateOption`'s own re-read, which checks the pane's `❯` is on this
+  // exact label before it commits — a label is all it has, there being no digit.
   const expected = req.body?.expectLabel;
-  const actual = prompt.options.find((o) => o.index === index)?.label;
+  const actual = option.label;
   if (expected && expected !== actual) {
     return res.status(409).json({
       error: 'The prompt changed — nothing was sent. Check the new one and answer again.',
@@ -628,11 +634,12 @@ app.post('/api/sessions/:id/answer', async (req, res) => {
   }
 
   try {
-    await sendKeys(session.paneId, key);
+    if (gate) await confirmGateOption(session.paneId, actual);
+    else await sendKeys(session.paneId, key);
     res.json({ ok: true, answered: { index, label: actual } });
     registry.refresh().catch(() => {});
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(gate ? 409 : 500).json({ error: err.message });
   }
 });
 

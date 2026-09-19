@@ -58,8 +58,10 @@ const quietWorker = (s) => s?.team?.role === 'worker' && !s.team.stuck;
  *
  * Order matters. A plan box and the trust gate both report `needs-decision`, and the trust
  * gate additionally carries a full, perfectly-parsed prompt — so the most specific witness
- * has to be asked first or the gate is announced as an ordinary permission prompt and
- * whoever reads it goes to the panel, where there is deliberately no button.
+ * has to be asked first, or the one box whose answer outlives every call the session makes
+ * is announced as an ordinary permission prompt. That was the reasoning when the panel
+ * refused the gate and it is unchanged by the 2026-09-19 ruling that made it answerable;
+ * only the *body* below changed, from "go to the Mac" to "come and read it".
  */
 export function needsKind(s) {
   if (!s || quietWorker(s)) return null;
@@ -144,11 +146,12 @@ const BODIES = {
   question: 'Claude is asking you something.',
   plan: 'A plan is ready for you to approve.',
   blocked: 'Waiting on a box the panel could not read — answer it in the terminal.',
-  // The one case where the panel is the wrong place to send somebody. It reads the gate
-  // perfectly and refuses to offer a button on it (`web/trust-gate.js`), so a notification
-  // that just said "needs a decision" would send the reader to a card whose whole content
-  // is "go to the Mac". Say that here instead.
-  trust: 'On the folder-trust gate — answer it in the terminal on this Mac. The panel will not.',
+  // Named rather than folded into `permission`, because what this one grants is not a call
+  // but a folder: read, edit and execute, for every session opened there afterwards. Since
+  // the 2026-09-19 ruling this notification is the thing that brings somebody to press it —
+  // the panel answers the gate now (`web/trust-gate.js`) — so it says which folder-shaped
+  // decision is waiting rather than sending anyone to a terminal.
+  trust: 'On the folder-trust gate — it wants to know whether you trust this folder.',
   // Not a state any session can be in: the settings box's test button, which exists so
   // "did I actually grant this?" has an answer that is not "wait for a session to block".
   test: 'A test. This is what it looks like when a session needs you.',

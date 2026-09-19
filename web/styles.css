@@ -4672,19 +4672,27 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-muted);
 }
 
-/* ---- the box the panel will not answer ----
+/* ---- the folder-trust gate ----
  *
- * Amber, like `.perm-unread`, because they mean the same thing to a reader: this session
- * is waiting, and it is not waiting on you *here*. The trust gate is the opposite case —
- * we read it perfectly and refuse it — but the instruction is identical: go to the Mac.
+ * Amber, like `.perm-unread`, and the reason changed under it without the colour needing
+ * to: it used to mean *this session is waiting and it is not waiting on you here*, and it
+ * now means *this is the box on which one click costs the most*. Since the 2026-09-19
+ * ruling the panel answers this screen, so the card has buttons — but it must never read as
+ * an ordinary permission bar, because what it grants outlives every call the session will
+ * ever make.
  *
- * `.perm-gate` is a transcript of what the terminal shows, not a set of controls. Flat
- * text on the sunk ground, no row borders, no radius, nothing that invites a click. The
- * options are listed because knowing the Mac says `1. Yes, I trust this folder / 2. No,
- * exit` is what makes the walk worth making — never so they can be pressed.
+ * `.perm-gate` above those buttons is still a transcript of what the terminal shows, not a
+ * set of controls: flat text on the sunk ground, no row borders, no radius, nothing that
+ * invites a click. It carries the folder and the two sentences, which is what somebody
+ * actually decides on. `.perm-refusal` stays for the box the panel genuinely cannot answer.
  */
-.perm-refusal { border-color: var(--working); }
-.perm-refusal .perm-kind { color: var(--working); }
+.perm-refusal,
+.perm-trust { border-color: var(--working); }
+.perm-refusal .perm-kind,
+.perm-trust .perm-kind { color: var(--working); }
+
+/* The transcript and the answers want air between them. */
+.perm-trust .perm-opts { margin-top: 0.55rem; }
 
 .perm-gate {
   font-family: var(--mono);

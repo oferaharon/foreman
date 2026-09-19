@@ -225,12 +225,14 @@ test('every kind has words of its own, and the tag is the session', () => {
   assert.equal(bodies.size, kinds.length, 'each screen says which one it is');
 });
 
-test('the trust gate’s words send the reader to the terminal, not to the panel', () => {
-  // The panel reads that screen perfectly and refuses to draw a button on it. A
-  // notification saying only "needs a decision" would send somebody to a card whose whole
-  // content is "go to the Mac".
+test('the trust gate’s words name the decision, and no longer send anyone to a terminal', () => {
+  // Under the old stance this line read "answer it in the terminal on this Mac. The panel
+  // will not." The 2026-09-19 ruling made the gate answerable from the panel, so a body
+  // still pointing at a terminal would be sending somebody past the button that now exists.
+  // It stays its own body all the same: what this box grants is a folder, not a call.
   const { body } = alertText({ id: 's1', kind: 'trust', title: 'alpha-main' });
-  assert.match(body, /terminal/i);
+  assert.match(body, /folder/i);
+  assert.doesNotMatch(body, /terminal/i);
 });
 
 test('a review names its branch when it has one and does not invent one when it does not', () => {

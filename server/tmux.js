@@ -7,6 +7,7 @@ import { parseQuestion } from './question.js';
 import { parsePlanPrompt } from './plan.js';
 import { FOOTER_MODEL_RE } from './model.js';
 import { parseGhost } from './ghost.js';
+import { parseTrustGate, isTrustGate } from '../web/trust-gate.js';
 
 const run = promisify(execFile);
 
@@ -396,7 +397,14 @@ export function parsePane(text) {
 
   // A parsed permission box is the strongest possible signal, and it carries the
   // options we need in order to answer safely.
-  const prompt = composer ? null : parsePrompt(text);
+  //
+  // `parseTrustGate` is the fallback and only ever the fallback. Claude Code v2.1.257 draws
+  // the folder-trust gate with **unnumbered** options, which `OPTION_RE` in `permission.js`
+  // cannot match and must keep being unable to match — so without this the gate arrived as
+  // a nameless `dialog` and every reader of it, both cards and the notification, went
+  // silent. v2.1.247's numbered gate still parses through `parsePrompt` and never reaches
+  // here. Both fixtures are committed; see `web/trust-gate.js` for what each looks like.
+  const prompt = composer ? null : (parsePrompt(text) ?? parseTrustGate(text));
 
   // A dialog is the same test without the parse: something owns the keystrokes, and we
   // can only name it. Tried before the working check, because where the keys would land
@@ -581,6 +589,66 @@ export async function sendText(paneId, text, { submit = true } = {}) {
 export async function sendKeys(paneId, ...keys) {
   await tmux(['send-keys', '-t', paneId, ...keys]);
 }
+
+/**
+ * The folder-trust gate as this pane is drawing it, or null for any other screen.
+ *
+ * One function so that "is this pane on the gate, and what is on it" has a single answer
+ * for the two callers that need it off raw text — `POST /api/sessions/:id/answer`'s walk
+ * below, and `answerTrustGate` in `server/dispatch.js`. Both layouts are read: v2.1.247's
+ * numbered gate through `parsePrompt`, v2.1.257's unnumbered one through `parseTrustGate`,
+ * and `isTrustGate` is asked afterwards so an ordinary permission box that happens to parse
+ * is never mistaken for this screen.
+ */
+export function gatePrompt(text) {
+  const prompt = parsePrompt(text) ?? parseTrustGate(text);
+  return prompt && isTrustGate(prompt) ? prompt : null;
+}
+
+/**
+ * Answer the folder-trust gate by walking the cursor onto a row and pressing Enter.
+ *
+ * **Never a counted number of presses.** The list wraps — `Down` from the last row lands on
+ * the first, measured on v2.1.257 — so a miscount does not stall on the end of the list, it
+ * silently selects the other answer, and on this screen the other answer is either "grant
+ * read, edit and execute on a folder nobody vetted" or "kill the session". Same shape as
+ * `changeMode` above and `server/model.js`'s cursor stepping, and for the same reason:
+ * press, re-read, check, and only then commit.
+ *
+ * `Enter` is sent in exactly one place, guarded by the pane's own `❯` sitting on the label
+ * we were asked for — not on the label we think we moved it to. If the walk cannot get
+ * there it gives up having pressed nothing but arrow keys, which commit nothing on this
+ * screen, and says so.
+ *
+ * @param {string} paneId
+ * @param {string} label the option label to confirm, exactly as the pane draws it
+ * @returns {Promise<'answered'>} throws otherwise, with a sentence a card can print
+ */
+export async function confirmGateOption(paneId, label, { steps = 8, settleMs = 300, sleep } = {}) {
+  const wait = sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  await assertClaudePane(paneId);
+
+  for (let step = 0; step <= steps; step += 1) {
+    const prompt = gatePrompt(await capturePane(paneId, 40));
+    if (!prompt) throw new Error('The folder-trust gate is no longer open in this session.');
+
+    const target = prompt.options.find((o) => o.label === label);
+    if (!target) {
+      throw new Error('The gate changed — nothing was sent. Check the new one and answer again.');
+    }
+    if (target.selected) {
+      await sendKeys(paneId, 'Enter');
+      return 'answered';
+    }
+    await sendKeys(paneId, 'Down');
+    await wait(settleMs);
+  }
+
+  throw new Error(
+    `Could not move the cursor onto "${label}" — nothing was confirmed. Answer it in the terminal.`,
+  );
+}
+
 
 /**
  * Type into a box that is deliberately holding the pane — the plan approval's own
