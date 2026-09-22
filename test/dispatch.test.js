@@ -12,17 +12,34 @@ import test from 'node:test';
 process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'foreman-dispatch-'));
 const { resolveWorkerModel, WORKER_MODELS, DEFAULT_WORKER_MODEL, writeWorkerSettings, WORKER_SETTINGS_DIR, GIT_DENY } =
   await import('../server/dispatch.js');
+const { WORKER_MODEL_NAMES, modelLabel, workerModelNames } = await import('../server/worker-models.js');
 const { plannerStance, pathRule } = await import('../server/team.js');
 
 test.after(() => {
   fs.rmSync(process.env.FOREMAN_STATE_DIR, { recursive: true, force: true });
 });
 
-test('no choice anywhere → Opus, marked as the default', () => {
+test('no choice anywhere → Opus 5.5, marked as the default', () => {
+  // The maintainer's ruling of 2026-09-22, replacing the 2026-08-26 default of Opus 5.
   const r = resolveWorkerModel(undefined, undefined);
-  assert.equal(r.model, 'claude-opus-5');
+  assert.equal(r.model, 'claude-opus-5-5');
   assert.equal(r.model, DEFAULT_WORKER_MODEL);
   assert.equal(r.isDefault, true, 'the room hears nothing about a default launch');
+});
+
+test('Opus 5.5 validates, plain and [1m]', () => {
+  assert.equal(resolveWorkerModel('claude-opus-5-5', null).model, 'claude-opus-5-5');
+  assert.equal(resolveWorkerModel('claude-opus-5-5[1m]', null).model, 'claude-opus-5-5[1m]');
+  assert.equal(resolveWorkerModel(null, 'claude-opus-5-5[1m]').model, 'claude-opus-5-5[1m]');
+});
+
+test('Opus 5 stays on the list under its successor', () => {
+  // Task records and team.json files written before 2026-09-22 name it. Dropping it would
+  // fail the *stored default* check on the next dispatch of every team that has one —
+  // which is a dispatch refused for a file nobody edited.
+  assert.ok(WORKER_MODELS.includes('claude-opus-5'));
+  assert.equal(resolveWorkerModel('claude-opus-5', 'claude-opus-5-5').model, 'claude-opus-5');
+  assert.equal(resolveWorkerModel(null, 'claude-opus-5').model, 'claude-opus-5');
 });
 
 test('the team default fills in when the lead names nothing', () => {
@@ -32,17 +49,24 @@ test('the team default fills in when the lead names nothing', () => {
 });
 
 test('an explicit model wins, and is not the default', () => {
-  const r = resolveWorkerModel('claude-fable-5', 'claude-opus-5');
+  const r = resolveWorkerModel('claude-fable-5', 'claude-opus-5-5');
   assert.equal(r.model, 'claude-fable-5');
-  assert.equal(r.defaultModel, 'claude-opus-5');
+  assert.equal(r.defaultModel, 'claude-opus-5-5');
   assert.equal(r.isDefault, false, 'a departure — the room gets a line');
 });
 
 test('naming the default explicitly is not a departure', () => {
   // The room line exists so the maintainer sees the lead's judgment calls; a lead that spelled
   // out the default made no call worth a line.
-  const r = resolveWorkerModel('claude-opus-5', 'claude-opus-5');
+  const r = resolveWorkerModel('claude-opus-5-5', 'claude-opus-5-5');
   assert.equal(r.isDefault, true);
+});
+
+test('the superseded default is still a departure from the new one', () => {
+  // The one case the rename creates: a lead that keeps asking for `claude-opus-5` out of
+  // habit gets it, and the room says so — which is the whole point of the line.
+  const r = resolveWorkerModel('claude-opus-5', 'claude-opus-5-5');
+  assert.equal(r.isDefault, false);
 });
 
 test('the [1m] suffix rides on any known id', () => {
@@ -55,7 +79,7 @@ test('an unknown model fails the dispatch, naming the list', () => {
   // lead picks a model" and "the lead picks launch flags".
   assert.throws(() => resolveWorkerModel('gpt-5', null), /Unknown model "gpt-5"/);
   assert.throws(() => resolveWorkerModel('gpt-5', null), new RegExp(WORKER_MODELS[0]));
-  assert.throws(() => resolveWorkerModel('claude-opus-5 --dangerously-skip-permissions', null), /Unknown model/);
+  assert.throws(() => resolveWorkerModel('claude-opus-5-5 --dangerously-skip-permissions', null), /Unknown model/);
   assert.throws(() => resolveWorkerModel('[1m]', null), /Unknown model/, 'a bare suffix is not a model');
 });
 
@@ -64,7 +88,7 @@ test('a corrupted stored default fails loudly, even under an explicit choice', (
   // next dispatch, whichever dispatch that is, not on the one unlucky enough to omit
   // `model`.
   assert.throws(() => resolveWorkerModel(null, 'claude-nonsense'), /defaultModel "claude-nonsense"/);
-  assert.throws(() => resolveWorkerModel('claude-opus-5', 'claude-nonsense'), /defaultModel/);
+  assert.throws(() => resolveWorkerModel('claude-opus-5-5', 'claude-nonsense'), /defaultModel/);
 });
 
 test('every id on the list resolves, plain and [1m]', () => {
@@ -72,6 +96,40 @@ test('every id on the list resolves, plain and [1m]', () => {
     assert.equal(resolveWorkerModel(id, null).model, id);
     assert.equal(resolveWorkerModel(`${id}[1m]`, null).model, `${id}[1m]`);
   }
+});
+
+test('the default is on the list it is the default of', () => {
+  // A default the list would refuse is a panel that cannot dispatch at all, and the
+  // failure is at dispatch time rather than at boot.
+  assert.ok(WORKER_MODELS.includes(DEFAULT_WORKER_MODEL));
+});
+
+test('every id on the list has a name a human can read', () => {
+  // The picker draws these. An id with no name falls back to the id, which is fine for a
+  // hand-edited team.json and wrong for a model the panel ships — `claude-opus-5-5` and
+  // `claude-opus-5` are one character apart in a dropdown.
+  for (const id of WORKER_MODELS) {
+    assert.ok(WORKER_MODEL_NAMES[id], `${id} has no display name`);
+    assert.notEqual(modelLabel(id), id, `${id} renders as its raw id`);
+  }
+  assert.equal(modelLabel('claude-opus-5-5'), 'Opus 5.5');
+  assert.equal(modelLabel('claude-opus-5'), 'Opus 5');
+});
+
+test('a [1m] variant is named, and an unknown id is not invented', () => {
+  assert.equal(modelLabel('claude-opus-5-5[1m]'), 'Opus 5.5 (1M context)');
+  assert.equal(modelLabel('claude-nonsense'), 'claude-nonsense', 'showable, never a lie');
+  assert.equal(modelLabel(null), '');
+});
+
+test('the served name map covers the list, plus whatever default it is asked about', () => {
+  // What `GET /api/team/config` hands the picker. The extra id is a stored `[1m]` default:
+  // the row still has to be drawn, and drawn as what it is.
+  const plain = workerModelNames();
+  assert.deepEqual(Object.keys(plain), [...WORKER_MODELS]);
+  const withStored = workerModelNames('claude-sonnet-5[1m]');
+  assert.equal(withStored['claude-sonnet-5[1m]'], 'Sonnet 5 (1M context)');
+  assert.deepEqual(workerModelNames(null, undefined, ''), plain, 'no default, no extra row');
 });
 
 /* ------------------------------------------------- the settings file itself --- */

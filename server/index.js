@@ -59,7 +59,13 @@ import {
 } from './snapshot.js';
 import { TaskStore, TASK_KINDS } from './tasks.js';
 import { createWorktree, removeWorktree, pruneWorktrees, runSetup, tidyLabel, WORKTREES_DIR } from './worktree.js';
-import { writeWorkerSettings, answerTrustGate, resolveWorkerModel, WORKER_MODELS } from './dispatch.js';
+import {
+  writeWorkerSettings,
+  answerTrustGate,
+  resolveWorkerModel,
+  WORKER_MODELS,
+  workerModelNames,
+} from './dispatch.js';
 import { ensureTeam, readTeam, setSlate, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
 import { assembleLead, briefsFor, foremanEntry, mcpFilePath } from './briefs.js';
 import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
@@ -2028,7 +2034,10 @@ app.get('/api/team/config', async (req, res) => {
   // `setupResolved` is computed, never stored: the same answer dispatch will use, with
   // the reason the panel shows read-only. Detection is a readdir — cheap enough per GET.
   // `models` rides along so the panel's default-model picker offers exactly the list
-  // dispatch will accept, from the one place it is defined.
+  // dispatch will accept, from the one place it is defined — and `modelNames` beside it is
+  // what each id is *called*, because `claude-opus-5-5` and `claude-opus-5` are one
+  // character apart in a dropdown the maintainer is expected to answer correctly. The
+  // names are served rather than spelled in the browser so there is still only one copy.
   //
   // `forgeResolved` and `baseResolved` are the same pattern and the same ruling (a control
   // the user cannot answer correctly should not be a control) — with one real difference
@@ -2037,7 +2046,14 @@ app.get('/api/team/config', async (req, res) => {
   // network) but it is a process rather than a readdir, so both cache per repo. Neither is
   // ever stored, and PATCH refuses to write either.
   const [forgeResolved, baseResolved] = await Promise.all([resolveForge(repo), resolveBaseBranch(repo)]);
-  res.json({ ...team, models: WORKER_MODELS, setupResolved: resolveSetup(team.setup, repo), forgeResolved, baseResolved });
+  res.json({
+    ...team,
+    models: WORKER_MODELS,
+    modelNames: workerModelNames(team.defaultModel),
+    setupResolved: resolveSetup(team.setup, repo),
+    forgeResolved,
+    baseResolved,
+  });
 });
 
 app.patch('/api/team/config', async (req, res) => {
@@ -2112,7 +2128,14 @@ app.patch('/api/team/config', async (req, res) => {
     // Same shape as the GET — the panel replaces its cached config with this wholesale,
     // and the model picker must not lose its option list on the first flip.
     const [forgeResolved, baseResolved] = await Promise.all([resolveForge(repo), resolveBaseBranch(repo)]);
-    res.json({ ...next, models: WORKER_MODELS, setupResolved: resolveSetup(next.setup, repo), forgeResolved, baseResolved });
+    res.json({
+      ...next,
+      models: WORKER_MODELS,
+      modelNames: workerModelNames(next.defaultModel),
+      setupResolved: resolveSetup(next.setup, repo),
+      forgeResolved,
+      baseResolved,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
-import { DEFAULT_WORKER_MODEL } from './dispatch.js';
+import { DEFAULT_WORKER_MODEL } from './worker-models.js';
 
 /**
  * A team is a folder under `STATE_DIR/teams/`, keyed by the repo's full path with each
@@ -57,8 +57,11 @@ const DEFAULTS = {
   // repo's own files (setup-detect.js), not stored. A team.json written before that
   // change may still carry one and it is honoured — but nothing writes it any more.
   allow: [], // per-repo build/test permission entries, e.g. "Bash(npm test:*)"
-  // What workers launch with when the lead names nothing — Opus, the maintainer's ruling
-  // (2026-08-26). The lead may name another per task; the room says which and why.
+  // What workers launch with when the lead names nothing — Opus 5.5, the maintainer's
+  // ruling (2026-09-22, replacing the 2026-08-26 default of Opus 5). Seeded from
+  // `DEFAULT_WORKER_MODEL` rather than spelled, so the two can never be different answers
+  // to one question. The lead may name another per task; the room says which and why, and
+  // a team.json already on disk keeps whatever default it was written with.
   defaultModel: DEFAULT_WORKER_MODEL,
   // Phrases an authenticated trigger may put into this team's lead, each
   // `{ id, match }` with `match` anchored `^...$` — see `server/trigger.js`, which
