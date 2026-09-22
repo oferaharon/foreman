@@ -7,6 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FALLBACK, humanName } from '../server/human-name.js';
+import { WORKER_MODELS, DEFAULT_WORKER_MODEL } from '../server/worker-models.js';
 
 /*
  * The real process, the real protocol, both roles. A stub panel answers the HTTP side,
@@ -617,6 +618,21 @@ test('the tool says plainly that it is not /exit, so it is never read as a softe
   const tool = res.result.tools.find((t) => t.name === 'worker_interrupt');
   assert.match(tool.description, /NOT `\/exit`/);
   assert.match(tool.description, /written to the room/);
+});
+
+test('task_dispatch names exactly the models the dispatch will accept', async () => {
+  // The list used to be typed out here a second time, which is the shape
+  // `docs/traps/one-spelling.md` is about: a lead told about a model the dispatch would
+  // refuse, or never told about one it would accept — and nothing on either side fails at
+  // the moment they part. It is imported now, and this runs over the real stdio boundary,
+  // so it also proves the import survives into the child process rather than throwing it.
+  const res = await lead.rpc({ jsonrpc: '2.0', id: 95, method: 'tools/list' });
+  const tool = res.result.tools.find((t) => t.name === 'task_dispatch');
+  for (const id of WORKER_MODELS) assert.ok(tool.description.includes(id), `${id} is not offered`);
+  assert.ok(tool.description.includes(DEFAULT_WORKER_MODEL), 'the default among them');
+  // The whole list, in the list's own order and spelling — a hand-typed copy that happened
+  // to contain every id would still fail this, which is the point.
+  assert.ok(tool.description.includes(WORKER_MODELS.join(', ')), 'interpolated, not retyped');
 });
 
 test('worker_read resolves a task id to its session', async () => {

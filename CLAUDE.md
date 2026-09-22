@@ -105,12 +105,19 @@ Who does what: `team.js` owns the disk layout — and, beside `leadSettings`, th
 checkouts, `setup-detect.js` the worktree-prepare command (read off the repo's own files and
 shown read-only, on the rule that a control the user cannot answer correctly should not be
 a control — so nothing writes `setup` any more and a wrong command is a bug in detection), `dispatch.js` the worker's settings file, the one trust gate the panel ever
-answers, and the worker-model list (`WORKER_MODELS` + `resolveWorkerModel` — the lead picks
+answers, and `resolveWorkerModel` — the lead picks
 each worker's model per task, judged on size and complexity; omitted means the team's
-`defaultModel`, Opus, shown as a picker in the team panel; a departure from the default
+`defaultModel`, **Opus 5.5** since the maintainer's ruling of 2026-09-22, shown as a picker
+in the team panel; a departure from the default
 requires a reason and gets a `system` room line saying which and why, so a human can see
 when the lead called it wrong; an unknown id fails the dispatch, which is what keeps
-`model` from becoming a general launch-flags channel), `room.js` the log, `watch.js`
+`model` from becoming a general launch-flags channel. The list itself is one rung lower, in
+`worker-models.js` — a leaf with no imports, holding `WORKER_MODELS`, `DEFAULT_WORKER_MODEL`
+and the names the picker draws, because `mcp/foreman.js` needs the same list for its
+`task_dispatch` description and cannot import `dispatch.js` without dragging `tmux.js` and
+the pane parsers into a stdio MCP child; `dispatch.js` re-exports all of it. `claude-opus-5`
+stays on the list under its successor — task records and `team.json` files name it and must
+still validate. `room.js` the log, `watch.js`
 transitions + stuck + loop + the nudge, `conflicts.js` the path-overlap scan, `gc.js` boot
 housekeeping, `deployed.js` whether a merged task is actually running on this Mac.
 

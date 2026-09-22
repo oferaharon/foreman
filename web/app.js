@@ -9473,10 +9473,18 @@ function createPane(slot, host) {
     // A stored default the list doesn't carry (a [1m] variant, or a hand-edited
     // team.json) still has to be showable, or the picker would lie about what runs.
     if (team.defaultModel && !modelIds.includes(team.defaultModel)) modelIds.push(team.defaultModel);
+    // The rows are *named*, not spelled as ids: `claude-opus-5-5` and `claude-opus-5` are
+    // one character apart, and this control is answered by somebody who is not a
+    // developer. The names come down with the config (`modelNames`, from the same file the
+    // list itself is defined in) rather than being mapped here — a second copy in the
+    // browser is the one-spelling trap, and it would go stale the day a model is added.
+    // The stored default is named too, `[1m]` suffix and all; the fallback to the raw id
+    // is for an id nothing server-side can name at all, where the id is the honest answer.
     for (const id of modelIds) {
       const opt = document.createElement('option');
       opt.value = id;
-      opt.textContent = id;
+      opt.textContent = team.modelNames?.[id] || id;
+      opt.title = id;
       modelPick.append(opt);
     }
     modelPick.value = team.defaultModel || '';

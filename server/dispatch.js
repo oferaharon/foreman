@@ -2,6 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
 import { trustOption } from '../web/trust-gate.js';
+import { WORKER_MODELS, DEFAULT_WORKER_MODEL } from './worker-models.js';
 import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
 
 /**
@@ -11,25 +12,20 @@ import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
 
 export const WORKER_SETTINGS_DIR = path.join(STATE_DIR, 'worker-settings');
 
-/**
- * The models a worker may be launched with, and nothing else. The value becomes a
- * `--model` launch flag, so this list is the wall between "the lead picks a model" and
- * "the lead picks launch flags" — an id not on it fails the dispatch before a worktree
- * exists. A `[1m]` suffix (the 1M-context variant) is accepted on any of them.
- *
- * Haiku is on the list because it is a real model id, but it cannot run auto mode
- * (measured, Wave 0) — a Haiku worker prompts on everything. The tool description
- * carries that warning; the panel does not second-guess an explicit choice.
+/*
+ * The model list and the default live one file down, in `worker-models.js`, and are
+ * re-exported here so every existing importer of `dispatch.js` is unchanged. They moved
+ * because `mcp/foreman.js` needs the same list for its `task_dispatch` description and
+ * cannot import this file — that would drag `tmux.js` and the pane parsers into a stdio
+ * MCP child. One spelling, imported at both ends; see `docs/traps/one-spelling.md`.
  */
-export const WORKER_MODELS = [
-  'claude-opus-5',
-  'claude-sonnet-5',
-  'claude-fable-5',
-  'claude-haiku-4-5-20251001',
-];
-
-/** Used when neither the lead nor team.json names one. The maintainer's ruling (2026-08-26). */
-export const DEFAULT_WORKER_MODEL = 'claude-opus-5';
+export {
+  WORKER_MODELS,
+  DEFAULT_WORKER_MODEL,
+  WORKER_MODEL_NAMES,
+  modelLabel,
+  workerModelNames,
+} from './worker-models.js';
 
 const validModel = (id) => {
   const base = String(id).endsWith('[1m]') ? String(id).slice(0, -4) : String(id);
@@ -39,11 +35,11 @@ const validModel = (id) => {
 /**
  * The one answer to "what model does this worker launch with".
  *
- * Explicit beats the team default beats Opus. Both the request and the stored default
- * are validated — a team.json hand-edited into an unknown id must fail loudly here, not
- * launch whatever the CLI makes of the string — and the default is checked even when an
- * explicit choice would mask it, so a corrupted file surfaces on the next dispatch
- * rather than on the one unlucky enough to omit `model`.
+ * Explicit beats the team default beats `DEFAULT_WORKER_MODEL`. Both the request and the
+ * stored default are validated — a team.json hand-edited into an unknown id must fail
+ * loudly here, not launch whatever the CLI makes of the string — and the default is
+ * checked even when an explicit choice would mask it, so a corrupted file surfaces on the
+ * next dispatch rather than on the one unlucky enough to omit `model`.
  *
  * @param {string|null|undefined} requested  the lead's choice, if any
  * @param {string|null|undefined} teamDefault  team.json's `defaultModel`

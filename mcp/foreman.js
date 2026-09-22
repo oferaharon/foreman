@@ -4,6 +4,11 @@ import readline from 'node:readline';
 import { MAX_MESSAGE_TEXT } from '../server/envelope.js';
 import { humanName } from '../server/human-name.js';
 import { TASK_STATES, OPEN_STATES } from '../server/tasks.js';
+// The dispatch's own list, imported rather than retyped — a lead told about a model the
+// dispatch would refuse (or never told about one it would accept) is the silent divergence
+// `docs/traps/one-spelling.md` is about. `worker-models.js` is a leaf with no imports for
+// exactly this caller: `dispatch.js` would drag `tmux.js` and the pane parsers in here.
+import { WORKER_MODELS } from '../server/worker-models.js';
 
 /**
  * The team's hands — a stdio MCP server over the panel's HTTP API, serving three very
@@ -529,7 +534,7 @@ const LEAD_TOOLS = [
   {
     name: 'task_dispatch',
     description:
-      `Create a worktree branched from main and start a worker session on it; the body becomes the worker's first message. Only after ${HUMAN} has confirmed the task in conversation — never dispatch unconfirmed work. Set kind "plan" to dispatch a PLANNER instead of a builder: it researches the repo and writes a plan document, and its permissions deny writing code at all. Use a planner for anything big or vague, or where ${HUMAN} would want to see the shape before code exists — then bring them the plan (plan_read) for approval before dispatching builders against it. The worker's model is your call, judged per task on its size and complexity: omit it for the team default, or name one of claude-opus-5, claude-sonnet-5, claude-fable-5, claude-haiku-4-5-20251001 (a [1m] suffix selects the 1M-context variant). Naming a non-default model requires a modelReason — it is posted to the room, where ${HUMAN} judges the call. Note Haiku cannot run auto mode (measured): a Haiku worker prompts on everything, so it is almost never the right choice.`,
+      `Create a worktree branched from main and start a worker session on it; the body becomes the worker's first message. Only after ${HUMAN} has confirmed the task in conversation — never dispatch unconfirmed work. Set kind "plan" to dispatch a PLANNER instead of a builder: it researches the repo and writes a plan document, and its permissions deny writing code at all. Use a planner for anything big or vague, or where ${HUMAN} would want to see the shape before code exists — then bring them the plan (plan_read) for approval before dispatching builders against it. The worker's model is your call, judged per task on its size and complexity: omit it for the team default, or name one of ${WORKER_MODELS.join(', ')} (a [1m] suffix selects the 1M-context variant). Naming a non-default model requires a modelReason — it is posted to the room, where ${HUMAN} judges the call. Note Haiku cannot run auto mode (measured): a Haiku worker prompts on everything, so it is almost never the right choice.`,
     inputSchema: {
       type: 'object',
       properties: {

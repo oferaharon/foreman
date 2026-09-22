@@ -133,6 +133,9 @@ server/
   forge.js        GitHub / Gitea / push only / no remote, derived per repo
   base-branch.js  what this repo calls its default branch — detected, never typed
   dispatch.js     a worker's settings file, the git deny floor, the one trust gate
+  worker-models.js  the models a worker may launch on, the default, and what each
+                  is called in front of a human — a leaf, so the MCP child can
+                  import the list without dragging the pane parsers in
   room.js         the append-only per-team log, addressed and broadcast
   watch.js        worker transitions, stuck and looping detection, the lead's nudge
   conflicts.js    two workers touching one path — committed and uncommitted alike

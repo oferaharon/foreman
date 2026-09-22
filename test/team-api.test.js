@@ -158,7 +158,7 @@ test('an omitted model stays omitted — the default is resolved when it starts,
     label: 'later-thought',
     body: 'something for next month',
   });
-  // Not `claude-opus-5`. `null` means "whatever the team default is on the day this
+  // Not `claude-opus-5-5`. `null` means "whatever the team default is on the day this
   // starts"; freezing today's resolved default would pin an old default silently, and
   // the room's "departure from the default" line would never fire because the record
   // would look like an explicit choice.
@@ -391,7 +391,7 @@ test('a promotion carries the record forward — same createdAt, new brief, mode
   assert.equal(task.startedBy, 'zzq-testname: "yes, go"', 'what was said, on the task');
   assert.equal(task.branch, 'agent/promote-me');
   assert.ok(task.worktree, 'the worktree it got');
-  assert.equal(task.model, 'claude-opus-5', 'the team default, resolved at the moment it started');
+  assert.equal(task.model, 'claude-opus-5-5', 'the team default, resolved at the moment it started');
   // Past the worktree, a failure is `failed` and keeps the checkout as evidence. It must
   // never fall back to `pending` — a record that went back on the backlog with a
   // half-built checkout on disk is the one shape nothing downstream can reason about.

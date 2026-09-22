@@ -138,9 +138,13 @@ test('a repo with no team reads as null', () => {
   assert.equal(readTeam('/Users/x/Code/Nowhere'), null);
 });
 
-test('the dispatch defaults: Opus workers, leadMerges off', () => {
+test('the dispatch defaults: Opus 5.5 workers, leadMerges off', () => {
   const { config } = ensureTeam('/Users/x/Code/Defaults');
-  assert.equal(config.defaultModel, 'claude-opus-5', 'the ruled default is Opus');
+  // The maintainer's ruling of 2026-09-22, replacing the 2026-08-26 default of Opus 5.
+  // Pinned as the literal rather than against `DEFAULT_WORKER_MODEL`: a seed that silently
+  // followed a constant would pass no matter what that constant became, and what is being
+  // held here is the ruling, not the wiring.
+  assert.equal(config.defaultModel, 'claude-opus-5-5', 'the ruled default is Opus 5.5');
   assert.equal(config.toggles.leadMerges, false, 'trust is handed over explicitly, never seeded');
 });
 
