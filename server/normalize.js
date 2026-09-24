@@ -8,6 +8,7 @@
 
 import { NUDGE_MARK } from './watch.js';
 import { readRoomDelivery } from './room-header.js';
+import { unwrapPasted } from './pasted-content.js';
 
 const DROP_TYPES = new Set([
   'attachment',
@@ -503,6 +504,31 @@ export function normalizeRecord(rec) {
 
     const text = textOf(content).trim();
     if (!text) return pasted.length ? [{ ...base, kind: 'user', text: '', images: pasted }] : [];
+
+    /*
+     * A record that is nothing but one `<pasted_content>` wrapper — Claude Code v2.1.280
+     * writes every paste its composer folds that way (four lines or more, or over 800
+     * characters), and the panel pastes every multi-line message it types. What was pasted
+     * is shown, not the tags; `pasted-content.js` has the measurements and the rule.
+     *
+     * Decided **before** the checks below, and none of them is asked of what was inside.
+     * Each is ruled out rather than skipped by accident: a command, its output and a task
+     * notice are written by Claude Code itself and never pasted; the nudge is one line
+     * under 800 characters, so it is never folded; links were retired before the wrapper
+     * existed, so no link record carries one. Asking them of a paste's *body* would turn
+     * somebody's pasted `<command-name>` into a chip — `parseCommand` is unanchored.
+     *
+     * The room reader is still asked, of the record as it stands: `readRoomDelivery` sees
+     * through the same one wrapper itself, and its two witnesses run on what is inside.
+     * `pasted` says the session received it as a paste — which, since v2.1.280, its system
+     * prompt tells it may hold instructions its user did not write. Nothing draws it yet.
+     */
+    const paste = unwrapPasted(text)?.trim();
+    if (paste) {
+      const room = readRoomDelivery(text);
+      if (room) return [{ ...base, kind: 'group_message', ...room, raw: paste, pasted: true }];
+      return [withImages({ ...base, kind: 'user', text: paste, pasted: true }, pasted)];
+    }
 
     const cmd = parseCommand(text);
     if (cmd) return [{ ...base, kind: 'command', name: cmd.name, args: cmd.args }];

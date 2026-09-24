@@ -1,4 +1,5 @@
 import { PREFIX, assertClean } from './envelope.js';
+import { unwrapPasted } from './pasted-content.js';
 
 /**
  * The **one line above a room delivery's body** — composed by `rooms-line.js` on the way
@@ -21,8 +22,9 @@ import { PREFIX, assertClean } from './envelope.js';
  * when an import genuinely is not available (`DEFAULT_AGENT_LABEL` across three
  * languages; `memberRow` mirroring `resolveMember`). An import is strictly better than a
  * test when one is possible, and here one is — from a leaf. So: a leaf. It imports
- * `envelope.js` for the refusal and the two prefixes and nothing else, and it holds the
- * writer and the reader side by side where a reader can see them agree.
+ * `envelope.js` for the refusal and the two prefixes and `pasted-content.js` (itself a
+ * leaf) for the wrapper the reader sees through, and nothing else, and it holds the writer
+ * and the reader side by side where a reader can see them agree.
  *
  * ## What the line has to carry, and what it deliberately stopped carrying
  *
@@ -94,6 +96,16 @@ import { PREFIX, assertClean } from './envelope.js';
  * A person who pastes a delivery back **verbatim and alone** does read as one. That is
  * accepted rather than defended against: it is indistinguishable by construction, and the
  * cost is a chip over a message that genuinely is a room delivery.
+ *
+ * ## …read inside one `<pasted_content>` wrapper, and never across one
+ *
+ * Since Claude Code v2.1.280 a delivery of four lines or more reaches the transcript
+ * wrapped whole in `<pasted_content id="…">`, which put a blank line and a tag where the
+ * header should be — both witnesses failed and the chip became a raw bubble. The wrapper
+ * is taken off first, by `unwrapPasted` and only when it is the entire record; the two
+ * witnesses then run **unchanged on what was inside**. Neither is loosened to find a
+ * header further down: a sentence typed above a pasted delivery is the quoting case this
+ * reader exists to leave alone, and it still fails witness one exactly as before.
  */
 
 /** Another session, on the `> ` prefix. Frozen wording — see the header. */
@@ -222,7 +234,8 @@ const HEAD_RE = new RegExp(
  * A room delivery, or `null` for anything else — **the two witnesses of the header above**,
  * and both must hold.
  *
- * @param {string} text the record's own text, exactly as it was typed into the pane
+ * @param {string} text the record's own text, exactly as it sits in the transcript — with
+ *   Claude Code's `<pasted_content>` wrapper still on it, if it has one
  * @returns {{from: string, room: string, roomId: string, speaker: 'peer'|'human',
  *            to: string|null, text: string} | null}
  *   `to` is the addressing clause with the `(not you …)` tail taken off — `you`,
@@ -231,7 +244,8 @@ const HEAD_RE = new RegExp(
  *   the prefixes themselves are the trust model and stay in the record the chip opens on.
  */
 export function readRoomDelivery(text) {
-  const s = typeof text === 'string' ? text : '';
+  const raw = typeof text === 'string' ? text : '';
+  const s = unwrapPasted(raw) ?? raw;
   const nl = s.indexOf('\n');
   // A header with no body is not a delivery: the panel never composes one.
   if (nl < 0) return null;
