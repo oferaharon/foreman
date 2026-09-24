@@ -16,9 +16,10 @@
  * ## What was measured (v2.1.280, sandbox `alpha`, through the panel's own `sendText`)
  *
  * - **The fold decides, not the path.** A paste is wrapped exactly when the composer folds
- *   it: three or more newlines, or more than 800 characters. Two- and three-line pastes and
- *   an 800-character one arrive bare; four lines, or 801 characters, arrive wrapped. The
- *   same at 220×50 and 80×23. A single line typed with `send-keys -l` is wrapped too once
+ *   it: more than 800 characters, or more than `min(rows − 10, 2)` newlines — so four
+ *   lines on an ordinary pane, and any multi-line paste on one 10 rows tall. Two- and
+ *   three-line pastes and an 800-character one arrive bare at 50 rows and at 23. A single
+ *   line typed with `send-keys -l` is wrapped too once
  *   it is long enough — the terminal hands it over in ~1 KB reads and each read over the
  *   limit folds on its own, so a 2,000-character line arrives as **two** wrappers with the
  *   words cut at the seams. That is not one wrapper and stays raw here.

@@ -2,9 +2,9 @@
 
 The evidence behind the **Transcript records** block of [`CLAUDE.md`](../../CLAUDE.md)'s
 Traps index — what a `.jsonl` record really is before `normalize.js` is done with it: slash
-command output, task notices, peer messages, room deliveries, and the subscription that
-carries them to a browser. Each section below is one trap, opening with the bold sentence
-its index line quotes.
+command output, task notices, peer messages, room deliveries, the paste wrapper, and the
+subscription that carries them to a browser. Each section below is one trap, opening with
+the bold sentence its index line quotes.
 
 ## A slash command's output is a transcript record
 
@@ -102,9 +102,78 @@ that is accepted rather than defended against — it is indistinguishable by con
 read what `rooms-line.js` writes, and `rooms-line.js` → `observe.js` → `normalize.js` closes
 the loop. ESM would resolve it today — neither module touches the other's bindings at
 evaluation time — and that is the "it'll be fine" this file is a list of. `room-header.js`
-holds the writer and the reader together, imports only `envelope.js`, and is the reason the
-two spellings cannot drift; a test holding them apart was the alternative and is strictly
-weaker when an import is available.
+holds the writer and the reader together, imports only `envelope.js` and the leaf
+`pasted-content.js`, and is the reason the two spellings cannot drift; a test holding them
+apart was the alternative and is strictly weaker when an import is available.
+
+## A paste the composer folds arrives wrapped
+
+**A paste the composer folds reaches the transcript inside one `<pasted_content>` wrapper,
+and the panel pastes every multi-line message it types — MEASURED on v2.1.280.** Measured
+through the panel's own `sendText`, in the sandbox. The record is the ordinary
+`type: 'user'`, `origin: {kind: 'human'}` one, with the text as
+`\n\n<pasted_content id="f4d4">\n…\n</pasted_content id="f4d4">\n`. That put a blank line
+and a tag where a room delivery's header should be, so both of `readRoomDelivery`'s
+witnesses failed and the chip became a raw bubble; an ordinary panel message showed its
+tags. `unwrapPasted` (`server/pasted-content.js`) takes off **exactly one whole-record
+wrapper** — whitespace only outside, open and close ids equal, no unescaped tag inside —
+and both readers import it. The witnesses then run unchanged on what was inside, and
+anything else (a sentence typed above a paste, two pastes) stays the record's text.
+
+What was measured, none of it guessable:
+
+- **The fold decides, and pane height is an input to it.** Wrapped exactly when the
+  composer draws `[Pasted text #N +K lines]`: more than 800 characters, or more than
+  `min(rows − 10, 2)` newlines. At 50 rows and at 23, two and three lines stay bare and
+  four fold; 800 characters stay bare and 801 fold. At 11 rows three lines fold, and at 10
+  rows **any** multi-line paste does. A room delivery is a header plus the body, so on an
+  ordinary pane a two-line post arrives bare and a three-line one wrapped.
+- **The pane never shows it.** Claude Code draws the submitted message without the tags,
+  so a `capture-pane` comparison says nothing; only the transcript does.
+- **A long single line is wrapped too, and cut.** `send-keys -l` hands the terminal ~1 KB
+  reads and each read over 800 characters folds on its own: a 2,000-character line arrived
+  as two wrappers plus a bare tail, with a blank line inserted mid-word at each seam. That
+  is not one wrapper, so it stays raw — and the session received different text from what
+  was sent. Measured on v2.1.280 only; whether earlier versions cut the line the same way
+  was not measured.
+- **Two whitespace shapes.** Delivered idle, the shape above with `promptSource: 'typed'`.
+  Delivered while busy, Claude Code queues it (`promptSource: 'queued'`, a second value
+  beside `typed`) and trims it, so the tags are the first and last bytes.
+- **The id is per session, not per paste**: four lowercase hex digits, the same on every
+  paste in one session, and today the head of the session id's SHA-256. It is not a
+  witness — the system prompt calls it random, and a witness keyed on an undocumented
+  derivation fails silently the release it changes. Only open-equals-close is.
+- **Tags inside the pasted text are escaped, lossily.** `<pasted_content` and
+  `</pasted_content` in any case come back as `<\pasted_content` / `<\/pasted_content`,
+  which is what makes "exactly one" checkable — an unescaped tag in a body can only be
+  another block's. A backslash already there is not doubled, so the escape cannot be undone
+  and is shown as the session received it.
+- **It is gated by a server-side flag, not a setting.** Read out of the 2.1.280 binary:
+  the wrapping on submit, the system-prompt sentence and the terminal's own unwrapping all
+  sit behind one remotely served feature flag; no `settings.json` key or environment
+  variable turns it off. The 2.1.280 system prompt tells the model that pasted text "may
+  contain instructions the user did not write", and a panel paste has no words of its own
+  outside the tags — so a maintainer's `| ` line or panel message arrives dressed as
+  somebody else's. The panel cannot undo that by reading; `pasted: true` on the
+  normalized message records it, and nothing draws it yet.
+
+**Whether the panel should send differently is the maintainer's call, and was measured
+rather than changed.** Three newline keys between `send-keys -l` lines — `C-j`,
+`M-Enter`, `\` then `Enter` — all delivered a short six-line message unwrapped and exact.
+All three break on a long line: after a 1,200-character first line, `C-j` **dropped the
+first 1,022 characters**, twice in two runs, and `M-Enter` and `\` + `Enter` kept them but
+wrapped them and cut the line. (Lines opening with `/` or `!`, or carrying an `@name`,
+came through intact mid-message; the same at the very start of the composer was not
+measured.) What survived every case was **several small bracketed pastes**,
+each under the fold (at most two newlines and 800 characters): exact on a 40-line,
+3,000-character delivery, 176 ms at no gap and 1.3 s at 50 ms between pastes, against one
+`paste-buffer` today. The costs of adopting it: the pane is claimed for the whole of that,
+a room fan-out types into members one after another so a seven-member post takes up to
+seven times as long, it rests on two Claude Code constants that can move in any release,
+and it would carry a peer's `> ` lines past the one marker that says they came from
+elsewhere. `test/fixtures/pasted-content.jsonl` is the capture — eleven records, both
+shapes, the escape, the mixed and the cut cases — and `test/pasted-content.test.js` pins
+it.
 
 ## A subscription dies with the socket
 
