@@ -370,8 +370,8 @@ once. Evidence: [`docs/traps/exposure.md`](docs/traps/exposure.md).
 ### Transcript records
 
 What a `.jsonl` record really is before `normalize.js` is done with it: slash command
-output, task notices, peer messages, room deliveries, and the subscription that carries
-them to a browser. Evidence:
+output, task notices, peer messages, room deliveries, the paste wrapper, and the
+subscription that carries them to a browser. Evidence:
 [`docs/traps/transcript.md`](docs/traps/transcript.md).
 
 - `server/normalize.js` (`parseCommandOutput`, `parseCommand`, `DROP_TYPES`) — **A slash
@@ -394,6 +394,11 @@ them to a browser. Evidence:
   MEASURED on v2.1.257, on a real delivery in the sandbox.** Both witnesses come out of the
   text: the anchored header shape, and every remaining line carrying that speaker's prefix.
   [transcript#a-room-delivery-leaves-the-same-record-a-typed-message-leaves](docs/traps/transcript.md#a-room-delivery-leaves-the-same-record-a-typed-message-leaves)
+- `server/pasted-content.js` (`unwrapPasted`) · `server/room-header.js` · `server/normalize.js`
+  — **A paste the composer folds reaches the transcript inside one `<pasted_content>`
+  wrapper, and the panel pastes every multi-line message it types — MEASURED on v2.1.280.**
+  Exactly one whole-record wrapper comes off, ids equal; neither room witness is loosened.
+  [transcript#a-paste-the-composer-folds-arrives-wrapped](docs/traps/transcript.md#a-paste-the-composer-folds-arrives-wrapped)
 - `server/index.js` (`subscribe`) · `web/app.js` (`ws.onopen`, `appendMessages`) — **A
   subscription dies with the socket, and nothing on screen says so.** `ws.onopen`
   re-subscribes every open pane, and the slot is claimed before the read — a subscription

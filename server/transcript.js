@@ -4,6 +4,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { BACKFILL_BYTES } from './config.js';
 import { normalizeRecord, stitch } from './normalize.js';
+import { unwrapPasted } from './pasted-content.js';
 
 /**
  * Read a byte range and return whole JSON lines, dropping any leading partial.
@@ -131,11 +132,14 @@ export async function probe(file) {
   }
   meta.replyTimes.sort();
 
-  // The first user turn makes a better label than a bare directory name.
+  // The first user turn makes a better label than a bare directory name. A first turn the
+  // panel pasted (a dispatch brief, say) is read inside its `<pasted_content>` wrapper —
+  // otherwise its first line is the tag, and the `<` test below skips the whole turn.
   if (!meta.title) {
     for (const r of head) {
       if (r.type === 'user' && !r.isMeta && typeof r.message?.content === 'string') {
-        const line = r.message.content.trim().split('\n')[0];
+        const said = unwrapPasted(r.message.content) ?? r.message.content;
+        const line = said.trim().split('\n')[0];
         if (line && !line.startsWith('<')) {
           meta.title = line.length > 60 ? `${line.slice(0, 57)}…` : line;
           break;
