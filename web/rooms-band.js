@@ -153,6 +153,52 @@ export function roomTitle(room, { archived = false } = {}) {
   return lines.join('\n');
 }
 
+/* ----------------------------------------------------------- the mark --- */
+
+/** How long a post keeps a room's `◎` lit: ten minutes. */
+export const RECENT_MS = 10 * 60_000;
+
+/**
+ * Whether a room was posted in recently enough for its `◎` to be lit.
+ *
+ * The signal nothing else on the row gives: a room you have already opened reads zero unseen
+ * however busy it is, and the number beside it is only the member count. An archived room is
+ * never lit — nothing more is typed into anyone from it. `lastAt` is a ms number or `null`
+ * (`server/rooms.js` normalises it), and the window is shut at its far end: a post exactly
+ * ten minutes old is out.
+ *
+ * A mark and nothing more. It never orders anything — the band stays in the store's order,
+ * see `partitionRooms`, and neither function the phone shares so much as reads `lastAt`.
+ */
+export function isRecent(room, now = Date.now()) {
+  if (!room || typeof room !== 'object' || room.archivedAt) return false;
+  const at = Number(room.lastAt);
+  if (!room.lastAt || !Number.isFinite(at)) return false;
+  return now - at < RECENT_MS;
+}
+
+/**
+ * How long until the next lit mark goes out, in ms, or `null` when none is lit.
+ *
+ * `bandSig` carries `lastAt` and knows nothing about the clock, so a room that goes quiet
+ * never re-signs and never repaints — right for everything on the row except this one mark.
+ * The caller sets one `setTimeout` for this delay and calls `relightBand` when it fires; a
+ * band with nothing lit holds no timer at all.
+ */
+export function nextUnlight(rooms = [], now = Date.now()) {
+  let soonest = null;
+  for (const room of partitionRooms(rooms).open) {
+    if (!isRecent(room, now)) continue;
+    const left = Number(room.lastAt) + RECENT_MS - now;
+    if (soonest === null || left < soonest) soonest = left;
+  }
+  return soonest === null ? null : Math.max(0, soonest);
+}
+
+/** The mark's whole class, lit or not. Assigned rather than toggled, so a stale class can
+ *  never ride along on a reused node. */
+const markClass = (lit) => (lit ? 'room-mark is-lit' : 'room-mark');
+
 /* ------------------------------------------------------------ the nodes --- */
 
 /**
@@ -191,7 +237,7 @@ function buildRow(key) {
   unseen.className = 'room-unseen';
   row.append(unseen);
 
-  parts.set(row, { name, count, unseen });
+  parts.set(row, { mark, name, count, unseen });
   return row;
 }
 
@@ -234,7 +280,7 @@ function buildFold(key) {
  * stale room record is exactly the class of bug the reuse is otherwise inviting.
  */
 export function patchBand(list, rooms = [], opts = {}) {
-  const { openIds = [], archivedCollapsed = true, onOpen = null, onToggleArchived = null } = opts;
+  const { openIds = [], archivedCollapsed = true, onOpen = null, onToggleArchived = null, now = Date.now() } = opts;
   if (!list) return [];
   const open = new Set(openIds);
   const entries = bandEntries(rooms, { archivedCollapsed });
@@ -266,7 +312,8 @@ export function patchBand(list, rooms = [], opts = {}) {
 
     const { room } = entry;
     const row = found || buildRow(entry.key);
-    const { name, count, unseen } = parts.get(row);
+    const { mark, name, count, unseen } = parts.get(row);
+    mark.className = markClass(isRecent(room, now));
     const members = room.memberCount ?? (room.members?.length || 0);
     row.className = `room-row${entry.archived ? ' is-archived' : ''}${open.has(room.id) ? ' is-open' : ''}`;
     name.textContent = room.name;
@@ -291,4 +338,25 @@ export function patchBand(list, rooms = [], opts = {}) {
   // survivors have been re-appended so nothing is removed and re-created in one beat.
   for (const node of have.values()) node.remove();
   return drawn;
+}
+
+/**
+ * Re-light the marks the band already has, against `now`, and touch nothing else.
+ *
+ * What the expiry timer calls. It walks the rows on screen, looks each one's room up by id
+ * and assigns one class to one span — nothing is built, moved, removed or measured, so it is
+ * safe under a cursor and between two patches. A row whose room has gone from `rooms` is
+ * left alone: removing it is the next patch's job, not this one's.
+ */
+export function relightBand(list, rooms = [], now = Date.now()) {
+  if (!list) return;
+  const byId = new Map();
+  for (const room of Array.isArray(rooms) ? rooms : []) if (room?.id) byId.set(room.id, room);
+  for (const node of [...list.children]) {
+    const key = node.dataset?.roomKey;
+    if (!key?.startsWith('room:')) continue;
+    const room = byId.get(key.slice('room:'.length));
+    const mark = parts.get(node)?.mark;
+    if (room && mark) mark.className = markClass(isRecent(room, now));
+  }
 }

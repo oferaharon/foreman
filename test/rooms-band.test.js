@@ -8,9 +8,13 @@ import {
   ARCHIVED_KEY,
   bandEntries,
   bandSig,
+  isRecent,
   memberLabel,
+  nextUnlight,
   partitionRooms,
   patchBand,
+  RECENT_MS,
+  relightBand,
   roomTitle,
   unseenText,
 } from '../web/rooms-band.js';
@@ -239,10 +243,16 @@ test('the desktop default is untouched by the phone’s recency order', () => {
     !/lastAt/.test(fn('bandEntries', band)) && !/lastAt/.test(fn('partitionRooms', band)),
     'neither function so much as reads `lastAt`',
   );
-  assert.ok(
-    !/recent|newest/i.test(strip(band).replace(/'[^']*'/g, '')),
-    'no recency option was added to the shared module',
-  );
+  // Scoped to the two functions the phone shares. The module does know the word now —
+  // `isRecent` lights the rail's `◎` — but that is a mark on a row, never an order, and it
+  // lives outside both of these.
+  for (const name of ['bandEntries', 'partitionRooms']) {
+    assert.ok(
+      !/recent|newest|sort/i.test(strip(fn(name, band)).replace(/'[^']*'/g, '')),
+      `no recency option was added to \`${name}\``,
+    );
+  }
+  assert.match(fn('bandEntries', band), /\{ archivedCollapsed = true \} = \{\}/, 'one option, still');
 });
 
 /* ------------------------------------------------------------- the fold --- */
@@ -473,6 +483,106 @@ test('the room you are looking at shows no unseen count, whatever the summary sa
     assert.match(row.className, /is-open/);
     assert.equal(span(row, 'room-unseen').hidden, true, '`markGroupRoomRead` is a round trip');
   });
+});
+
+/* ------------------------------------------------------------- the mark --- */
+
+const NOW = 1_000_000_000;
+const MIN = 60_000;
+const mark = (row) => row.children.find((c) => /^room-mark\b/.test(c.className));
+
+test('the mark is lit inside ten minutes, out at the edge and past it', () => {
+  assert.equal(RECENT_MS, 10 * MIN);
+  assert.equal(isRecent(room('r1', 'a', { lastAt: NOW }), NOW), true, 'just now');
+  assert.equal(isRecent(room('r1', 'a', { lastAt: NOW - 9 * MIN }), NOW), true, 'inside the window');
+  assert.equal(isRecent(room('r1', 'a', { lastAt: NOW - RECENT_MS + 1 }), NOW), true, 'a millisecond inside');
+  assert.equal(isRecent(room('r1', 'a', { lastAt: NOW - RECENT_MS }), NOW), false, 'exactly ten minutes is out');
+  assert.equal(isRecent(room('r1', 'a', { lastAt: NOW - 11 * MIN }), NOW), false, 'past it');
+});
+
+test('a room never spoken in, an archived room and a malformed one are never lit', () => {
+  assert.equal(isRecent(room('r1', 'a', { lastAt: null }), NOW), false, '`null` lastAt');
+  assert.equal(isRecent(room('r1', 'a', { lastAt: NOW, archivedAt: NOW }), NOW), false, 'archived');
+  assert.equal(isRecent(null, NOW), false);
+  assert.equal(isRecent(room('r1', 'a', { lastAt: 'soon' }), NOW), false);
+});
+
+test('the next expiry is the soonest lit room’s, and there is none with nothing lit', () => {
+  const rooms = [
+    room('r1', 'a', { lastAt: NOW - 2 * MIN }),
+    room('r2', 'b', { lastAt: NOW - 7 * MIN }),
+    room('r3', 'c', { lastAt: NOW - 30 * MIN }),
+    room('r4', 'd', { lastAt: NOW - MIN, archivedAt: 5 }),
+  ];
+  assert.equal(nextUnlight(rooms, NOW), 3 * MIN, 'r2 goes out first; r3 is already out, r4 is archived');
+  assert.equal(nextUnlight([room('r1', 'a')], NOW), null, 'no timer for a band with nothing lit');
+  assert.equal(nextUnlight(undefined, NOW), null);
+});
+
+test('a patched row wears the lit class, and loses it on the next patch once quiet', () => {
+  withDom(() => {
+    const list = container();
+    patchBand(list, [room('r1', 'a', { lastAt: NOW - MIN }), room('r2', 'b', { lastAt: NOW - 20 * MIN })], { now: NOW });
+    const [lit, quiet] = list.children;
+    assert.equal(mark(lit).className, 'room-mark is-lit');
+    assert.equal(mark(quiet).className, 'room-mark');
+    assert.equal(mark(lit).textContent, '◎', 'the glyph is unchanged');
+
+    patchBand(list, [room('r1', 'a', { lastAt: NOW - MIN }), room('r2', 'b', { lastAt: NOW - 20 * MIN })], {
+      now: NOW + 10 * MIN,
+    });
+    assert.equal(list.children[0], lit, 'patched, never rebuilt');
+    assert.equal(mark(lit).className, 'room-mark');
+  });
+});
+
+test('an archived row is never lit, however recent its last post', () => {
+  withDom(() => {
+    const list = container();
+    patchBand(list, [room('r1', 'gone', { archivedAt: 5, lastAt: NOW })], { archivedCollapsed: false, now: NOW });
+    const row = list.children.find((c) => c.dataset.roomKey === 'room:r1');
+    assert.equal(mark(row).className, 'room-mark');
+  });
+});
+
+test('the timer’s relight puts a mark out in place, moving and rebuilding nothing', () => {
+  withDom(() => {
+    const list = container();
+    const rooms = [room('r1', 'a', { lastAt: NOW - MIN, unseen: 2 }), room('r2', 'gone', { archivedAt: 5 })];
+    patchBand(list, rooms, { archivedCollapsed: true, now: NOW });
+    const before = [...list.children];
+    const [row] = before;
+    assert.equal(mark(row).className, 'room-mark is-lit');
+
+    relightBand(list, rooms, NOW + 9 * MIN - 1);
+    assert.equal(mark(row).className, 'room-mark is-lit', 'still inside the window');
+
+    relightBand(list, rooms, NOW + 9 * MIN);
+    assert.equal(mark(row).className, 'room-mark', 'out once the window runs out');
+    assert.deepEqual([...list.children], before, 'same nodes, same order');
+    assert.equal(span(row, 'room-unseen').textContent, '2', 'the badge is untouched');
+    assert.equal(span(row, 'room-count').textContent, '2', 'and so is the member count');
+
+    relightBand(null, rooms, NOW);
+    relightBand(list, [], NOW);
+    assert.equal(mark(row).className, 'room-mark', 'a room gone from the frame is the next patch’s job');
+  });
+});
+
+test('the app re-arms one expiry timer on every patch, and the timer only relights', () => {
+  // Sliced by hand: `fn` stops at the first two-space `}`, which is `patchBand`'s own `});`.
+  const from = app.indexOf('\nfunction renderRoomsBand(');
+  const render = app.slice(from, app.indexOf('\n}\n', from));
+  assert.ok(
+    render.indexOf('scheduleRoomsUnlight();') > render.indexOf('patchBand('),
+    'the timer is re-armed after the patch that may have lit a mark',
+  );
+  const schedule = fn('scheduleRoomsUnlight');
+  assert.match(schedule, /clearTimeout\(roomsUnlightTimer\)/, 'one timer, never a pile of them');
+  assert.match(schedule, /nextUnlight\(state\.rooms\)/);
+  assert.match(schedule, /relightBand\(el\.roomsList, state\.rooms\)/);
+  assert.ok(!/patchBand|replaceChildren|roomsSig/.test(strip(schedule)), 'the timer never rebuilds the band');
+  assert.match(styles, /\.room-mark\.is-lit\s*\{\s*color:\s*var\(--accent\);\s*\}/, 'lit is the accent token');
 });
 
 /* ---------------------------------------------------- the band in the app --- */

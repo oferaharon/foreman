@@ -1205,7 +1205,10 @@ There is no create, no join, no add, and no tool takes a pane or a speaker: whic
 posting is read from the tool server's own environment, so a session cannot post as another.
 
 **The rail band** sits above the peer-messages row: one row per open room with its name, member
-count and a count of what has arrived since anybody last opened it. Archived rooms fold into a
+count and a count of what has arrived since anybody last opened it. Its `◎` lights in the accent
+colour while the room's last post is under ten minutes old — the one sign of activity on a room
+you have already opened — and goes out on its own timer when the ten minutes run out, without
+repainting the row. Archived rooms fold into a
 collapsed `archived · N`. The band's head and its `+ room` are in the rail even when there are
 no rooms at all — a control that only appears once you have used it is a control nobody finds.
 
