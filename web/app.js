@@ -125,7 +125,7 @@ import { colourFor } from './session-colour.js';
 // the signature are things a node test can hold, and a render function inlined here is
 // neither. `patchBand` reaches for `document` the way `buildTrustCard` does, and is
 // driven by the same kind of stub in its own test.
-import { patchBand, bandSig } from './rooms-band.js';
+import { patchBand, bandSig, nextUnlight, relightBand } from './rooms-band.js';
 // The create modal's arithmetic: who may be in a room, in what order they are offered, and
 // what stops the button being pressable. The seventh, for the band's own reason one line up
 // — and `roomParticipants` here is now the *only* spelling of the allow-list on this side of
@@ -3514,6 +3514,32 @@ function renderRoomsBand() {
     onOpen: openGroupRoom,
     onToggleArchived: toggleArchivedRooms,
   });
+  scheduleRoomsUnlight();
+}
+
+/** The one pending timer that puts out the next lit `◎`, or `null` when nothing is lit. */
+let roomsUnlightTimer = null;
+
+/**
+ * Put the rooms band's lit marks out when their ten minutes run out, even if nothing else
+ * changes.
+ *
+ * `bandSig` carries `lastAt` and not the clock, so a room that goes quiet never re-signs and
+ * `renderRoomsBand` never patches it again — the mark would stay lit for as long as the room
+ * stayed quiet, which is exactly backwards. One `setTimeout` for the soonest expiry, re-armed
+ * on every patch and every firing; `relightBand` assigns a class and nothing else, so this
+ * never rebuilds the band and never measures anything (`rooms#a-repaint-that-measures-anything`).
+ */
+function scheduleRoomsUnlight() {
+  clearTimeout(roomsUnlightTimer);
+  roomsUnlightTimer = null;
+  const wait = nextUnlight(state.rooms);
+  if (wait === null) return;
+  // A beat past the edge, so the check lands outside the window rather than on it.
+  roomsUnlightTimer = setTimeout(() => {
+    relightBand(el.roomsList, state.rooms);
+    scheduleRoomsUnlight();
+  }, wait + 250);
 }
 
 /** The archived fold, opened or shut. Kept in this browser — see `state.roomsArchivedShut`. */

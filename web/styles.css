@@ -6529,6 +6529,13 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .room-mark { flex: none; }
 
+/* Something was posted in the last ten minutes (`isRecent`, `web/rooms-band.js`) — the
+   session dot's job for a room, and the only thing on the row that says so once the room has
+   been opened and its unseen count reads zero. `--accent` tracks both themes from its own
+   two definitions. No transition: the timer that puts it out assigns a class and nothing
+   else, and an automated Chrome window runs none anyway. */
+.room-mark.is-lit { color: var(--accent); }
+
 /* The rail is 20rem, so this is the half that gives. Every other span in the row is
    `flex: none` — a member count that shrank to `…` would be a number that lies. */
 .room-name {
