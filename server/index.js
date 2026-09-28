@@ -55,6 +55,9 @@ import {
   benchEntries,
   restoreSessions,
   relaunchEntries,
+  relaunchOne,
+  heldBy,
+  isLeadEntry,
   liveWorkers,
 } from './snapshot.js';
 import { TaskStore, TASK_KINDS } from './tasks.js';
@@ -3940,17 +3943,12 @@ app.post('/api/sessions/:id/exit', async (req, res) => {
   // `needs-decision` without a parsed box behind them — the `Switch model?` confirm is one,
   // and the startup trust gate sets no `dialog` at all, so testing only for
   // `state === 'dialog'` would have walked straight past it. `sendText` refuses these too;
-  // this is here to say *which* rather than to be the guard.
-  const live = await readPaneState(session.paneId);
-  if (
-    live.prompt ||
-    live.plan ||
-    live.question ||
-    live.state === 'needs-decision' ||
-    live.state === 'dialog'
-  ) {
+  // this is here to say *which* rather than to be the guard. `heldBy` is the one spelling
+  // of the test, shared with both relaunches.
+  const held = heldBy(await readPaneState(session.paneId));
+  if (held) {
     return res.status(409).json({
-      error: 'Something is open in the terminal — answer or interrupt it first, then close.',
+      error: `Not closed: ${held}. Answer or interrupt it first, then close.`,
     });
   }
 
@@ -4217,7 +4215,11 @@ let restoring = false;
 app.post('/api/snapshot/restore', async (req, res) => {
   const snap = snapshot.get();
   if (!snap?.sessions.length) return res.status(400).json({ error: 'Nothing saved yet.' });
-  if (restoring) return res.status(409).json({ error: 'A restore is already running.' });
+  // `relaunching` too: a restore landing mid-relaunch would start fresh the very sessions
+  // the relaunch had just exited to resume, and the relaunch would then skip them as live.
+  if (restoring || relaunching) {
+    return res.status(409).json({ error: 'A relaunch or restore is already running.' });
+  }
 
   const terminal = req.body?.terminal !== false;
   restoring = true;
@@ -4284,28 +4286,26 @@ const EXIT_GONE_TIMEOUT_MS = 20000;
 /** Set while a relaunch is running, for the same reason `restoring` exists. */
 let relaunching = false;
 
+/** Why a session that was sent `/exit` was not started again: its name never freed. */
+const STILL_UP = 'did not close in time — still running';
+
 /**
- * Relaunch every session on the bench — the control for "I updated Claude Code".
+ * Close these bench entries, wait for their names to free, and put them back — the one
+ * relaunch loop, shared by **relaunch all** and the bin's **restart one**.
  *
- * Snapshot → exit each → restore, where the snapshot is `relaunchEntries` against the live
- * roster rather than the saved slot (see `snapshot.js`: a relaunch must not spend the
+ * Exit each → wait → `restoreSessions`, where the entries are `relaunchEntries` against the
+ * live roster rather than the saved slot (see `snapshot.js`: a relaunch must not spend the
  * maintainer's bench save, and a session id from Tuesday resumes nothing useful on Friday).
- * Two modes, and neither is a default the caller can fall into — an absent `mode` is a 400,
- * because "fresh" and "resume" differ by whether seventeen conversations survive and that
- * is not a thing to decide on someone's behalf.
  *
- * Three guards, and they are the feature rather than trim around it:
- *
- *   **Not while a worker is live.** `liveWorkers` is the whole roster minus the bench, by
- *   the same two tests the snapshot uses. Refused outright, naming the workers.
+ * Two rules live here rather than in either caller, so the two cannot drift apart:
  *
  *   **A session holding something is skipped, never forced.** The pane is re-read now —
- *   not trusted from the roster, which is a poll behind — for every way it can be busy:
- *   `prompt || plan || question || needs-decision || dialog`, the list `assertNotBlocked`
- *   already keeps and the `/exit` endpoint already tests. A permission box or the startup
- *   trust gate would take `/exit` as six characters typed into itself. Left alone, still
- *   running, and named in the result — which is also why it needs no special case in the
- *   restore below: it is still in `liveNames`, so `restoreSessions` skips it.
+ *   not trusted from the roster, which is a poll behind — for every way it can be busy,
+ *   through `heldBy`: `prompt || plan || question || needs-decision || dialog`, the list
+ *   `assertNotBlocked` already keeps. A permission box or the startup trust gate would take
+ *   `/exit` as six characters typed into itself. Left alone, still running, and named in
+ *   the result — which is also why it needs no special case in the restore below: it is
+ *   still in `liveNames`, so `restoreSessions` skips it.
  *
  *   **Everything is reported.** Exited, resumed, skipped and why, failed and why. A
  *   half-relaunched machine that says "done" is the failure mode here.
@@ -4316,7 +4316,103 @@ let relaunching = false;
  * with its serial loop, its per-entry failure isolation and its skip-what-is-already-live
  * rule doing double duty as the handler for the sessions this refused to touch. A second
  * loop that exited and relaunched in step would be a second launcher path, which is the
- * one thing this file has learned not to grow.
+ * one thing this file has learned not to grow — and a restart of one session is this same
+ * loop over a list of one, for the same reason.
+ *
+ * The caller holds the `relaunching` flag and has made its own refusals first; this neither
+ * refreshes the roster nor broadcasts it, because each caller does both once, afterwards.
+ *
+ * @param {Array<object>} entries from `relaunchEntries` (or `relaunchOne`)
+ * @param {{terminal: boolean, emit?: (step: object) => void}} opts
+ * @returns {Promise<Array<object>>} one result per entry, `reason` set on a row left alone
+ */
+async function relaunchBench(entries, { terminal, emit = () => {} }) {
+  const skipped = new Map(); // tmux session name -> why it was left alone
+  const toPin = [];
+
+  /* ---- exit: every entry that isn't holding something ---- */
+  const exiting = [];
+  for (const entry of entries) {
+    const step = { folder: entry.folder, slug: entry.slug, name: entry.tmuxSession, phase: 'exit' };
+    if (!entry.paneId) {
+      skipped.set(entry.tmuxSession, 'no pane to close');
+      emit({ ...step, state: 'skipped', reason: 'no pane to close' });
+      continue;
+    }
+
+    const held = heldBy(await readPaneState(entry.paneId).catch(() => ({})));
+    if (held) {
+      const reason = `${held} — answer or interrupt it first`;
+      skipped.set(entry.tmuxSession, reason);
+      emit({ ...step, state: 'skipped', reason });
+      continue;
+    }
+
+    try {
+      // `sendText` re-reads the pane a third time and refuses the same states — it is the
+      // backstop under the check above, not a duplicate of it.
+      await sendText(entry.paneId, '/exit');
+      exiting.push(entry);
+      emit({ ...step, state: 'exited' });
+    } catch (err) {
+      skipped.set(entry.tmuxSession, err.message);
+      emit({ ...step, state: 'skipped', reason: err.message });
+    }
+  }
+
+  /* ---- wait for the names to actually free up ---- */
+  const wanted = new Set(exiting.map((e) => e.tmuxSession).filter(Boolean));
+  const deadline = Date.now() + EXIT_GONE_TIMEOUT_MS;
+  let stillUp = [];
+  while (wanted.size) {
+    stillUp = (await liveSessionNames()).filter((n) => wanted.has(n));
+    if (!stillUp.length || Date.now() > deadline) break;
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  for (const name of stillUp) {
+    // It never went. Relaunching now would mint a `-2`, so it doesn't: the name stays
+    // live, `restoreSessions` skips it, and the report says which.
+    skipped.set(name, STILL_UP);
+  }
+
+  /* ---- restore, the same loop the snapshot uses ---- */
+  const results = await restoreSessions(entries, {
+    liveNames: await liveSessionNames(),
+    // A relaunch is the control for "I updated Claude Code" or "I changed a setting", so
+    // it is also the control that hands a session today's brief — the flags are regenerated
+    // here, not replayed from whatever the session was launched with an hour ago.
+    startSession: async (opts) => createSession({ ...opts, terminal, extraArgs: await standaloneArgs() }),
+    startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume })).created,
+    onStep: (done, entry) => {
+      if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
+      emit({ ...done, phase: 'start', reason: skipped.get(done.name) ?? null });
+    },
+  });
+
+  // Pins are pane-keyed and carry the tmux birthday, so they need the panes that exist now.
+  // The lead is pinned from birth by `launchLead`, so only the ordinary rows are replayed.
+  if (toPin.length) {
+    const created = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.createdMs]));
+    for (const paneId of toPin) pins.set(paneId, true, { paneCreatedMs: created.get(paneId) ?? null });
+  }
+
+  // A skipped row was never exited, so `restoreSessions` reporting it as "already running"
+  // is true but not the useful half; the reason it was left alone is.
+  return results.map((r) => ({ ...r, reason: skipped.get(r.name) ?? null }));
+}
+
+/**
+ * Relaunch every session on the bench — the control for "I updated Claude Code".
+ *
+ * Two modes, and neither is a default the caller can fall into — an absent `mode` is a 400,
+ * because "fresh" and "resume" differ by whether seventeen conversations survive and that
+ * is not a thing to decide on someone's behalf.
+ *
+ * One guard of its own on top of `relaunchBench`'s two, and it is the feature rather than
+ * trim around it: **not while a worker is live.** `liveWorkers` is the whole roster minus
+ * the bench, by the same two tests the snapshot uses. Refused outright, naming the workers.
+ * It is this endpoint's and not the loop's, because it exists for the reason this endpoint
+ * touches *everything*; the single restart below deliberately does not carry it.
  */
 /**
  * What a relaunch would touch, without touching it.
@@ -4353,94 +4449,34 @@ app.post('/api/relaunch', async (req, res) => {
   }
 
   const terminal = req.body?.terminal !== false;
-
-  // The roster is up to a poll behind, and this reads it to decide what to end.
-  await registry.refresh().catch(() => {});
-  const sessions = registry.list();
-
-  const workers = liveWorkers(sessions);
-  if (workers.length) {
-    const names = workers.map((w) => w.tmuxSession || w.title).filter(Boolean);
-    return res.status(409).json({
-      error:
-        `${workers.length} worker${workers.length === 1 ? ' is' : 's are'} still running ` +
-        `(${names.join(', ')}). A worker can't be put back — no brief, no tools, and its ` +
-        'worktree may be swept. Close the tasks first, then relaunch.',
-      workers: names,
-    });
-  }
-
-  const entries = relaunchEntries(sessions, { resume: mode === 'resume' });
-  if (!entries.length) return res.status(400).json({ error: 'Nothing on the bench to relaunch.' });
-
+  // Taken before the first `await`, so two presses a moment apart cannot both get past the
+  // check above while the roster refresh is in flight.
   relaunching = true;
-  const skipped = new Map(); // tmux session name -> why it was left alone
-  const toPin = [];
   let results = [];
 
   try {
-    /* ---- exit: every bench session that isn't holding something ---- */
-    const exiting = [];
-    for (const entry of entries) {
-      const step = { folder: entry.folder, slug: entry.slug, name: entry.tmuxSession, phase: 'exit' };
-      if (!entry.paneId) {
-        skipped.set(entry.tmuxSession, 'no pane to close');
-        for (const ws of wss.clients) send(ws, 'relaunch', { ...step, state: 'skipped', reason: 'no pane to close' });
-        continue;
-      }
+    // The roster is up to a poll behind, and this reads it to decide what to end.
+    await registry.refresh().catch(() => {});
+    const sessions = registry.list();
 
-      const live = await readPaneState(entry.paneId).catch(() => ({}));
-      if (
-        live.prompt ||
-        live.plan ||
-        live.question ||
-        live.state === 'needs-decision' ||
-        live.state === 'dialog'
-      ) {
-        const reason = 'holding something — answer or interrupt it first';
-        skipped.set(entry.tmuxSession, reason);
-        for (const ws of wss.clients) send(ws, 'relaunch', { ...step, state: 'skipped', reason });
-        continue;
-      }
-
-      try {
-        // `sendText` re-reads the pane a third time and refuses the same states — it is the
-        // backstop under the check above, not a duplicate of it.
-        await sendText(entry.paneId, '/exit');
-        exiting.push(entry);
-        for (const ws of wss.clients) send(ws, 'relaunch', { ...step, state: 'exited' });
-      } catch (err) {
-        skipped.set(entry.tmuxSession, err.message);
-        for (const ws of wss.clients) send(ws, 'relaunch', { ...step, state: 'skipped', reason: err.message });
-      }
+    const workers = liveWorkers(sessions);
+    if (workers.length) {
+      const names = workers.map((w) => w.tmuxSession || w.title).filter(Boolean);
+      return res.status(409).json({
+        error:
+          `${workers.length} worker${workers.length === 1 ? ' is' : 's are'} still running ` +
+          `(${names.join(', ')}). A worker can't be put back — no brief, no tools, and its ` +
+          'worktree may be swept. Close the tasks first, then relaunch.',
+        workers: names,
+      });
     }
 
-    /* ---- wait for the names to actually free up ---- */
-    const wanted = new Set(exiting.map((e) => e.tmuxSession).filter(Boolean));
-    const deadline = Date.now() + EXIT_GONE_TIMEOUT_MS;
-    let stillUp = [];
-    while (wanted.size) {
-      stillUp = (await liveSessionNames()).filter((n) => wanted.has(n));
-      if (!stillUp.length || Date.now() > deadline) break;
-      await new Promise((r) => setTimeout(r, 300));
-    }
-    for (const name of stillUp) {
-      // It never went. Relaunching now would mint a `-2`, so it doesn't: the name stays
-      // live, `restoreSessions` skips it, and the report says which.
-      skipped.set(name, 'did not close in time — still running');
-    }
+    const entries = relaunchEntries(sessions, { resume: mode === 'resume' });
+    if (!entries.length) return res.status(400).json({ error: 'Nothing on the bench to relaunch.' });
 
-    /* ---- restore, the same loop the snapshot uses ---- */
-    results = await restoreSessions(entries, {
-      liveNames: await liveSessionNames(),
-      // Relaunch-all is the control for "I updated Claude Code", so it is also the control
-      // that hands every bench session today's brief — the flags are regenerated here, not
-      // replayed from whatever the session was launched with an hour ago.
-      startSession: async (opts) => createSession({ ...opts, terminal, extraArgs: await standaloneArgs() }),
-      startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume })).created,
-      onStep: (done, entry) => {
-        if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
-        const step = { ...done, phase: 'start', reason: skipped.get(done.name) ?? null };
+    results = await relaunchBench(entries, {
+      terminal,
+      emit: (step) => {
         for (const ws of wss.clients) send(ws, 'relaunch', step);
       },
     });
@@ -4448,25 +4484,140 @@ app.post('/api/relaunch', async (req, res) => {
     relaunching = false;
   }
 
-  if (toPin.length) {
-    const created = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.createdMs]));
-    for (const paneId of toPin) pins.set(paneId, true, { paneCreatedMs: created.get(paneId) ?? null });
+  await registry.refresh().catch(() => {});
+  broadcastRoster();
+
+  res.json({
+    ok: true,
+    mode,
+    results,
+    started: results.filter((r) => r.state === 'started').length,
+    resumed: results.filter((r) => r.state === 'started' && r.resumed).length,
+    skipped: results.filter((r) => r.state === 'skipped').length,
+    failed: results.filter((r) => r.state === 'failed').length,
+  });
+});
+
+/* ------------------------------------------------ restart one session --- */
+
+/**
+ * Whether the bin's confirm box may offer "restart" for this row, and what it would do.
+ *
+ * Asked before the choices are drawn, for relaunch-all's reason: the refusal is the
+ * server's answer (`relaunchOne`, off the bench rule), so the box never offers a restart
+ * the endpoint would then refuse — a worker row simply gets the old box, close and cancel.
+ * The pane is **not** judged here; what it is holding changes by the second, so that is
+ * read at the press, not at the open.
+ *
+ * `resumable` and not the id, as above: the browser has no use for a session id.
+ */
+app.get('/api/sessions/:id/relaunch', (req, res) => {
+  const session = registry.get(req.params.id);
+  const plan = relaunchOne(session, { mode: 'resume' });
+  if (plan.why === 'unknown') return res.status(404).json({ error: plan.error });
+  if (plan.error) return res.json({ offered: false, why: plan.why, reason: plan.error });
+  res.json({
+    offered: true,
+    name: plan.entry.tmuxSession,
+    lead: isLeadEntry(plan.entry),
+    resumable: Boolean(plan.entry.resume),
+    pinned: plan.entry.pinned,
+    bypass: plan.entry.skipPermissions,
+  });
+});
+
+/**
+ * Restart one session — `/exit`, then the same launch again, from the bin's confirm box.
+ *
+ * For "I changed a setting and this one session needs to pick it up", which used to be the
+ * bin and then `+ new` by hand. It is relaunch-all over a list of one: `relaunchOne` builds
+ * the entry (`relaunchEntries`, so the folder is `paneCwd`, the slug is `slugFor`'s, and
+ * bypass, pin and resume id come from the same place), and `relaunchBench` runs it —
+ * `/exit`, wait for the *name* to free (or `uniqueSessionName` mints a `-2`, silently and
+ * for good), `restoreSessions`, re-pin. A lead goes back through `launchLead` and so gets
+ * today's brief, MCP config and settings; an ordinary session through `createSession` with
+ * `standaloneArgs()`. A resumed one gets them too: the launch flags beat the replayed
+ * conversation (`docs/traps/launch.md`).
+ *
+ * Refused, rather than skipped, for a worker, a name it could not come back under, and a
+ * pane holding something — see `relaunchOne`. **Not** refused because workers are live:
+ * that is relaunch-all's guard, for relaunch-all's reason, and restarting a lead while its
+ * workers run is precisely the case this exists for.
+ *
+ * It shares the `relaunching` flag with relaunch all and the restore, so none of the three
+ * can overlap. `terminal` follows the old session unless the caller says otherwise: a
+ * session that had a Terminal window attached gets one again, and one that didn't is not
+ * handed a window nobody asked for.
+ *
+ * The outcome is the status code, so nothing reads a half-finished restart as done: 200
+ * only when it started again; 409 when it was left running (with why); 500 when it closed
+ * and then failed to start — the one outcome where the session is gone, which the message
+ * says in as many words.
+ */
+app.post('/api/sessions/:id/relaunch', async (req, res) => {
+  const mode = req.body?.mode;
+  if (relaunching || restoring) {
+    return res.status(409).json({ error: 'A relaunch or restore is already running — try again when it finishes.' });
+  }
+  relaunching = true;
+
+  let plan;
+  let result;
+  let terminal;
+  try {
+    // The roster is up to a poll behind, and the pane is what `/exit` would be typed into.
+    await registry.refresh().catch(() => {});
+    const session = registry.get(req.params.id);
+    const live = session?.paneId ? await readPaneState(session.paneId).catch(() => null) : null;
+    plan = relaunchOne(session, { mode, live });
+    if (plan.error) return res.status(plan.status).json({ error: plan.error, why: plan.why });
+
+    terminal = typeof req.body?.terminal === 'boolean' ? req.body.terminal : Boolean(session.attached);
+    [result] = await relaunchBench([plan.entry], { terminal });
+  } catch (err) {
+    // Every step inside `relaunchBench` already catches its own failures, so this is a
+    // safety net, and it does not know how far the restart got — so it does not guess.
+    result = { state: 'broken', error: err.message };
+  } finally {
+    relaunching = false;
   }
 
   await registry.refresh().catch(() => {});
   broadcastRoster();
 
-  // A skipped row was never exited, so `restoreSessions` reporting it as "already running"
-  // is true but not the useful half; the reason it was left alone is.
-  const report = results.map((r) => ({ ...r, reason: skipped.get(r.name) ?? null }));
-  res.json({
-    ok: true,
-    mode,
-    results: report,
-    started: report.filter((r) => r.state === 'started').length,
-    resumed: report.filter((r) => r.state === 'started' && r.resumed).length,
-    skipped: report.filter((r) => r.state === 'skipped').length,
-    failed: report.filter((r) => r.state === 'failed').length,
+  const name = result?.name || plan?.entry?.tmuxSession || 'The session';
+  if (result?.state === 'started') {
+    const made = result.paneId ? registry.byPane(result.paneId) : null;
+    return res.json({
+      ok: true,
+      mode,
+      name,
+      lead: Boolean(result.lead),
+      resumed: Boolean(result.resumed),
+      sessionId: made?.id ?? null,
+    });
+  }
+  if (result?.state === 'skipped') {
+    return res.status(409).json({
+      error:
+        result.reason === STILL_UP
+          ? `${name} was sent /exit but had not closed after ${EXIT_GONE_TIMEOUT_MS / 1000} seconds, ` +
+            'so it was not started again. Check its terminal.'
+          : `Not restarted: ${result.reason || 'it was still running'}. ${name} was left as it is.`,
+      name,
+    });
+  }
+  if (result?.state === 'broken') {
+    return res.status(500).json({
+      error: `The restart stopped part-way: ${result.error}. Check the rail for whether ${name} is still running.`,
+      name,
+    });
+  }
+  res.status(500).json({
+    error:
+      `${name} closed, but did not start again: ${result?.error || 'no reason given'}. ` +
+      'Start it again from + new.',
+    name,
   });
 });
 

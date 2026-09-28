@@ -3,14 +3,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   SnapshotStore,
   benchEntries,
+  heldBy,
   isLeadEntry,
   liveWorkers,
   relaunchEntries,
+  relaunchOne,
   restoreSessions,
 } from '../server/snapshot.js';
+import { parsePane } from '../server/tmux.js';
 import { WORKTREES_DIR } from '../server/worktree.js';
 import { sessionName } from '../server/launch.js';
 import { SESSION_PREFIX } from '../server/config.js';
@@ -582,4 +586,173 @@ test('a resume that is not a string is dropped rather than passed on', async () 
     ...l,
   });
   assert.deepEqual(l.calls.sessions.map((c) => c.resume), [null, null]);
+});
+
+/* ------------------------------------------------ restart one session --- */
+
+const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+/** A real capture, read the way the endpoint reads a pane — never a hand-built state. */
+const screen = (name) => parsePane(fs.readFileSync(path.join(FIXTURES, name), 'utf8'));
+
+test('a pane with its composer showing is holding nothing, idle or working', () => {
+  assert.equal(heldBy(screen('pane-idle.txt')), null);
+  assert.equal(heldBy(screen('pane-working.txt')), null);
+  assert.equal(heldBy(null), null);
+});
+
+/* The trap this exists for: the trust gate sets no `dialog`, so a test for `dialog` alone
+   walks past it and types `/exit` into a security gate. Both builds, both widths. */
+test('the trust gate is holding something, on both builds and at both widths, and is named as the gate', () => {
+  for (const f of [
+    'pane-trust-gate.txt',
+    'pane-trust-gate-narrow.txt',
+    'pane-trust-gate-2.1.247.txt',
+    'pane-trust-gate-2.1.247-narrow.txt',
+  ]) {
+    assert.match(heldBy(screen(f)) || '', /trust its folder/, f);
+  }
+});
+
+test('every other box the panel reads is holding something, and says which', () => {
+  assert.match(heldBy(screen('prompt-bash.txt')), /permission prompt/);
+  assert.match(heldBy(screen('dialog-plan-approve.txt')), /plan/);
+  assert.match(heldBy(screen('dialog-choice-single.txt')), /question/);
+  assert.match(heldBy(screen('dialog-model.txt')), /Select model/);
+  assert.match(heldBy(screen('dialog-effort.txt')), /Effort/);
+});
+
+/* `Switch model?` reads `needs-decision` with no prompt parsed behind it. It is not a
+   permission prompt, and a refusal that called it one would send someone looking for the
+   wrong thing. */
+test('a box with no parsed prompt behind it is not called a permission prompt', () => {
+  const held = heldBy(screen('dialog-model-confirm.txt'));
+  assert.ok(held);
+  assert.doesNotMatch(held, /permission/);
+});
+
+const one = (over = {}) =>
+  row({
+    id: '507be0d1-ab7e-4037-82f2-ddcf8d649f09',
+    transcriptPath: '/p/507be0d1.jsonl',
+    paneId: '%7',
+    ...over,
+  });
+
+test('a restart needs a mode, and neither is assumed', () => {
+  assert.equal(relaunchOne(one()).why, 'mode');
+  assert.equal(relaunchOne(one(), { mode: 'both' }).status, 400);
+});
+
+test('a session the panel does not know, or cannot type into, is a 404', () => {
+  assert.equal(relaunchOne(null, { mode: 'fresh' }).status, 404);
+  assert.equal(relaunchOne(one({ paneId: null }), { mode: 'fresh' }).status, 404);
+});
+
+/* The bench rule, reached through the same allow-list: a worker, a planner and a worker
+   whose task closed under it are all refused, because none of them can be put back. */
+test('a worker is refused, by role and by the folder it sits in', () => {
+  const worktree = path.join(WORKTREES_DIR, 'alpha-fix-the-thing');
+  for (const s of [
+    one({ tmuxSession: `${P}alpha-fix-the-thing`, paneCwd: worktree, team: { role: 'worker', task: 't1' } }),
+    one({ tmuxSession: `${P}alpha-plan-it`, paneCwd: worktree, team: { role: 'planner', task: 't2' } }),
+    one({ tmuxSession: `${P}alpha-fix-the-thing`, paneCwd: worktree, team: null }),
+    one({ team: { role: 'something-new' } }),
+  ]) {
+    const out = relaunchOne(s, { mode: 'resume' });
+    assert.equal(out.why, 'worker', s.tmuxSession);
+    assert.equal(out.status, 409);
+    assert.equal(out.entry, undefined);
+  }
+});
+
+/* Unlike relaunch-all: restarting a lead while its workers run is the case this exists for.
+   `relaunchOne` is handed the one row and never the roster, so there is nothing for a live
+   worker to refuse through — and the roster below would make relaunch-all refuse. */
+test('a lead restarts while its workers are running', () => {
+  const lead = one({ tmuxSession: `${P}alpha-lead`, team: { role: 'lead', tasks: 2 } });
+  const worker = one({
+    tmuxSession: `${P}alpha-fix-the-thing`,
+    paneCwd: path.join(WORKTREES_DIR, 'alpha-fix-the-thing'),
+    team: { role: 'worker', task: 't1' },
+  });
+  assert.equal(liveWorkers([lead, worker]).length, 1, 'relaunch-all would refuse this roster');
+
+  const { entry } = relaunchOne(lead, { mode: 'resume' });
+  assert.equal(entry.slug, 'lead');
+  assert.equal(isLeadEntry(entry), true, 'so it goes back through launchLead');
+  assert.equal(entry.resume, '507be0d1-ab7e-4037-82f2-ddcf8d649f09');
+});
+
+test('the entry is the one relaunch-all would build for the same row', () => {
+  const s = one({ bypass: true, pinned: true });
+  for (const mode of ['fresh', 'resume']) {
+    assert.deepEqual(relaunchOne(s, { mode }).entry, relaunchEntries([s], { resume: mode === 'resume' })[0]);
+  }
+});
+
+/* `paneCwd`, never `cwd`: the transcript's `cwd` follows the session around, and a restart
+   into where it wandered would come back under another heading, with another name. */
+test('it comes back in the pane’s folder, under the same name, with its bypass and pin', () => {
+  const { entry } = relaunchOne(one({ cwd: '/Users/x/Code/alpha/src', bypass: true, pinned: true }), {
+    mode: 'fresh',
+  });
+  assert.equal(entry.folder, '/Users/x/Code/alpha');
+  assert.equal(entry.slug, 'main');
+  assert.equal(entry.tmuxSession, `${P}alpha-main`);
+  assert.equal(sessionName('alpha', entry.slug), entry.tmuxSession);
+  assert.equal(entry.skipPermissions, true);
+  assert.equal(entry.pinned, true);
+  assert.equal(entry.paneId, '%7');
+});
+
+test('fresh carries no session id; resume carries the row’s own, and only a real one', () => {
+  assert.equal(relaunchOne(one(), { mode: 'fresh' }).entry.resume, null);
+  assert.equal(relaunchOne(one(), { mode: 'resume' }).entry.resume, '507be0d1-ab7e-4037-82f2-ddcf8d649f09');
+  // A pane never bound to a history: offered, and it comes back fresh rather than failing.
+  const bare = one({ id: 'pane-7', transcriptPath: null });
+  assert.equal(relaunchOne(bare, { mode: 'resume' }).entry.resume, null);
+});
+
+test('a row with no pane folder has nowhere to start again', () => {
+  assert.equal(relaunchOne(one({ paneCwd: null }), { mode: 'fresh' }).why, 'folder');
+});
+
+/* Relaunch-all would quietly mint a fresh name for these. A single restart promises the
+   same name, so it says so before ending anything rather than after. */
+test('a name the launcher would not mint again is refused before anything is ended', () => {
+  for (const s of [
+    one({ tmuxSession: 'alpha-by-hand' }), // no prefix at all
+    one({ tmuxSession: `${P}beta-main` }), // named for another folder
+    one({ tmuxSession: `${P}alpha-Main.x` }), // characters the launcher would sanitize away
+    one({ tmuxSession: null }),
+  ]) {
+    const out = relaunchOne(s, { mode: 'fresh' });
+    assert.equal(out.why, 'name', String(s.tmuxSession));
+    assert.equal(out.status, 409);
+  }
+});
+
+test('a `-2` name comes back as the `-2` it was', () => {
+  const { entry } = relaunchOne(one({ tmuxSession: `${P}alpha-main-2` }), { mode: 'fresh' });
+  assert.equal(entry.slug, 'main-2');
+});
+
+/* Refused, not skipped: with one row there is nothing else to get on with, and the words
+   are what is on screen. */
+test('a pane holding something is refused, and the refusal says what is holding it', () => {
+  const out = relaunchOne(one(), { mode: 'resume', live: screen('pane-trust-gate.txt') });
+  assert.equal(out.why, 'holding');
+  assert.equal(out.status, 409);
+  assert.match(out.error, /trust its folder/);
+  assert.match(out.error, /left as it is/);
+
+  assert.equal(relaunchOne(one(), { mode: 'resume', live: screen('dialog-choice-single.txt') }).why, 'holding');
+  assert.ok(relaunchOne(one(), { mode: 'resume', live: screen('pane-working.txt') }).entry, 'busy is not blocked');
+});
+
+/* The order is the point: a worker is refused as a worker even while it is holding a box,
+   so the reason given is the one that will still be true once the box is answered. */
+test('a worker holding a box is refused as a worker', () => {
+  const s = one({ paneCwd: path.join(WORKTREES_DIR, 'alpha-x'), team: { role: 'worker' } });
+  assert.equal(relaunchOne(s, { mode: 'fresh', live: screen('prompt-bash.txt') }).why, 'worker');
 });
