@@ -642,6 +642,53 @@ body.row-dragging * { cursor: row-resize !important; }
 .ghost-btn.danger:hover { background: color-mix(in srgb, var(--decision) 12%, transparent); }
 .ghost-btn:disabled { opacity: 0.5; cursor: default; }
 
+/* The bin's box, when it also offers a restart. Two stacked, full-width choices rather than
+   two more buttons in `.modal-row`: the box is a 24rem form, four buttons in one row there
+   is the crushed-label problem `.snap-actions` exists for, and each choice needs its own
+   sentence underneath — the difference between them is whether the conversation survives,
+   which a label alone does not say to someone who does not think in `--resume`. The close
+   and cancel row below them is untouched. */
+.restart-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+.restart-choices > .field-hint { margin: 0 0 0.15rem; }
+.restart-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 0.4rem 0.55rem;
+}
+.restart-choice:hover:not(:disabled) { border-color: var(--ink-faint); }
+.restart-choice-label {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.restart-choice-hint {
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  line-height: 1.4;
+  color: var(--ink-faint);
+}
+.restart-choice.primary { border-color: var(--accent); }
+.restart-choice.primary .restart-choice-label { color: var(--accent); }
+.restart-choice.primary:hover:not(:disabled) { background: var(--accent-soft); }
+.restart-choice.is-busy:disabled { opacity: 1; }
+.restart-choice.is-busy .restart-choice-label { color: var(--working); }
+.restart-choice:disabled { opacity: 0.5; cursor: default; }
+
 /* ---------------------------------------------------- settings modal --- */
 
 /* Wider than a form (`.modal`, 24rem) and narrower than a document (`.is-wide`, 44rem):
@@ -1544,6 +1591,9 @@ body.row-dragging * { cursor: row-resize !important; }
 .dup-btn.is-bypass { color: var(--decision); }
 .dup-btn.is-bypass:hover { color: var(--decision); opacity: 1; }
 .dup-btn.is-busy { opacity: 1; color: var(--working); cursor: default; }
+/* Mid-restart from the bin's box: visible without a hover, like the busy duplicate. */
+.close-btn.is-busy,
+.close-btn.is-busy:hover { opacity: 1; color: var(--working); cursor: default; }
 .dup-btn.is-error { opacity: 1; color: var(--decision); }
 
 .session.has-unread .session-title { color: var(--ink); font-weight: 700; }
