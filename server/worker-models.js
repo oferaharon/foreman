@@ -19,6 +19,8 @@
  *
  * `claude-opus-5` stays on the list under `claude-opus-5-5`: task records and team.json
  * files written before 2026-09-22 name it, and every one of them must still validate.
+ * Same reason `claude-sonnet-5` stays on the list under `claude-sonnet-5-5`, added
+ * 2026-09-28: dropping it would fail every team.json and task record naming it.
  *
  * Haiku is on the list because it is a real model id, but it cannot run auto mode
  * (measured, Wave 0) — a Haiku worker prompts on everything. The tool description
@@ -27,6 +29,7 @@
 export const WORKER_MODELS = [
   'claude-opus-5-5',
   'claude-opus-5',
+  'claude-sonnet-5-5',
   'claude-sonnet-5',
   'claude-fable-5',
   'claude-haiku-4-5-20251001',
@@ -54,6 +57,7 @@ export const DEFAULT_WORKER_MODEL = 'claude-opus-5-5';
 export const WORKER_MODEL_NAMES = {
   'claude-opus-5-5': 'Opus 5.5',
   'claude-opus-5': 'Opus 5',
+  'claude-sonnet-5-5': 'Sonnet 5.5',
   'claude-sonnet-5': 'Sonnet 5',
   'claude-fable-5': 'Fable 5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
