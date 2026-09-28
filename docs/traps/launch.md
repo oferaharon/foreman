@@ -59,6 +59,22 @@ it is also what makes the wait-for-exit loop return instantly: `liveSessionNames
 bug. It does not happen when anything was skipped — benched both ways, with two blocked
 sessions surviving and the ids continuing from `%3`.
 
+**…and a reused `%0` used to cost the relaunched session its pin.** Measured restarting a
+single session that was the only one on a scratch tmux server: the new pane came back as
+`%0` inside one roster poll, before `PinStore.prune` had seen the old one go, so the dead
+pane's pin was still on file under that id. `set` read that as "already pinned" and did
+nothing, the next `prune` dropped the pin for its changed birthday, and the session came
+back unpinned — while the same restart, timed so a poll *did* land in the gap, kept it. `set`
+now applies `prune`'s own birthday rule and replaces a pin that belongs to an earlier pane.
+It is a race, so a bench that happens to keep the pin proves nothing; `test/pins.test.js`
+pins both halves.
+
+**…and the pane that was showing it lets go.** The moment a session leaves the roster, each
+pane's `adopt` hands itself to some other session — so a restart that asks "which pane is
+showing this?" when the answer lands finds none. The bin's box notes those panes at the
+press instead; its backdrop covers the rail for the whole restart, so nothing else can have
+moved them.
+
 ## A relaunch into a folder whose trust was never recorded
 
 **A relaunch into a folder whose trust was never recorded lands on the trust gate.** Not

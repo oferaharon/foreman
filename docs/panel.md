@@ -206,6 +206,39 @@ picker, or the startup trust gate would take `/exit` as six characters typed *in
 themselves*. `interrupt` — the button above the composer's box — is the way out of those
 first.
 
+**Restarting one.** The same box also restarts the session, for "I changed a setting and
+this one needs to pick it up" — the single-row version of [relaunch all](#relaunch-all).
+No new button on the row, whose action column is full: when a restart is possible the box
+reads *Close or restart this session?* and offers two more choices above `close it`, each
+with a sentence saying what it does:
+
+- **restart, keep the conversation** — it comes back remembering what was said
+  (`claude --resume`, the same transcript file, so the row and its history stay put). Off,
+  and saying why, for a session the panel never bound to a transcript.
+- **restart fresh** — it comes back with an empty conversation.
+
+Either way it comes back in the same folder (the pane's, never where the conversation
+wandered to), under the same tmux name, with its bypass and its pin, and on today's flags —
+a lead through the lead launcher with today's brief, tools and settings, anything else with
+the standalone ones. A pane that was showing it follows it to the restarted session. The
+answer is in the box or a toast: restarted and whether it remembers, left running and why,
+or — the one outcome where the session is gone — closed and not started again, said in as
+many words.
+
+What it will not do, all checked by the server (`relaunchOne` in `snapshot.js`) as well as
+the box:
+
+- **A worker.** Its box stays exactly as it was, close and cancel; a worker can't be put
+  back, and the endpoint refuses one too.
+- **A name it couldn't give back.** A session the panel never named (no prefix) would come
+  back as a different session, so the box says so instead of offering.
+- **A session holding something** — the same test as closing, re-read at the press. It
+  says what is on screen and leaves it alone.
+
+Unlike relaunch all it is **not** refused while workers are running: restarting a lead
+mid-team is exactly when a lead's settings have changed. It shares relaunch all's and
+restore's lock, so none of the three can run over another.
+
 That button is the only way a human reaches the interrupt, but not the only way it is
 reached: a team lead has `worker_interrupt`, which hits the same endpoint for one of its
 own workers and optionally types a message straight after. It ends a turn and never a
@@ -356,6 +389,8 @@ Sessions are closed first and then started one at a time, so there is a stretch 
 middle where the bench is down; the box stays open and each row shows where it has got to.
 The saved snapshot is not touched — this reads the roster as it is right now, so pressing
 it never spends the bench you saved.
+
+For one session, the bin's box does the same thing — see *Restarting one* above.
 
 ### Briefs
 
