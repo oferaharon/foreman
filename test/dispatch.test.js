@@ -42,6 +42,19 @@ test('Opus 5 stays on the list under its successor', () => {
   assert.equal(resolveWorkerModel(null, 'claude-opus-5').model, 'claude-opus-5');
 });
 
+test('Sonnet 5.5 validates, plain and [1m]', () => {
+  assert.ok(WORKER_MODELS.includes('claude-sonnet-5-5'));
+  assert.equal(resolveWorkerModel('claude-sonnet-5-5', null).model, 'claude-sonnet-5-5');
+  assert.equal(resolveWorkerModel('claude-sonnet-5-5[1m]', null).model, 'claude-sonnet-5-5[1m]');
+  assert.equal(resolveWorkerModel(null, 'claude-sonnet-5-5').model, 'claude-sonnet-5-5');
+});
+
+test('Sonnet 5 still validates alongside its successor', () => {
+  // Same reasoning as Opus 5 above: existing task records and team.json files name it.
+  assert.ok(WORKER_MODELS.includes('claude-sonnet-5'));
+  assert.equal(resolveWorkerModel('claude-sonnet-5', 'claude-sonnet-5-5').model, 'claude-sonnet-5');
+});
+
 test('the team default fills in when the lead names nothing', () => {
   const r = resolveWorkerModel('', 'claude-sonnet-5');
   assert.equal(r.model, 'claude-sonnet-5');
@@ -114,6 +127,11 @@ test('every id on the list has a name a human can read', () => {
   }
   assert.equal(modelLabel('claude-opus-5-5'), 'Opus 5.5');
   assert.equal(modelLabel('claude-opus-5'), 'Opus 5');
+  assert.equal(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
+});
+
+test('Sonnet 5.5 [1m] is named', () => {
+  assert.equal(modelLabel('claude-sonnet-5-5[1m]'), 'Sonnet 5.5 (1M context)');
 });
 
 test('a [1m] variant is named, and an unknown id is not invented', () => {
