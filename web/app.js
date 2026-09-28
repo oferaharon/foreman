@@ -31,6 +31,10 @@ import { anyNewOutput } from './files-new.js';
 // can hold the clamp and its refusals in plain Node; the measuring is the browser's half
 // and stays in `openFiles`.
 import { filesModalHeight } from './files-height.js';
+// …and the reader's place across a `load earlier`, held from the bottom so the older
+// messages land above what they were reading. Pure so `test/scroll-hold.test.js` can pin
+// the read-before-paint order the room panel once got backwards.
+import { holdFromBottom } from './scroll-hold.js';
 // …and the path detector the conversation's own prose is walked with. Shape only: it
 // answers which runs of text *look* like a path, and `linkablePaths` then keeps the ones
 // that name this session's own outputs or a folder holding one. Pure for the usual reason
@@ -14940,7 +14944,11 @@ function createPane(slot, host) {
         if (msg.sessionId !== view.selected) return;
         view.messages = msg.messages.concat(view.messages);
         view.hasEarlier = msg.hasEarlier;
-        renderMain();
+        // The stream alone, never `renderMain`: that ends at the bottom, which is right for
+        // `transcript` and threw the reader away from the messages they had just asked for —
+        // and it rebuilds the composer, which takes a half-typed draft's textarea out from
+        // under its cursor. The older messages land above; the one being read stays put.
+        if (streamEl) holdFromBottom(streamEl.stream, renderStream);
         return;
       case 'rebound':
         // A session we were watching just earned its real id — follow it silently, and
