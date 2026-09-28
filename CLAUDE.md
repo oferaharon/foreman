@@ -437,9 +437,11 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   lead answers out of today's brief, settings and MCP config while remembering yesterday's
   conversation.
   [launch#--resume-continues-the-same-transcript-file](docs/traps/launch.md#--resume-continues-the-same-transcript-file)
-- `server/snapshot.js` (`relaunchEntries`, `liveSessionNames`) — **Relaunching the whole
-  bench can take the tmux server down with it, and pane ids restart at `%0`.** Session
-  **names** are the contract and survive it; read a pane-id reset as expected, not as a bug.
+- `server/snapshot.js` (`relaunchEntries`, `liveSessionNames`) · `server/pins.js` (`set`) ·
+  `web/app.js` (`confirmClose`) — **Relaunching the whole bench can take the tmux server
+  down with it, and pane ids restart at `%0`.** Session **names** are the contract and
+  survive it; read a pane-id reset as expected, not as a bug — but a reused `%0` used to cost
+  the session its pin, and a pane showing it lets go the moment it leaves the roster.
   [launch#relaunching-the-whole-bench-can-take-the-tmux-server-down](docs/traps/launch.md#relaunching-the-whole-bench-can-take-the-tmux-server-down)
 - `server/snapshot.js` (`restoreSessions`) · `~/.claude.json` — **A relaunch into a folder
   whose trust was never recorded lands on the trust gate.** Three sessions answering their
@@ -1030,6 +1032,15 @@ holding anything is skipped rather than forced and named in the result, and ever
 reported. The exits all land before any relaunch, which costs a window where the bench is
 down and buys reusing `restoreSessions` unchanged — its skip-what-is-already-live rule is
 also what handles the sessions the guard refused to touch.
+
+**Restart one** is the same loop over a list of one, from the bin's confirm box rather than a
+new row button: `relaunchBench` in `server/index.js` is the exit → wait-for-the-name →
+`restoreSessions` → re-pin loop both endpoints share, and `relaunchOne` (`snapshot.js`,
+tested) builds the entry through `relaunchEntries` and makes the refusals — a worker, a name
+`uniqueSessionName` would not mint again, a pane `heldBy` says is holding something. It
+deliberately does **not** carry relaunch-all's live-worker refusal: that exists because
+relaunch-all touches everything, and restarting a lead mid-team is the case this is for.
+`heldBy` is now the one spelling of "holding something" for both relaunches and `/exit`.
 
 **The room reads as three tiers of loudness, not three shapes any more.** Tier 1
 (`system`, `conflict`) is a git-log row: a 2px gutter carries the colour a frame used to

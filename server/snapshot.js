@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
 import { WORKTREES_DIR } from './worktree.js';
-import { isLeadName, slugFor } from './launch.js';
+import { isLeadName, slugFor, uniqueSessionName } from './launch.js';
+import { isTrustGate } from '../web/trust-gate.js';
 
 const FILE = path.join(STATE_DIR, 'snapshot.json');
 
@@ -181,6 +182,103 @@ export function relaunchEntries(sessions = [], { resume = false } = {}) {
     const id = s?.transcriptPath && SESSION_ID_RE.test(String(s.id || '')) ? s.id : null;
     return { ...entry, paneId: s?.paneId ?? null, resume: resume ? id : null };
   });
+}
+
+/**
+ * What a pane is holding that `/exit` would be typed into, in words — or null when nothing.
+ *
+ * One spelling of the test every path that ends a session asks, because "blocked" is wider
+ * than `state === 'dialog'`: `prompt || plan || question || needs-decision || dialog`.
+ * The startup trust gate sets no `dialog` at all — on both builds it parses as a full
+ * `prompt` with `needs-decision` — so it is caught by the `prompt` half, and named first
+ * because "a permission prompt" would be the wrong thing to tell someone about that screen.
+ * The words go straight into a refusal, so they say what is on screen rather than which
+ * field fired.
+ *
+ * @param {object|null|undefined} live what `readPaneState` just read off the pane
+ * @returns {string|null}
+ */
+export function heldBy(live) {
+  if (!live) return null;
+  if (live.prompt && isTrustGate(live.prompt)) return 'it is asking whether to trust its folder';
+  if (live.plan) return 'it is showing a plan for you to approve';
+  if (live.question) return 'it is asking you a question';
+  if (live.prompt) return 'it is waiting on a permission prompt';
+  // A picker (`dialog`), or a box that reads `needs-decision` with no parsed prompt behind
+  // it — `Switch model?` is one. Neither is a permission prompt, so neither is called one.
+  if (live.state === 'needs-decision' || live.state === 'dialog') {
+    const title = live.dialog && live.dialog !== 'dialog' ? String(live.dialog).replace(/\s+/g, ' ').trim() : '';
+    return title ? `“${title}” is open in its terminal` : 'a box is open in its terminal';
+  }
+  return null;
+}
+
+/**
+ * Restarting **one** session, from the bin's confirm box: the entry to put back, or why not.
+ *
+ * The same entry relaunch-all would build for this row — `relaunchEntries` over a roster of
+ * one, so the bench rule, the slug, the bypass, the pin and the resume id all come from the
+ * one place that already decides them — plus the refusals that only make sense when one
+ * row was *chosen*:
+ *
+ *   **A worker is refused**, by `isBenchRow`'s allow-list and for its reasons: it cannot
+ *   be put back. The box does not offer the choice on a worker row at all; this is what
+ *   makes that a property of the panel rather than of the page.
+ *
+ *   **A name it could not come back under is refused.** Relaunch-all will quietly mint a
+ *   new name for a session the panel never named (no prefix, so `slugFor` is null); for a
+ *   single restart "under the same name" is the promise, so the test is the exact one —
+ *   what `uniqueSessionName` would mint here once the old name is free — and a mismatch is
+ *   said before anything is ended rather than discovered afterwards.
+ *
+ *   **A pane holding something is refused**, when the caller has read it (`live`). Not
+ *   skipped-and-reported as relaunch-all does — with one row there is nothing else to get
+ *   on with, so the honest answer is a refusal that says what is on screen.
+ *
+ * What is deliberately **not** here is relaunch-all's refusal over live workers. That guard
+ * exists because relaunch-all touches everything; this touches one row, and restarting a
+ * lead while its workers run is exactly when a lead's settings have changed.
+ *
+ * @param {object|null} session the live roster row
+ * @param {{mode?: string, live?: object|null}} [opts] `live` is the pane as just read;
+ *        omitted, the pane is not judged (the box asks before it has anything to judge)
+ * @returns {{entry: object} | {status: number, why: string, error: string}}
+ */
+export function relaunchOne(session, { mode, live = null } = {}) {
+  const refuse = (status, why, error) => ({ status, why, error });
+
+  if (mode !== 'fresh' && mode !== 'resume') return refuse(400, 'mode', 'Pick a mode: "fresh" or "resume".');
+  if (!session?.paneId) return refuse(404, 'unknown', 'Unknown or read-only session.');
+  if (!isBenchRow(session)) {
+    return refuse(
+      409,
+      'worker',
+      'A worker can’t be restarted — it would come back without its brief or its tools. ' +
+        'Its lead dispatches a new one.',
+    );
+  }
+
+  const [entry] = relaunchEntries([session], { resume: mode === 'resume' });
+  if (!entry) return refuse(400, 'folder', 'There is no folder to start it again in.');
+
+  const name = entry.slug
+    ? uniqueSessionName(path.basename(entry.folder), entry.slug, new Set())
+    : null;
+  if (!entry.tmuxSession || name !== entry.tmuxSession) {
+    return refuse(
+      409,
+      'name',
+      `It wasn’t started under a name the panel can give back${entry.tmuxSession ? ` (${entry.tmuxSession})` : ''}, ` +
+        'so a restart would bring it back as a different session. Close it and start a new one instead.',
+    );
+  }
+
+  const held = heldBy(live);
+  if (held) {
+    return refuse(409, 'holding', `Not restarted: ${held}. Answer it or interrupt it first — it was left as it is.`);
+  }
+
+  return { entry };
 }
 
 /**

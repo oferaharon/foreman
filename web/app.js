@@ -4871,8 +4871,19 @@ function dupBtn(s) {
 function closeBtn(s) {
   const btn = document.createElement('button');
   btn.className = 'close-btn';
-  btn.title = `Close ${s.title} — ends the session`;
-  btn.setAttribute('aria-label', `Close ${s.title}`);
+  // Copy only: whether a restart is actually offered is the server's answer, asked when the
+  // box opens. This just keeps the tooltip from promising one on a worker's row.
+  const role = s.team?.role ?? null;
+  const verb = role === null || role === 'lead' ? 'Close or restart' : 'Close';
+  btn.title = `${verb} ${s.title}`;
+  btn.setAttribute('aria-label', `${verb} ${s.title}`);
+  // Mid-restart the row is rebuilt (and, for a moment, gone), so the busy state is read off
+  // module scope — `restarting` — rather than left on a node the next broadcast replaces.
+  if (restarting.has(s.tmuxSession)) {
+    btn.disabled = true;
+    btn.classList.add('is-busy');
+    btn.title = `Restarting ${s.title}…`;
+  }
 
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 12 12');
@@ -4907,20 +4918,56 @@ function closeBtn(s) {
 }
 
 /**
- * The one modal in the panel that guards something irreversible.
+ * Sessions being restarted from the bin's box right now, by tmux session name.
+ *
+ * Module scope for `duplicating`'s reason: the row is rebuilt on every roster broadcast,
+ * and a restart takes the row away and brings it back under the same name partway through.
+ * Keyed on the **name** because that is the one thing that survives — the pane id and, for a
+ * fresh restart, the session id both change under it — so the row that comes back is still
+ * drawn busy until the answer is in.
+ */
+const restarting = new Set();
+
+/** Set while the bin's box is asking the server what it may offer, so a double click opens one box. */
+let closeBoxOpening = false;
+
+/**
+ * The one modal in the panel that guards something irreversible — and, since the bin grew
+ * a restart, the place a single session is restarted from.
  *
  * It names the session, its folder, and what is going on in it right now — a session
  * that is mid-task looks exactly like an idle one in a list of fourteen rows, and "are
  * you sure?" over a bare name is not enough to tell them apart.
+ *
+ * **Restart** is two more choices beside close rather than a button on the row, because
+ * the row's action column is full. Whether they are offered is the server's answer
+ * (`GET /api/sessions/:id/relaunch`, off `relaunchOne`), asked *before* the box is drawn
+ * rather than after it, so nothing moves under the pointer on its way to `close it` — and a
+ * worker row gets exactly the box it always had, because a worker cannot be put back. The
+ * copy is written for someone who does not think in launch flags: both restarts pick up the
+ * current settings, and "keep the conversation" means it remembers what was said.
  */
-function confirmClose(s) {
+async function confirmClose(s) {
+  if (closeBoxOpening || restarting.has(s.tmuxSession)) return;
+  closeBoxOpening = true;
+  let offer = null;
+  try {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(s.id)}/relaunch`);
+    if (res.ok) offer = await res.json().catch(() => null);
+  } catch {
+    /* a close is still a close — the box opens without the restart choices */
+  } finally {
+    closeBoxOpening = false;
+  }
+  const offered = Boolean(offer?.offered);
+
   const back = document.createElement('div');
   back.className = 'modal-back';
   const box = document.createElement('div');
   box.className = 'modal';
 
   const h = document.createElement('h2');
-  h.textContent = 'Close this session?';
+  h.textContent = offered ? 'Close or restart this session?' : 'Close this session?';
   box.append(h);
 
   const what = document.createElement('p');
@@ -4940,10 +4987,62 @@ function confirmClose(s) {
   state.className = 'field-hint';
   state.textContent =
     s.status === 'working'
-      ? `It is working right now${s.activity ? ` (${s.activity}…)` : ''} — that will be cut off.`
-      : 'Sends /exit. The terminal closes with it; the transcript stays on disk.';
+      ? `It is working right now${s.activity ? ` (${s.activity}…)` : ''} — ` +
+        (offered ? 'closing or restarting will cut that off.' : 'that will be cut off.')
+      : `${offered ? 'Close it sends' : 'Sends'} /exit. The terminal closes with it; the transcript stays on disk.`;
   if (s.status === 'working') state.style.color = 'var(--decision)';
   box.append(state);
+
+  /* ---- restart: offered, or said plainly why not (and nothing at all for a worker) ---- */
+  const choices = [];
+  if (offered) {
+    const sec = document.createElement('div');
+    sec.className = 'restart-choices';
+
+    const kept = ['same folder', 'same name'];
+    if (offer.pinned) kept.push('still pinned');
+    if (offer.bypass) kept.push('permission prompts still off');
+    const intro = document.createElement('p');
+    intro.className = 'field-hint';
+    intro.textContent =
+      `Restarting closes it and opens it again straight away — ${kept.join(', ')}. ` +
+      'Either way it comes back with your current settings' +
+      (offer.lead ? ', and as a team lead with the latest team instructions and tools.' : '.');
+    sec.append(intro);
+
+    const choice = (label, hint, mode, primary = false) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `restart-choice${primary ? ' primary' : ''}`;
+      const l = document.createElement('span');
+      l.className = 'restart-choice-label';
+      l.textContent = label;
+      const d = document.createElement('span');
+      d.className = 'restart-choice-hint';
+      d.textContent = hint;
+      b.append(l, d);
+      b.onclick = () => restart(mode, b);
+      choices.push(b);
+      sec.append(b);
+      return b;
+    };
+    const keep = choice(
+      'restart, keep the conversation',
+      offer.resumable
+        ? 'It remembers everything said so far.'
+        : 'There is no saved conversation to bring back for this one — restart it fresh.',
+      'resume',
+      true,
+    );
+    keep.disabled = !offer.resumable;
+    choice('restart fresh', 'It starts with an empty conversation. This one stays saved on disk.', 'fresh');
+    box.append(sec);
+  } else if (offer && offer.why !== 'worker' && offer.reason) {
+    const why = document.createElement('p');
+    why.className = 'field-hint';
+    why.textContent = `Restart isn’t offered here: ${offer.reason}`;
+    box.append(why);
+  }
 
   const note = document.createElement('p');
   note.className = 'modal-note';
@@ -4960,7 +5059,11 @@ function confirmClose(s) {
   row.append(cancel, go);
   box.append(row);
 
+  // While a restart is running the box stays up: it is the only place the answer lands, and
+  // a session that closed and then failed to start must not be reported to nobody.
+  let busy = false;
   const close = () => {
+    if (busy) return;
     back.remove();
     document.removeEventListener('keydown', onKey, true);
   };
@@ -4973,9 +5076,13 @@ function confirmClose(s) {
     if (e.target === back) close();
   };
 
+  const lock = (on) => {
+    for (const b of [go, cancel, ...choices]) b.disabled = on;
+    if (!on && choices[0] && !offer.resumable) choices[0].disabled = true;
+  };
+
   go.onclick = async () => {
-    go.disabled = true;
-    cancel.disabled = true;
+    lock(true);
     note.className = 'modal-note';
     note.textContent = 'Sending /exit…';
     try {
@@ -4984,14 +5091,81 @@ function confirmClose(s) {
     } catch (err) {
       note.className = 'modal-note err';
       note.textContent = err.message;
-      go.disabled = false;
-      cancel.disabled = false;
+      lock(false);
     }
   };
 
+  /**
+   * Close it, start it again, and say which of those actually happened.
+   *
+   * The status code is the outcome (`POST /api/sessions/:id/relaunch`): 200 is started,
+   * 409 is left running and why, 500 is closed-and-not-back. Only the first closes the box —
+   * with a toast, because the row it came from has just been rebuilt — and only the last
+   * takes the choices away for good, since there is no longer a session for them to act on.
+   */
+  async function restart(mode, pressed) {
+    // Which panes were showing it, taken *now*: the moment the old session leaves the
+    // roster each pane's `adopt` hands itself to some other session, so by the time the
+    // answer lands "is this pane showing it?" is already false. Nothing else can have moved
+    // them meanwhile — the box's backdrop covers the rail for the whole restart.
+    const showing = panes.filter((p) => p.selected() === s.id);
+    busy = true;
+    lock(true);
+    pressed.classList.add('is-busy');
+    restarting.add(s.tmuxSession);
+    renderRail();
+    note.className = 'modal-note';
+    note.textContent = 'Closing it, then starting it again — a few seconds.';
+
+    let res;
+    let out = {};
+    try {
+      res = await fetch(`/api/sessions/${encodeURIComponent(s.id)}/relaunch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      out = await res.json().catch(() => ({}));
+    } catch (err) {
+      out = { error: `The panel did not answer (${err.message}). Check the rail for whether it is still running.` };
+    } finally {
+      busy = false;
+      restarting.delete(s.tmuxSession);
+      pressed.classList.remove('is-busy');
+      renderRail();
+    }
+
+    if (res?.ok) {
+      // Put those panes back on it. The server's id is the one to open: a fresh restart is a
+      // new conversation (a `pane-N` until it first speaks, followed by `rebound` after that),
+      // and a resumed one may not be bound to its old transcript yet — opening the old id
+      // before the roster has it would only hand the pane straight back to `adopt`.
+      const target = out.sessionId || s.id;
+      for (const p of showing) p.open(target);
+      close();
+      toast(
+        out.resumed
+          ? `${out.name} restarted — it remembers the conversation.`
+          : mode === 'resume'
+            ? `${out.name} restarted, but fresh — there was no saved conversation to bring back.`
+            : `${out.name} restarted fresh.`,
+      );
+      return;
+    }
+
+    note.className = 'modal-note err';
+    note.textContent = out.error || `That didn't take (${res?.status ?? 'no answer'}).`;
+    if (res && res.status < 500) {
+      lock(false); // refused or left running — still there, and every choice still means something
+    } else {
+      cancel.disabled = false;
+      cancel.textContent = 'ok';
+    }
+  }
+
   back.append(box);
   document.body.append(back);
-  // Cancel takes the focus, not the button that ends a session.
+  // Cancel takes the focus, not a button that ends a session.
   cancel.focus();
 }
 

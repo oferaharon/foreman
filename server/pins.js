@@ -78,7 +78,15 @@ export class PinStore {
   set(paneId, pinned, { paneCreatedMs = null, now = Date.now() } = {}) {
     if (!paneId) return false;
     if (pinned) {
-      if (this.pins.has(paneId)) return false; // already pinned; don't reshuffle the order
+      // Already pinned: don't reshuffle the order — unless the pin on file is for an earlier
+      // pane that held this id. `prune` drops those, but only on the next roster poll, and a
+      // relaunch that takes the tmux server down and back inside one poll gets `%0` again
+      // straight away: the stale pin made this a no-op, `prune` then saw the birthday change
+      // and dropped it, and the relaunched session came back unpinned. Same birthday rule as
+      // `prune`, applied at the moment it matters.
+      const had = this.pins.get(paneId);
+      const stale = had && paneCreatedMs && had.paneCreatedMs && had.paneCreatedMs !== paneCreatedMs;
+      if (had && !stale) return false;
       this.pins.set(paneId, { at: now, paneCreatedMs });
     } else if (!this.pins.delete(paneId)) {
       return false;
