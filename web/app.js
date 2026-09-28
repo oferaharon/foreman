@@ -4989,7 +4989,7 @@ async function confirmClose(s) {
     s.status === 'working'
       ? `It is working right now${s.activity ? ` (${s.activity}…)` : ''} — ` +
         (offered ? 'closing or restarting will cut that off.' : 'that will be cut off.')
-      : 'Sends /exit. The terminal closes with it; the transcript stays on disk.';
+      : `${offered ? 'Close it sends' : 'Sends'} /exit. The terminal closes with it; the transcript stays on disk.`;
   if (s.status === 'working') state.style.color = 'var(--decision)';
   box.append(state);
 
@@ -5104,6 +5104,11 @@ async function confirmClose(s) {
    * takes the choices away for good, since there is no longer a session for them to act on.
    */
   async function restart(mode, pressed) {
+    // Which panes were showing it, taken *now*: the moment the old session leaves the
+    // roster each pane's `adopt` hands itself to some other session, so by the time the
+    // answer lands "is this pane showing it?" is already false. Nothing else can have moved
+    // them meanwhile — the box's backdrop covers the rail for the whole restart.
+    const showing = panes.filter((p) => p.selected() === s.id);
     busy = true;
     lock(true);
     pressed.classList.add('is-busy');
@@ -5131,12 +5136,12 @@ async function confirmClose(s) {
     }
 
     if (res?.ok) {
-      // A fresh restart is a new conversation with a new id; a pane that was showing the old
-      // one follows it rather than sitting on a transcript that has stopped. A resumed one
-      // keeps its id, so the pane is already where it should be.
-      if (out.sessionId && out.sessionId !== s.id) {
-        for (const p of panes) if (p.selected() === s.id) p.open(out.sessionId);
-      }
+      // Put those panes back on it. The server's id is the one to open: a fresh restart is a
+      // new conversation (a `pane-N` until it first speaks, followed by `rebound` after that),
+      // and a resumed one may not be bound to its old transcript yet — opening the old id
+      // before the roster has it would only hand the pane straight back to `adopt`.
+      const target = out.sessionId || s.id;
+      for (const p of showing) p.open(target);
       close();
       toast(
         out.resumed

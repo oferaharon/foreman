@@ -65,6 +65,30 @@ test('a pane id reused by a new tmux server does not inherit the pin', () => {
   p.stop();
 });
 
+/*
+ * The other half of that guard, at `set`: a relaunch that takes the whole tmux server down
+ * gets `%0` back inside one roster poll, before `prune` has seen the old one go. Measured on
+ * a scratch bench — the restarted session came back unpinned, because the dead pane's pin
+ * made the re-pin a no-op and `prune` then dropped it for its birthday.
+ */
+test('re-pinning a reused pane id replaces the dead pane’s pin rather than deferring to it', () => {
+  const p = new PinStore(tmpStore());
+  p.set('%0', true, { paneCreatedMs: 500, now: 100 });
+  assert.equal(p.set('%0', true, { paneCreatedMs: 9000, now: 900 }), true);
+  p.prune(new Map([['%0', 9000]]));
+  assert.equal(p.has('%0'), true, 'it survives the next prune');
+  assert.equal(p.at('%0'), 900);
+  p.stop();
+});
+
+test('re-pinning the same live pane still changes nothing', () => {
+  const p = new PinStore(tmpStore());
+  p.set('%0', true, { paneCreatedMs: 500, now: 100 });
+  assert.equal(p.set('%0', true, { paneCreatedMs: 500, now: 900 }), false);
+  assert.equal(p.at('%0'), 100);
+  p.stop();
+});
+
 test('the same pane, still alive, keeps its pin', () => {
   const p = new PinStore(tmpStore());
   p.set('%1', true, { paneCreatedMs: 500 });
