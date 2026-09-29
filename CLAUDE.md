@@ -907,6 +907,12 @@ own fields mean, and what is deliberately never kept out of it. Evidence:
   stale for hours on a quiet bench.** The key is set only when it is absent — and that same
   interval is what broke a naive latest-payload-wins merge, live, on one account.
   [rate-limits#the-status-line-is-event-driven](docs/traps/rate-limits.md#the-status-line-is-event-driven)
+- `server/rate-limits.js` (`fresher`, `#witness`) — **A manual usage reset lowers a window
+  without a new `resetsAt`, so "the higher percentage wins" held the weekly bar at a
+  pre-reset 95% — MEASURED on v2.1.280.** Within one window only a session whose own reading
+  moved since its last post moves the bar, either way; a repeat, a first sighting (`/clear`
+  re-posts a held copy under a new id) and a vanished window move nothing.
+  [rate-limits#a-manual-usage-reset-lowers-a-window-without-a-new-resetsat](docs/traps/rate-limits.md#a-manual-usage-reset-lowers-a-window-without-a-new-resetsat)
 - `server/rate-limits.js` — **`resets_at` is Unix seconds, not milliseconds, and
   `used_percentage` isn't the payload's only name for itself.** A wrong answer that renders
   without complaint rather than throwing, so every reader multiplies by 1000 first.

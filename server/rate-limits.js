@@ -295,8 +295,8 @@ function windowsFrom(raw, read) {
  * And it is not a clock. Nothing here compares arrival times — two posts a minute apart can
  * carry readings hours apart, which is the whole bug — so freshness is read off the data:
  * a five-hour window that reset since the sleeping session last looked has a *later*
- * `resetsAt` than the one that session remembers. That is the only ordering the payload
- * actually carries.
+ * `resetsAt` than the one that session remembers. That, and the sender's own history
+ * (`#witness`) inside one window, are the only orderings the payload actually carries.
  */
 function mergeWindows(stored, incoming, now, source) {
   const out = {};
