@@ -4,6 +4,11 @@ import { STATE_DIR } from './config.js';
 
 const FILE = path.join(STATE_DIR, 'rate-limits.json');
 
+/** Sessions whose last reading is remembered; far above how many are ever open at once. */
+const MAX_SESSIONS = 256;
+/** A `session_id` is a uuid; anything this long is not one and is not kept. */
+const MAX_ID = 200;
+
 /**
  * How much of the account's quota is gone, and when we last heard.
  *
@@ -38,9 +43,14 @@ const FILE = path.join(STATE_DIR, 'rate-limits.json');
  *   stale re-post and is ignored, and a window the payload simply did not mention is left
  *   alone. The one and only thing that removes a window is its own `resetsAt` passing —
  *   real expiry, measured against this machine's clock rather than inferred from somebody
- *   else's memory of it. And **within one window the higher percentage wins**, because a
- *   long window (the weekly one) is still current in a sleeping session's copy, so its
- *   reset matches and only the number tells the two readings apart — see `fresher`.
+ *   else's memory of it. And **within one window only a witnessed reading moves the
+ *   bar**, because a long window (the weekly one) is still current in a sleeping session's
+ *   copy, so its reset matches and the reset cannot tell the two readings apart. The
+ *   witness is the sending session's own reading changing since its last post — an idle
+ *   re-post repeats itself byte for byte and cannot forge one. That replaced "the higher
+ *   percentage wins", which assumed usage only climbs inside a window and was wrong: a
+ *   manual usage reset lowers it without minting a new `resetsAt`. See `fresher` and
+ *   `#witness`.
  * - **`used_percentage`, falling back to `utilization`.** The capture says
  *   `used_percentage`. The binary's string table puts `utilization` next to `five_hour`
  *   and every internal telemetry name is `priorFiveHourUtilization`, so one `??` is cheap
@@ -51,7 +61,10 @@ const FILE = path.join(STATE_DIR, 'rate-limits.json');
  *
  * And one rule that is not about the data: **no USD, ever** (ruling of 2026-09-04). The
  * payload carries `cost.total_cost_usd`; this is a subscription and the number is
- * meaningless here, so it is never extracted, never stored and never sent.
+ * meaningless here, so it is never extracted, never stored and never sent. The one thing
+ * besides the windows this module reads out of a payload is `session_id`, and only as the
+ * key to that session's own last window readings, **in memory** — never in the file, never
+ * in the record the roster carries. See `#witness` for why memory is enough.
  *
  * `ingest` answers whether anything a *reader* would see changed, so the caller can decide
  * whether to broadcast. A re-post of the same numbers answers false even though `at` has
@@ -70,12 +83,21 @@ const FILE = path.join(STATE_DIR, 'rate-limits.json');
  * hours.
  */
 export class RateLimitStore {
+  #seen;
+
   /** @param {string} [file] override the store location (tests) */
   constructor(file = FILE) {
     this.file = file;
     /** @type {{windows: Record<string, {usedPercentage: number|null, resetsAt: number|null}>, at: number}|null} */
     this.record = null;
     this.dirty = false;
+    /**
+     * Each session's own last reading, keyed by `session_id`, oldest first — a `Map` keeps
+     * insertion order, and `#witness` re-inserts on every post, so the first key is the one
+     * to evict. Readings only (`windowsFrom` builds them), never the payload.
+     * @type {Map<string, Record<string, {usedPercentage: number|null, resetsAt: number|null}>>}
+     */
+    this.#seen = new Map();
     this.#load();
 
     this.timer = setInterval(() => this.#flush(), 2000);
@@ -129,11 +151,67 @@ export class RateLimitStore {
     const raw = isPlainObject(payload) ? payload.rate_limits : null;
     if (!isPlainObject(raw)) return false; // a payload without the key says nothing — see the header
 
-    const windows = mergeWindows(this.record?.windows, windowsFrom(raw, payloadWindow), now);
+    const incoming = windowsFrom(raw, payloadWindow);
+    const source = this.#witness(payload.session_id, incoming);
+    const windows = mergeWindows(this.record?.windows, incoming, now, source);
     const changed = signature(windows) !== signature(this.record?.windows);
     this.record = { windows, at: now };
     this.dirty = true;
     return changed;
+  }
+
+  /**
+   * What kind of evidence this post is, judged against the same session's previous post,
+   * and then remembered as that session's latest.
+   *
+   * - `fresh` — a window this session reported last time reads differently now. That is a
+   *   new API response and nothing else: Claude Code builds `rate_limits` from one
+   *   process-wide reading that each response's `anthropic-ratelimit-unified-*` headers
+   *   **replace wholesale** (`applyWindowReadings` in the binary, v2.1.280), so between two
+   *   responses every render repeats it exactly. Measured on v2.1.280 in the sandbox's
+   *   `alpha`: a 5-second `refreshInterval` rendered the same two windows byte for byte
+   *   before, across and after a turn. And because one response carries every window, one
+   *   window moving vouches for the rest of the same post — which matters, because the
+   *   percentages are integers and the weekly one can sit still for hours while the
+   *   five-hour one ticks.
+   * - `repeat` — known, and nothing it reported last time has moved. An idle re-post.
+   * - `first` — an id this store has not seen. **Not evidence either way**, and the reason
+   *   is measured rather than cautious: `/clear` mints a new `session_id` inside the same
+   *   process and its very first render carries that process's held reading — a sleeper's
+   *   copy under a brand-new name (captured: the old id and the new one posting identical
+   *   windows in the same second). A new session's first post is usually fresh too; there
+   *   is no telling which, so it becomes a baseline and moves nothing until it moves.
+   * - `anonymous` — no usable `session_id` at all. Nothing Claude Code sends, but nothing
+   *   stops a script posting here, and there is no witness to read, so it gets the rule
+   *   this store had before there was one.
+   *
+   * A window that *disappears* is deliberately not a witness. Claude Code filters every
+   * window whose `resets_at` has passed on its own clock, so a sleeping session's five-hour
+   * window vanishes from its payload with no response at all; counting that as movement
+   * would let the sleeper's weekly copy through once, every five hours. Only a window
+   * present in both posts is compared.
+   *
+   * **In memory, on purpose.** A restart loses every baseline, and all that costs is one
+   * post per session: each becomes `first` again, which moves nothing, so a panel restarted
+   * among sleepers holding a pre-reset copy keeps what it had on disk rather than taking
+   * theirs — the case a persisted map would exist for is already the safe one. Keeping the
+   * file to `{windows, at}` also means a rollback reads it unchanged; `TaskStore`'s erasure
+   * is what happens to a field an older reader has never heard of.
+   *
+   * Bounded by count, oldest out: an open session re-posts every minute and so stays near
+   * the end, and one evicted by a flood simply comes back as `first` — the safe kind.
+   */
+  #witness(sessionId, incoming) {
+    const id = typeof sessionId === 'string' && sessionId !== '' && sessionId.length <= MAX_ID ? sessionId : null;
+    if (id === null) return 'anonymous';
+
+    const before = this.#seen.get(id);
+    this.#seen.delete(id);
+    this.#seen.set(id, incoming);
+    if (this.#seen.size > MAX_SESSIONS) this.#seen.delete(this.#seen.keys().next().value);
+
+    if (!before) return 'first';
+    return Object.keys(incoming).some((k) => before[k] && !sameReading(before[k], incoming[k])) ? 'fresh' : 'repeat';
   }
 
   stop() {
@@ -220,10 +298,10 @@ function windowsFrom(raw, read) {
  * `resetsAt` than the one that session remembers. That is the only ordering the payload
  * actually carries.
  */
-function mergeWindows(stored, incoming, now) {
+function mergeWindows(stored, incoming, now, source) {
   const out = {};
   for (const key of new Set([...Object.keys(stored ?? {}), ...Object.keys(incoming)])) {
-    const win = fresher(stored?.[key], incoming[key]);
+    const win = fresher(stored?.[key], incoming[key], source);
     if (win && !expired(win, now)) out[key] = win;
   }
   return out;
@@ -235,35 +313,55 @@ function mergeWindows(stored, incoming, now) {
  * Two comparisons, because the payload carries two independent orderings and neither one
  * alone is enough.
  *
- * **Across windows, the reset.** A later `resetsAt` is a later window, so it wins; an
- * *earlier* one is a session re-posting what it last saw and is dropped.
+ * **Across windows, the reset.** A later `resetsAt` is a later window, so it wins, whoever
+ * sent it; an *earlier* one is a session re-posting what it last saw and is dropped.
  *
- * **Within one window, the percentage.** Equal resets are the same window read twice, and
- * usage inside a window only ever climbs — quota is spent, never returned, until the reset
- * that ends the window and gives it a new `resetsAt`. So the **higher** reading is the
- * later one and a lower one is the sleeper's older copy. Taking the incoming value as-is
- * was the first version of this rule, and it left the weekly bar flapping 9% → 5% → 9% on
- * the same idle re-post the five-hour half was already protected from: the weekly window is
- * long enough that a session asleep for hours still holds the *current* one, so its reset
- * matches exactly and the comparison above cannot separate them. It is the same bug one
- * field across.
+ * **Within one window, the witness.** Equal resets are the same window read twice, and the
+ * data cannot say which read is newer: the weekly window is long enough that a session
+ * asleep for hours still holds the *current* one, so its reset matches exactly. Only the
+ * sender can say, and `#witness` asks it — did your own reading move since your last post?
  *
- * The honest limit, since it is a real one: a genuine downward correction inside a window
- * is now ignored. It is bounded rather than permanent — the next reset mints a new
- * `resetsAt`, which the comparison above accepts unconditionally, so a wrong high reading
- * cannot outlive its own window (five hours at the worst, a week for the weekly one).
- * Weighed against a bar that visibly walks backwards every minute on a quiet machine.
+ * - `fresh` wins, **in either direction**. A new API response is the newest thing there is,
+ *   and a lower number from one is a real drop. This is the manual usage reset: it zeroed
+ *   the weekly window and kept its `resetsAt`, so the five-hour bar (new window, new reset)
+ *   corrected itself and the weekly one sat at 95% while the account said 0.
+ * - `repeat` and `first` move nothing, **in either direction**. A sleeper's copy is lower
+ *   than the truth on an ordinary day — the 9% → 5% → 9% weekly flap this rule was first
+ *   built against — and *higher* than it after a manual reset, where the rule this replaced
+ *   would have let every sleeper holding a pre-reset copy put the 95% straight back.
+ * - `anonymous` keeps the old rule, the **higher** reading, because with no session there
+ *   is no witness and "usage climbs inside a window" is the only ordering left. It is wrong
+ *   exactly once per manual reset, and no Claude Code payload takes this path.
+ *
+ * The honest limit, since it is a real one: two sessions answered within a moment of each
+ * other can post out of order, and the older fresh reading then wins — a bar a point low.
+ * It cannot flap: it needs a percentage to tick between two responses that close together,
+ * it happens at most once per tick, a sleeper can never cause it, and the next fresh post
+ * from either session puts it right. Refusing a fresh drop to rule it out is exactly the
+ * rule that left the weekly bar at 95% for a week.
+ *
+ * `null` is "there is nothing drawable here", not zero, so it never replaces a real number
+ * — not even from a fresh post.
  *
  * An unreadable `resetsAt` on either side puts the two beyond comparison, and there the
  * incoming wins — the pre-merge behaviour. It is the honest answer to "I cannot tell which
- * is newer", and it cannot strand a bad record: the next post replaces it.
+ * is newer", and it cannot strand a bad record: the next post replaces it. Claude Code never
+ * sends one (it drops a window whose reset is not a number in the future), so this is about
+ * a hand-edited file and a script, not about sleepers.
  */
-function fresher(stored, incoming) {
+function fresher(stored, incoming, source) {
   if (!stored) return incoming;
   if (!incoming) return stored;
   if (stored.resetsAt === null || incoming.resetsAt === null) return incoming;
   if (incoming.resetsAt !== stored.resetsAt) return incoming.resetsAt < stored.resetsAt ? stored : incoming;
-  return higher(stored, incoming);
+  if (source === 'fresh') return incoming.usedPercentage === null && stored.usedPercentage !== null ? stored : incoming;
+  if (source === 'anonymous') return higher(stored, incoming);
+  return stored;
+}
+
+/** One window, read the same way twice. */
+function sameReading(a, b) {
+  return a.usedPercentage === b.usedPercentage && a.resetsAt === b.resetsAt;
 }
 
 /**
