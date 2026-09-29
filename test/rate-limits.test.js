@@ -47,7 +47,8 @@ test('a payload with rate_limits becomes the record', () => {
  * a subscription. The ruling is no USD anywhere, so the store must not so much as keep it.
  */
 test('nothing but the windows is kept — no cost, no USD, no session id', () => {
-  const s = new RateLimitStore(tmpStore());
+  const file = tmpStore();
+  const s = new RateLimitStore(file);
   s.ingest({
     session_id: 'abc', model: { id: 'claude-fable-5-1' },
     cost: { total_cost_usd: 0.3027715, total_duration_ms: 37615 },
@@ -58,6 +59,13 @@ test('nothing but the windows is kept — no cost, no USD, no session id', () =>
   assert.ok(!/usd|cost|session|model|context/i.test(json), json);
   assert.deepEqual(Object.keys(s.get()), ['windows', 'at']);
   s.stop();
+
+  // The session id is read — it is the key to that session's own last reading — but only in
+  // memory. The file is exactly what it was before there was a witness, which is also what
+  // lets an older build read it back unchanged.
+  const disk = fs.readFileSync(file, 'utf8');
+  assert.ok(!/usd|cost|session|model|context|abc|0\.3027715|37615/i.test(disk), disk);
+  assert.deepEqual(Object.keys(JSON.parse(disk)), ['windows', 'at']);
 });
 
 test('a later payload updates the window it names and leaves the others alone', () => {
@@ -200,6 +208,191 @@ test('an unreadable resets_at on either side falls back to latest-wins', () => {
   s.ingest({ rate_limits: { five_hour: { used_percentage: 8, resets_at: 1788571200 } } }, NOW + 2000);
   assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 8, resetsAt: 1788571200 });
   s.stop();
+});
+
+/* ----------------------------------------------------------- the witness --- */
+
+/*
+ * Everything above posts without a `session_id` and so runs on the old rule — the higher
+ * reading wins inside a window. Claude Code always sends one, and what it makes possible is
+ * below: a session whose own reading moved since its last post is carrying a new API
+ * response, and that is the only thing allowed to move a bar inside one window.
+ *
+ * The shape is the real one: `rate_limits` is built from one process-wide reading that each
+ * response replaces wholesale, so an idle render repeats it byte for byte (measured on
+ * v2.1.280 in the sandbox's alpha, 5-second refresh, before, across and after a turn).
+ */
+const R5 = 1788571200; //                the current five-hour window's reset
+const R7 = 1789084800; //                the current weekly window's reset
+const post = (id, five, seven, r5 = R5) => ({
+  session_id: id,
+  rate_limits: {
+    ...(five !== undefined && { five_hour: { used_percentage: five, resets_at: r5 } }),
+    ...(seven !== undefined && { seven_day: { used_percentage: seven, resets_at: R7 } }),
+  },
+});
+
+/*
+ * The bug, in the shape it arrived in: the maintainer used the one-time usage reset, which
+ * zeroed both windows. The five-hour one came back with a new `resetsAt` and corrected
+ * itself; the weekly one kept its `resetsAt` and stayed at 95%, because "the higher
+ * percentage wins" read every fresh low reading as a sleeper's copy.
+ */
+test('a manual usage reset: a fresh lower reading on the same weekly window wins', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest(post('active', 40, 94), NOW);
+  s.ingest(post('active', 41, 95), NOW + 60_000);
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 95, resetsAt: R7 });
+
+  // The reset: a new five-hour window, and the same weekly one at nearly nothing.
+  assert.equal(s.ingest(post('active', 0, 1, R5 + 3600), NOW + 120_000), true, 'and it is broadcast');
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 1, resetsAt: R7 }, 'same resetsAt, lower, accepted');
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 0, resetsAt: R5 + 3600 });
+  s.stop();
+});
+
+/*
+ * The regression this must not bring back, now with session ids on it: one sleeping
+ * session re-posting its last-known weekly reading every minute. Refused as a first
+ * sighting and refused as a repeat, and no broadcast for any of it.
+ */
+test('the idle re-post flap stays refused: a sleeper moves nothing, first post or fiftieth', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest(post('active', 43, 8), NOW);
+  s.ingest(post('active', 44, 9), NOW + 1000);
+  assert.equal(s.get().windows.seven_day.usedPercentage, 9);
+
+  const sleeper = post('sleeper', undefined, 5);
+  for (let i = 1; i <= 5; i++) {
+    assert.equal(s.ingest(sleeper, NOW + i * 60_000), false, `minute ${i}`);
+    assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 9, resetsAt: R7 }, `minute ${i}`);
+  }
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 44, resetsAt: R5 }, 'and the five-hour bar it forgot is kept');
+  s.stop();
+});
+
+/*
+ * The other direction, which "higher wins" got wrong by construction. After a reset, every
+ * session that has not spoken since is holding a pre-reset copy that is *higher* than the
+ * truth — and `/clear` re-posts that copy under a brand-new id (captured: old id and new id,
+ * identical windows, the same second).
+ */
+test('after a drop, a sleeper holding the pre-reset copy cannot put it back — nor can its /clear', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest(post('sleeper', 41, 95), NOW);
+  s.ingest(post('active', 41, 95), NOW + 1000);
+  s.ingest(post('active', 0, 1, R5 + 3600), NOW + 2000);
+  assert.equal(s.get().windows.seven_day.usedPercentage, 1);
+
+  for (let i = 1; i <= 3; i++) {
+    assert.equal(s.ingest(post('sleeper', 41, 95), NOW + i * 60_000), false, `repeat, minute ${i}`);
+  }
+  assert.equal(s.ingest(post('sleeper-after-clear', 41, 95), NOW + 4 * 60_000), false, 'a new id with the held copy');
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 1, resetsAt: R7 });
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 0, resetsAt: R5 + 3600 }, 'older reset, refused as before');
+  s.stop();
+});
+
+/*
+ * The real machine on the day this shipped: a stored 95% on disk, a restart that forgot
+ * every baseline, sleepers holding pre-reset copies and active sessions holding the truth.
+ * Nobody's first post moves anything; the first *moved* post of a known session does — and
+ * a weekly percentage can sit still for hours, so a five-hour tick in the same post has to
+ * be enough to vouch for it (one response carries both windows).
+ */
+test('after a restart, the first post of a session whose numbers moved corrects the weekly bar', () => {
+  const file = tmpStore();
+  const before = new RateLimitStore(file);
+  before.ingest({ rate_limits: { five_hour: { used_percentage: 7, resets_at: R5 }, seven_day: { used_percentage: 95, resets_at: R7 } } }, NOW);
+  before.stop();
+
+  const s = new RateLimitStore(file);
+  assert.equal(s.ingest(post('sleeper', 5, 95), NOW + 1000), false);
+  assert.equal(s.ingest(post('active', 7, 1), NOW + 2000), false, 'a first sighting is a baseline, not a witness');
+  assert.equal(s.ingest(post('active', 7, 1), NOW + 62_000), false, 'nor is a repeat of it');
+  assert.equal(s.get().windows.seven_day.usedPercentage, 95);
+
+  assert.equal(s.ingest(post('active', 8, 1), NOW + 90_000), true, 'the five-hour ticked: a new response');
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 1, resetsAt: R7 });
+  assert.equal(s.ingest(post('sleeper', 5, 95), NOW + 120_000), false, 'and the sleeper still moves nothing');
+  assert.equal(s.get().windows.seven_day.usedPercentage, 1);
+  s.stop();
+});
+
+/*
+ * Claude Code drops a window from the payload once its reset passes on *its* clock, with no
+ * response at all — so a sleeper's post changes shape every five hours. That is not a
+ * witness, or the sleeper's weekly copy would get through once each time.
+ */
+test('a window disappearing from a sleeper\'s payload is not a witness', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest(post('active', 43, 8), NOW);
+  s.ingest(post('active', 44, 9), NOW + 1000);
+  s.ingest(post('sleeper', 30, 5), NOW + 2000);
+  assert.equal(s.ingest(post('sleeper', undefined, 5), NOW + 62_000), false);
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 9, resetsAt: R7 });
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 44, resetsAt: R5 });
+  s.stop();
+});
+
+/* The reset comparison outranks the witness: a later window wins whoever carries it. */
+test('a later reset still wins from a first sighting and from a repeat', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest(post('active', 97, 50), NOW);
+  assert.equal(s.ingest(post('newcomer', 0, 50, R5 + 5 * 3600), NOW + 1000), true, 'first sighting, next window');
+  assert.deepEqual(s.get().windows.five_hour, { usedPercentage: 0, resetsAt: R5 + 5 * 3600 });
+
+  const t = new RateLimitStore(tmpStore());
+  t.ingest(post('a', 97, 50), NOW);
+  t.ingest(post('b', 3, 50, R5 + 5 * 3600), NOW + 1000);
+  t.ingest(post('a', 97, 50), NOW + 2000); // an older window again: refused, as before
+  assert.equal(t.get().windows.five_hour.resetsAt, R5 + 5 * 3600);
+  s.stop();
+  t.stop();
+});
+
+/* `null` is nothing drawable; a fresh post carrying one does not blank a real reading. */
+test('a fresh post never replaces a real percentage with an unreadable one', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest(post('active', 43, 8), NOW);
+  s.ingest(post('active', 44, null), NOW + 1000);
+  assert.deepEqual(s.get().windows.seven_day, { usedPercentage: 8, resetsAt: R7 });
+  assert.equal(s.get().windows.five_hour.usedPercentage, 44);
+  s.stop();
+});
+
+/*
+ * The memory is bounded, and what falls out of it comes back as a first sighting — the kind
+ * that moves nothing — rather than as a stranger's witness.
+ */
+test('the per-session memory is bounded, and an evicted session is a first sighting again', () => {
+  const s = new RateLimitStore(tmpStore());
+  s.ingest({ rate_limits: { seven_day: { used_percentage: 50, resets_at: R7 } } }, NOW);
+  s.ingest(post('kept', undefined, 40), NOW + 1);
+  s.ingest(post('evicted', undefined, 40), NOW + 2);
+  for (let i = 0; i < 250; i++) s.ingest(post(`other-${i}`, undefined, 50), NOW + 10 + i);
+  s.ingest(post('kept', undefined, 40), NOW + 500); // a live session re-posts, and stays near the end
+
+  // 252 remembered; ten more push the four oldest out, `evicted` first among them.
+  for (let i = 250; i < 260; i++) s.ingest(post(`other-${i}`, undefined, 50), NOW + 600 + i);
+  assert.equal(s.ingest(post('evicted', undefined, 41), NOW + 2000), false, 'forgotten, so not a witness');
+  assert.equal(s.get().windows.seven_day.usedPercentage, 50);
+  assert.equal(s.ingest(post('kept', undefined, 41), NOW + 3000), true, 'remembered, so it is');
+  assert.equal(s.get().windows.seven_day.usedPercentage, 41);
+  s.stop();
+});
+
+/* Only a string is a session id; anything else is a post with no witness, on the old rule. */
+test('a session_id that is not a usable string is anonymous, and the higher reading wins', () => {
+  for (const id of [42, '', null, { id: 'x' }, 'x'.repeat(201)]) {
+    const s = new RateLimitStore(tmpStore());
+    s.ingest({ session_id: id, rate_limits: { seven_day: { used_percentage: 9, resets_at: R7 } } }, NOW);
+    s.ingest({ session_id: id, rate_limits: { seven_day: { used_percentage: 5, resets_at: R7 } } }, NOW + 1000);
+    assert.equal(s.get().windows.seven_day.usedPercentage, 9, JSON.stringify(id)?.slice(0, 20));
+    s.ingest({ session_id: id, rate_limits: { seven_day: { used_percentage: 12, resets_at: R7 } } }, NOW + 2000);
+    assert.equal(s.get().windows.seven_day.usedPercentage, 12, JSON.stringify(id)?.slice(0, 20));
+    s.stop();
+  }
 });
 
 /* ------------------------------------------------------------- expiry --- */
