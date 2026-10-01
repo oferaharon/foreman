@@ -168,6 +168,42 @@ that now sends — and it lives in `web/prefs.js`, imported by the desktop and b
 files, because `/` and `/m/` are one origin and two spellings of one `localStorage` key is
 a setting that appears to work. `web/trust-gate.js`'s reasoning, in the trust-gate trap.
 
+## The agent panel below the composer
+
+**With background subagents running, Claude Code draws a list of them *below* the composer,
+and that list pushed the composer out of every reader's window — MEASURED on v2.1.257 and
+again on v2.1.280, in the sandbox.** The shape is one blank row under the mode line, then
+`⏺ main`, at most five `◯ <type>  <title>` rows, and `↓ N more` for the rest. `hasComposer`
+reads the last six non-empty lines and `parseMode`/`parseBypass` the last five, so at four
+agents `mode`, `bypass`, `model` and `ctx` all went null on a session that still read idle,
+and at five `hasComposer` missed and the pane read as a `dialog` titled with its own footer
+line — `assertNotBlocked` then refused everything, and `POST /send` answered `queued` into a
+session sitting at an empty composer. Through a real panel, before and after.
+
+At 70–80 columns there is one more line, and it is easy to miss because it comes and goes:
+the footer's right-hand slot (`/rc`) is drawn beside the mode line when it fits and on a line
+of its own *below* it when it does not — which happens when the rotating
+`/tasks to see subagents` hint makes the mode line long. That moves both breaks down by one
+(three agents blank the footer, four read as `dialog`), and it is why `stripAgentPanel`
+allows exactly one slot-only line (no `⏵⏸`, no `|`) between the mode line and `⏺ main`. The
+plan this was built from wanted the mode line *immediately* above the run, measured at
+220 columns; at 80 that stripped nothing.
+
+Three rules, all in `server/tmux.js`. **Strip, never widen** `hasComposer`'s window — its six
+is what stops a session showing this repo's permission fixtures from reading as a live box.
+**Anchor at both ends**: the run is the last thing on screen and the mode line is directly
+above it, because `⏺` is also the transcript's reply glyph. **Count `rows + N`**, never the
+`◯` rows alone. And on the mode line, **`← 1 agent` is not a count** — it reads `1` on every
+session with nothing running and `1` with seven agents running, and it is in every older
+pane fixture here; `shells` and `monitors` are read by an allow-list of nouns, because
+`1 feedback draft` has the same `N noun` shape. Below ~44 columns (~52 under bypass) the
+counts are cut with no ellipsis, so the noun is required and a cut count reads as absent.
+
+`parseGhost` reads its own capture and searches the bottom eleven lines for the composer's
+lower rule: the panel at its seven-line maximum puts that rule at the eleventh, and with the
+slot wrapped as well, the twelfth — so no suggestion is offered there. Nothing, not
+something wrong; but there is no slack left if Claude Code ever draws an eighth panel row.
+
 ## The footer's rotating slot
 
 **The footer's right-hand slot rotates.** It shows `/rc`, "new task? /clear to save…",

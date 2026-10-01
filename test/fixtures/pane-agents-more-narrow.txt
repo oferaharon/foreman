@@ -1,0 +1,23 @@
+⏺ Agent "Sleep agent 2" finished · 2m 51s
+
+⏺ Sleep agent 2 (240s) is still mid-sleep, nothing to do yet.
+
+✻ Waiting for 2 background agents to finish
+
+───────────────────────────────────────────────────────────────── alpha-narrow ─
+❯ check monitor status
+────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx: 7%                                        /rc
+  ⏵⏵ auto mode on · 4 shells, 1 monitor · ← 1 agent
+
+  ⏺ main
+  ◯ general-purpose  Sleep agent 1                     3m 42s · ↓ 40.9k tokens
+  ◯ general-purpose  Running /bin/sleep 240 in backgr… 2m 51s · ↓ 39.6k tokens
+  ◯ general-purpose  Running sleep 280 command         3m 42s · ↓ 36.5k tokens
+  ◯ general-purpose  Waiting for background sleep com… 1m 12s · ↓ 45.0k tokens
+  ◯ general-purpose  Blocking standalone sleep 360     3m 42s · ↓ 36.3k tokens
+  ↓ 2 more
+
+
+
+

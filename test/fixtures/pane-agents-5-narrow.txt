@@ -1,0 +1,23 @@
+✻ Waiting for 2 background agents to finish
+
+› Message from @af5f07a9d8db51145 (ctrl+o to expand)
+
+· Actualizing…
+  ⎿  Tip: Dynamic workflows let Claude write a script that orchestrates many
+     agents for you. Mention the keyword ultracode or ask Claude to use a
+     workflow directly.
+
+───────────────────────────────────────────────────────────────── alpha-narrow ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx: 7%                                        /rc
+  ⏵⏵ auto mode on · 3 shells, 1 monitor · ← 1 agent
+
+  ⏺ main
+  ◯ general-purpose  Running sleep 280 command         4m 54s · ↓ 36.7k tokens
+  ◯ general-purpose  Waiting for background sleep com… 1m 12s · ↓ 45.0k tokens
+  ◯ general-purpose  Blocking standalone sleep 360     4m 54s · ↓ 36.3k tokens
+  ◯ general-purpose  Sleep agent 6                        20s · ↓ 37.4k tokens
+  ◯ general-purpose  Sleep agent 7                         9s · ↓ 36.6k tokens
+
+

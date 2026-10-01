@@ -282,6 +282,13 @@ pane width every one of them depends on. Evidence:
   it — three separate measurements, and getting any of them wrong ships a wrong suggestion.**
   Every non-blank character after the caret must be dim, and a read ending in `…` is refused.
   [pane-parsers#ghost-text](docs/traps/pane-parsers.md#ghost-text)
+- `server/tmux.js` (`stripAgentPanel`, `parseBackground`) · `server/sessions.js` ·
+  `test/fixtures/pane-agents-*.txt` — **Background subagents draw a list *below* the
+  composer, and it made a five-agent session read as a `dialog` that queued every message —
+  MEASURED on v2.1.257 and v2.1.280; four at 80 columns, where `/rc` wraps under the mode
+  line.** Strip it first, anchored at both ends; `← 1 agent` is never a count; drop the
+  counts behind a box, never hold them.
+  [pane-parsers#the-agent-panel-below-the-composer](docs/traps/pane-parsers.md#the-agent-panel-below-the-composer)
 - `server/transcript.js` (`effort`) · `server/sessions.js` · `server/tmux.js` (the footer
   scrape) — **The footer's right-hand slot rotates.** Read effort from the transcript, never by
   scraping; model and `ctx:` are stable in the footer and are read there.

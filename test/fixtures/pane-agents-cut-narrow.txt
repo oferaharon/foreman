@@ -1,0 +1,50 @@
+  running
+
+⏺ Background command "Sleep for
+150 seconds in background"
+completed (exit code 0)
+
+⏺ Background sleep 150 finished
+  clean (exit 0).
+
+✻ Cogitated for 2s · done 7:41 PM
+  · 5 shells, 1 monitor still
+  running
+
+⏺ Background command "Sleep for
+151 seconds in background"
+completed (exit code 0)
+
+⏺ Background sleep 151 finished
+  clean too — both standalone
+  sleeps done, still waiting on
+  agent 3 and 5.
+
+✻ Churned for 2s · done 7:41 PM ·
+  5 shells, 1 monitor still
+  running
+
+⏺ Agent "Sleep agent 2" finished ·
+4m 5s
+
+⏺ Repeat notification for sleep
+  agent 2 — already reported,
+  nothing new.
+
+✻ Cogitated for 3s · done 7:42 PM
+  · 5 shells, 1 monitor still
+  running
+
+─────────────────────── alpha-fx ─
+❯ check the monitor status
+──────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx…
+  ⏵⏵ auto mode on · 5 shells, 1
+
+  ⏺ main
+  ◯ general-purpose 26s · ↓ 37.9k
+  ◯ general-purpose 32s · ↓ 41.5k
+  ◯ general-purpose 14s · ↓ 39.8k
+  ◯ general-purpose 10s · ↓ 36.4k
+  ◯ general-purpose 34s · ↓ 38.3k
+

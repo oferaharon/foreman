@@ -1637,6 +1637,30 @@ body.row-dragging * { cursor: row-resize !important; }
   display: block;
 }
 
+/* The second dot: something is still running behind this session's composer — subagents,
+   background shells, monitors. Same cell as the padlock above, and it wins that cell (they
+   overlap there: a 13px mark and a 7px dot in a 13.6px column), so `sessionRow` draws one
+   or the other and never both.
+
+   Zero vertical cost, measured on today's rail: an ordinary row 55.51px, a row folded into
+   its group 63.51px and a three-line team row 74.80px, each identical with the dot and
+   without it. `align-self: start` and `margin-top: 0` together put it 5.2px under the status
+   dot; the `0` is not redundant — `.session .dot` above gives every dot `0.5rem`, which
+   pushed the first probe 8px lower than intended. No margin that could escape the row,
+   because an open group's tint is tiled from full-width siblings.
+
+   Amber and pulsing, the `working` dot's own colour and keyframes, because the ruling is
+   that this *is* a working session — one whose work is out of sight. */
+.session .dot.bg-dot {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: start;
+  justify-self: center;
+  margin-top: 0;
+  background: var(--working);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
 /* Two states, and the shape no longer separates them — the shut padlock went with the
    certain case — so the colour carries it alone.
 
@@ -3049,7 +3073,8 @@ body.row-dragging * { cursor: row-resize !important; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.28; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dot.working { animation: none; }
+  .dot.working,
+  .session .dot.bg-dot { animation: none; }
 }
 
 /* ============================================================== main === */
@@ -4262,6 +4287,48 @@ body.row-dragging * { cursor: row-resize !important; }
    both this and the flex parent is what actually lets it shrink — without it the row grows
    past the composer and takes the pane's horizontal scroll with it. */
 .ghost-line-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- the background line ---- */
+
+/* What the session still has running behind its composer, in the terminal's own words:
+   `BACKGROUND  5 agents, 5 shells, 2 monitors`. First in the strip and a whole line of its
+   own — the same `flex: 0 0 100%` plus `min-width: 0` the merge block needs, for the same
+   reason (see `.composer-above.has-merge` above) — so it sits top left and never shares a
+   row with the suggestion or pushes interrupt sideways.
+
+   One line and a fixed height whatever it says: the text never wraps, so a count changing
+   during a burst moves nothing. Amber, the `working` ink, because the rail's second dot
+   wears the same colour for the same fact; no border and no fill, because it asks nothing
+   of anybody. */
+.composer-above.has-bg > .bg-line { flex: 0 0 100%; min-width: 0; }
+
+.bg-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  overflow: hidden;
+  font-size: 0.76rem;
+  color: var(--working);
+}
+
+/* The suggestion's tag, in this line's ink: same face, size and tracking, so the two read as
+   one register stacked above the box. */
+.bg-line-tag {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.bg-line-text {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;

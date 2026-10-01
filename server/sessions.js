@@ -580,6 +580,19 @@ export class SessionRegistry extends EventEmitter {
         activitySeconds: scrape?.state === 'working' ? scrape.activitySeconds ?? null : null,
         mode: scrape?.mode || null,
         bypass: this.#bypass(bind.pane.paneId, scrape?.bypass ?? null),
+        // What is still running behind the composer — subagents, background shells,
+        // monitors — or `null` while a box hides the line it is read from.
+        //
+        // **Dropped, not remembered**, and that is the opposite of `bypass` one line up on
+        // purpose. A session's permission mode cannot change while a box is up, so the last
+        // real `bypass` is still true behind it. Background work *does* end behind a box — a
+        // monitor fires, an agent finishes — so a remembered count is a claim that goes stale
+        // on its own, and what it costs is a row that pulses forever behind a permission
+        // prompt. The dot has no work to do there anyway: a session holding a box does not
+        // look idle, and looking idle while busy is the whole thing the dot exists to
+        // correct. `ghost` is the precedent — dropped for the same reason, one rule stricter
+        // than `footer`.
+        background: scrape?.background ?? null,
         unread,
         lastReply,
         queued: this.#queued(bind.pane.paneId),
@@ -650,6 +663,8 @@ export class SessionRegistry extends EventEmitter {
         activitySeconds: scrape.state === 'working' ? scrape.activitySeconds ?? null : null,
         mode: scrape.mode || null,
         bypass: this.#bypass(pane.paneId, scrape.bypass ?? null),
+        // Dropped rather than remembered, as in the bound loop above — see there.
+        background: scrape.background ?? null,
         unread: 0,
         lastReply: null,
         queued: this.#queued(pane.paneId),
@@ -705,6 +720,10 @@ export class SessionRegistry extends EventEmitter {
         // browser until some unrelated field happens to move — and the line above the
         // composer would go on offering a prompt the session has stopped suggesting.
         prev.ghost !== s.ghost ||
+        // An idle session whose only moving part is its background count — a monitor
+        // firing, an agent finishing — changes nothing else on the row. Without this the
+        // rail's second dot would appear and vanish whenever some unrelated field moved.
+        JSON.stringify(prev.background) !== JSON.stringify(s.background) ||
         prev.effort !== s.effort ||
         prev.lastActivity !== s.lastActivity ||
         // A task closing, or a lead's count moving, changes the row's third line and

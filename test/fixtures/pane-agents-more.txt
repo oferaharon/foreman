@@ -1,0 +1,50 @@
+⏺ 7 background agents launched (↓ to manage)
+   ├ Sleep agent 1
+   ├ Sleep agent 2
+   ├ Sleep agent 3
+   ├ Sleep agent 4
+   ├ Sleep agent 5
+   ├ Sleep agent 6
+   └ Sleep agent 7
+
+⏺ Bash(sleep 120)
+  ⎿  Running in the background (↓ to manage)
+
+⏺ Bash(sleep 121)
+  ⎿  Running in the background (↓ to manage)
+
+⏺ Monitor(watching /tmp/bgdot-clean-flag.txt for DONE)
+  ⎿  Monitor started · task bujwwc2zs · timeout 1800s
+  ⎿  Allowed by auto mode classifier
+
+⏺ All launched: 7 sleep agents, the flag-file monitor, and two background sleeps — not waiting on any of it.
+
+✻ Waiting for 7 background agents to finish
+
+› Message from @a4d6c30d9ef3886f9 (ctrl+o to expand)
+
+⏺ Sleep agent 6 (400s) finished.
+
+✻ Waiting for 7 background agents to finish
+
+› Message from @a5fa345ecbaf8693e (ctrl+o to expand)
+
+› Message from @ae01901a2a6d1a6ee (ctrl+o to expand)
+
+· Beaming…
+  ⎿  Tip: Run /ultrareview for a cloud-based multi-agent review that finds and verifies bugs in your branch — 3 free reviews left
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── alpha-wide ─
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx: 7%                                                                                                                                                                                    /rc
+  ⏵⏵ auto mode on · 5 shells, 1 monitor · ← 1 agent
+
+  ⏺ main
+  ◯ general-purpose  Sleep agent 1                                                                                                                                                                     8s · ↓ 36.2k tokens
+  ◯ general-purpose  Sleep agent 2                                                                                                                                                                     8s · ↓ 36.2k tokens
+  ◯ general-purpose  Sleep agent 3                                                                                                                                                                     8s · ↓ 33.5k tokens
+  ◯ general-purpose  Sleep agent 4                                                                                                                                                                     8s · ↓ 36.4k tokens
+  ◯ general-purpose  Sleep agent 5                                                                                                                                                                     8s · ↓ 36.4k tokens
+  ↓ 2 more
+

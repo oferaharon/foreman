@@ -1,0 +1,50 @@
+⏺ Sleep agent 6 (400s) also hit the sandbox block on standalone sleep and correctly refused to substitute run_in_background — reported the blocker instead of faking "done," same as agent 1.
+
+✻ Waiting for 4 background agents to finish
+
+⏺ Agent "Sleep agent 6" finished · 26s
+
+⏺ Agent "Sleep agent 5" finished · 28s
+
+⏺ Both duplicate/trailing finish notices — sleep agent 6 and sleep agent 5, both already reported — nothing new.
+
+✻ Waiting for 2 background agents to finish
+
+› Message from @general-purpose (ctrl+o to expand)
+
+⏺ Sleep agent 5 has now completed its sleep and reports "done" (it previously said "pending").
+
+✻ Waiting for 2 background agents to finish
+
+⏺ Background command "Sleep for 120 seconds in background" completed (exit code 0)
+
+⏺ The 120s background sleep finished cleanly.
+
+✻ Waiting for 2 background agents to finish
+
+⏺ Background command "Sleep for 121 seconds in background" completed (exit code 0)
+
+⏺ The 121s background sleep finished too — both plain Bash background jobs done.
+
+✻ Waiting for 2 background agents to finish
+
+❯ Reply with the single word pong.
+
+⏺ pong
+
+✻ Waiting for 2 background agents to finish
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── alpha-wide ─
+❯ check on the remaining sleep agents
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx: 8%                                                                                                                                                                                    /rc
+  ⏵⏵ auto mode on · 3 shells, 1 monitor · ← 1 agent
+
+  ⏺ main
+  ◯ general-purpose  Running sleep 240 command                                                                                                                                                      4m 5s · ↓ 36.2k tokens
+  ◯ general-purpose  Blocking standalone sleep call                                                                                                                                                 4m 5s · ↓ 36.5k tokens
+  ◯ general-purpose  Sleep agent 4                                                                                                                                                                     8s · ↓ 36.4k tokens
+  ◯ general-purpose  Sleep agent 5                                                                                                                                                                    28s · ↓ 43.7k tokens
+  ◯ general-purpose  Sleep agent 7                                                                                                                                                                    13s · ↓ 36.8k tokens
+
+
