@@ -53,6 +53,9 @@ import { asideFolded, ghostSend, hideFinished, isFinishedState } from './prefs.j
 import { roomFolded } from './prefs.js';
 // …and the `files` modal's remembered grid/list choice, on its own line for the same reason.
 import { filesView } from './prefs.js';
+// What a session still has running behind its composer, in Claude Code's own words. Two
+// readers — the rail row's second dot and the line above the composer — and one answer.
+import { backgroundWords } from './background.js';
 // What a closed side panel has room to say. The ninth pure module under `web/`, shipped by
 // item 1 of this feature with nothing wired to it; the lead's aside is the first half to
 // wear it. `asideStripFacts` reads the same `s.team` object `teamLine` reads, which is what
@@ -3422,6 +3425,33 @@ function bindingMark(s) {
 }
 
 /**
+ * The second dot: this session still has something running behind its composer.
+ *
+ * The turn can be over — `Stop` fired, the composer is drawn, the row honestly reads idle —
+ * while subagents, background shells or monitors it started go on working. The terminal
+ * says so on its mode line and in a panel under the composer; this is the rail saying it
+ * too. It pulses, in the `working` colour, because the maintainer's ruling is that this
+ * *is* a working session — one whose work you cannot see — and a quiet count was argued
+ * for and refused: more text does not read as activity.
+ *
+ * It costs the row nothing. It lives in the reserved cell under the status dot (row 2,
+ * column 1 — the same cell `bindingMark` draws in), so the row's height is measured
+ * identical with and without it, on an ordinary row, a row folded into its group and a
+ * three-line team row alike, and it carries no margin that could cut through a group's
+ * tiled tint.
+ *
+ * Never a notification — see `needsKind` in `web/notify.js`.
+ */
+function backgroundDot(s) {
+  const words = backgroundWords(s.background);
+  if (!words) return null;
+  const dot = document.createElement('span');
+  dot.className = 'dot bg-dot';
+  dot.title = `Background: ${words}`;
+  return dot;
+}
+
+/**
  * The rail's shared-room row: one persistent line, and the count of what has arrived since
  * anybody last looked.
  *
@@ -4627,8 +4657,17 @@ function sessionRow(s, fold = null) {
   dot.className = `dot ${s.status}`;
   btn.append(dot);
 
-  const mark = bindingMark(s);
-  if (mark) btn.append(mark);
+  // The cell under the status dot holds one of two things, never both: they overlap there
+  // (a 13px padlock and a 7px dot in a 13.6px column, measured), so one must give way. The
+  // background dot wins, on the maintainer's ruling: it is true only for a window and it is
+  // the thing he asked to be shown, while the binding is a standing fact that can be read a
+  // second later — the padlock comes back the moment the work ends.
+  const bg = backgroundDot(s);
+  if (bg) btn.append(bg);
+  else {
+    const mark = bindingMark(s);
+    if (mark) btn.append(mark);
+  }
 
   btn.append(fold ? foldedTitle(s, fold) : plainTitle(s));
 
@@ -11942,6 +11981,7 @@ function createPane(slot, host) {
       composerEl.autoGrow();
     } else {
       renderQueue();
+      renderBackgroundLine();
       renderGhostLine();
       updateComposerHint();
     }
@@ -13061,6 +13101,15 @@ function createPane(slot, host) {
     const ghost = document.createElement('div');
     ghost.className = 'ghost-line';
 
+    /*
+     * And the background line, on the same terms again — built empty, appended only while
+     * the session has something running behind it, so a session with nothing in the
+     * background is byte-identical to the layout before this existed. It goes first, top
+     * left, on a line of its own: background · merge · suggestion · interrupt.
+     */
+    const bgLine = document.createElement('div');
+    bgLine.className = 'bg-line';
+
     let stop = null;
     let stopLabel = null;
     if (s.interactive) {
@@ -13111,7 +13160,7 @@ function createPane(slot, host) {
     inner.append(queue, strip, above, ta, row);
 
     closeCompletion();
-    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, stop, stopLabel, autoGrow };
+    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, bgLine, stop, stopLabel, autoGrow };
     lastComposerSig = composerSig(s);
     renderAttachments();
     renderQueue();
@@ -13120,10 +13169,77 @@ function createPane(slot, host) {
     // tree — the wrap is appended by the caller — which is safe only because nothing here
     // guards on `isConnected` and nothing here measures the document. The room and the
     // task list do both, which is why `renderMain` mounts before it paints them.
+    renderBackgroundLine();
     renderMergeQueue();
     renderGhostLine();
     updateComposerHint();
     return wrap;
+  }
+
+  /**
+   * The background line: what this session still has running behind its composer.
+   *
+   * The turn is over and the composer is ready — typing goes straight in — but subagents,
+   * background shells or monitors it started are still working, and the terminal says so on
+   * its mode line. This is that line, in the terminal's own words behind a quiet tag:
+   * `BACKGROUND  5 agents, 5 shells, 2 monitors`. The words are the maintainer's choice over
+   * a friendlier invented sentence; `web/background.js` spells them for this and for the rail
+   * row's second dot alike.
+   *
+   * **It is not in `composerSig`.** During a burst the counts move every few seconds, and a
+   * signature carrying them would tear the whole textarea down under a reader's cursor
+   * several times a minute. It rides `renderHead`'s roster beat instead, beside
+   * `renderQueue` and `renderGhostLine`, which is the merge queue's own rule.
+   *
+   * **Membership rather than `hidden`**, like the merge block and the suggestion, because
+   * `.composer-above:empty` is what collapses the strip for a session with nothing in it.
+   *
+   * **First, and on a line of its own.** `prepend` here, and `renderMergeQueue` inserts after
+   * this line when it is there, so the order is the same whichever of the two painted last.
+   * It is exactly one line tall whenever it exists, so a count changing moves nothing; it
+   * appearing or going is the one moment the strip changes height, and that is when a reader
+   * pinned to the bottom of the transcript is kept there.
+   *
+   * Never a notification — `needsKind` in `web/notify.js` says why.
+   */
+  function renderBackgroundLine() {
+    if (!composerEl?.bgLine) return;
+    const s = current();
+    const { bgLine, above } = composerEl;
+
+    const words = s?.interactive ? backgroundWords(s.background) : '';
+    if (!words) {
+      bgLine.replaceChildren();
+      bgLine.remove();
+      above.classList.remove('has-bg');
+      return;
+    }
+    // Nothing to repaint if it already says this — the line sits above a textarea somebody
+    // may be typing into, and the roster beat arrives every couple of seconds.
+    if (bgLine.dataset.sig === words && bgLine.parentNode === above) return;
+    bgLine.dataset.sig = words;
+
+    const tag = document.createElement('span');
+    tag.className = 'bg-line-tag';
+    tag.textContent = 'background';
+
+    const body = document.createElement('span');
+    body.className = 'bg-line-text';
+    body.textContent = words;
+    body.title = words;
+
+    bgLine.replaceChildren(tag, body);
+
+    if (bgLine.parentNode !== above) {
+      // Measured before the line goes in, for `renderMergeQueue`'s reason: this is the one
+      // moment the strip grows and the transcript's bottom edge moves up under a reader.
+      const stream = streamEl?.stream;
+      const pinned =
+        stream && above.isConnected ? stream.scrollHeight - stream.scrollTop - stream.clientHeight < 40 : false;
+      above.prepend(bgLine);
+      above.classList.add('has-bg');
+      if (pinned) stream.scrollTop = stream.scrollHeight;
+    }
   }
 
   /**
@@ -13521,7 +13637,11 @@ function createPane(slot, host) {
     const foot = mergeFoot(data, rows);
     if (foot) merge.append(foot);
 
-    above.prepend(merge);
+    // Below the background line when there is one, so the strip reads background · merge ·
+    // suggestion · interrupt whichever of the two painted last.
+    const { bgLine } = composerEl;
+    if (bgLine?.parentNode === above) bgLine.after(merge);
+    else above.prepend(merge);
     above.classList.add('has-merge');
     list.scrollTop = keepScroll;
     if (pinned) stream.scrollTop = stream.scrollHeight;

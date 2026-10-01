@@ -62,6 +62,12 @@ const quietWorker = (s) => s?.team?.role === 'worker' && !s.team.stuck;
  * is announced as an ordinary permission prompt. That was the reasoning when the panel
  * refused the gate and it is unchanged by the 2026-09-19 ruling that made it answerable;
  * only the *body* below changed, from "go to the Mac" to "come and read it".
+ *
+ * **Background work is deliberately not on this list, and never will be.** A session still
+ * running subagents, shells or monitors behind an idle composer (`s.background`) pulses a
+ * second dot on its rail row and says so above its composer — and that is all. It is
+ * information, not a summons: nothing is waiting on anybody, and it would fire every time a
+ * session backgrounded a shell. Its absence here is a decision, not an oversight.
  */
 export function needsKind(s) {
   if (!s || quietWorker(s)) return null;
