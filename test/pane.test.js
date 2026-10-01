@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parsePane } from '../server/tmux.js';
+import { parsePane, stripAgentPanel } from '../server/tmux.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const fixture = (name) => fs.readFileSync(path.join(FIXTURES, name), 'utf8');
@@ -319,4 +319,143 @@ test('the two widths agree on everything answerable and disagree only about the 
   assert.equal(wide.detail.length, 3);
   assert.equal(narrow.detail.length, 8, 'the path tail and the wrapped paragraph');
   assert.equal(narrow.detail[1], '-trust-1');
+});
+
+/*
+ * Background activity, and the agent panel that broke the parser.
+ *
+ * Real captures from Claude Code v2.1.280, in the sandbox's `alpha` (and `beta` for the
+ * bypass pair). The `pane-agents-*` panels come from two sessions created at 220×50 and
+ * 80×23 and never resized, because a capture taken just after a resize can still be
+ * mid-redraw — one batch was thrown away for exactly that. The 34-column, monitor and bypass
+ * captures were resized to width and taken after the pane had settled, and read line by line.
+ *
+ * With background subagents running, Claude Code draws them in a panel *below* the composer,
+ * and that panel pushed the footer and mode line out of every reader's window: at four
+ * agents `mode`, `bypass`, `model` and `ctx` went null, at five the pane read as a `dialog`
+ * titled with its own footer, and `assertNotBlocked` refused everything. At 80 columns the
+ * footer's right-hand `/rc` slot can wrap onto a line of its own between the mode line and
+ * the panel, which moved both breaks down by one — the `-narrow` fixtures for three and four
+ * agents are exactly that shape, and are the ones that pin the anchor.
+ */
+const AGENT_PANEL = [
+  // [fixture, agents, shells, monitors]
+  ['pane-agents-3-narrow.txt', 3, 2, 1], // was idle with mode/bypass/model/ctx all null
+  ['pane-agents-4.txt', 4, 3, 1], // was idle with mode/bypass/model/ctx all null
+  ['pane-agents-4-narrow.txt', 4, 3, 1], // was `dialog`
+  ['pane-agents-5.txt', 5, 3, 1], // was `dialog`
+  ['pane-agents-5-narrow.txt', 5, 3, 1], // was `dialog`
+  ['pane-agents-more.txt', 7, 5, 1], // was `dialog`
+  ['pane-agents-more-narrow.txt', 7, 4, 1], // was `dialog`
+];
+
+test('an agent panel under the composer no longer reads as a dialog', () => {
+  for (const [file, agents, shells, monitors] of AGENT_PANEL) {
+    const text = fixture(file);
+    assert.match(text, /^\s*⏺ main\s*$/m, `${file}: the panel is on screen`);
+    const state = parsePane(text);
+    assert.notEqual(state.state, 'dialog', file);
+    assert.equal(state.dialog, null, file);
+    assert.equal(state.mode, 'auto', file);
+    assert.equal(state.bypass, false, file);
+    assert.equal(state.model, 'Sonnet 5', file);
+    assert.equal(typeof state.contextPct, 'number', file);
+    assert.deepEqual(state.background, { agents, shells, monitors }, file);
+  }
+});
+
+test('the 80-column shape: the `/rc` slot wrapped between the mode line and the panel', () => {
+  for (const file of ['pane-agents-3-narrow.txt', 'pane-agents-4-narrow.txt']) {
+    const lines = fixture(file).split('\n');
+    const mode = lines.findIndex((l) => /⏵⏵ auto mode on/.test(l));
+    assert.match(lines[mode + 1], /^\s+\/rc\s*$/, `${file}: the slot sits on its own line`);
+    assert.match(lines[mode + 2], /^\s*$/, file);
+    assert.match(lines[mode + 3], /^\s*⏺ main\s*$/, file);
+  }
+});
+
+test('five rows and `↓ N more` count the hidden ones too', () => {
+  for (const file of ['pane-agents-more.txt', 'pane-agents-more-narrow.txt']) {
+    const text = fixture(file);
+    assert.equal(text.match(/^\s*◯ /gm).length, 5, `${file}: the list caps at five rows`);
+    assert.match(text, /^\s*↓ 2 more\s*$/m, file);
+    assert.equal(parsePane(text).background.agents, 7, file);
+  }
+});
+
+/*
+ * `← 1 agent` is a navigation hint on every mode line of every session. It read `1` with
+ * nothing running and `1` with seven agents running, and it is in every pane fixture this
+ * file had before background activity existed — so reading it as a count would have lit the
+ * rail's second dot on every row, permanently.
+ */
+test('`← 1 agent` is not an agent count', () => {
+  for (const file of ['pane-idle.txt', 'pane-bypass.txt', 'pane-working.txt', 'pane-working-elapsed.txt']) {
+    const text = fixture(file);
+    assert.match(text, /← 1 agent/, `${file} carries the hint`);
+    assert.deepEqual(parsePane(text).background, { agents: 0, shells: 0, monitors: 0 }, file);
+  }
+  // …and with seven agents really running, it still reads 1 on the line itself.
+  assert.match(fixture('pane-agents-more.txt'), /· ← 1 agent/);
+});
+
+test('shells and monitors come off the mode line by name', () => {
+  const cases = [
+    ['pane-bg-monitor.txt', { agents: 0, shells: 0, monitors: 1 }],
+    ['pane-bg-monitor-narrow.txt', { agents: 0, shells: 0, monitors: 1 }],
+    ['pane-bg-bypass.txt', { agents: 0, shells: 2, monitors: 1 }],
+  ];
+  for (const [file, want] of cases) assert.deepEqual(parsePane(fixture(file)).background, want, file);
+
+  // The same counts under bypass, which is nine characters longer and so cut earlier.
+  const bypass = parsePane(fixture('pane-bg-bypass.txt'));
+  assert.equal(bypass.bypass, true);
+  assert.equal(bypass.mode, null, 'bypass is not a mode');
+});
+
+/*
+ * Below ~44 columns (~52 under bypass) the counter segment is cut with no ellipsis — the
+ * line simply ends. A count whose noun was cut off reads as absent: under-reported, never
+ * invented.
+ */
+test('a count cut off before its noun reads as absent', () => {
+  const narrow = fixture('pane-agents-cut-narrow.txt');
+  assert.match(narrow, /⏵⏵ auto mode on · \d+ shells, 1\s*$/m, 'the monitor count lost its noun');
+  const state = parsePane(narrow);
+  assert.equal(state.state, 'idle', 'five agents at 34 columns, and still not a dialog');
+  assert.equal(state.background.monitors, 0);
+  assert.equal(state.background.agents, 5);
+
+  const bypass = fixture('pane-bg-bypass-narrow.txt');
+  assert.match(bypass, /⏵⏵ bypass permissions on · 2 shells, 1\s*$/m);
+  assert.deepEqual(parsePane(bypass).background, { agents: 0, shells: 2, monitors: 0 });
+});
+
+test('a box hides the mode line, and that is unknown rather than none', () => {
+  for (const file of ['prompt-bash.txt', 'dialog-model.txt', 'dialog-choice-single.txt', 'pane-trust-gate.txt']) {
+    assert.equal(parsePane(fixture(file)).background, null, file);
+  }
+});
+
+/*
+ * The strip is anchored at both ends — last on screen, mode line directly above — because
+ * `⏺` is also the transcript's reply glyph. These start from a real capture and change one
+ * thing each, in the test, so the capture itself stays untouched.
+ */
+test('the panel is only stripped when it is the last thing on screen', () => {
+  const real = fixture('pane-agents-5.txt').trimEnd();
+  assert.equal(stripAgentPanel(real).agents, 5);
+  const notLast = stripAgentPanel(`${real}\n  something drawn below it`);
+  assert.equal(notLast.agents, 0);
+  assert.equal(notLast.text, `${real}\n  something drawn below it`);
+});
+
+test('the panel is only stripped with the mode line directly above it', () => {
+  const real = fixture('pane-agents-4-narrow.txt');
+  // One slot line is allowed (that is the 80-column shape); a second line between is not.
+  const twoLines = real.replace(/^(\s+\/rc\s*)$/m, '$1\n  another line');
+  assert.equal(stripAgentPanel(twoLines).agents, 0);
+  // Nor is a line carrying the footer's `|`, which the slot never does.
+  const footerShaped = real.replace(/^\s+\/rc\s*$/m, '  alpha (main) | Sonnet 5');
+  assert.equal(stripAgentPanel(footerShaped).agents, 0);
 });

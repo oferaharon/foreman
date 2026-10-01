@@ -1,0 +1,50 @@
+  6
+  7
+  8
+  9
+  10
+  11
+  12
+  13
+  14
+  15
+  16
+  17
+  18
+  19
+  20
+  21
+  22
+  23
+  24
+  25
+  26
+  27
+  28
+  29
+  30
+  31
+  32
+  33
+  34
+  35
+  36
+  37
+  38
+  39
+  40
+  41
+  42
+  43
+  44
+  45
+
+✻ Crunched for 1s · done 7:50 PM · 2 shells, 1
+  monitor still running
+
+──────────────────────────────── beta-bypass ─
+❯ check the background sleeps and monitor sta…
+──────────────────────────────────────────────
+  beta (main) | Sonnet 5 | ctx: 6%
+  ⏵⏵ bypass permissions on · 2 shells, 1
+

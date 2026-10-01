@@ -1,0 +1,50 @@
+✻ Waiting for 2 background agents to finish
+
+› Message from @general-purpose (ctrl+o to expand)
+
+⏺ Sleep agent 5 has now completed its sleep and reports "done" (it previously said "pending").
+
+✻ Waiting for 2 background agents to finish
+
+⏺ Background command "Sleep for 120 seconds in background" completed (exit code 0)
+
+⏺ The 120s background sleep finished cleanly.
+
+✻ Waiting for 2 background agents to finish
+
+⏺ Background command "Sleep for 121 seconds in background" completed (exit code 0)
+
+⏺ The 121s background sleep finished too — both plain Bash background jobs done.
+
+✻ Waiting for 2 background agents to finish
+
+❯ Reply with the single word pong.
+
+⏺ pong
+
+✻ Waiting for 2 background agents to finish
+
+› Message from @a90cea37f914e1b4f (ctrl+o to expand)
+
+⏺ Sleep agent 2 (240s) finished.
+
+✻ Waiting for 2 background agents to finish
+
+⏺ Agent "Sleep agent 2" finished · 4m 10s
+
+⏺ Duplicate finish notice for sleep agent 2 — already reported.
+
+✻ Waiting for 1 background agent to finish
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── alpha-wide ─
+❯ check the flag file monitor status
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx: 8%                                                                                                                                                                                    /rc
+  ⏵⏵ auto mode on · 3 shells, 1 monitor · ← 1 agent
+
+  ⏺ main
+  ◯ general-purpose  Blocking standalone sleep call                                                                                                                                                4m 52s · ↓ 36.5k tokens
+  ◯ general-purpose  Sleep agent 4                                                                                                                                                                     8s · ↓ 36.4k tokens
+  ◯ general-purpose  Sleep agent 5                                                                                                                                                                    28s · ↓ 43.7k tokens
+  ◯ general-purpose  Sleep agent 7                                                                                                                                                                    13s · ↓ 36.8k tokens
+

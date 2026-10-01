@@ -380,7 +380,139 @@ function parseBypass(recent) {
   return null;
 }
 
-export function parsePane(text) {
+/*
+ * The agent panel, and why it is cut off before anything else reads the pane.
+ *
+ * While a session has background subagents, Claude Code draws a list of them *below* the
+ * composer — one blank row under the mode line, then:
+ *
+ *     ⏺ main
+ *     ◯ general-purpose  Sleep agent 1                  7s · ↓ 33.3k tokens
+ *     …at most five `◯` rows…
+ *     ↓ 2 more
+ *
+ * Every reader below looks at the last few non-empty lines — `hasComposer` six, `parseMode`
+ * and `parseBypass` five, the footer scrape six — so that list pushes the composer out from
+ * under all of them. Measured on v2.1.257 and again on v2.1.280 in the sandbox: at four
+ * agents the session still reads idle but `mode`, `bypass`, `model` and `ctx:` all go null;
+ * at five `hasComposer` misses and the whole pane reads as a `dialog` whose title is the
+ * footer line, so `assertNotBlocked` refuses everything and a message sent to a session
+ * sitting at an empty composer goes to the queue and stays there.
+ *
+ * So the panel is stripped, and stripped *first*. Not by widening `hasComposer`'s window:
+ * that six is deliberate — a session showing this repo's own permission fixtures scrolls
+ * `⏵⏵`-shaped text through its pane, and a wider window would start believing it. The same
+ * move as `stripPreviewPanel` in `question.js`: recognise the thing that is in the way, take
+ * it off, and let every parser see the screen it was written for.
+ *
+ * Anchored at both ends, because `⏺` is also the transcript's own reply glyph and a reply
+ * that happens to read `⏺ main` must not be eaten:
+ *
+ * - **The run is the last thing on screen.** Optional `↓ N more`, then one or more `◯`
+ *   rows, then `⏺ main`, walking up from the bottom.
+ * - **The mode line is directly above it** — blank rows between, and at most one line that
+ *   holds only the footer's right-hand slot (no `⏵⏸`, no `|`). That one line is not
+ *   decoration: at 70–80 columns, when the mode line is long (counts plus the rotating
+ *   `/tasks to see subagents` hint), `/rc` no longer fits beside it and wraps onto a line of
+ *   its own between the mode line and the panel. Measured on v2.1.280 at 80×23, where the
+ *   extra line moved the break down by one — four agents read as `dialog`, three blanked the
+ *   footer — and an anchor that wanted the mode line *immediately* above stripped nothing.
+ *
+ * What comes back is the text with the panel gone and the number of agents it listed. The
+ * list caps at five rows and says `↓ N more` for the rest, so the count is rows + N, never
+ * rows alone — a parser counting `◯` reports five for a session running forty.
+ *
+ * One neighbour has almost no slack left, and it is worth knowing before Claude Code ever
+ * draws an eighth panel row: `parseGhost` reads its own `-pe` capture and looks for the
+ * composer's lower rule within the bottom eleven lines. With the panel at its seven-line
+ * maximum the rule is the eleventh line, and with the slot wrapped as above it is the
+ * twelfth — so a suggestion reads as none there. Nothing, rather than something wrong.
+ *
+ * @returns {{ text: string, agents: number }}
+ */
+const PANEL_HEAD_RE = /^\s*⏺\s+main\s*$/;
+const PANEL_ROW_RE = /^\s*◯\s+\S/;
+const PANEL_MORE_RE = /^\s*↓\s+(\d+)\s+more\s*$/;
+
+export function stripAgentPanel(text) {
+  const lines = text.split('\n');
+  const none = { text, agents: 0 };
+  let i = lines.length - 1;
+  const skipBlank = () => {
+    while (i >= 0 && !lines[i].trim()) i -= 1;
+  };
+
+  skipBlank();
+  let more = 0;
+  const tail = i >= 0 ? PANEL_MORE_RE.exec(lines[i]) : null;
+  if (tail) {
+    more = Number(tail[1]);
+    i -= 1;
+    skipBlank();
+  }
+
+  let rows = 0;
+  while (i >= 0 && PANEL_ROW_RE.test(lines[i])) {
+    rows += 1;
+    i -= 1;
+    skipBlank();
+  }
+  if (!rows || i < 0 || !PANEL_HEAD_RE.test(lines[i])) return none;
+  const head = i;
+
+  i -= 1;
+  skipBlank();
+  if (i >= 0 && !/[⏵⏸|]/.test(lines[i])) {
+    i -= 1;
+    skipBlank();
+  }
+  if (i < 0 || !/[⏵⏸]/.test(lines[i])) return none;
+
+  return { text: lines.slice(0, head).join('\n'), agents: rows + more };
+}
+
+/**
+ * What is still running behind this session's composer, in the terminal's own nouns.
+ *
+ * `shells` and `monitors` ride on the mode line, as one segment straight after the mode
+ * phrase — `⏵⏵ auto mode on · 5 shells, 2 monitors · ← 1 agent` — and `agents` is what
+ * `stripAgentPanel` counted, because subagents are never in that segment at all.
+ *
+ * **`← 1 agent` is not a count.** It is a navigation hint, it is on every mode line of every
+ * session, it reads `1` with nothing running and `1` with seven agents running, and it is in
+ * every pane fixture this repo has. A `/(\d+)\s+agents?/` here would pulse every row in the
+ * rail, permanently. So the nouns are an **allow-list** — `shell` and `monitor`, nothing
+ * else — rather than "any `N noun` segment", which would also count the `1 feedback draft`
+ * that has been seen on the same line.
+ *
+ * Below ~44 columns (~52 under `bypass permissions on`) the segment is cut with **no
+ * ellipsis** — `2 monito`, or a bare `1`. Requiring the noun makes a cut count read as
+ * absent: under-reported, never invented, and never mis-read low, because the digits come
+ * first and are cut last.
+ *
+ * `null` when there is no mode line in view — a box or a picker owns the footer — which is
+ * not "nothing running", the same distinction `parseBypass` draws. `sessions.js` drops it
+ * rather than remembering it; see there.
+ *
+ * @returns {{ agents: number, shells: number, monitors: number } | null}
+ */
+const COUNT_RE = /\b(\d+)\s+(shell|monitor)s?\b/g;
+
+function parseBackground(recent, agents) {
+  const line = recent
+    .slice(-5)
+    .find(
+      (l) => /[⏵⏸]/.test(l) && (/bypass(ing)? permissions/i.test(l) || MODES.some((m) => m.match.test(l))),
+    );
+  if (!line) return null;
+  const counts = { agents, shells: 0, monitors: 0 };
+  for (const [, n, noun] of line.matchAll(COUNT_RE)) counts[`${noun}s`] = Number(n);
+  return counts;
+}
+
+export function parsePane(raw) {
+  // Everything below reads the screen with the agent panel taken off — see `stripAgentPanel`.
+  const { text, agents } = stripAgentPanel(raw);
   const lines = text.split('\n');
   const nonEmpty = lines.filter((l) => l.trim());
   const recent = nonEmpty.slice(-14);
@@ -465,6 +597,7 @@ export function parsePane(text) {
     question,
     mode: parseMode(recent),
     bypass: parseBypass(recent),
+    background: parseBackground(recent, agents),
   };
 }
 
@@ -485,6 +618,7 @@ export async function readPaneState(paneId) {
       question: null,
       mode: null,
       bypass: null,
+      background: null,
     };
   }
 }

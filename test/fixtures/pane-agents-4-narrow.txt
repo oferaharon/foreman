@@ -1,0 +1,23 @@
+
+⏺ Agent "Sleep agent 3" finished · 4m 56s
+
+⏺ Already logged — sleep agent 3 done.
+
+✻ Waiting for 1 background agent to finish
+
+───────────────────────────────────────────────────────────────── alpha-narrow ─
+❯ check on the remaining sleep agents
+────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Sonnet 5 | ctx: 8%
+  ⏵⏵ auto mode on · 3 shells, 1 monitor · /tasks to see subagents · ← 1 agent
+                                                                           /rc
+
+  ⏺ main
+  ◯ general-purpose  Waiting for background sleep com… 1m 12s · ↓ 45.0k tokens
+  ◯ general-purpose  Blocking standalone sleep 360     5m 26s · ↓ 36.3k tokens
+  ◯ general-purpose  Sleep agent 6                        20s · ↓ 37.4k tokens
+  ◯ general-purpose  Sleep agent 7                         9s · ↓ 36.6k tokens
+
+
+
+
