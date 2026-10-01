@@ -53,6 +53,29 @@ footer's model and context percentage. No restart is needed to graduate. Claude 
 re-reads its hook config while running, so a session picks the hook up the next time you
 speak to it, whenever it was started.
 
+### Background work
+
+A session can finish its turn — composer drawn, the row honestly **idle** — while
+subagents, background shells or monitors it started go on running. The terminal says so
+in two places, and the panel reads both: the mode line (`⏵⏵ auto mode on · 5 shells,
+2 monitors`) and a list of agents Claude Code draws *under* the composer (`⏺ main`, up to
+five `◯` rows, then `↓ N more`).
+
+The rail row gets a **second dot**, amber and pulsing, under the status dot, in the cell the
+binding padlock uses — the dot wins that cell while work is running and the padlock comes
+back when it ends. It costs no height. The composer gets one quiet line, top left, in the
+terminal's own words: `BACKGROUND  5 agents, 5 shells, 2 monitors`. Neither ever raises a
+notification: nothing is waiting on you, and typing goes straight in. No phone change.
+
+Three things about the reading, each measured. `← 1 agent`, on every mode line of every
+session, is a navigation hint and is never read as a count. A box hides the mode line, and
+the counts are then **dropped** rather than remembered — background work can end behind a
+box, and a remembered count would be a row pulsing forever behind a prompt. And the agent
+list under the composer used to break the parser outright: at five agents (four at 80
+columns, where the footer's `/rc` slot can wrap onto a line of its own) the panel lost the
+composer, called the session a `dialog` and queued every message sent to it. It is now
+stripped before anything else reads the pane — see the trap in `docs/traps/pane-parsers.md`.
+
 ### Rate-limit gauges
 
 Two thin bars for a subscription account's own usage: a five-hour window that refills
@@ -808,7 +831,9 @@ the mark would be twenty identical reassurances, and a mark on every row is not 
 the one row that differed had to be hunted for among them. `label` keeps its padlock even
 though it is exact, because it is still the panel reasoning and a title can be shared by
 every session in a repo. The rule for anything added later is the same: if the panel
-wasn't *told*, it draws.
+wasn't *told*, it draws. The one thing that takes the cell from it is the background dot
+(see *Background work*): the two overlap there, so while a session has work running behind
+its composer the dot is drawn and the padlock is not.
 
 The cell stays empty rather than closing up. The row's first grid column is a fixed
 0.85rem and the meta line beside it is taller than the mark, so a title sits at the same x
