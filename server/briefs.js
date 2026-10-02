@@ -9,6 +9,7 @@ import { leadBrief } from './lead-brief.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { teamDir, planPath, readTeam, teamDefaults } from './team.js';
 import { sessionBrief } from './session-launch.js';
+import { resolveProjectMcp } from './project-mcp.js';
 
 /**
  * One assembly of what a session is launched *reading* — used by the launch that writes
@@ -75,8 +76,19 @@ export function foremanEntry({ repo, role, task = null, port = PORT }) {
  *
  * `userConfigFile` is the test seam — the same shape `detectForge`'s `deps` has, and for
  * the same reason: no test should need a real `~/.claude.json`.
+ *
+ * `projectMcpServers` is the team's list of the repo's own project servers to carry
+ * (`team.json`). What comes back as `projectServers` is the names actually copied — the
+ * brief names those and `leadSettings` allows those, never the list as asked.
  */
-export async function leadToolSurface({ repo, teamDir: tDir, forge, port = PORT, userConfigFile = USER_CLAUDE_CONFIG }) {
+export async function leadToolSurface({
+  repo,
+  teamDir: tDir,
+  forge,
+  projectMcpServers = [],
+  port = PORT,
+  userConfigFile = USER_CLAUDE_CONFIG,
+}) {
   const mcpServers = { foreman: foremanEntry({ repo, role: 'lead', port }) };
   const notes = [];
   let effective = forge;
@@ -108,7 +120,15 @@ export async function leadToolSurface({ repo, teamDir: tDir, forge, port = PORT,
       effective = { ...forge, reading: READINGS.push, forge: null, via: null };
     }
   }
-  return { mcpServers, forge: effective, notes };
+  // The repo's own project servers, last, so the panel's entries are already on the
+  // surface and `taken` keeps a project server from landing on either name. The same call a
+  // build worker's dispatch makes, with the same repo and the same list — so a lead and its
+  // workers cannot disagree about which of the repo's servers this team carries. Its notes
+  // join the forge's: a server ticked and not given is said, never dropped.
+  const project = resolveProjectMcp({ repo, allow: projectMcpServers, taken: Object.keys(mcpServers) });
+  Object.assign(mcpServers, project.servers);
+  notes.push(...project.notes);
+  return { mcpServers, forge: effective, notes, projectServers: project.names };
 }
 
 /**
@@ -126,10 +146,11 @@ export async function leadToolSurface({ repo, teamDir: tDir, forge, port = PORT,
 export async function assembleLead({ repo, teamDir: tDir, decisionsFile, config = {}, port = PORT, fresh = false, deps = {} }) {
   const detected = await resolveForge(repo, { fresh, ...(deps.forge || {}) });
   const base = (await resolveBaseBranch(repo)).branch;
-  const { mcpServers, forge, notes } = await leadToolSurface({
+  const { mcpServers, forge, notes, projectServers } = await leadToolSurface({
     repo,
     teamDir: tDir,
     forge: detected,
+    projectMcpServers: config?.projectMcpServers ?? [],
     port,
     ...(deps.userConfigFile ? { userConfigFile: deps.userConfigFile } : {}),
   });
@@ -145,8 +166,9 @@ export async function assembleLead({ repo, teamDir: tDir, decisionsFile, config 
     // repo can carry its own, and a brief is generated per repo.
     human: humanName(repo),
     selfMerge: Boolean(config?.toggles?.leadDecidesMerges),
+    projectServers,
   });
-  return { brief, forge, detected, base, notes, mcpServers };
+  return { brief, forge, detected, base, notes, mcpServers, projectServers };
 }
 
 /**
@@ -206,7 +228,9 @@ export async function briefsFor(repo, { port = PORT, taskId = '<task>', deps = {
     notes: lead.notes,
     briefs: {
       lead: lead.brief,
-      worker: workerBrief({ repo, taskId, decisionsFile, human, base }),
+      // The lead's own answer: a build worker's dispatch resolves the same list against
+      // the same repo, so it is the set the next worker would be handed too.
+      worker: workerBrief({ repo, taskId, decisionsFile, human, base, projectServers: lead.projectServers }),
       planner: plannerBrief({ repo, taskId, planFile: planPath(repo, taskId), decisionsFile, human, base }),
       standalone,
       decisions,

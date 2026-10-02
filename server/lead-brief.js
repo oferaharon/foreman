@@ -26,7 +26,16 @@ import { HUMAN_PREFIX, LEAD_PREFIX } from './envelope.js';
  * until something imports it. Anything that edits the prose here should `import()` the
  * file afterwards as its own check.
  */
-export function leadBrief({ repo, teamDir, decisionsFile, forge = null, base = 'main', human = FALLBACK, selfMerge = false }) {
+export function leadBrief({
+  repo,
+  teamDir,
+  decisionsFile,
+  forge = null,
+  base = 'main',
+  human = FALLBACK,
+  selfMerge = false,
+  projectServers = [],
+}) {
   const name = path.basename(repo);
   return `# You are the team lead for ${name}
 
@@ -106,7 +115,7 @@ session and removes its worktree, and the plan file itself stays in your team fo
 
 Never paste a plan into the room. It is a document; the room is a log ${human} scans.
 
-## What goes to the forge, and what never does
+${projectToolsSection(projectServers)}## What goes to the forge, and what never does
 
 Anything you write into a PR title, a PR body, or \`task_set_pr\` — anything that leaves
 this repo for a forge — is public the moment it lands and permanent afterwards. Name
@@ -235,6 +244,38 @@ write only there; the checkout is read-only to you.
  * contract, and a change to it fails the tests rather than quietly teaching a shape the
  * panel does not write.
  */
+/**
+ * The repo's own project MCP servers this lead was handed (`resolveProjectMcp`,
+ * `server/project-mcp.js`) — present only when there are any, so a team that carries none
+ * reads exactly the brief it always did.
+ *
+ * The load-bearing sentence is the one about sharing. Such a server usually drives one
+ * thing on this Mac — a simulator, a device, a browser — and every session here reaches the
+ * same one. The panel deliberately does not serialize it (a lock it cannot see the far side
+ * of is a lock that lies), so the rule that two workers never drive it at once is the
+ * lead's, and has to be said where the lead reads its rules.
+ */
+export function projectToolsSection(projectServers = []) {
+  if (!projectServers.length) return '';
+  const names = projectServers.map((n) => `\`${n}\``).join(', ');
+  const tools = projectServers.map((n) => `\`mcp__${n}__*\``).join(', ');
+  const one = projectServers.length === 1;
+  return `## Project tools from this repo
+
+This team carries ${one ? 'the project MCP server' : 'the project MCP servers'} ${names} from the repo's own
+\`.mcp.json\` — tools named ${tools}, approved in the repo's own Claude Code settings and
+ticked in the team panel. You have ${one ? 'it' : 'them'}, and so does every build worker you dispatch; planners
+do not.
+
+Whatever ${one ? 'it drives' : 'they drive'} — a simulator, a device, a browser, a local service — is **one thing on
+this Mac, shared by every session here**, ordinary ones included. So **run at most one
+worker at a time whose task drives it.** The panel does not serialize this; you do. A second
+such task waits: record it with \`task_add\` and start it when the first reports. Say in the
+task body that the worker has the resource to itself for the length of the task.
+
+`;
+}
+
 function roomsSection({ human, decisionsFile, forge }) {
   // The merge queue is a paragraph the forge section only prints where there is a forge
   // to merge on, so the comparison to it is only drawn where the lead has actually been

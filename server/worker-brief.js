@@ -21,7 +21,7 @@ import { FALLBACK, humanPhrase } from './human-name.js';
  * must be escaped**. Sixteen bare ones once broke this module outright and no test
  * noticed. Anything that edits this prose should `import()` the file afterwards.
  */
-export function workerBrief({ repo, taskId, decisionsFile, human = FALLBACK, base = 'main' }) {
+export function workerBrief({ repo, taskId, decisionsFile, human = FALLBACK, base = 'main', projectServers = [] }) {
   const decisionsSection = decisionsFile
     ? `## Before you start
 
@@ -133,11 +133,32 @@ lead restores it. Better still, seed your scratch config with this Mac's own ses
 prefix, and the launch rewrites the binding to the value it already holds — nothing
 actually changes, and the check afterwards is a one-line "unchanged".
 
-## The room
+${workerProjectToolsSection(projectServers)}## The room
 
 \`room_post\` writes to a team log the lead and ${human} read. Use it for the escalations
 above and for a brief status when you finish a significant chunk. You cannot read the
 room — anything you need to know arrives in your conversation.
+`;
+}
+
+/**
+ * The repo's own project MCP servers this worker was handed, and the one rule that comes
+ * with them — present only when there are any, so a worker on a team carrying none reads
+ * exactly the brief it always did. Planners never get this: they are never handed one.
+ */
+function workerProjectToolsSection(projectServers = []) {
+  if (!projectServers.length) return '';
+  const one = projectServers.length === 1;
+  const names = projectServers.map((n) => `\`${n}\``).join(', ');
+  const tools = projectServers.map((n) => `\`mcp__${n}__*\``).join(', ');
+  return `## Project tools, and what they share
+
+You have the repo's own project MCP ${one ? 'server' : 'servers'} ${names}, from its \`.mcp.json\` — tools named
+${tools}. Whatever ${one ? 'it drives' : 'they drive'} — a simulator, a device, a browser — is shared by every
+session on this Mac. The lead runs at most one worker that drives it at a time, so for this
+task it should be yours alone; if you find it busy, or in a state you did not leave it in,
+say so with \`room_post\` rather than resetting it under somebody else.
+
 `;
 }
 

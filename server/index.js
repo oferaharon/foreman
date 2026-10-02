@@ -71,6 +71,7 @@ import {
 } from './dispatch.js';
 import { ensureTeam, readTeam, setSlate, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
 import { assembleLead, briefsFor, foremanEntry, mcpFilePath } from './briefs.js';
+import { resolveProjectMcp, projectMcpCatalogue, normalizeProjectMcpServers } from './project-mcp.js';
 import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
 import { collectQueue, composition, mergeLine, prName, prNumber } from './merge-queue.js';
 import { mergeVerdict } from './merge-check.js';
@@ -1018,7 +1019,7 @@ async function launchLead(folder, { terminal, resume = null }) {
   // `notes` is what could not be given, said out loud in the launch result rather than
   // dropped: a tool that silently isn't there is a lead that fails at the far end of a
   // task.
-  const { brief, forge: effective, base, notes, mcpServers } = await assembleLead({
+  const { brief, forge: effective, base, notes, mcpServers, projectServers } = await assembleLead({
     repo: folder,
     teamDir: tDir,
     decisionsFile,
@@ -1040,7 +1041,15 @@ async function launchLead(folder, { terminal, resume = null }) {
   await fsp.writeFile(
     settingsFile,
     JSON.stringify(
-      leadSettings({ repo: folder, dir: tDir, leadMerges: Boolean(config.toggles?.leadMerges), forge: effective }),
+      leadSettings({
+        repo: folder,
+        dir: tDir,
+        leadMerges: Boolean(config.toggles?.leadMerges),
+        forge: effective,
+        // The project servers actually copied into `mcp.json` above — never the team's list
+        // as asked, so a skipped name gets no rule.
+        projectServers,
+      }),
       null,
       2,
     ),
@@ -1068,6 +1077,15 @@ async function launchLead(folder, { terminal, resume = null }) {
   if (created.paneId) {
     pins.set(created.paneId, true, { paneCreatedMs: await paneBirthday(created.paneId) });
   }
+  // A tool that could not be given is said out loud — here, in the room, because the
+  // launch dialog closes and the room does not, and because a restore or a relaunch has no
+  // dialog at all. It used to be posted by `POST /api/launch` alone, which left every
+  // other way a lead starts (restore, relaunch all, restart one) dropping its notes in
+  // silence. A refused MCP entry, or a project server ticked and not handed over, is a
+  // lead that discovers the gap at the far end of a task otherwise.
+  for (const note of notes || []) {
+    room.post(folder, { from: 'panel', to: 'lead', kind: 'system', alert: true, text: note });
+  }
   return { created, config, forge: effective, base, notes };
 }
 
@@ -1079,12 +1097,8 @@ app.post('/api/launch', async (req, res) => {
       const { created, forge, base, notes } = await launchLead(folder, { terminal: req.body?.terminal !== false });
       await registry.refresh().catch(() => {});
       const session = created.paneId ? registry.byPane(created.paneId) : null;
-      // A tool that could not be given is said out loud — here and in the room, because
-      // the launch dialog closes and the room does not. A refused MCP entry means the
-      // lead will discover the gap at the far end of a task otherwise.
-      for (const note of notes || []) {
-        room.post(folder, { from: 'panel', to: 'lead', kind: 'system', alert: true, text: note });
-      }
+      // The notes are already in the room (`launchLead` posts them, for every way a lead
+      // starts); they come back here too so the launch dialog can say them.
       return res.json({
         ok: true,
         ...created,
@@ -1688,6 +1702,16 @@ app.post('/api/team/dispatch', async (req, res) => {
     const stance = kind === 'plan'
       ? plannerStance({ repo: wt.top, worktree: wt.dir, plans: plansDir(repo), worktreesRoot: WORKTREES_DIR })
       : { deny: [], allow: [] };
+    // The repo's own project MCP servers the team ticked — for a **build** worker only.
+    // A planner reads and writes one document, and its stance is a wall against doing
+    // anything else; a tool that builds, runs or drives a simulator has no place on it.
+    // `resolveProjectMcp` is the same call the lead's tool surface makes, with the same
+    // repo (the main checkout: a worktree has no `.claude/settings.local.json`, which is
+    // where the approval usually lives) and the same list, so a lead and its workers
+    // cannot disagree about what the repo allows.
+    const project = kind === 'build'
+      ? resolveProjectMcp({ repo, allow: team?.projectMcpServers ?? [], taken: ['foreman'] })
+      : { servers: {}, names: [], notes: [] };
     const settingsFile = await writeWorkerSettings({
       repo: wt.top,
       label,
@@ -1696,6 +1720,7 @@ app.post('/api/team/dispatch', async (req, res) => {
         ...stance.allow,
       ],
       deny: stance.deny,
+      projectServers: project.names,
     });
 
     // The worker's voice (Wave C): a brief teaching the two-channel escalation rule, and
@@ -1707,20 +1732,28 @@ app.post('/api/team/dispatch', async (req, res) => {
       wBriefFile,
       kind === 'plan'
         ? plannerBrief({ repo: wt.top, taskId: label, planFile, decisionsFile, human: humanName(repo), base: bareBase(wt.base) })
-        : workerBrief({ repo: wt.top, taskId: label, decisionsFile, human: humanName(repo), base: bareBase(wt.base) }),
+        : workerBrief({
+            repo: wt.top,
+            taskId: label,
+            decisionsFile,
+            human: humanName(repo),
+            base: bareBase(wt.base),
+            projectServers: project.names,
+          }),
     );
     const wMcpFile = path.join(tDir, `worker-${label}.mcp.json`);
     await fsp.writeFile(
       wMcpFile,
       JSON.stringify(
-        { mcpServers: { foreman: foremanEntry({ repo, role: 'worker', task: label }) } },
+        { mcpServers: { foreman: foremanEntry({ repo, role: 'worker', task: label }), ...project.servers } },
         null,
         2,
       ),
     );
 
     // standalone-args: exempt — a worker is not a standalone. It gets its own brief, its own
-    // two-tool MCP config and `--strict-mcp-config`, all scoped to its task; the group tools
+    // two-tool MCP config (plus any project server the team carries) and
+    // `--strict-mcp-config`, all scoped to its task; the group tools
     // are deliberately not in `WORKER_TOOLS` and a worker is not an @-addressable peer.
     const created = await createSession({
       folder: wt.dir,
@@ -1764,8 +1797,13 @@ app.post('/api/team/dispatch', async (req, res) => {
     // and `report`; `room.js` is untouched.
     room.post(repo, {
       from: 'panel', to: 'lead', kind: 'system', about: label, event: 'dispatch',
-      text: `${kind === 'plan' ? 'Planner' : 'Worker'} ${label} dispatched on ${wt.branch}${wt.stale ? ` (base: local ${wt.base} — fetch failed)` : ''}.`,
+      text: `${kind === 'plan' ? 'Planner' : 'Worker'} ${label} dispatched on ${wt.branch}${wt.stale ? ` (base: local ${wt.base} — fetch failed)` : ''}${project.names.length ? `, carrying project MCP ${project.names.join(', ')}` : ''}.`,
     });
+    // A project server the team ticked and this worker was not handed — said, the same way
+    // the lead's launch says it, so the worker that needed it is not the first to find out.
+    for (const note of project.notes) {
+      room.post(repo, { from: 'panel', to: 'lead', kind: 'system', about: label, alert: true, text: note });
+    }
     // A departure from the team default is said out loud, with the lead's why — so the
     // maintainer can see when the lead has called it wrong. The default going out silently
     // is the point of it being the default. `event: 'model'` is the same additive stamp the
@@ -2049,6 +2087,11 @@ app.get('/api/team/config', async (req, res) => {
   // git. It is cheap (`git remote get-url` and `symbolic-ref` read `.git/config`, no
   // network) but it is a process rather than a readdir, so both cache per repo. Neither is
   // ever stored, and PATCH refuses to write either.
+  //
+  // `projectMcpResolved` is the same pattern once more: the repo's own `.mcp.json` servers
+  // and whether its own Claude Code settings approve each — computed per GET from three
+  // small files, never stored. Names and verdicts only; an entry is a command line and
+  // stays on this side.
   const [forgeResolved, baseResolved] = await Promise.all([resolveForge(repo), resolveBaseBranch(repo)]);
   res.json({
     ...team,
@@ -2057,6 +2100,7 @@ app.get('/api/team/config', async (req, res) => {
     setupResolved: resolveSetup(team.setup, repo),
     forgeResolved,
     baseResolved,
+    projectMcpResolved: projectMcpCatalogue(repo, team.projectMcpServers),
   });
 });
 
@@ -2116,6 +2160,19 @@ app.patch('/api/team/config', async (req, res) => {
       return res.status(400).json({ error: err.message });
     }
   }
+  // Which of the repo's own project MCP servers this team carries. Whitelisted by name like
+  // every key here, and shaped by the one function that decides what a name may be
+  // (`normalizeProjectMcpServers`) — which refuses `foreman` and both forge servers' names,
+  // because an allow rule `mcp__<name>` on any of them would reach the panel's own tools.
+  // Whether the repo declares and approves a name is the launch's question, not this one's:
+  // the launch re-reads the repo every time and says which names it skipped.
+  if (req.body?.projectMcpServers !== undefined) {
+    try {
+      next.projectMcpServers = normalizeProjectMcpServers(req.body.projectMcpServers);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
   // `setup` deliberately not writable — it is detected from the project's files
   // (setup-detect.js). A legacy value already in team.json is honoured; nothing new
   // writes one. If detection is wrong, that is a bug in detection, not a box to correct.
@@ -2139,6 +2196,7 @@ app.patch('/api/team/config', async (req, res) => {
       setupResolved: resolveSetup(next.setup, repo),
       forgeResolved,
       baseResolved,
+      projectMcpResolved: projectMcpCatalogue(repo, next.projectMcpServers),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
