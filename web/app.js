@@ -133,6 +133,7 @@ import { colourFor } from './session-colour.js';
 // neither. `patchBand` reaches for `document` the way `buildTrustCard` does, and is
 // driven by the same kind of stub in its own test.
 import { patchBand, bandSig, nextUnlight, relightBand } from './rooms-band.js';
+import { newestCreatedFirst } from './rooms-newest.js';
 // The create modal's arithmetic: who may be in a room, in what order they are offered, and
 // what stops the button being pressable. The seventh, for the band's own reason one line up
 // — and `roomParticipants` here is now the *only* spelling of the allow-list on this side of
@@ -3520,7 +3521,9 @@ let roomsSig = '';
  * is the cheaper half of the same guard, not a substitute for it.
  */
 function renderRoomsBand() {
-  const rooms = state.rooms;
+  // Newest-created first, sorted here and not in the band module (`web/rooms-newest.js`).
+  // One array, read by both the signature and the patch, so they cannot disagree.
+  const rooms = newestCreatedFirst(state.rooms);
 
   // The **rows** exist only while there is something in them — `.app.has-rooms` gates
   // `.rooms-list` and nothing else, so the head and its `+ room` are always in the rail.

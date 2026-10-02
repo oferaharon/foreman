@@ -6,7 +6,8 @@
  * tab (`roomsListView` in `web/m/rooms.js`, on the record's `lastAt`). Both were ordered by
  * facts that do not move until the maintainer asked for recency on **2026-09-16**: *"On
  * mobile only I'd like the standalone and rooms lists to be sorted by recent at the top."*
- * The desktop keeps the orders it had, and `web/rooms-band.js` says so from the other end.
+ * The desktop keeps its own orders — the rooms band sorts by creation, never by activity
+ * (`web/rooms-newest.js`) — and `web/rooms-band.js` says so from the other end.
  *
  * It is one comparator rather than two so the two lists cannot disagree about what recency
  * means — the `isLeadName` rule this repo keeps relearning, in its smallest possible form.

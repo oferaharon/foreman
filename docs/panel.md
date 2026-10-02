@@ -1264,7 +1264,9 @@ Enter or Tab to take one, Escape to dismiss) and a post that named somebody carr
 There is no create, no join, no add, and no tool takes a pane or a speaker: which session is
 posting is read from the tool server's own environment, so a session cannot post as another.
 
-**The rail band** sits above the peer-messages row: one row per open room with its name, member
+**The rail band** sits above the peer-messages row, newest *created* room on top (never by
+activity, so a post moves nothing; open rooms above archived, the order applying within each; rooms
+with no creation stamp or an equal one fall back to the reverse of the store's order): one row per open room with its name, member
 count and a count of what has arrived since anybody last opened it. Its `◎` lights in the accent
 colour while the room's last post is under ten minutes old — the one sign of activity on a room
 you have already opened — and goes out on its own timer when the ten minutes run out, without
@@ -1415,9 +1417,9 @@ room's own `+` adds or removes a member and archives the room, each of the last 
 in-place confirmation before anything that takes something away. Renaming a room is not on the
 phone.
 
-**Newest-first is the phone's order and the Mac's lists are unchanged.** The rail still orders
-sessions by urgency and the rail's rooms band still draws rooms in the order they were made,
-both for the reason recency is wrong there: a list that reorders itself while you are moving a
+**Newest-first by activity is the phone's order; the Mac's lists are not.** The rail still orders
+sessions by urgency and the rail's rooms band draws rooms newest *created* first, neither by
+activity, for the reason recency is wrong there: a list that reorders itself while you are moving a
 cursor across it takes the row out from under the press. On a phone the trade goes the other
 way — you open it to find whatever just happened — and it is the maintainer's own call, taken
 knowing a row can move under a thumb.
