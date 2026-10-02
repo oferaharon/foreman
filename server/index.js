@@ -71,7 +71,7 @@ import {
 } from './dispatch.js';
 import { ensureTeam, readTeam, setSlate, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
 import { assembleLead, briefsFor, foremanEntry, mcpFilePath } from './briefs.js';
-import { resolveProjectMcp, projectMcpCatalogue, normalizeProjectMcpServers } from './project-mcp.js';
+import { workerProjectMcp, projectMcpCatalogue, normalizeProjectMcpServers } from './project-mcp.js';
 import { matchTrigger, findLead, MAX_TRIGGER_TEXT } from './trigger.js';
 import { collectQueue, composition, mergeLine, prName, prNumber } from './merge-queue.js';
 import { mergeVerdict } from './merge-check.js';
@@ -1702,16 +1702,13 @@ app.post('/api/team/dispatch', async (req, res) => {
     const stance = kind === 'plan'
       ? plannerStance({ repo: wt.top, worktree: wt.dir, plans: plansDir(repo), worktreesRoot: WORKTREES_DIR })
       : { deny: [], allow: [] };
-    // The repo's own project MCP servers the team ticked — for a **build** worker only.
-    // A planner reads and writes one document, and its stance is a wall against doing
-    // anything else; a tool that builds, runs or drives a simulator has no place on it.
-    // `resolveProjectMcp` is the same call the lead's tool surface makes, with the same
-    // repo (the main checkout: a worktree has no `.claude/settings.local.json`, which is
-    // where the approval usually lives) and the same list, so a lead and its workers
-    // cannot disagree about what the repo allows.
-    const project = kind === 'build'
-      ? resolveProjectMcp({ repo, allow: team?.projectMcpServers ?? [], taken: ['foreman'] })
-      : { servers: {}, names: [], notes: [] };
+    // The repo's own project MCP servers the team ticked — for a **build** worker only
+    // (`workerProjectMcp`: a planner gets none). It resolves through the same call the
+    // lead's tool surface makes, with the same repo — the main checkout, because a worktree
+    // has no `.claude/settings.local.json` and that is where the approval usually lives —
+    // and the same list, so a lead and its workers cannot disagree about what the repo
+    // allows.
+    const project = workerProjectMcp({ kind, repo, allow: team?.projectMcpServers ?? [] });
     const settingsFile = await writeWorkerSettings({
       repo: wt.top,
       label,

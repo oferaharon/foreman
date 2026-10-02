@@ -215,15 +215,20 @@ export function readProjectMcp(repo) {
 /**
  * Is `name` approved by the repo's own project settings — and by which file?
  *
- * Precedence, read the way Claude Code layers its settings (local over shared) and,
- * where the two could disagree, towards **no**:
+ * The precedence is **measured, not read off the docs** — Claude Code v2.1.280, eleven
+ * combinations of the two files in the sandbox, each read back through `claude mcp list`
+ * (`✔ Connected` / `⏸ Pending approval` / gone). Two of the three rules are not what the
+ * documentation's own summary implies, which is why it was measured:
  *
- *   - `disabledMcpjsonServers` naming it in **either** file refuses it. A server somebody
- *     switched off anywhere stays off; an enable in the other file does not reopen it.
- *   - `enableAllProjectMcpServers` is a boolean, so it is read from `settings.local.json`
- *     when that file sets it at all, and from `settings.json` only otherwise — an explicit
- *     `false` in the local file closes what a shared `true` opened.
- *   - otherwise `enabledMcpjsonServers` in either file approves it (the lists add up).
+ *   - `disabledMcpjsonServers` naming it in **either** file refuses it — over an enable in
+ *     the other file, over one in the same file, and over `enableAllProjectMcpServers`.
+ *     Claude Code drops a disabled server from the list entirely.
+ *   - `enableAllProjectMcpServers` is read from `settings.local.json` when that file sets
+ *     it at all, and from `settings.json` only otherwise: a local `false` closes a shared
+ *     `true` (measured — every server went back to pending), and a local `true` opens over
+ *     a shared `false`. Not "any file's `true` wins".
+ *   - otherwise `enabledMcpjsonServers` in either file approves it: the two lists add up
+ *     (shared naming one server and local another approved both).
  *
  * Only the repo's project files are read. The user's own `~/.claude/settings.json` and
  * `~/.claude.json` are not consulted, deliberately: an approval this panel acts on for a
@@ -309,6 +314,21 @@ export function resolveProjectMcp({ repo, allow = [], taken = [] }) {
     }
   }
   return { servers, names: Object.keys(servers), notes };
+}
+
+/**
+ * What one dispatched worker carries. A **build** worker gets the team's servers through
+ * `resolveProjectMcp`, exactly as its lead does; every other kind gets none.
+ *
+ * Written as an allow-list on kind — `build`, and nothing else — rather than "not a
+ * planner", because kinds have grown here once already and the next one should start with
+ * no project tools until somebody decides otherwise. A planner reads and writes one
+ * document behind a stance that walls it off from doing anything else; a tool that builds,
+ * runs or drives a simulator has no place on it.
+ */
+export function workerProjectMcp({ kind, repo, allow = [] }) {
+  if (kind !== 'build') return { servers: {}, names: [], notes: [] };
+  return resolveProjectMcp({ repo, allow, taken: ['foreman'] });
 }
 
 /**
