@@ -9492,7 +9492,9 @@ function createPane(slot, host) {
     }
 
     const note = document.createElement('div');
-    note.className = 'team-toggle-note';
+    // Its own spacing, not the per-row note's pull-up: under an unavailable row's reason it
+    // otherwise reads as the end of that reason.
+    note.className = 'team-toggle-note team-mcp-foot';
     note.textContent =
       'For the lead and build workers, never planners. A change reaches the next lead launch and the next dispatch — nothing already running. Whatever these drive is shared by every session on this Mac; the lead runs one such worker at a time.';
     block.append(note);

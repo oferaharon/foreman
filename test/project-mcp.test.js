@@ -51,7 +51,7 @@ test.after(() => {
 });
 
 /** A clean stdio entry — the shape the motivating repo declares: a command, an arg, no env. */
-const CLEAN = { type: 'stdio', command: 'xcrun', args: ['mcpbridge'] };
+const CLEAN = { type: 'stdio', command: 'sim-bridge', args: ['serve'] };
 
 let n = 0;
 /** A folder with whatever `.mcp.json` and settings the caller says; `undefined` writes nothing. */
@@ -118,7 +118,7 @@ test('a name that would bend the allow rule is refused', () => {
   for (const bad of ['my.server', 'my server', 'a/b', '', 'x'.repeat(65), 'mcp__*']) {
     assert.ok(nameProblem(bad), `refused: ${JSON.stringify(bad)}`);
   }
-  for (const good of ['xcode', 'hello', 'my-server', 'my_server', 'Sim2']) {
+  for (const good of ['sim', 'hello', 'my-server', 'my_server', 'Sim2']) {
     assert.equal(nameProblem(good), null, good);
   }
   assert.ok(nameProblem(7));
@@ -128,10 +128,10 @@ test('a name that would bend the allow rule is refused', () => {
 test('PATCH’s normaliser trims, de-duplicates and sorts — and refuses the whole list over one bad name', () => {
   assert.deepEqual(normalizeProjectMcpServers(undefined), []);
   assert.deepEqual(normalizeProjectMcpServers([]), []);
-  assert.deepEqual(normalizeProjectMcpServers([' xcode ', 'hello', 'xcode']), ['hello', 'xcode']);
-  assert.throws(() => normalizeProjectMcpServers('xcode'), /list of server names, not string/);
+  assert.deepEqual(normalizeProjectMcpServers([' sim ', 'hello', 'sim']), ['hello', 'sim']);
+  assert.throws(() => normalizeProjectMcpServers('sim'), /list of server names, not string/);
   assert.throws(() => normalizeProjectMcpServers(null), /not null/);
-  assert.throws(() => normalizeProjectMcpServers(['xcode', 'foreman']), /"foreman"/);
+  assert.throws(() => normalizeProjectMcpServers(['sim', 'foreman']), /"foreman"/);
   assert.throws(() => normalizeProjectMcpServers(['github']), /panel's own servers/);
   assert.throws(() => normalizeProjectMcpServers(['a__b']), /separator/);
   assert.throws(() => normalizeProjectMcpServers([3]), /not a server name/);
@@ -369,5 +369,5 @@ test('the panel lists every declared server with its verdict, plus any stale tic
   assert.equal(by.nope.approved, false);
   assert.equal(by.leaky.approved, true, 'approved, and still refused for its credential');
   assert.equal(by.gone.declared, false);
-  assert.ok(!JSON.stringify(servers).includes('xcrun'), 'a command line never goes to the browser');
+  assert.ok(!JSON.stringify(servers).includes('sim-bridge'), 'a command line never goes to the browser');
 });

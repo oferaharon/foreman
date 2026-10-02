@@ -3036,6 +3036,7 @@ body.row-dragging * { cursor: row-resize !important; }
 .team-mcp { display: flex; flex-direction: column; gap: 0.45rem; }
 .team-mcp-cap { color: var(--ink-muted); font-size: 0.72rem; }
 .team-mcp-name { font-family: var(--mono); font-size: 0.76rem; }
+.team-mcp-foot { margin-top: 0; }
 
 .head-bypass {
   color: var(--decision);
