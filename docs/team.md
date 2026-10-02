@@ -40,7 +40,8 @@ A session's role comes from **launch flags, not files in the folder**: the brief
 and the permission stance rides `--settings`. No repository gets a new file and no
 `CLAUDE.md` is edited for any of this to work. That matters for a reason worth stating:
 config placed in the folder would hand the lead's powers to *every* ordinary session
-opened there.
+opened there. The strict flag has one cost, and a per-team list puts it back: see [The
+repo's own MCP servers](#the-repos-own-mcp-servers).
 
 A worker inherits the repo's own `CLAUDE.md` for free, because a worktree is a full
 checkout — it follows exactly the house rules you do, with nobody wiring it up.
@@ -117,6 +118,52 @@ falls. Three consequences, none of which is a gap to be fixed:
   different tool. They do carry one generated permission rule now — an allow for the
   panel's own `foreman` tools (`session-settings.json` in `server/session-launch.js`, via
   `--settings`) — but nothing beyond it: no deny list, no path restriction, no git floor.
+
+### The repo's own MCP servers
+
+A repo can declare MCP servers of its own in a checked-in `.mcp.json` — one that builds and
+runs the app, say, or drives a simulator — and an ordinary session opened there gets them once
+the repo's Claude Code settings approve them. A lead and its workers did not: they launch with
+`--strict-mcp-config`, which is what keeps a role's tool surface known, and it drops every
+server the repo declares. A hand edit to the generated file is overwritten at the next launch.
+
+So each team carries a list, `projectMcpServers` in `team.json`, ticked in the team panel
+(below). At every lead launch and every **build** worker's dispatch, `resolveProjectMcp`
+(`server/project-mcp.js`) — one function, called by both, with the same repo and the same
+list, so a lead and its workers cannot disagree — copies a server into that session's MCP
+config only if **all** of these hold:
+
+- it is on the team's list;
+- the repo's `.mcp.json` declares it;
+- the repo's **own** Claude Code project settings approve it — `enabledMcpjsonServers` names
+  it, or `enableAllProjectMcpServers` is on, and `disabledMcpjsonServers` does not name it.
+  Both `.claude/settings.json` and `.claude/settings.local.json` are read, from the **main
+  checkout** — a worktree has no `settings.local.json`, since it is normally gitignored. The
+  precedence is the one Claude Code itself was measured to use (v2.1.280): the two enable
+  lists add up, a disable in either file wins over every enable, and the enable-all switch is
+  read from the local file when that sets it at all, so a local `false` closes a shared
+  `true`. Your user-level settings are not consulted: an approval the panel acts on for a
+  whole team is one the repo's own files show;
+- its entry carries no credential — in `env`, `headers`, the URL or a `--flag` in `args` —
+  because the generated files are world-readable. The same refusal the forge entry gets.
+
+Every name asked for and not given is said: an alert line in the room at the lead's launch
+(restores and relaunches included) and at each dispatch, naming the server and the reason.
+A copied server gets the bare allow rule `mcp__<name>` in that session's settings, so in auto
+mode its calls are not routed to the classifier — and only a copied one: a name that was
+skipped gets no rule. **Planners never get them**: a planner reads and writes one document,
+behind a stance that walls it off from anything else.
+
+Names are refused outright when they could never be right: `foreman`, `gitea` and `github`
+(the panel's own entries use those keys, and `mcp__<name>` on one of them would reach its
+tools), anything containing `__` (the separator inside a tool name), and anything outside
+letters, digits, `-` and `_`.
+
+**What it does not do: share the thing those tools drive.** A simulator, a device or a browser
+is one thing on this Mac, used by every session here. The panel does not serialize it; the
+lead's brief carries the rule instead — at most one worker that drives such a resource at a
+time — and the worker's brief tells it so. A change to the list reaches the **next** lead
+launch and the **next** dispatch; nothing already running is touched.
 
 ### Planners
 
@@ -260,7 +307,11 @@ the team is running. Three detected values sit beside them read-only, each with 
 it was chosen: the **setup** command, read off the project's files; the **forge**, read off
 the repo's own `origin` (see [The forge](#the-forge)); and the **base branch**. None of the
 three is a box, deliberately — a wrong value there is a bug in detection, not something for
-you to correct.
+you to correct. Under them, **project tools**: every MCP server the repo's own `.mcp.json`
+declares, with a switch each (see [The repo's own MCP
+servers](#the-repos-own-mcp-servers)). A server the launch would not copy — unapproved in the
+repo's settings, carrying a credential, or no longer declared — is drawn unavailable with the
+reason under it, and can only be unticked. A repo that declares none shows one muted line.
 
 **Room** — the log, below.
 
@@ -489,7 +540,7 @@ Everything outlives the browser tab, and none of it is inside your repositories:
 ```
 ~/.foreman/
   teams/<repo>/
-    team.json       config and the autonomy toggles
+    team.json       config, the autonomy toggles, and the repo's MCP servers to carry
     room.jsonl      the room, append-only
     decisions.md    what you have ruled on, in your words — survives the lead's /clear
     plans/          one file per planner task; outlives the task that wrote it

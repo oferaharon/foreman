@@ -66,7 +66,7 @@ panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
 `effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
 `rooms-line.js`, `session-launch.js`, `briefs.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
 `team.js`, `room.js`, `worktree.js`, `setup-detect.js`, `forge.js`, `base-branch.js`, `watch.js`, `conflicts.js`,
-`gc.js` and `launch.js`. Run them before touching any of them, and note that `test/fixtures/` holds
+`gc.js`, `launch.js` and `project-mcp.js`. Run them before touching any of them, and note that `test/fixtures/` holds
 real `capture-pane` output, not reconstructions — and that the git wrappers are tested
 against **real throwaway repos**, because stubbing git to test a git wrapper proves
 nothing.
@@ -84,8 +84,10 @@ tests, listed under *The substrate* above. Read them before changing any of it.
 
 A role is **launch flags, never files in the repo** — `--append-system-prompt-file` for
 the brief (`lead-brief.js` / `worker-brief.js`), `--mcp-config` + `--strict-mcp-config`
-for the tools (`mcp/foreman.js`, one hand-rolled stdio server serving two roles), and
-`--settings` for the permission stance. No repo gets a new file and no `CLAUDE.md` gets
+for the tools (`mcp/foreman.js`, one hand-rolled stdio server serving two roles — plus, for a
+lead and a **build** worker, whichever of the repo's own `.mcp.json` servers the team's
+`projectMcpServers` list names and the repo's own Claude Code settings approve, never a
+planner; `server/project-mcp.js`), and `--settings` for the permission stance. No repo gets a new file and no `CLAUDE.md` gets
 edited for a session to take part, which is deliberate: a role declared in the folder is
 a role handed to every *ordinary* session opened there. **Every role now carries a
 `--settings` file, including a standalone** (`session-settings.json`,
@@ -704,6 +706,12 @@ in front of the composer may and may not depend on. Evidence:
   classifier, and the classifier can itself fail.** Every role allows the bare whole-server
   form `mcp__foreman`; it is an allow rule and nothing more, and no panel guard is touched.
   [team-machinery#the-auto-mode-classifier](docs/traps/team-machinery.md#the-auto-mode-classifier)
+- `server/project-mcp.js` (`resolveProjectMcp`, `approval`, `nameProblem`) · `server/briefs.js`
+  (`leadToolSurface`) · `server/index.js` (the dispatch) — **`--strict-mcp-config` drops every
+  server a repo's `.mcp.json` declares, and the approval that would have let one through is
+  usually in a file a worktree does not have.** Read from the main checkout, by one function;
+  the precedence was measured, and a local `false` closes a shared enable-all.
+  [team-machinery#a-repos-own-mcp-servers-and-who-approves-them](docs/traps/team-machinery.md#a-repos-own-mcp-servers-and-who-approves-them)
 - `server/tasks.js` (`TaskStore`, `TASK_STATES`, `TASK_KINDS`) — **A task state the store has
   never heard of is deleted, not rejected.** `#flush` rewrites the whole file from the Map two
   seconds later, so back up `~/.foreman/tasks.json` before any rollback of a commit that added

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
 import { DEFAULT_WORKER_MODEL } from './worker-models.js';
+import { mcpServerRule } from './project-mcp.js';
 
 /**
  * A team is a folder under `STATE_DIR/teams/`, keyed by the repo's full path with each
@@ -124,6 +125,20 @@ const DEFAULTS = {
    * permission.
    */
   humanReviewPaths: [],
+  /**
+   * Which of the repo's own project MCP servers (its checked-in `.mcp.json`) this team's
+   * lead and build workers carry — by name, ticked in the team panel. Empty is the default
+   * and empty means none: `--strict-mcp-config` drops every project server, and only a
+   * name on this list is put back.
+   *
+   * A name here is a request, not a grant. At each launch `resolveProjectMcp`
+   * (`server/project-mcp.js`) copies a server only if the repo still declares it, the repo's
+   * own Claude Code settings approve it, and its entry carries no credential — and says
+   * which and why for every name it skipped. Planners never get them. Top-level for the
+   * `humanReviewPaths` reason: `toggles` is the autonomy dials, and a list in there reads as
+   * one. Written by `PATCH /api/team/config` through `normalizeProjectMcpServers` only.
+   */
+  projectMcpServers: [],
   /**
    * Where the team room's visible slate starts — the `seq` of the `event: 'clear'` divider
    * the maintainer last pressed, or `null` for "show all".
@@ -415,8 +430,13 @@ export function mergeRule(forge) {
  * installed Claude Code's own docs (`### MCP` in the permissions page, v2.1.257):
  * "`mcp__puppeteer` matches any tool provided by the `puppeteer` server". This is an allow
  * rule, nothing more — every guard behind these tools still runs exactly as it did.
+ *
+ * `projectServers` is the names `resolveProjectMcp` actually copied into this lead's
+ * `mcp.json` — each gets the same bare server rule, so a project tool the maintainer ticked
+ * and the repo approved is not routed to the classifier on every call. Copied, never merely
+ * listed: see the comment on the rule.
  */
-export function leadSettings({ repo, dir, leadMerges = false, forge = null }) {
+export function leadSettings({ repo, dir, leadMerges = false, forge = null, projectServers = [] }) {
   const rule = leadMerges ? mergeRule(forge) : null;
   return {
     permissions: {
@@ -436,6 +456,10 @@ export function leadSettings({ repo, dir, leadMerges = false, forge = null }) {
         'Bash(gh release create:*)',
         // Skips the auto-mode classifier for every `foreman` tool call. See the doc comment.
         'mcp__foreman',
+        // The repo's own project servers this lead was actually handed — never the team's
+        // list as such: a name that was skipped at launch gets no rule, because a rule for a
+        // server that is not there is a rule waiting for whatever later takes its name.
+        ...projectServers.map(mcpServerRule),
       ],
     },
   };

@@ -4,6 +4,7 @@ import { STATE_DIR } from './config.js';
 import { trustOption } from '../web/trust-gate.js';
 import { WORKER_MODELS, DEFAULT_WORKER_MODEL } from './worker-models.js';
 import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
+import { mcpServerRule } from './project-mcp.js';
 
 /**
  * The pieces of dispatching a worker that aren't worktree or task bookkeeping: the
@@ -107,9 +108,14 @@ export const GIT_DENY = [
  * builds them; this only guarantees the floor underneath, which is why the two live
  * apart). A build worker passes none and gets exactly what it always got.
  *
+ * `projectServers` is the repo's own project MCP servers this worker's MCP config actually
+ * carries (`resolveProjectMcp`, `server/project-mcp.js`) — each gets the bare server rule,
+ * for the same classifier reason `mcp__foreman` does. Only a build worker is ever handed
+ * any; a planner's dispatch passes none, so its file is exactly what it was.
+ *
  * @returns {Promise<string>} the file path, for `extraArgs`
  */
-export async function writeWorkerSettings({ repo, label, allow = [], deny = [] }) {
+export async function writeWorkerSettings({ repo, label, allow = [], deny = [], projectServers = [] }) {
   await fsp.mkdir(WORKER_SETTINGS_DIR, { recursive: true });
   const file = path.join(WORKER_SETTINGS_DIR, `${path.basename(repo)}-${label}.json`);
   const settings = {
@@ -117,7 +123,7 @@ export async function writeWorkerSettings({ repo, label, allow = [], deny = [] }
     permissions: {
       // Skips the auto-mode classifier for every `foreman` tool call — see the doc
       // comment. First, so the file reads as "the panel's own tools, then this kind's own".
-      allow: ['mcp__foreman', ...allow],
+      allow: ['mcp__foreman', ...projectServers.map(mcpServerRule), ...allow],
       // The floor first, so reading the file top-down reads as "never these, plus
       // whatever this kind of worker also may not do".
       deny: [...GIT_DENY, ...deny],

@@ -165,6 +165,42 @@ server form was chosen over a hand-copied per-tool list for the `isLeadName` rea
 added to `LEAD_TOOLS` or `WORKER_TOOLS` later needs no matching update here, because there
 is nothing to update.
 
+## A repo's own MCP servers, and who approves them
+
+**`--strict-mcp-config` drops every server a repo's `.mcp.json` declares, and the approval
+that would have let one through is usually in a file a worktree does not have.** So the
+answer is read from the main checkout, by one function, with Claude Code's own precedence
+measured rather than read off its docs. A team on a repo that declares a stdio server of
+its own (one that drives a simulator) had a lead and workers without it while standalone
+sessions in the same folder had it; the strict flag is right and stays, so a per-team list
+(`projectMcpServers`) puts named servers back, through `resolveProjectMcp`
+(`server/project-mcp.js`), which the lead's tool surface and the build worker's dispatch both
+call.
+
+Three measurements, all on Claude Code v2.1.280 in the sandbox's `alpha`, eleven
+combinations of `.claude/settings.json` and `.claude/settings.local.json`, each read back
+through `claude mcp list` (`✔ Connected` / `⏸ Pending approval` / absent):
+
+- **The enable lists add up.** Shared naming one server and local naming another approved
+  both. So `enabledMcpjsonServers` is read from either file.
+- **A disable wins over every enable, from either file.** Disabled in local over enabled in
+  shared, disabled in shared over enabled in local, disabled beside
+  `enableAllProjectMcpServers: true` in the same file, and disabled beside enabled in the same
+  file — each time the server was dropped from the list entirely.
+- **`enableAllProjectMcpServers` is local-over-shared, not "any `true` wins".** A shared `true`
+  under a local `false` put every server back to pending; a shared `false` under a local
+  `true` connected them all. A docs summary consulted beforehand said `true` in any source
+  takes precedence — measured, it does not.
+
+`test/project-mcp.test.js` carries the eleven rows as the approval matrix; if Claude Code
+changes, re-measure them, do not edit them green. And the location matters as much as the
+precedence: `.claude/settings.local.json` is normally gitignored, so the worktree a worker
+runs in has the repo's `.mcp.json` and not the approval — every read goes to the team's repo,
+the main checkout. Two refusals sit beside it: `foreman`, `gitea` and `github` are never
+carried (an allow rule `mcp__github` would reach a forge merge tool that `leadMerges`
+deliberately leaves unallowed), and nor is a name containing `__`, which would turn the
+whole-server rule into a rule for one named tool on another server.
+
 ## An unknown task state
 
 **A task state the store has never heard of is deleted, not rejected.** `TaskStore.#load`

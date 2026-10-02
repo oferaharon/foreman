@@ -1243,6 +1243,81 @@ test('both refuse without a folder, and without a team', async () => {
   assert.ok(!fs.existsSync(path.join(stateDir, 'teams', teamKeyFor(path.join(stateDir, 'NoTeamHere')))));
 });
 
+/* ------------------------------------------------- project MCP servers --- */
+
+/*
+ * `projectMcpServers` — which of the repo's own `.mcp.json` servers the team carries.
+ * PATCH stores names only, through `normalizeProjectMcpServers`; GET serves the repo's
+ * servers with a verdict each (`projectMcpResolved`), computed and never stored.
+ */
+
+const storedTeam = () => JSON.parse(fs.readFileSync(path.join(stateDir, 'teams', teamKeyFor(repo), 'team.json'), 'utf8'));
+
+test('project MCP servers: GET lists the repo’s own servers with a verdict, and none is ticked by default', async () => {
+  fs.writeFileSync(
+    path.join(repo, '.mcp.json'),
+    JSON.stringify({
+      mcpServers: {
+        hello: { type: 'stdio', command: 'node', args: ['hello-mcp.js'] },
+        nope: { type: 'stdio', command: 'node', args: ['hello-mcp.js'] },
+        leaky: { type: 'stdio', command: 'node', args: ['hello-mcp.js'], env: { SANDBOX_API_TOKEN: 'sandbox-not-a-secret' } },
+      },
+    }),
+  );
+  fs.mkdirSync(path.join(repo, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(repo, '.claude', 'settings.local.json'), JSON.stringify({ enabledMcpjsonServers: ['hello', 'leaky'] }));
+
+  const res = await api('GET', `/api/team/config?folder=${encodeURIComponent(repo)}`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.projectMcpServers, [], 'empty is the default, and empty means none');
+  const by = Object.fromEntries(res.body.projectMcpResolved.servers.map((s) => [s.name, s]));
+  assert.equal(by.hello.available, true);
+  assert.equal(by.nope.available, false);
+  assert.match(by.nope.reason, /not approved/);
+  assert.equal(by.leaky.available, false);
+  assert.match(by.leaky.reason, /SANDBOX_API_TOKEN/);
+  assert.ok(!JSON.stringify(res.body).includes('sandbox-not-a-secret'), 'no value ever reaches the browser');
+  assert.ok(!JSON.stringify(res.body.projectMcpResolved).includes('hello-mcp.js'), 'nor a command line');
+  assert.equal(storedTeam().projectMcpResolved, undefined, 'computed, never stored');
+});
+
+test('project MCP servers: PATCH round-trips a list, tidied, and the answer carries the verdicts', async () => {
+  const res = await api('PATCH', '/api/team/config', { folder: repo, projectMcpServers: [' hello ', 'hello', 'later'] });
+  assert.equal(res.status, 200, res.body.error);
+  assert.deepEqual(res.body.projectMcpServers, ['hello', 'later']);
+  assert.deepEqual(storedTeam().projectMcpServers, ['hello', 'later'], 'on disk');
+  // A name the repo does not declare yet is storable — the launch says it was skipped.
+  const later = res.body.projectMcpResolved.servers.find((s) => s.name === 'later');
+  assert.deepEqual([later.listed, later.declared, later.available], [true, false, false]);
+  assert.equal(res.body.projectMcpResolved.servers.find((s) => s.name === 'hello').listed, true);
+});
+
+test('project MCP servers: PATCH refuses foreman, both forge names, a bent name and a non-list — and writes nothing', async () => {
+  for (const [list, pattern] of [
+    [['hello', 'foreman'], /"foreman"/],
+    [['github'], /panel's own servers/],
+    [['gitea'], /panel's own servers/],
+    [['gitea__pull_request_write'], /separator/],
+    [['my.server'], /not a server name/],
+    ['hello', /list of server names/],
+    [null, /not null/],
+  ]) {
+    const res = await api('PATCH', '/api/team/config', { folder: repo, projectMcpServers: list });
+    assert.equal(res.status, 400, JSON.stringify(list));
+    assert.match(res.body.error, pattern);
+  }
+  assert.deepEqual(storedTeam().projectMcpServers, ['hello', 'later'], 'the last good list stands');
+
+  // And a PATCH that does not mention the key keeps it.
+  await api('PATCH', '/api/team/config', { folder: repo, toggles: { flagConflicts: true } });
+  assert.deepEqual(storedTeam().projectMcpServers, ['hello', 'later']);
+
+  const cleared = await api('PATCH', '/api/team/config', { folder: repo, projectMcpServers: [] });
+  assert.deepEqual(cleared.body.projectMcpServers, []);
+  fs.rmSync(path.join(repo, '.mcp.json'));
+  fs.rmSync(path.join(repo, '.claude'), { recursive: true });
+});
+
 /* ------------------------------------------------------- the self-merge --- */
 
 /*

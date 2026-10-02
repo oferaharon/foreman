@@ -3031,6 +3031,12 @@ body.row-dragging * { cursor: row-resize !important; }
   text-align: right;
 }
 .team-err { color: var(--decision); font-size: 0.76rem; }
+/* The repo's own project MCP servers — a caption and one switch per server, drawn by
+   `.team-toggle-row` (never a stock checkbox) and spaced like the block it sits in. */
+.team-mcp { display: flex; flex-direction: column; gap: 0.45rem; }
+.team-mcp-cap { color: var(--ink-muted); font-size: 0.72rem; }
+.team-mcp-name { font-family: var(--mono); font-size: 0.76rem; }
+.team-mcp-foot { margin-top: 0; }
 
 .head-bypass {
   color: var(--decision);
