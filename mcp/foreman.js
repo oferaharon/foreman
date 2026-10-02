@@ -374,6 +374,9 @@ const summarizeRoom = (r) => ({
     tmuxSession: m.tmuxSession,
     paneId: m.paneId,
     addedAt: m.addedAt,
+    // The panel's own word for which member is the caller. Only `?paneId=` answers carry
+    // it, and only on one member — see `myRooms`.
+    ...(m.you ? { you: true } : {}),
   })),
   memberCount: r.memberCount ?? (r.members || []).length,
   lastAt: r.lastAt,
@@ -384,12 +387,16 @@ const summarizeRoom = (r) => ({
 /**
  * The rooms this pane is in, asked of the panel rather than decided here.
  *
- * `?paneId=` is `roomsFor`, which is the **same `memberMatches`** the post endpoint
- * decides a poster by. Answering it in this process instead — comparing `TMUX_PANE`
- * against each member's `paneId` — would be a second spelling of one contract, free to
- * disagree with the first, and the disagreement shows up as a room listed here that the
- * next `group_post` is refused from. Two spellings of a membership rule is the
- * `isLeadName` lesson in room clothes.
+ * `?paneId=` is `callerMember` (`server/rooms-line.js`), the **same matcher** the post
+ * endpoint decides a poster by. Answering it in this process instead — comparing
+ * `TMUX_PANE` against each member's `paneId` — would be a second spelling of one contract,
+ * free to disagree with the first, and the disagreement shows up as a room listed here that
+ * the next `group_post` is refused from. Two spellings of a membership rule is the
+ * `isLeadName` lesson in room clothes. It would also be the bug the panel had: a stored
+ * `paneId` goes stale when a session is restarted under the same tmux session name, so
+ * that comparison says "no" to a member that is still being handed every post. The panel
+ * resolves the caller against its live roster and marks the member it resolved to with
+ * `you: true`.
  */
 async function myRooms({ open = false } = {}) {
   const pane = requirePane();
@@ -413,9 +420,10 @@ const SESSION_TOOLS = [
       `The rooms you are in, each with everyone else in it and when it last carried a message. A **room** is a named place where a few sessions coordinate on one thing — a feature spread across two codebases, say. Ask whenever it matters rather than relying on remembering; membership changes without telling you. Being in no rooms is the ordinary case, not a failure to find them. You cannot create a room, join one, or add anyone to one: only ${HUMAN} can, from the panel, and there is deliberately no tool for it — ask them in conversation if you want one. Archived rooms are left out: nothing more can be posted to one, though group_read still reads it.`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => ({
-      // Your own pane, echoed back, so you can tell which member of each room is you —
-      // there is no other id you hold about yourself, and addressing yourself in a room
-      // is the mistake this saves.
+      // Your own pane, echoed back. Which member of each room is you is the member marked
+      // `you: true` — not the one whose `paneId` matches this, since a restart gives you a
+      // new pane and leaves the stored one behind. Addressing yourself in a room is the
+      // mistake the mark saves.
       you: requirePane(),
       rooms: (await myRooms({ open: true })).map(summarizeRoom),
     }),

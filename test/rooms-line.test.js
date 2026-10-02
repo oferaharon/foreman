@@ -15,6 +15,7 @@ process.env.FOREMAN_STATE_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-r
 const {
   NOT_A_PARTICIPANT,
   UNKNOWN,
+  callerMember,
   memberFor,
   memberLabel,
   mentionsIn,
@@ -212,6 +213,106 @@ test('resolveMembers answers once per member, in the room order, resolved or not
   // line per member and a missing entry would be a member nobody knows was missed.
   assert.equal(out[2].reason, UNKNOWN);
   assert.deepEqual(resolveMembers(undefined, [ALPHA]), []);
+});
+
+/* -------------------------------------------------------------------------- */
+/* The caller: which member a pane asking about itself is.                    */
+/* -------------------------------------------------------------------------- */
+
+/*
+ * `callerMember` is the other direction of the same rule: a session holding nothing but
+ * its own `TMUX_PANE` is a member exactly when some member resolves to that pane's row. The
+ * room below was made when alpha was on `%12` and beta on `%19`; every test then moves the
+ * roster underneath it the way a restart, a `/clear` or a tmux server restart would.
+ */
+const PAIR = [member(ALPHA), member(BETA)];
+
+test('a restarted member — new pane, same tmux session — is still the member it was', () => {
+  // The bin's restart or relaunch-all: `/exit`, then the same launch under the same name.
+  // The store still says `%12`; the session is on `%31` now and asks as `%31`.
+  const restarted = row({ id: 'sess-6', paneId: '%31' });
+  const roster = [restarted, BETA];
+
+  const me = callerMember(PAIR, '%31', roster);
+  assert.ok(me, 'the restarted session is a member');
+  assert.equal(me.index, 0);
+  assert.equal(me.member, PAIR[0]);
+  assert.equal(me.row, restarted);
+  assert.equal(me.via, 'tmux');
+
+  // And it is the same answer delivery gives: the member resolves to that row.
+  assert.equal(resolveMember(PAIR[0], roster).row, restarted);
+  // The pane id that went stale answers nothing — nobody holds it any more.
+  assert.equal(callerMember(PAIR, '%12', roster), null);
+});
+
+test('a stranger holding a member’s old pane id is refused', () => {
+  // A tmux server restart: pane ids start again at `%0`, alpha came back on `%3`, and a
+  // session nobody put in the room was handed `%12`. Comparing pane ids would have let it
+  // post as alpha; resolving refuses it, because alpha resolves to `%3`.
+  const relaunched = row({ id: 'sess-6', paneId: '%3' });
+  const stranger = row({ ...GAMMA, paneId: '%12' });
+  const roster = [stranger, relaunched, BETA];
+
+  assert.equal(callerMember(PAIR, '%12', roster), null, 'the stranger is not alpha');
+  assert.equal(callerMember(PAIR, '%3', roster)?.index, 0, 'alpha, on its new pane, still is');
+
+  // Alpha gone altogether: `%12` is still the stranger's, and there is no fallback to the
+  // stored pane id alone — the two-witness rung wants the name too, and the name differs.
+  assert.equal(callerMember(PAIR, '%12', [stranger, BETA]), null);
+});
+
+test('a stranger that shares both witnesses is still refused while the member is live', () => {
+  /*
+   * The hard case, `resolveMember`'s own: a session from another launcher in the same repo
+   * on the same branch is *called* `alpha-main` too (its label is null and its title is the
+   * repo-branch one), and after a server restart it can hold `%12`. Rung 2 alone would take
+   * it. The member resolves to its own tmux session first, so the stranger is refused.
+   */
+  const relaunched = row({ id: 'sess-6', paneId: '%3' });
+  const stranger = row({ id: 'sess-8', tmuxSession: 'other-alpha-main', paneId: '%12', label: null, title: 'alpha-main' });
+
+  assert.equal(callerMember(PAIR, '%12', [stranger, relaunched, BETA]), null);
+});
+
+test('a /clear changes nothing: same pane, same tmux session, same member', () => {
+  // `/clear` rotates the session id and the transcript; the roster row's `id` moves with it.
+  const cleared = row({ id: 'sess-11' });
+  const me = callerMember(PAIR, '%12', [cleared, BETA]);
+  assert.equal(me?.index, 0);
+  assert.equal(me.row, cleared);
+  assert.equal(callerMember(PAIR, '%19', [cleared, BETA])?.index, 1);
+});
+
+test('a pane in no room, an empty pane id and an empty roster are all no', () => {
+  assert.equal(callerMember(PAIR, '%23', [ALPHA, BETA, GAMMA]), null, 'gamma is live and not a member');
+  assert.equal(callerMember(PAIR, '', [ALPHA, BETA]), null, 'an empty key matches nothing rather than everything');
+  assert.equal(callerMember(PAIR, undefined, [ALPHA, BETA]), null);
+  assert.equal(callerMember(PAIR, '%12', []), null, 'not on the roster at all');
+  assert.equal(callerMember(undefined, '%12', [ALPHA]), null);
+});
+
+test('a caller whose row is a worker is not a member, whatever its pane', () => {
+  // The participant allow-list applies to the caller exactly as to a recipient: the same
+  // resolution answers both.
+  const nowAWorker = row({ team: { role: 'worker', taskId: 'issue-1-thing' } });
+  assert.equal(callerMember(PAIR, '%12', [nowAWorker, BETA]), null);
+});
+
+test('in a split, only the pane the member was stored with is the member', () => {
+  // One tmux session, two Claude panes. The member is the top one; the bottom one shares
+  // every name and is not in the room.
+  const top = row({ id: 'sess-1', paneId: '%12' });
+  const bottom = row({ id: 'sess-4', paneId: '%13' });
+  assert.equal(callerMember(PAIR, '%12', [top, bottom, BETA])?.via, 'tmux+pane');
+  assert.equal(callerMember(PAIR, '%13', [top, bottom, BETA]), null);
+});
+
+test('a member stored without a tmux session is matched on its pane and name together', () => {
+  // A hand-edited or very old record. The two-witness rung still answers, and only with both.
+  const room = [{ tmuxSession: null, paneId: '%12', name: 'alpha-main' }];
+  assert.equal(callerMember(room, '%12', [ALPHA])?.via, 'pane+name');
+  assert.equal(callerMember(room, '%12', [row({ label: 'beta-main', tmuxSession: 'foreman-beta-main' })]), null);
 });
 
 /* -------------------------------------------------------------------------- */

@@ -21,6 +21,7 @@ const {
   POST_FLOOR_MS,
   RATE_WINDOW_MS,
   logDirFor,
+  memberKey,
   memberMatches,
   parseEntries,
 } = await import('../server/rooms.js');
@@ -191,18 +192,15 @@ test('a member is removed by any of its three ids, and nothing matched answers n
 test('membership is looked up by any of the three ids', () => {
   const store = store_(scratch());
   const one = store.create('the release', [ALPHA, BETA]);
-  const two = store.create('the other one', [BETA, GAMMA]);
-  store.create('done with', [BETA]);
-  store.archive('room-3');
 
-  assert.deepEqual(store.roomsFor(BETA.tmuxSession, { open: true }).map((r) => r.id), [one.id, two.id]);
-  assert.deepEqual(store.roomsFor(BETA.tmuxSession).map((r) => r.id), [one.id, two.id, 'room-3']);
-  assert.deepEqual(store.roomsFor('%12').map((r) => r.id), [one.id], 'a pane id answers too');
-  assert.deepEqual(store.roomsFor('gamma-master').map((r) => r.id), [two.id]);
-  assert.deepEqual(store.roomsFor('nobody'), []);
-  assert.deepEqual(store.roomsFor(''), [], 'an empty key matches nothing rather than everything');
+  // A store lookup, not a caller check — who a calling pane is goes through `callerMember`
+  // against the live roster (`rooms-line.js`). `roomsFor`, this lookup over every room, was
+  // how `GET /api/rooms?paneId=` used to answer that question, and it went with the fix.
+  assert.equal(typeof store.roomsFor, 'undefined');
 
   assert.equal(store.isMember(one.id, '%19'), true);
+  assert.equal(store.isMember(one.id, 'beta-main'), true, 'and by session name');
+  assert.equal(store.isMember(one.id, ''), false, 'an empty key matches nothing rather than everything');
   assert.equal(store.isMember(one.id, GAMMA.tmuxSession), false);
   assert.equal(store.isMember('nope', ALPHA.tmuxSession), false);
 
@@ -210,6 +208,19 @@ test('membership is looked up by any of the three ids', () => {
   assert.equal(memberMatches(ALPHA, ''), false);
   assert.equal(memberMatches(null, '%12'), false);
   assert.equal(memberMatches({ tmuxSession: null, paneId: null, name: null }, ''), false);
+});
+
+test('a member posts under its strongest stored id, which a restart cannot change', () => {
+  // `#sameMember`'s order: the tmux session survives a `/clear` and a restart, so it is the
+  // key whenever the member has one, and the limiter counts one member across both.
+  assert.equal(memberKey(ALPHA), ALPHA.tmuxSession);
+  assert.equal(memberKey({ tmuxSession: null, paneId: '%12', name: 'alpha-main' }), '%12');
+  assert.equal(memberKey({ tmuxSession: null, paneId: null, name: 'alpha-main' }), 'alpha-main');
+  assert.equal(memberKey(null), '');
+  // Whatever it is, the member answers to it — `post` checks membership with exactly this.
+  for (const m of [ALPHA, BETA, { tmuxSession: null, paneId: '%12', name: null }]) {
+    assert.equal(memberMatches(m, memberKey(m)), true);
+  }
 });
 
 test('a caller cannot reach in and mutate the store through a copy', () => {

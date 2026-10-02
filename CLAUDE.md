@@ -759,10 +759,12 @@ clamp, how a member is resolved, and what `@name` does and does not change. Evid
   paints nothing, and a quiet feature hides it.** Paint after the container is in the document;
   a busy room self-heals in seconds while a quiet one stays blank for hours.
   [rooms#a-list-painted-at-build-time](docs/traps/rooms.md#a-list-painted-at-build-time)
-- `server/rooms-line.js` (`resolveMember`) · `web/rooms-pane.js` (`memberRow`) ·
-  `test/rooms-pane.test.js` — **A room member is resolved `tmuxSession` first, and the
-  recorded decision said the opposite.** A stored pane id can be live and belong to somebody
-  else, which is a post typed into a stranger.
+- `server/rooms-line.js` (`resolveMember`, `callerMember`) · `web/rooms-pane.js` (`memberRow`) ·
+  `server/index.js` (`GET /api/rooms`, `POST /api/rooms/:id/post`) · `test/rooms-pane.test.js` —
+  **A room member is resolved `tmuxSession` first, and the recorded decision said the
+  opposite.** A stored pane id can be live and belong to somebody else, which is a post typed
+  into a stranger — and a *caller* is decided by that same resolution, never by comparing pane
+  ids, which refused a restarted member its own room.
   [rooms#a-room-member-is-resolved-tmuxsession-first](docs/traps/rooms.md#a-room-member-is-resolved-tmuxsession-first)
   · [one-spelling](docs/traps/one-spelling.md)
 - `server/index.js` (`sendOrQueue`, `roomTurn`) · `server/rooms.js` (`rateFault`) ·

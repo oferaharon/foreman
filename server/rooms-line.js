@@ -215,6 +215,52 @@ export function resolveMembers(members, sessions) {
   return list.map((member) => ({ member, ...resolveMember(member, sessions) }));
 }
 
+/**
+ * Which member of a room the **caller** is — a session asking about itself, holding
+ * nothing but its own `TMUX_PANE` — or nothing.
+ *
+ * **One rule for both directions.** The caller is a member exactly when some member
+ * *resolves*, by `resolveMember` above, to the live row holding the caller's pane. So "who
+ * may post as this member" and "whose terminal this member's copies are typed into" are
+ * one answer, and nothing a restart does can split them.
+ *
+ * It was two rules, and a restart split them. Delivery resolved `tmuxSession` first, while
+ * the caller was matched by comparing its pane id string against the stored
+ * `member.paneId`. A restart (the bin's restart, relaunch-all) keeps the tmux session name
+ * and mints a new pane, so the member went on *receiving* every post while its own
+ * `group_post` was refused `not-a-member` and its `group_list` answered `[]` — until
+ * somebody removed it and added it back. The stored pane id is deliberately **not**
+ * refreshed when it goes stale: the store is rewritten wholesale (`TaskStore`'s erasure
+ * waits for any key it drops), and this answers from the live roster without writing
+ * anything.
+ *
+ * **And the string match was not only too strict, it was too loose.** Pane ids restart at
+ * `%0` when the tmux server does, so a member's old pane id can be live and belong to
+ * somebody else — a stranger the string match would have taken for the member, able to
+ * post in its name. Here the stranger's row is not the row the member resolves to, which
+ * is `tmuxSession` first, so it is refused (`docs/traps/rooms.md`).
+ *
+ * The first member resolving to the caller's row answers. Two members resolving to one
+ * row is a hand-edited file — the store refuses a second member with the same tmux
+ * session — and the endpoint keys self-exclusion on the row, not the index, so the
+ * caller's pane is never typed its own post back either way.
+ *
+ * @param {Array<object>} members the room's membership, as `rooms.js` stores it
+ * @param {string} paneId the caller's own pane, as its MCP child read it from `TMUX_PANE`
+ * @param {Array<object>} sessions the roster, as the panel holds it
+ * @returns {{index: number, member: object, row: object, via: string}|null}
+ */
+export function callerMember(members, paneId, sessions) {
+  const pane = str(paneId);
+  if (!pane) return null;
+  const list = Array.isArray(members) ? members : [];
+  for (let index = 0; index < list.length; index += 1) {
+    const { row, via } = resolveMember(list[index], sessions);
+    if (row && str(row.paneId) === pane) return { index, member: list[index], row, via };
+  }
+  return null;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Part two: the two lines a member's terminal receives.                      */
 /* -------------------------------------------------------------------------- */

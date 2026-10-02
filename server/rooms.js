@@ -191,12 +191,27 @@ export function logDirFor(file) {
  * The store matches on all three because it is a *lookup*, not a resolution: which of the
  * three to believe when they disagree, and in what order, is `rooms-line.js`'s question
  * and is answered against the live roster, not here.
+ *
+ * **Never a test of who a calling pane is.** A caller holds only its live pane id, and a
+ * member's stored one goes stale at a restart — or, after a tmux server restart, names
+ * somebody else. Asked that question this answered a restarted member "no" and a stranger
+ * on its old pane "yes"; `callerMember` in `rooms-line.js` is the one answer to it, and
+ * hands back the member, whose `memberKey` this then matches.
  */
 export function memberMatches(member, key) {
   const want = str(key);
   if (!want || !member) return false;
   return member.tmuxSession === want || member.paneId === want || member.name === want;
 }
+
+/**
+ * The id a member posts under in this store — what `post` checks membership with and what
+ * the limiter counts per poster. The strongest id the member carries, in `#sameMember`'s
+ * order: a stored id never changes, so a member keeps one key through every `/clear` and
+ * restart, and cannot shed its own rate limit by being relaunched.
+ */
+export const memberKey = (member) =>
+  str(member?.tmuxSession) || str(member?.paneId) || str(member?.name) || '';
 
 /** A member as the door accepts it. Every id is refused for control characters, because
  *  each of them is interpolated into a header line in the message members receive — a
@@ -490,16 +505,14 @@ export class GroupRoomStore extends EventEmitter {
   }
 
   /**
-   * Every room `key` is a member of. A store lookup by one of the three ids, not a
-   * resolution against the live roster — see `memberMatches`.
+   * Is `key` in this room? A store lookup by one of the three stored ids — never the
+   * question "is this calling pane a member", which is `callerMember`'s (`memberMatches`).
+   *
+   * There used to be a `roomsFor(key)` beside this, the same lookup over every room, and
+   * `GET /api/rooms?paneId=` answered `group_list` with it. It went with the fix that made
+   * that route resolve the caller against the roster, so the old question has nowhere left
+   * to be asked from.
    */
-  roomsFor(key, { open = false } = {}) {
-    return this.rooms
-      .filter((r) => (!open || !r.archivedAt) && r.members.some((m) => memberMatches(m, key)))
-      .map((r) => this.#copy(r));
-  }
-
-  /** Is `key` in this room? */
   isMember(id, key) {
     const room = this.#record(id);
     return !!room && room.members.some((m) => memberMatches(m, key));
@@ -768,7 +781,10 @@ export class GroupRoomStore extends EventEmitter {
    * one of the three member ids — and it is required rather than defaulted, with `null`
    * spelling the maintainer explicitly, because a `by` that quietly defaulted would let a
    * session's post skip the membership check and the limiter by omission. The same stance
-   * `speaker` has in `envelope.js`: not plumbed by accident.
+   * `speaker` has in `envelope.js`: not plumbed by accident. The endpoint passes the
+   * `memberKey` of the member `callerMember` resolved, never the caller's raw pane id —
+   * which is what lets a restarted member post at all, and what keeps one limiter count
+   * per member across the restart.
    *
    * The store refuses, in the order the endpoint answers them: no such room (404), an
    * archived room (409), a poster who is not a member (409), over a limit (429). A body
