@@ -228,12 +228,12 @@ export function roomsListView(rooms, { onOpen, onChange, sessions = () => [] } =
    *
    * The maintainer's ruling of 2026-09-16 — *"On mobile only I'd like the standalone and
    * rooms lists to be sorted by recent at the top"* — is about the phone. `bandEntries` and
-   * `partitionRooms` are shared with the desktop's rail band, whose own header explains at
-   * length why it keeps the store's creation order: a band that reordered itself every time
-   * anybody spoke would take a row out from under a cursor on its way to press it. So the
-   * phone sorts the array it hands over and the shared module is untouched, which is also the
-   * only version of this that is provable — there is no option to pass and therefore no way
-   * for the desktop to be handed one by accident.
+   * `partitionRooms` are shared with the desktop's rail band, which sorts by *creation*
+   * (2026-10-01) and never by activity: a band that reordered itself every time anybody spoke
+   * would take a row out from under a cursor on its way to press it. So each screen sorts the
+   * array it hands over and the shared module is untouched, which is also the only version of
+   * this that is provable — there is no option to pass and therefore no way for one screen to
+   * be handed the other's order by accident.
    *
    * Sorting *before* the partition keeps the archived fold exactly where it was:
    * `partitionRooms` preserves the order of what it is given, so recency orders **within**

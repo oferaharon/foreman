@@ -54,20 +54,22 @@ export function memberLabel(m) {
  * and `null` while it is open — so the test is on the field rather than on a `state` word
  * the record does not carry.
  *
- * The order is the store's and is not re-sorted here. `list()` answers in creation order,
- * which is stable across every frame; sorting on `lastAt` would make the band reorder
- * itself under a cursor every time anybody said anything, which is the cost the whole
- * patch-in-place rule exists to avoid.
+ * The order is whatever the caller hands over and is not re-sorted here. Both screens sort
+ * the array they pass in, and neither asks this module for it:
  *
- * **The phone does sort, and the Mac does not — say it that way round.** Since the
- * maintainer's ruling of 2026-09-16 the phone's Rooms tab draws its list newest first, and it
- * does so by sorting the array it hands to `bandEntries` (`roomsListView`, `web/m/rooms.js`),
- * never by asking this module for it. There is deliberately **no option to pass**: an opt-in
- * flag here is a flag the rail could one day be handed by accident, and the whole value of
- * the split is that the desktop's order cannot be changed from a phone-side edit. What this
- * function does carry for both of them is that the partition preserves the order it is given,
- * so the phone's sort orders *within* the open and archived sections and never lifts an
- * archived room above a live one.
+ *  - **The desktop** sorts newest *created* first (`newestCreatedFirst`, `web/rooms-newest.js`,
+ *    called from `renderRoomsBand`; the maintainer's ruling of 2026-10-01). `createdAt` only
+ *    changes when a room is made, so the band still never reorders on a post — sorting on
+ *    `lastAt` would move a row under a cursor every time anybody spoke, which is the cost the
+ *    whole patch-in-place rule exists to avoid.
+ *  - **The phone** sorts newest by *activity* (`roomsListView`, `web/m/rooms.js`; the ruling
+ *    of 2026-09-16), accepting that a row moves when anybody speaks.
+ *
+ * There is deliberately **no option to pass**: an opt-in flag here is a flag one screen could
+ * one day be handed by accident, and the whole value of the split is that neither order can be
+ * changed from the other side's edit. What this function does carry for both is that the
+ * partition preserves the order it is given, so each sort orders *within* the open and
+ * archived sections and never lifts an archived room above a live one.
  */
 export function partitionRooms(rooms = []) {
   const list = Array.isArray(rooms) ? rooms : [];
@@ -167,8 +169,8 @@ export const RECENT_MS = 10 * 60_000;
  * (`server/rooms.js` normalises it), and the window is shut at its far end: a post exactly
  * ten minutes old is out.
  *
- * A mark and nothing more. It never orders anything — the band stays in the store's order,
- * see `partitionRooms`, and neither function the phone shares so much as reads `lastAt`.
+ * A mark and nothing more. It never orders anything — the band is ordered by creation, see
+ * `partitionRooms`, and neither function the phone shares so much as reads `lastAt`.
  */
 export function isRecent(room, now = Date.now()) {
   if (!room || typeof room !== 'object' || room.archivedAt) return false;

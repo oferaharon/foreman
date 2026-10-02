@@ -18,6 +18,7 @@ import {
   roomTitle,
   unseenText,
 } from '../web/rooms-band.js';
+import { newestCreatedFirst } from '../web/rooms-newest.js';
 
 /*
  * The rail's rooms band.
@@ -200,7 +201,7 @@ test('the store’s order is kept — the band never re-sorts on `lastAt`', () =
   );
 });
 
-test('the desktop default is untouched by the phone’s recency order', () => {
+test('the shared module’s default is untouched by either screen’s sort', () => {
   /*
    * The maintainer's ruling of **2026-09-16** put the *phone's* Rooms tab into recency order
    * (`roomsListView`, `web/m/rooms.js`). This module is shared with the rail band, so the one
@@ -253,6 +254,69 @@ test('the desktop default is untouched by the phone’s recency order', () => {
     );
   }
   assert.match(fn('bandEntries', band), /\{ archivedCollapsed = true \} = \{\}/, 'one option, still');
+});
+
+/* --------------------------------------------------- the desktop's order --- */
+
+const bandIds = (rooms, opts) =>
+  bandEntries(rooms, opts).map((e) => (e.kind === 'fold' ? 'fold' : e.room.id));
+
+test('the desktop draws the room made most recently first, open above archived', () => {
+  // Store order (oldest first), with `lastAt` disagreeing with creation on every row so an
+  // activity sort would be visible.
+  const store = [
+    room('r1', 'first made', { createdAt: 100, lastAt: 900 }),
+    room('r2', 'second made', { createdAt: 200, lastAt: 1 }),
+    room('r3', 'third made', { createdAt: 300, lastAt: null }),
+    room('r4', 'archived, old', { createdAt: 150, archivedAt: 5, lastAt: 800 }),
+    room('r5', 'archived, new', { createdAt: 250, archivedAt: 6, lastAt: 2 }),
+  ];
+  const sorted = newestCreatedFirst(store);
+  assert.deepEqual(bandIds(sorted), ['r3', 'r2', 'r1', 'fold']);
+  assert.deepEqual(bandIds(sorted, { archivedCollapsed: false }), ['r3', 'r2', 'r1', 'fold', 'r5', 'r4']);
+  assert.deepEqual(store.map((r) => r.id), ['r1', 'r2', 'r3', 'r4', 'r5'], 'the input is not mutated');
+});
+
+test('a post moves nothing: the order is the same before and after `lastAt` changes', () => {
+  const before = [room('r1', 'a', { createdAt: 100 }), room('r2', 'b', { createdAt: 200 })];
+  const after = [room('r1', 'a', { createdAt: 100, lastAt: 5000 }), room('r2', 'b', { createdAt: 200 })];
+  assert.deepEqual(bandIds(newestCreatedFirst(before)), ['r2', 'r1']);
+  assert.deepEqual(bandIds(newestCreatedFirst(after)), ['r2', 'r1']);
+});
+
+test('ties and unstamped rooms fall back to the reverse of the store’s order', () => {
+  // `list()` is oldest first, so later in the store = made later = first. Records from before
+  // `createdAt` read 0 and sit below every stamped room.
+  const store = [
+    room('r1', 'old, no stamp', { createdAt: 0 }),
+    room('r2', 'old, no stamp too', { createdAt: 0 }),
+    room('r3', 'stamped', { createdAt: 50 }),
+    room('r4', 'same stamp', { createdAt: 50 }),
+    room('r5', 'archived tie a', { createdAt: 7, archivedAt: 1 }),
+    room('r6', 'archived tie b', { createdAt: 7, archivedAt: 1 }),
+  ];
+  assert.deepEqual(bandIds(newestCreatedFirst(store), { archivedCollapsed: false }), [
+    'r4',
+    'r3',
+    'r2',
+    'r1',
+    'fold',
+    'r6',
+    'r5',
+  ]);
+  // Unreadable stamps are 0, and nothing is dropped or thrown on.
+  const odd = [room('a', 'a', { createdAt: 'x' }), room('b', 'b', { createdAt: -4 }), room('c', 'c', { createdAt: 9 })];
+  assert.deepEqual(newestCreatedFirst(odd).map((r) => r.id), ['c', 'b', 'a']);
+  assert.deepEqual(newestCreatedFirst(undefined), []);
+  assert.equal(newestCreatedFirst([null, room('z', 'z')]).length, 2);
+});
+
+test('the sort is wired in the desktop caller, once, and never into the shared module', () => {
+  const body = strip(fn('renderRoomsBand'));
+  assert.match(body, /newestCreatedFirst\(state\.rooms\)/, 'renderRoomsBand sorts what it hands over');
+  assert.ok(!/state\.rooms\b/.test(body.replace(/newestCreatedFirst\(state\.rooms\)/, '')), 'one sorted array feeds signature and patch');
+  assert.ok(!/newestCreatedFirst|createdAt/.test(strip(band)), 'the shared module does not know the order');
+  assert.ok(!/lastAt/.test(strip(fs.readFileSync(path.join(ROOT, 'web/rooms-newest.js'), 'utf8'))), 'creation only, never activity');
 });
 
 /* ------------------------------------------------------------- the fold --- */
