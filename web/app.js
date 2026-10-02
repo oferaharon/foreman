@@ -9408,6 +9408,98 @@ function createPane(slot, host) {
   }
 
   /**
+   * `projectMcpServers` — which of the repo's own project MCP servers (its checked-in
+   * `.mcp.json`) the team's lead and build workers carry. The lead and its workers launch
+   * with `--strict-mcp-config`, which drops every server the repo declares; a tick here puts
+   * one back, at the next launch.
+   *
+   * The rows come from `projectMcpResolved`, which the server computes from the repo's own
+   * files per GET and never stores — the same judgement the launch makes (`judge` in
+   * `server/project-mcp.js`), so a switch that is live here is a server the launch would
+   * copy. A row that would not be copied (unapproved in the repo's own Claude Code settings,
+   * carrying a credential, no longer declared) is drawn unavailable with the reason under
+   * it, and stays pressable only while it is ticked, so a stale tick can be taken off.
+   *
+   * The switch is `.team-toggle-row`'s, not a stock checkbox: a native box is painted from
+   * the *browser's* colour scheme rather than the page's, and an unticked one read as ticked
+   * (docs/traps/browser.md#a-stock-checkbox-is-painted-by-the-browser).
+   *
+   * A successful PATCH redraws the block from the answer rather than flipping one switch,
+   * because whether a row is pressable depends on whether it is ticked.
+   */
+  function projectMcpBlock(team, elm) {
+    const block = document.createElement('div');
+    block.className = 'team-mcp';
+    const servers = team.projectMcpResolved?.servers || [];
+    const listed = Array.isArray(team.projectMcpServers) ? team.projectMcpServers : [];
+
+    if (!servers.length) {
+      // One muted line rather than nothing: the absence is a fact about the repo, and a
+      // maintainer looking for the control should find out why it has no rows.
+      const row = document.createElement('div');
+      row.className = 'team-setup-row';
+      const label = document.createElement('span');
+      label.textContent = 'project tools';
+      const value = document.createElement('span');
+      value.className = 'team-setup-value is-unknown';
+      value.textContent = 'none — this repo’s .mcp.json declares no servers';
+      row.append(label, value);
+      block.append(row);
+      return block;
+    }
+
+    const cap = document.createElement('span');
+    cap.className = 'team-mcp-cap';
+    cap.textContent = 'project tools';
+    cap.title =
+      'MCP servers the repo itself declares in .mcp.json. A tick hands one to the lead and to build workers — never to planners — when the repo’s own Claude Code settings approve it and its entry carries no credential.';
+    block.append(cap);
+
+    for (const server of servers) {
+      const pressable = server.available || server.listed;
+      const row = document.createElement('label');
+      row.className = server.available ? 'team-toggle-row' : 'team-toggle-row is-unavailable';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = Boolean(server.listed);
+      box.disabled = !pressable;
+      box.onchange = async () => {
+        box.disabled = true;
+        const next = box.checked
+          ? [...new Set([...listed, server.name])]
+          : listed.filter((name) => name !== server.name);
+        try {
+          const answer = await patchTeam({ projectMcpServers: next });
+          block.replaceWith(projectMcpBlock(answer, elm));
+        } catch (err) {
+          box.checked = !box.checked; // it didn't take — show the truth
+          box.disabled = !pressable;
+          errLine(elm, err.message);
+        }
+      };
+      const name = document.createElement('span');
+      name.className = 'team-mcp-name';
+      name.textContent = server.name;
+      name.title = server.reason || '';
+      row.append(box, name);
+      block.append(row);
+      if (!server.available) {
+        const why = document.createElement('div');
+        why.className = 'team-toggle-note';
+        why.textContent = `${server.listed ? 'Ticked, but not handed over' : 'Not available'} — ${server.reason}.`;
+        block.append(why);
+      }
+    }
+
+    const note = document.createElement('div');
+    note.className = 'team-toggle-note';
+    note.textContent =
+      'For the lead and build workers, never planners. A change reaches the next lead launch and the next dispatch — nothing already running. Whatever these drive is shared by every session on this Mac; the lead runs one such worker at a time.';
+    block.append(note);
+    return block;
+  }
+
+  /**
    * How long the SETTINGS fold takes, in milliseconds. It is spelled here *and* in
    * `.team-settings-fold`'s transition, and the two have to agree — this copy exists only
    * to time the backstop re-pin, so drifting apart costs a room that re-pins early rather
@@ -9752,6 +9844,7 @@ function createPane(slot, host) {
     modelWrap.append(modelPick);
     modelRow.append(modelText, modelWrap);
     elm.append(modelRow);
+    elm.append(projectMcpBlock(team, elm));
     // Setup is shown, never typed — the maintainer's ruling (2026-08-26): a control the user
     // cannot answer correctly should not be a control. The server detects it from the
     // project's files; a wrong command here is a bug in setup-detect.js, not a box to
