@@ -114,6 +114,36 @@ mirrors the same order for its status dot and cannot import the real one (that p
 `server/observe.js`), so `test/rooms-pane.test.js` drives both against one set of fixtures and
 asserts they agree — held together by a test rather than by a comment.
 
+**And a caller is decided by the same resolution, never by comparing pane ids — which is how
+the panel first got it wrong in the other direction.** Delivery resolved `tmuxSession` first
+from the start, but "is this calling pane a member" — the post check, and the `?paneId=`
+listing that `group_list` and `group_read` read — compared the caller's `TMUX_PANE` string
+with the stored `member.paneId`. A restart (the bin's restart, relaunch-all) keeps the tmux
+session name and mints a new pane, so a restarted member went on *receiving* every post while
+its own `group_post` was refused `not-a-member` and its `group_list` answered `[]`; the only
+way back was removing it and adding it again. MEASURED on v2.1.280 in the sandbox: alpha
+restarted through `POST /api/sessions/:id/relaunch` came back on `%2` with the room still
+storing `%0`, was handed beta's post, and got `%2 is not in "restart probe"` from its own.
+The same comparison was also too *loose*: after a tmux server restart the old pane id can be
+a stranger's, and it would have let the stranger post in the member's name.
+
+`callerMember` (`server/rooms-line.js`) is the one answer now: the caller is the member that
+`resolveMember` resolves to the live row holding the caller's pane. Every caller site asks
+it — `POST /api/rooms/:id/post` and `GET /api/rooms?paneId=`, which must share a matcher or a
+session is listed a room its next post is refused from — and everything downstream follows the
+resolved member rather than the raw pane: the limiter keys on `memberKey` (the strongest
+stored id, so a restart neither refuses the member nor resets its count), the fan-out skips
+the author's *row*, and `from` is the member's name. The store's `roomsFor` was retired with
+it, so the old question has nowhere left to be asked; `memberMatches` and `isMember` stay as
+store lookups by a stored id, which is what `post` re-checks with. The stored `paneId` is
+deliberately **not** rewritten when it goes stale: resolution is enough, and `rooms.json` is
+rewritten wholesale, so every write to it is a chance at `TaskStore`'s erasure. Because the
+caller's pane no longer matches its stored one, the listing marks the caller's member
+`you: true` — that, not a pane comparison, is how `group_list` tells a session which member
+it is. And since this decides membership off the roster, which is a poll behind, a caller
+whose pane the roster does not hold yet gets one `registry.refresh()` before the answer
+(`rosterForCaller`), or a session restarted a second ago is refused for the length of a poll.
+
 ## `handed` is not `delivered`
 
 **`handed` is not `delivered`, and the window between checking and writing it down had to be

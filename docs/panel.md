@@ -1261,6 +1261,15 @@ Enter or Tab to take one, Escape to dismiss) and a post that named somebody carr
 - `group_read` — `{id, since?}`. Everything after a cursor (capped at 200), or roughly the
   last 20 entries with `since` omitted. Archived rooms stay readable.
 
+**A member survives a restart with nothing re-entered.** The bin's restart and relaunch-all
+bring a session back under the same tmux session name on a new pane, and the room keeps the
+old pane id it stored. Which member a calling session is gets decided the way delivery
+decides who a member is — the session name first, against the live roster — so the restarted
+session still lists, reads and posts to its rooms, and its own posts still never come back to
+it. `group_list` marks the member that is you with `you: true`, since your pane no longer
+matches the one the room stored. A different session that happens to be holding a member's old
+pane id after the tmux server restarted is refused.
+
 There is no create, no join, no add, and no tool takes a pane or a speaker: which session is
 posting is read from the tool server's own environment, so a session cannot post as another.
 
