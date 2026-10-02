@@ -107,8 +107,9 @@ import { RoomStore } from './room.js';
 // rooms reach them through `rooms-line.js` instead.)
 import { assertSendableBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
-import { GroupRoomStore, memberMatches, MAX_MEMBERS } from './rooms.js';
+import { GroupRoomStore, memberKey, MAX_MEMBERS } from './rooms.js';
 import {
+  callerMember,
   memberFor,
   memberLabel,
   mentionsIn,
@@ -3091,29 +3092,58 @@ const memberName = (member, row) =>
   rowName(row) || member?.name || member?.tmuxSession || member?.paneId || 'a session';
 
 /**
+ * The roster a **caller** is decided against: the panel's in-memory one, refreshed once when
+ * it does not hold the caller's pane at all.
+ *
+ * The roster is a poll behind, and a session that was just started or restarted can call a
+ * tool before the next poll has seen its pane. Deciding membership against the roster —
+ * which `callerMember` does, and must — would refuse that call for the length of one poll,
+ * a refusal the caller cannot tell from a real one. A pane the roster *does* hold is
+ * answered without a refresh, so the ordinary call, including the ordinary "in no rooms",
+ * reads nothing.
+ */
+async function rosterForCaller(paneId) {
+  if (!registry.byPane(paneId)) await registry.refresh().catch(() => {});
+  return registry.list();
+}
+
+/**
  * Every room, with `unseen` and `lastAt` folded in. `list()` reads no file.
  *
  * `?paneId=` narrows it to the rooms one member is in, and it exists for exactly one
  * caller: `group_list` in `mcp/foreman.js`, where a session asks which rooms it is in and
- * the only id it holds about itself is its own `TMUX_PANE` (the plan's §5.1).
+ * the only id it holds about itself is its own `TMUX_PANE` (the plan's §5.1). `group_read`
+ * scopes itself by the same answer.
  *
- * The filter is `roomsFor`, which is `isMember` over the whole index — **the same
- * `memberMatches` `POST /api/rooms/:id/post` decides a poster by**, and that is the whole
- * reason it is a query here rather than a filter in the MCP process. A second spelling of
- * "is this pane a member" would be free to disagree with the first, and the shape of the
- * disagreement is a session shown a room its next post is refused from, or refused a room
- * it was never shown. One matcher, asked twice.
+ * The filter is `callerMember` — **the same matcher `POST /api/rooms/:id/post` decides a
+ * poster by**, and that is the whole reason it is a query here rather than a filter in the
+ * MCP process. A second spelling of "is this pane a member" would be free to disagree with
+ * the first, and the shape of the disagreement is a session shown a room its next post is
+ * refused from, or refused a room it was never shown. One matcher, asked twice. It was
+ * asked twice before, too — of a matcher comparing the caller's pane id with the stored
+ * one, which a restart leaves stale — so a restarted member was refused by both at once
+ * while still receiving every post. `callerMember`'s header has the rest.
+ *
+ * The member the caller resolved to carries `you: true`, because after a restart the
+ * caller's own pane id is not the one stored on its member, and that pane id was the only
+ * way `group_list` could tell a session which member was itself.
  *
  * A pane that is in no room answers `[]`, which is the ordinary case and not a 404: the
  * question was "which rooms am I in", and none is an answer to it.
  */
-app.get('/api/rooms', (req, res) => {
+app.get('/api/rooms', async (req, res) => {
   const open = req.query.open === '1' || req.query.open === 'true';
   const paneId = String(req.query.paneId ?? '').trim();
-  res.json({
-    rooms: paneId ? rooms.roomsFor(paneId, { open }) : rooms.list({ open }),
-    maxMembers: MAX_MEMBERS,
-  });
+  if (!paneId) return res.json({ rooms: rooms.list({ open }), maxMembers: MAX_MEMBERS });
+
+  const sessions = await rosterForCaller(paneId);
+  const mine = [];
+  for (const room of rooms.list({ open })) {
+    const me = callerMember(room.members, paneId, sessions);
+    if (!me) continue;
+    mine.push({ ...room, members: room.members.map((m, i) => (i === me.index ? { ...m, you: true } : m)) });
+  }
+  res.json({ rooms: mine, maxMembers: MAX_MEMBERS });
 });
 
 /**
@@ -3310,11 +3340,9 @@ app.post('/api/rooms/:id/post', async (req, res) => {
     return res.status(400).json({ error: err.message, cap: MAX_MESSAGE_TEXT });
   }
 
-  // `null` spells the maintainer, and it is spelled rather than defaulted: `post` refuses
-  // an omitted `by` outright, so a session that forgot to name itself cannot skip the
-  // membership check and the limiter by omission.
+  // No pane is the panel's own composer, which is the maintainer. A session always names
+  // its pane — `group_post` sends its own `TMUX_PANE` and has no way to omit it.
   const paneId = String(req.body?.paneId ?? '').trim();
-  const by = paneId || null;
 
   try {
     return await roomTurn(id, async () => {
@@ -3326,9 +3354,26 @@ app.post('/api/rooms/:id/post', async (req, res) => {
           code: 'archived',
         });
       }
-      if (by !== null && !rooms.isMember(id, by)) {
-        return res.status(409).json({ error: `${by} is not in "${room.name}".`, code: 'not-a-member' });
+
+      /*
+       * Who is posting, decided the way delivery decides who a member is: the caller's pane
+       * to its live row, and the caller is the member that *resolves* to that row
+       * (`callerMember`, the one matcher `GET /api/rooms?paneId=` asks too). Never the pane
+       * id against the stored one — a restart leaves that stale, and a tmux server restart
+       * can hand it to a stranger.
+       *
+       * Everything downstream follows the member, never the raw pane: `by` is its stored
+       * key, so the limiter counts one member across a restart; its row is what the fan-out
+       * skips; `from` is its name. `null` spells the maintainer, and it is spelled
+       * rather than defaulted: `post` refuses an omitted `by` outright, so a session that
+       * forgot to name itself cannot skip the membership check and the limiter by omission.
+       */
+      const sessions = paneId ? await rosterForCaller(paneId) : registry.list();
+      const author = paneId ? callerMember(room.members, paneId, sessions) : null;
+      if (paneId && !author) {
+        return res.status(409).json({ error: `${paneId} is not in "${room.name}".`, code: 'not-a-member' });
       }
+      const by = author ? memberKey(author.member) : null;
       const over = rooms.rateFault(id, by);
       if (over) {
         return res.status(429).json({ error: over.message, code: over.code, retryAfterMs: over.retryAfterMs });
@@ -3353,11 +3398,8 @@ app.post('/api/rooms/:id/post', async (req, res) => {
        */
       const to = mentionsIn(text, room.members);
 
-      const sessions = registry.list();
       const resolved = resolveMembers(room.members, sessions);
-      const mine = by === null ? -1 : resolved.findIndex((r) => memberMatches(r.member, by));
-      const author = mine < 0 ? null : resolved[mine];
-      const from = by === null ? 'panel' : memberName(author?.member, author?.row);
+      const from = author ? memberName(author.member, author.row) : 'panel';
 
       /*
        * Compose once before anything is typed, so a room whose own *name*, id or member
@@ -3377,9 +3419,11 @@ app.post('/api/rooms/:id/post', async (req, res) => {
 
       const handed = [];
       for (let i = 0; i < resolved.length; i += 1) {
-        // Never to the author. A session handed its own post would answer it.
-        if (i === mine) continue;
         const entry = resolved[i];
+        // Never to the author. A session handed its own post would answer it. Keyed on the
+        // row the author resolved to rather than on its index, so no member — however the
+        // file came to hold it — can route the post back into the pane that wrote it.
+        if (author && entry.row && entry.row.paneId === author.row.paneId) continue;
 
         const mark = {
           name: memberName(entry.member, entry.row),

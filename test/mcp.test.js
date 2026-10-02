@@ -137,8 +137,12 @@ function summarizeTaskMirror(t) {
   };
 }
 
-/** The store's own `memberMatches`, mirrored — the stub is the contract here, the way it
- *  mirrors the room endpoint's 200 cap above. */
+/** A stand-in for the panel's membership decision. The real one is `callerMember`
+ *  (`server/rooms-line.js`), which resolves the caller's pane against the live roster —
+ *  this stub has no roster, so it compares stored ids, which is enough for what is under
+ *  test here: that the tools ask the panel and hand its answer back unchanged. Whether a
+ *  restarted member is still a member is `test/rooms-line.test.js`'s and
+ *  `test/rooms-api.test.js`'s. */
 const memberMatches = (m, key) => m.tmuxSession === key || m.paneId === key || m.name === key;
 
 let stub;
@@ -334,15 +338,16 @@ test.before(async () => {
           }));
         }
       } else if (req.url.startsWith('/api/rooms') && req.method === 'GET') {
-        // `roomsFor` when a pane is named, `list` when one is not — the real route's own
-        // split, so a tool that forgot to name itself would read as "every room on the
-        // machine" here exactly as it would against the panel.
+        // The caller's rooms when a pane is named, `list` when one is not — the real route's
+        // own split, so a tool that forgot to name itself would read as "every room on the
+        // machine" here exactly as it would against the panel. And, like the real route, the
+        // member the caller is comes back marked `you: true`.
         const q = new URL(req.url, 'http://x').searchParams;
         const key = q.get('paneId') || '';
         const open = q.get('open') === '1';
         const rows = ROOMS.filter(
           (r) => (!open || !r.archivedAt) && (!key || r.members.some((m) => memberMatches(m, key))),
-        );
+        ).map((r) => (key ? { ...r, members: r.members.map((m) => (memberMatches(m, key) ? { ...m, you: true } : m)) } : r));
         res.end(JSON.stringify({ rooms: rows, maxMembers: 8 }));
       } else {
         res.statusCode = 404;
@@ -1052,9 +1057,14 @@ test('group_list answers the rooms this pane is in, and leaves archived ones out
   assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
   const body = out(res);
   assert.deepEqual(body.rooms.map((r) => r.id), ['rm-1'], 'rm-2 is not this pane’s; rm-3 is archived');
-  assert.equal(body.you, ALPHA_PANE, 'and the pane comes back, so a member can tell which one is itself');
+  assert.equal(body.you, ALPHA_PANE, 'and the pane comes back');
   assert.equal(body.rooms[0].memberCount, 3);
   assert.deepEqual(body.rooms[0].members.map((m) => m.name), ['alpha-main', 'beta-main', 'gamma-master']);
+  // Which member is this session is the panel's mark, carried through and only where it was
+  // set: after a restart the pane above is not the one stored on the member, so comparing
+  // the two is no longer a way to tell.
+  assert.deepEqual(body.rooms[0].members.map((m) => m.you === true), [true, false, false]);
+  assert.ok(!('you' in body.rooms[0].members[1]), 'absent rather than false on everybody else');
 });
 
 test('group_list drops the maintainer’s seen mark, which is not a session’s to read', async () => {

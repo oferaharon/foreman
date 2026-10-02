@@ -7,6 +7,9 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+// A constant read and nothing else: `rooms.js` writes nothing at import (`rooms-create.test.js`
+// imports it the same way), and the panel under test runs in its own process and state dir.
+import { POST_FLOOR_MS } from '../server/rooms.js';
 
 /*
  * The group-room endpoints, against the real server — `test/shared-room-api.test.js`'s
@@ -350,8 +353,8 @@ test('?paneId= answers only the rooms that pane is in — the filter group_list 
   assert.ok(!ids_.includes(theirs.id), 'and never one it is not');
 
   // The whole reason this is a query rather than a filter in `mcp/foreman.js`: it is
-  // `roomsFor`, which is the same `memberMatches` the post endpoint decides a poster by.
-  // A second spelling would be free to list a room the next post is refused from.
+  // `callerMember`, the same matcher the post endpoint decides a poster by. A second
+  // spelling would be free to list a room the next post is refused from.
   const post = await api('POST', `/api/rooms/${theirs.id}/post`, {
     text: 'PROBE-FILTER', paneId: panes.get('alpha-main'),
   });
@@ -689,6 +692,69 @@ test('a member whose session has gone comes back unreachable, with a reason', as
   assert.equal(after.body.entries.length, 1);
 
   await freshPanes(['gamma-master']);
+});
+
+test('a restarted member — new pane, same tmux session — still lists, posts, and is posted to', async (t) => {
+  /*
+   * The bin's restart and relaunch-all both `/exit` a session and launch it again under the
+   * same tmux session name, so it comes back on a new pane while the room still stores the
+   * old one. `freshPanes` is exactly that: kill the session, start it under its own name.
+   *
+   * Before the fix delivery already worked — it resolves `tmuxSession` first — while the
+   * member's own calls were refused: `?paneId=` answered `[]` and a post was a 409
+   * `not-a-member`, because both compared the caller's pane id with the stale stored one.
+   */
+  if (!bench) return t.skip('no scratch tmux bench on this machine');
+  assert.ok(await freshPanes(['alpha-main', 'beta-main']));
+  const room = await makeRoom('after a restart', ['alpha-main', 'beta-main']);
+  const before = panes.get('alpha-main');
+
+  assert.ok(await freshPanes(['alpha-main']));
+  const after = panes.get('alpha-main');
+  assert.notEqual(after, before, 'the restart gave alpha a new pane');
+  const stored = (await api('GET', `/api/rooms/${room.id}`)).body.room.members;
+  assert.equal(stored.find((m) => m.name === 'alpha-main').paneId, before, 'and the room still stores the old one');
+
+  // `group_list` (and `group_read`, which scopes itself by the same answer).
+  const listed = await api('GET', `/api/rooms?paneId=${encodeURIComponent(after)}`);
+  const mine = listed.body.rooms.find((r) => r.id === room.id);
+  assert.ok(mine, 'the restarted member still lists its room');
+  // Its own pane no longer matches its stored one, so the panel says which member it is.
+  assert.deepEqual(mine.members.filter((m) => m.you).map((m) => m.name), ['alpha-main']);
+  const gone = await api('GET', `/api/rooms?paneId=${encodeURIComponent(before)}`);
+  assert.ok(!gone.body.rooms.some((r) => r.id === room.id), 'the old pane is nobody now');
+
+  // `group_post`, as the restarted member: it posts as itself, and the fan-out still skips it.
+  const said = await api('POST', `/api/rooms/${room.id}/post`, { text: 'PROBE-RESTART said', paneId: after });
+  assert.equal(said.status, 200, JSON.stringify(said.body));
+  const postedAt = Date.now();
+  assert.equal(said.body.entry.from, 'alpha-main');
+  assert.deepEqual(said.body.entry.handed.map((h) => [h.name, h.state]), [['beta-main', 'typed']]);
+  assert.match(screenOf('beta-main'), /> PROBE-RESTART said/);
+  assert.doesNotMatch(screenOf('alpha-main'), /PROBE-RESTART said/, 'the author got no copy');
+
+  // And delivery the other way, which never broke: beta posts, the restarted alpha hears it.
+  const heard = await api('POST', `/api/rooms/${room.id}/post`, { text: 'PROBE-RESTART heard', paneId: panes.get('beta-main') });
+  assert.equal(heard.status, 200, JSON.stringify(heard.body));
+  assert.deepEqual(heard.body.entry.handed.map((h) => [h.name, h.state]), [['alpha-main', 'typed']]);
+  assert.match(screenOf('alpha-main'), /> PROBE-RESTART heard/);
+
+  /*
+   * The limiter counts the member, not the pane: restart alpha again and post at once, and
+   * the post a moment ago still holds the floor. Keyed on the raw pane id, a restart would
+   * have been a way out of it. Asserted only inside the floor — a slow machine that took
+   * longer than that to restart a pane has measured nothing.
+   */
+  assert.ok(await freshPanes(['alpha-main']));
+  const again = await api('POST', `/api/rooms/${room.id}/post`, { text: 'PROBE-RESTART again', paneId: panes.get('alpha-main') });
+  if (Date.now() - postedAt < POST_FLOOR_MS - 1_000) {
+    assert.equal(again.status, 429, JSON.stringify(again.body));
+    assert.equal(again.body.code, 'rate-limited');
+  } else {
+    t.diagnostic(`the second restart took ${Date.now() - postedAt}ms, past the floor; the limiter was not measured`);
+  }
+
+  await freshPanes(['alpha-main', 'beta-main']);
 });
 
 /* ------------------------------------------------------------ the frame --- */
