@@ -344,6 +344,12 @@ body.row-dragging * { cursor: row-resize !important; }
   font-size: 0.6rem;
 }
 .snap-row.is-skipped { opacity: 0.5; }
+
+/* The summary view's drift lists — which sessions the count line above them is counting.
+   Two of them can sit in one box, so each is capped well below the restore list's 40vh:
+   about six rows, then it scrolls, and the buttons stay on screen. */
+.snap-drift-head { margin: 0.6rem 0 0; }
+.snap-list.snap-drift { margin-top: 0.25rem; max-height: min(8.5rem, 22vh); }
 .snap-row.is-started .snap-state { color: var(--idle); }
 .snap-row.is-failed .snap-state { color: var(--decision); }
 
