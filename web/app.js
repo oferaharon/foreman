@@ -102,6 +102,9 @@ import { ageText, groupSummary } from './group-summary.js';
 // `renderRail` lifts nested workers out before that count is taken, so a busy worker in a
 // closed team group used to light nothing until the stuck timer fired.
 import { orderWorkers } from './worker-order.js';
+import { driftRows } from './snapshot-drift.js';
+// ^ the snapshot box's drift as named rows, each with its folder. The server sends names
+// only; the folders come from the saved entries and the live roster.
 // The briefs modal's two rules: which of the four tabs is a function of a repository, and
 // which repo a freshly opened modal lands on. The twelfth pure module under `web/`, and the
 // reason it is one is that both render perfectly when re-derived wrongly — a repo picker on
@@ -2193,6 +2196,37 @@ async function openSnapshot() {
       drift.textContent = bits.length ? bits.join(' · ') : 'Matches what’s running.';
       if (bits.length) drift.classList.add('warn');
       body.append(drift);
+
+      // Which ones, under the count. Running-not-saved first, matching the count's order.
+      const named = driftRows({ missing, extra }, { saved: snap.sessions, live: state.sessions });
+      for (const [title, entries] of [
+        ['Running, not saved:', named.extra],
+        ['Saved, not running:', named.missing],
+      ]) {
+        if (!entries.length) continue;
+        const head = document.createElement('p');
+        head.className = 'field-hint snap-drift-head';
+        head.textContent = title;
+        const list = document.createElement('div');
+        list.className = 'snap-list snap-drift';
+        for (const entry of entries) {
+          const r = document.createElement('div');
+          r.className = 'snap-row';
+          const name = document.createElement('span');
+          name.className = 'snap-name';
+          name.textContent = entry.name;
+          r.append(name);
+          if (entry.folder) {
+            const where = document.createElement('span');
+            where.className = 'snap-where';
+            where.textContent = shortPath(entry.folder);
+            where.title = entry.folder;
+            r.append(where);
+          }
+          list.append(r);
+        }
+        body.append(head, list);
+      }
     }
 
     const hint = document.createElement('p');

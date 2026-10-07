@@ -350,7 +350,11 @@ A dozen sessions across nine folders is twenty minutes of `+ new` to rebuild aft
 reboot. `snapshot` in the rail head saves the set you have open, and puts it back.
 
 The dialog shows when the snapshot was taken, how many sessions are in it, and how far the
-bench has drifted from it — *2 running now aren't saved · 1 saved isn't running*. The
+bench has drifted from it — *2 running now aren't saved · 1 saved isn't running* — with
+the sessions themselves listed under it, *Running, not saved* and *Saved, not running*, each
+by name and folder (the folder from the saved entry for the one, the live pane for the
+other); a long list scrolls inside its own short box rather than pushing the buttons off
+screen. The
 button itself wears a dot whenever that line would say anything, because a snapshot you
 saved once and forgot is worth noticing the day before the reboot rather than the morning
 after. `save now` replaces it; there is one slot.
