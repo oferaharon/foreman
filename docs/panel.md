@@ -359,6 +359,20 @@ button itself wears a dot whenever that line would say anything, because a snaps
 saved once and forgot is worth noticing the day before the reboot rather than the morning
 after. `save now` replaces it; there is one slot.
 
+Under that status the box reads by purpose, in two labelled sections and a footer that only
+closes (nothing in this view is pending, so it says `close`, not `cancel`). **Bench** holds
+`save now` and `restore…`, with the line about what a restore brings back — fresh, same
+folders, names and groups, anything already running left alone — beside them rather than
+above every button. **Restart** holds `relaunch all…` alone, under its own rule, in the red
+outline the bin's `close it` wears, because it is the one control in the box that ends
+sessions, with its one-line why next to it. At most one bench button is primary, and which
+follows the facts (`snapshotPrimary` in `web/snapshot-drift.js`): `restore…` when something
+is saved and either nothing is running or a saved session isn't — it wins whenever both
+could, since after a reboot a `save now` would replace the bench with an empty one —
+`save now` when nothing is saved yet or running sessions are missing from the save, and
+neither when the save matches what's running. `restore…` stays off while nothing is saved.
+The box scrolls once it is taller than the window, rather than clipping its footer.
+
 `restore…` shows exactly what it is about to start before it starts anything, with
 anything already running greyed out and marked, and each row ticks over — *started*,
 *failed*, *already running* — as the sessions come up one at a time. A folder renamed

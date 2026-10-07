@@ -359,15 +359,17 @@ body.row-dragging * { cursor: row-resize !important; }
    beside it. */
 .snap-row.is-exited .snap-state { color: var(--decision); }
 
-/* The summary view's button row: save/relaunch on the left, cancel/restore on the right,
-   via a spacer with `margin-right: auto`. Plain `.modal-row` lets its buttons shrink, which
-   is harmless for the 1-2-button rows the other six modals use it for but crushes four
-   buttons here into near-equal slivers with mid-word-wrapped labels — hence a modifier
-   here rather than a change to `.ghost-btn` or `.modal-row` themselves, which stay exactly
-   as every other modal-row caller found them. `flex: none` is what lets the spacer's auto
-   margin actually produce a gap (an auto margin on a shrinking flex item has no slack left
-   to consume once the row is tight), and `flex-wrap` means a genuinely too-narrow window
-   wraps whole buttons onto a second line instead of crushing their text mid-word. */
+/* The box's footer row. The summary view's own buttons now live in its sections and leave
+   only `close` here; the relaunch view still puts `back` on the left and two buttons on the
+   right, via a spacer with `margin-right: auto`. Plain `.modal-row` lets its buttons shrink,
+   which is harmless for the 1-2-button rows the other six modals use it for but crushed the
+   four the summary used to hold into near-equal slivers with mid-word-wrapped labels — hence
+   a modifier here rather than a change to `.ghost-btn` or `.modal-row` themselves, which
+   stay exactly as every other modal-row caller found them. `flex: none` is what lets the
+   spacer's auto margin actually produce a gap (an auto margin on a shrinking flex item has
+   no slack left to consume once the row is tight), and `flex-wrap` means a genuinely
+   too-narrow window wraps whole buttons onto a second line instead of crushing their text
+   mid-word. */
 .modal-row.snap-actions {
   flex-wrap: wrap;
 }
@@ -375,6 +377,48 @@ body.row-dragging * { cursor: row-resize !important; }
   white-space: nowrap;
   flex: none;
 }
+
+/* The summary view, read by purpose: the status (when, how many, what drifted) on top, then
+   two labelled sections — **Bench** (save, restore) and **Restart** (relaunch all, the only
+   control in the box that ends sessions, so it wears the bin's own `danger` and sits under a
+   rule of its own) — and a footer that only closes. The section heading is the settings
+   modal's `h3`, re-spelled here rather than shared, because `.settings-sec` carries margins
+   tuned to a box twice this one's width. `.snap-sec-row` gets the same no-crush treatment as
+   `.snap-actions` above, and its own `[hidden]` rule because it sets `display`. */
+.field-hint.snap-status { color: var(--ink-muted); font-size: 0.66rem; margin: 0; }
+.snap-sec {
+  margin-top: 0.9rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--rule);
+}
+.snap-sec h3 {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  font-weight: normal;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin: 0 0 0.45rem;
+}
+.snap-sec-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.snap-sec-row[hidden] { display: none; }
+.snap-sec-row .ghost-btn { white-space: nowrap; flex: none; }
+.snap-sec > .field-hint { margin: 0.45rem 0 0; }
+/* The one-line why sits beside the relaunch button rather than under it; the button keeps
+   its width and the sentence takes what is left. 12rem still fits beside the button at the
+   box's own 24rem, so it only drops under it in a box the viewport has squeezed —
+   and the row's `gap` is then the step between the two, on purpose (the flex-wrap trap). */
+.snap-restart .snap-sec-row { align-items: flex-start; }
+.snap-restart .snap-sec-row .field-hint { flex: 1 1 12rem; min-width: 0; margin: 0; }
+/* The sections made the summary about 8rem taller, so with both drift lists full it no
+   longer fits a short laptop viewport; past that the box scrolls rather than clipping its
+   footer, the way `.modal.is-settings` does. */
+.modal.snap-box { max-height: calc(100vh - 2rem); overflow-y: auto; }
 
 /* The drift line ("N running aren't saved") is a fact about staleness, not an error — the
    snapshot still works, it just won't reproduce what's live right now. `--working` is the

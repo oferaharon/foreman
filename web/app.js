@@ -102,7 +102,7 @@ import { ageText, groupSummary } from './group-summary.js';
 // `renderRail` lifts nested workers out before that count is taken, so a busy worker in a
 // closed team group used to light nothing until the stuck timer fired.
 import { orderWorkers } from './worker-order.js';
-import { driftRows } from './snapshot-drift.js';
+import { driftRows, snapshotPrimary } from './snapshot-drift.js';
 // ^ the snapshot box's drift as named rows, each with its folder. The server sends names
 // only; the folders come from the saved entries and the live roster.
 // The briefs modal's two rules: which of the four tabs is a function of a repository, and
@@ -2114,7 +2114,7 @@ async function openSnapshot() {
   const back = document.createElement('div');
   back.className = 'modal-back';
   const box = document.createElement('div');
-  box.className = 'modal';
+  box.className = 'modal snap-box';
 
   const h = document.createElement('h2');
   h.textContent = 'Snapshot';
@@ -2180,7 +2180,7 @@ async function openSnapshot() {
     say('');
 
     const when = document.createElement('p');
-    when.className = 'field-hint';
+    when.className = 'field-hint snap-status';
     when.textContent = snap.savedAt
       ? `Saved ${agoText(snap.savedAt)} · ${snap.sessions.length} session${snap.sessions.length === 1 ? '' : 's'}`
       : 'Nothing saved yet. Save the sessions you have open and restore them after a reboot.';
@@ -2229,14 +2229,23 @@ async function openSnapshot() {
       }
     }
 
-    const hint = document.createElement('p');
-    hint.className = 'field-hint';
-    hint.textContent =
-      'Sessions come back fresh — same folders, same names, same groups, no history. ' +
-      'Anything already running is left alone.';
-    body.append(hint);
+    // Below the status, the buttons by purpose: the bench (save it, put it back) and the one
+    // control here that ends sessions, kept apart from both and dressed the way the bin's
+    // own `close it` is. Which bench button is primary is `snapshotPrimary`'s call.
+    const section = (title) => {
+      const sec = document.createElement('section');
+      sec.className = 'snap-sec';
+      const head = document.createElement('h3');
+      head.textContent = title;
+      const buttons = document.createElement('div');
+      buttons.className = 'snap-sec-row';
+      sec.append(head, buttons);
+      body.append(sec);
+      return { sec, buttons };
+    };
+    const primary = snapshotPrimary(snap);
 
-    const save = button('save now');
+    const save = button('save now', primary === 'save');
     save.onclick = async () => {
       save.disabled = true;
       say('Reading the roster…');
@@ -2251,22 +2260,36 @@ async function openSnapshot() {
       }
     };
 
-    const cancel = button('cancel');
-    cancel.onclick = close;
-
-    const restore = button('restore…', true);
+    const restore = button('restore…', primary === 'restore');
     restore.disabled = !snap.sessions.length;
     restore.onclick = confirm;
 
+    const bench = section('Bench');
+    bench.buttons.append(save, restore);
+    const hint = document.createElement('p');
+    hint.className = 'field-hint';
+    hint.textContent =
+      'Sessions come back fresh — same folders, same names, same groups, no history. ' +
+      'Anything already running is left alone.';
+    bench.sec.append(hint);
+
     const relaunchBtn = button('relaunch all…');
-    relaunchBtn.title =
+    relaunchBtn.classList.add('danger');
+    relaunchBtn.onclick = relaunchConfirm;
+    const why = document.createElement('p');
+    why.className = 'field-hint';
+    why.textContent =
       'Close every session on the bench and start it again — after a Claude Code update, ' +
       'or a change to a global setting.';
-    relaunchBtn.onclick = relaunchConfirm;
+    const restart = section('Restart');
+    restart.sec.classList.add('snap-restart');
+    restart.buttons.append(relaunchBtn, why);
 
-    const spacer = document.createElement('span');
-    spacer.style.marginRight = 'auto';
-    row.append(save, relaunchBtn, spacer, cancel, restore);
+    // Nothing in this view is pending, so the footer closes rather than cancels; the two
+    // views behind it keep their own `back`.
+    const done = button('close');
+    done.onclick = close;
+    row.append(done);
   }
 
   /* ---- view three: relaunch all — the only view here that ends sessions ---- */
