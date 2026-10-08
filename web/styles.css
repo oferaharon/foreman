@@ -1648,6 +1648,83 @@ body.row-dragging * { cursor: row-resize !important; }
 .pin-btn:hover,
 .dup-btn:hover { color: var(--accent); }
 
+/* ---------------------------------------------------- pinned order grip --- */
+
+/* The grip on a pinned row's left edge: drag to reorder the pinned group, or ↑/↓ on it.
+
+   **Positioned over the gutter the row already has, never given a column of its own.**
+   `.session`'s own 1.1rem left padding is empty space on every row; the grip sits in it, so
+   a pinned row's dot and title stay on the same x as every row below it, and nothing about
+   the rail being a flat list of siblings (rail-and-groups#a-flat-list-of-siblings) changes.
+   It is a sibling of the row's `div role="button"`, not inside it — a press here must not
+   open the session. Full row height so the target is the whole strip, the mark itself
+   aligned with the title line.
+
+   Drawn at rest, unlike the pin beside it — the pane grips' lesson (#13): a thing that can
+   be dragged and says nothing about it is a thing nobody drags. `--ink-faint` at rest is
+   the panel's "present but not asking for anything". */
+.session-row.is-pinned { position: relative; }
+
+.pin-grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1.05rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 0.72rem;
+  color: var(--ink-faint);
+  cursor: grab;
+  /* A touch drag on the grip is a drag, not a scroll of the rail. */
+  touch-action: none;
+  transition: color 0.12s ease;
+}
+
+/* Six dots, two columns of three — drawn rather than typed, because `⋮⋮` is two glyphs whose
+   spacing is the font's business and differs between the two faces this panel falls back to. */
+.pin-grip::before {
+  content: '';
+  width: 6px;
+  height: 10px;
+  background-image: radial-gradient(circle, currentColor 1px, transparent 1.25px);
+  background-size: 4px 4px;
+  background-position: -1px -1px;
+}
+
+.session-row.is-pinned:hover .pin-grip { color: var(--ink-muted); }
+.pin-grip:hover,
+.pin-grip:focus-visible,
+.session-row.pin-dragging .pin-grip { color: var(--accent); }
+.pin-grip:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 3px; }
+
+/* What moves: the row and anything nested under it, dimmed in place while the line shows
+   where it will land. */
+.session-row.pin-dragging { opacity: 0.45; }
+
+/* The drop line. A pseudo-element on the row it lands against rather than a node inserted
+   between rows — an inserted node would be a sibling with height, and would move every row
+   below it under the pointer that is measuring them. Worker rows are already `relative`. */
+.session-row.pin-drop-above::after,
+.session-row.pin-drop-below::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0.4rem;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.session-row.pin-drop-above::after { top: -1px; }
+.session-row.pin-drop-below::after { bottom: -1px; }
+
+/* While a pinned row is held, the pointer is captured by its grip and every other cursor on
+   the page would otherwise show through — the same rule the pane grips carry. */
+body.pin-reordering { user-select: none; }
+body.pin-reordering * { cursor: grabbing !important; }
+
 /* A duplicate of a bypassing session bypasses too, so the button is the colour of the
    badge it is about to inherit. */
 .dup-btn.is-bypass { color: var(--decision); }
