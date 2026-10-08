@@ -243,6 +243,65 @@ past it is silently erased on the next flush — milder than the task-state vers
 (there whole records vanish; here the colours re-assign themselves on the next boot), but
 the same family. **Back up `groups.json` before rolling back past #145.**
 
+## PinStore drops the order on a rollback
+
+**`PinStore` is the same family, and was built knowing it.** `#load` copies named fields, so
+a build from before the pinned order reads each pin's `at` and `paneCreatedMs`, drops
+`order`, and rewrites the file without it on its first flush. That is why `at` is still
+written although nothing sorts by it any more: the older build *skips* a pin with no numeric
+`at`, and sorts by it, so a rollback keeps every pin and falls back to pin-time order — and
+a file written by that build has no `order` at all, which this one reads oldest-first, the
+order the rail used to draw. Only the arrangement is lost. **Back up `pins.json` before
+rolling back past the pinned order.** `test/pins.test.js` pins both directions.
+
+## A drag owns the rail until it lands
+
+**The rail is rebuilt from scratch on every roster broadcast, and a drag is the one thing on
+it that cannot survive that.** A rebuild replaces the grip the pointer is captured to, so the
+capture is lost, the held row vanishes from under the cursor, and the drag ends with no
+drop. `renderRail` therefore returns early while `pinDrag` (module scope, for `duplicating`'s
+reason — launch#a-duplicate-inherits-bypass) is set, noting that it was asked, and every way
+a drag ends — drop, Escape, a drop outside the group, `pointercancel`, a lost capture, the
+window losing focus — paints once. Two details are load-bearing. `pinDrag` is set at the
+**press**, not after the 4px slop: a broadcast between the two detaches the grip just the
+same. And the window-blur cancel is not tidiness — a drag that never ends is a rail that
+never repaints again.
+
+Measured on the scratch bench: a session pinned from outside while a row was held produced
+**zero** child mutations on the rail list, and exactly one on the Escape that ended it — the
+held frame arriving then. The real-mouse drag went through the extension's input (trusted
+CDP events); everything mid-drag — the line, the dimmed block, the held broadcast, Escape,
+the stale drop — was proven with **dispatched** `PointerEvent`s and `KeyboardEvent`s, because
+an automated window answers no keyboard (see "An automated Chrome window" below). A
+synthetic `pointerId` gets no real capture, so those runs dispatch on the grip directly.
+
+The grip is a sibling of the row's `div role="button"`, never inside it (the row is not a
+button, above), positioned over the gutter `.session`'s own left padding leaves — so a
+pinned row's dot stays on the same x as every other row's: the grip is out of flow, and
+the gutter was already empty. The drop line
+is a pseudo-element on the row it lands against, for the flat-list reason: a node inserted
+between rows would be a sibling with height, moving every row below it under the pointer
+measuring them.
+
+## A relaunch carries the pinned order by name
+
+**Every re-pin lands at the bottom of the group, and a lead pins itself from birth partway
+through the loop.** So before the order existed, a relaunch put the group back in launch
+order with the lead wherever `launchLead` happened to run — and with `now` stamped on every
+re-pin in one synchronous loop, several could share a millisecond and leave the tie to the
+sort.
+Pane ids say nothing about where a pin was (relaunching-the-whole-bench: they restart at
+`%0`); the session name is the contract. So `relaunchBench` reads the group as names
+**before** anything exits — after, the panes are gone and the store with them — and the
+restore reads it off the snapshot, whose entries are in roster order and so in the pinned
+group's (`benchEntries` keeps it, and a test says so). `carryPinOrder` then places only the
+pins *this run made*, each by the name its entry was saved under (a relaunch can mint a new
+one): beside the last pin whose name came before it, or above the first that came after.
+A pin the run did not make never moves, which is what keeps a restore into a rearranged
+bench from undoing the arrangement. Measured on the bench: relaunch-all with the scratch
+tmux server going down, restart-one on the top row, and a restore after killing the server
+outright all came back in the saved order.
+
 ## The menu item's display rule
 
 **`.menu-item`'s `display: flex` beat `[hidden]`, the same way `.files-grid`'s did.** The

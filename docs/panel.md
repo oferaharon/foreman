@@ -165,8 +165,18 @@ actually working in — it slides down the moment two others so much as blink. T
 the right of a rail row (or `pin` in a pane header) nails it to a **Pinned** group above
 everything else, the inbox included.
 
-Pinned rows keep the order you pinned them in, so adding a second never moves the first.
-They still carry their own badges — unread counts, `asking`, queued messages — so a
+**The pinned group is in the order you put it in.** A new pin goes to the bottom, so adding
+a second never moves the first. To rearrange, drag a pinned row by the grip on its left
+edge — the six dots, drawn on pinned rows only — and a line shows where it will land; drop
+it and the order is saved. A pinned lead moves with the workers nested under it, dimmed
+together while you hold it. Escape, or letting go anywhere outside the pinned group, puts
+everything back as it was. With the grip focused, `↑` / `↓` move the row one place. The rail
+does not repaint while you are holding a row, so a session changing state mid-drag never
+pulls it out from under the cursor; it catches up the moment you let go. And if the pinned
+set changed while you were dragging — something pinned or unpinned from another window —
+nothing is reordered and a toast says so.
+
+Pinned rows still carry their own badges — unread counts, `asking`, queued messages — so a
 pinned session that wants you says so where you already are, rather than jumping to a
 different part of the rail to say it.
 
@@ -174,7 +184,9 @@ Pins are stored server-side in `~/.foreman/pins.json`, keyed by **pane** rather 
 session id: `/clear` mints a new session id, and a pin that quietly fell off when you
 cleared a conversation would be worse than no pin at all. A pane that closes takes its pin
 with it, and — as with the queue — a pane id handed out again by a new tmux server does
-not inherit the old one.
+not inherit the old one. The order lives in the same file (an `order` on each pin);
+`POST /api/pins/order` writes it, and refuses any list that is not exactly the pins that
+exist, rearranged.
 
 ### Starting a session
 
@@ -253,7 +265,8 @@ with a sentence saying what it does:
 - **restart fresh** — it comes back with an empty conversation.
 
 Either way it comes back in the same folder (the pane's, never where the conversation
-wandered to), under the same tmux name, with its bypass and its pin, and on today's flags —
+wandered to), under the same tmux name, with its bypass and its pin — in its old place in
+the pinned group — and on today's flags —
 a lead through the lead launcher with today's brief, tools and settings, anything else with
 the standalone ones. A pane that was showing it follows it to the restarted session. The
 answer is in the box or a toast: restarted and whether it remembers, left running and why,
@@ -404,7 +417,10 @@ permissions skipped. What it deliberately doesn't hold:
 
 Pins do come back: they're pane-keyed with a tmux-birthday guard, so every one of them
 dies at reboot by design, and re-pinning is what makes the restored rail look like the one
-you saved.
+you saved — **in the order you saved it**, matched by session name, since the new panes'
+ids say nothing about where the old ones were. A pin the restore did not make (a session
+that was already running) is never moved; a restored one goes back beside its saved
+neighbours.
 
 It lives in `~/.foreman/snapshot.json`. Restoring twice is harmless — a name that is
 already up is skipped rather than started, so nothing acquires a `-2`.
@@ -414,7 +430,7 @@ already up is skipped rather than started, so nothing acquires a `-2`.
 Update Claude Code, or change a global setting that only takes effect at launch, and every
 session already running is on the old one. `relaunch all…`, in the same Snapshot box,
 closes each of them with `/exit` and starts it again — same folders, same names, same
-groups, same pins.
+groups, same pins, in the same order.
 
 It asks which kind, and neither is a default:
 

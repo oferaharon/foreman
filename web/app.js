@@ -1369,6 +1369,13 @@ function startPinDrag(e, grip, paneId) {
   grip.setPointerCapture(e.pointerId);
   pinDrag = { paneId, pointerId: e.pointerId, grip, startY: e.clientY, active: false, blocks, from, target: null, deferred: false };
   document.addEventListener('keydown', pinDragKey, true);
+  // The window losing focus mid-drag can swallow the pointerup, and a drag that never ends
+  // is a rail that never repaints again — so leaving the window is a cancel.
+  window.addEventListener('blur', cancelPinDrag);
+}
+
+function cancelPinDrag() {
+  endPinDrag(null, false);
 }
 
 function movePinDrag(e) {
@@ -1434,6 +1441,7 @@ function endPinDrag(e, drop) {
   if (!d || (e && e.pointerId !== d.pointerId)) return;
   pinDrag = null;
   document.removeEventListener('keydown', pinDragKey, true);
+  window.removeEventListener('blur', cancelPinDrag);
   document.body.classList.remove('pin-reordering');
   try {
     d.grip.releasePointerCapture(d.pointerId);

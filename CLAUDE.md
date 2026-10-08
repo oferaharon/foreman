@@ -639,6 +639,21 @@ fact; the front end's own cascade traps are here too. Evidence:
   never heard of, the same way `TaskStore` drops a whole record.** Back up `groups.json`
   before rolling back past #145.
   [rail-and-groups#groupstore-drops-an-unknown-field](docs/traps/rail-and-groups.md#groupstore-drops-an-unknown-field)
+- `server/pins.js` (`PinStore`, `#load`, `#flush`) — **`PinStore` drops `order` on a rollback
+  the same way, and still writes `at` for the build that needs it.** Every pin survives;
+  only the arrangement is lost. Back up `pins.json` before rolling back past the pinned
+  order.
+  [rail-and-groups#pinstore-drops-the-order-on-a-rollback](docs/traps/rail-and-groups.md#pinstore-drops-the-order-on-a-rollback)
+- `web/app.js` (`pinDrag`, `renderRail`, `endPinDrag`) — **A drag in the rail owns the rail
+  until it lands.** The roster rebuilds every row on each broadcast, which would detach the
+  grip the pointer is captured to — so `renderRail` holds while `pinDrag` is set, from the
+  press and not the first move, and every way a drag ends paints once.
+  [rail-and-groups#a-drag-owns-the-rail-until-it-lands](docs/traps/rail-and-groups.md#a-drag-owns-the-rail-until-it-lands)
+- `server/index.js` (`relaunchBench`, `/api/snapshot/restore`, `carryPins`) · `server/pins.js`
+  (`carryPinOrder`) — **Every re-pin lands at the bottom, and a lead pins itself mid-loop —
+  so a relaunch reshuffled the pinned group until the order was carried by name.** Read the
+  names *before* the exits; never move a pin the run did not make.
+  [rail-and-groups#a-relaunch-carries-the-pinned-order-by-name](docs/traps/rail-and-groups.md#a-relaunch-carries-the-pinned-order-by-name)
 - `web/styles.css` (`.menu-item`) — **`.menu-item`'s `display: flex` beat `[hidden]`, the same
   way `.files-grid`'s did.** Scoped rather than a blanket `[hidden]` override, which would
   have to be proven safe against every other `hidden` toggle in the stylesheet.
@@ -1017,7 +1032,12 @@ produced" has the shape; the per-turn image strip and its byte route are untouch
 **Pinning** (`server/pins.js`, pane-keyed and persisted like the queue) adds a `pinned` group
 above the inbox. Pinned rows come *out* of the inbox rather than moving into it — a pin is a
 promise about where a row will be, and one that relocated the moment it needed you would
-break that promise exactly when you were looking for it.
+break that promise exactly when you were looking for it. **The group's order is the
+maintainer's**: a new pin goes to the bottom, a grip on each pinned row's left edge drags it
+(a pinned lead with its nested workers, as one block), `POST /api/pins/order` writes it and
+may only rearrange the pins that exist, and relaunch-all, restart-one and snapshot restore
+put each pin back where its session *name* was (`carryPinOrder`) — pane ids reset, names
+are the contract. Desktop only; the phone reads nothing about pins.
 
 **Groups** (`server/groups.js`) file folder headings under names you choose and fold them
 away. Four things are load-bearing. A group holds **folders**, not sessions — sessions rotate

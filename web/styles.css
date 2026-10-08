@@ -1674,7 +1674,7 @@ body.row-dragging * { cursor: row-resize !important; }
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-top: 0.72rem;
+  padding-top: 0.85rem;
   color: var(--ink-faint);
   cursor: grab;
   /* A touch drag on the grip is a drag, not a scroll of the rail. */
