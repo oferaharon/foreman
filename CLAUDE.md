@@ -93,7 +93,10 @@ a role handed to every *ordinary* session opened there. **Every role now carries
 `--settings` file, including a standalone** (`session-settings.json`,
 `server/session-launch.js`) — the one thing in it is an allow rule for the panel's own
 `foreman` tools, spelled `mcp__foreman`, the bare whole-server form. See the classifier
-trap below for why.
+trap below for why. **And every role but a worker carries `--model <launchModel>`** — the
+panel's own launch model (`config.json`, a picker in the settings box, **Opus 5.5** by the
+maintainer's ruling of 2026-10-08), validated against `worker-models.js`; a worker's model
+is the lead's per-task call and is never doubled.
 
 State lives outside every repo, under `~/.foreman/` (resolved, not fixed — see the trap
 below): `teams/<repo-key>/` holds
@@ -452,6 +455,13 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   survive it; read a pane-id reset as expected, not as a bug — but a reused `%0` used to cost
   the session its pin, and a pane showing it lets go the moment it leaves the roster.
   [launch#relaunching-the-whole-bench-can-take-the-tmux-server-down](docs/traps/launch.md#relaunching-the-whole-bench-can-take-the-tmux-server-down)
+- `server/session-launch.js` (`launchModelArgs`) · `server/launch.js` (`claudeCommand`) ·
+  `server/index.js` (`launchLead`) — **A `--resume` comes back on the model its transcript
+  last answered on, and `"model"` in `settings.json` does not hold it — MEASURED on
+  v2.1.288; `--model` beats both.** So every non-worker launch passes `--model
+  <launchModel>`, after `--resume`, exactly once — and a `/model` pick does not survive a
+  relaunch, by ruling.
+  [launch#a-resume-comes-back-on-the-transcripts-model](docs/traps/launch.md#a-resume-comes-back-on-the-transcripts-model)
 - `server/snapshot.js` (`restoreSessions`) · `~/.claude.json` — **A relaunch into a folder
   whose trust was never recorded lands on the trust gate.** Three sessions answering their
   gates at once can lose one to the last writer.
@@ -1083,6 +1093,13 @@ out of `room_read`. Tier 3 (`escalation`, `alert`) is the one framed, tinted, re
 left — the two share it and are told apart only by the author line and tag, a worker's name
 against `panel`. A self-merge's own evidence list folds behind `N checks ›`, closed by
 default. Everything else in the room is machinery and stays `system`.
+
+**Every session the panel launches starts on an explicit model.** `+ new`, `⧉`, snapshot
+restore, relaunch all, restart one and a team lead all pass `--model <launchModel>` — read
+from `config.json` at each launch, so no restart, defaulting to `DEFAULT_LAUNCH_MODEL`
+(Opus 5.5) and refusing an id `worker-models.js` does not list, aliases included. It is not
+an exposure key: a LAN peer may change it, as it may launch a session. Workers keep their own
+`--model` from `resolveWorkerModel`. The snapshot deliberately saves no per-session model.
 
 **Row and header controls**: `⧉` duplicates a session into the same folder, the bin `/exit`s
 one behind a confirmation, a folder icon opens the project in Finder, and `recent` drops the

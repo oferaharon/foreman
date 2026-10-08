@@ -196,6 +196,18 @@ what source `~/.zshrc` and let its `claude()` wrapper add `--name` — same
 `remain-on-exit` guard while it boots, same `mouse on` and prefix-guarded pbcopy
 binding, and the same Terminal window attached at the end.
 
+**What model it starts on.** Every session the panel starts — from `+ new`, `⧉`, a
+restore, relaunch all, a restart from the bin, and a team lead — is launched with
+`--model <id>`, the **launch model** in the settings box (the gear in the rail head),
+**Opus 5.5** unless you pick another. It is the panel's own choice rather than Claude Code's
+default because that default moves, and because a session resumed with its conversation
+otherwise comes back on whatever model it was last answering on, whatever
+`~/.claude/settings.json` says (measured; see
+[the trap](traps/launch.md#a-resume-comes-back-on-the-transcripts-model)). The picker draws
+the same list as the team panel's worker model and takes effect at the next launch, no
+restart; a session already running keeps its model. Workers are the one exception: they
+start on the model their lead picked for the task, or the team's worker model.
+
 If claude dies on startup the pane is captured, quoted back to you, and killed, rather
 than leaving a Terminal window attached to a corpse. A brand-new folder will open on
 Claude Code's own folder-trust gate — answer it in the Terminal window that just opened, or
@@ -411,7 +423,8 @@ It asks which kind, and neither is a default:
   and its place don't move; a lead comes back as a lead, with today's brief and tools, and
   yesterday's context. A pane the panel never bound to a transcript has no history to come
   back with, and the list says *no history* against it beforehand rather than surprising
-  you afterwards.
+  you afterwards. Each comes back on the **launch model**, not on the one it was using —
+  without that, a resume brings back the transcript's last model.
 - **relaunch fresh** — new conversations, the same thing `restore…` does.
 
 It is deliberately fussy about what it will touch:
@@ -1033,6 +1046,10 @@ own blurbs, the current one ticked. Pick one and it applies to **that session on
 The dialog staying open in the terminal while the menu is open in the browser is the point:
 the panel is a remote control for that box, not a copy of it. Dismissing the menu Escapes
 it rather than leaving one holding the session.
+
+A pick here lasts as long as the session does: restart it, or relaunch the bench, and it
+comes back on the panel's **launch model** (the settings box), keeping its conversation or
+not. That is the point of the launch model, not a side effect of it.
 
 Setting a *global* default is deliberately not offered here. In that dialog a digit selects
 **and** writes `model` in `~/.claude/settings.json` for every session you start afterwards,

@@ -1892,7 +1892,7 @@ async function openSettings() {
   const lmText = document.createElement('span');
   lmText.textContent = 'launch model';
   const lmPick = document.createElement('select');
-  const lmStored = typeof cfg.launchModel === 'string' ? cfg.launchModel : null;
+  let lmStored = typeof cfg.launchModel === 'string' ? cfg.launchModel : null;
   const lmIds = Array.isArray(cfg.launchModels) ? [...cfg.launchModels] : [];
   // A stored id the list does not carry (a `[1m]` variant, or a hand edit) is still drawn,
   // or the picker would show a model that is not the one on file.
@@ -1905,7 +1905,9 @@ async function openSettings() {
     lmPick.append(opt);
   }
   // What a launch would use now: the stored id, or the default when the file has none.
-  const lmShown = lmStored ?? cfg.defaults?.launchModel ?? '';
+  // Re-seated after every save, from the server's answer: "did it move" is always asked
+  // against what is on disk now, not against what the box opened on.
+  let lmShown = lmStored ?? cfg.defaults?.launchModel ?? '';
   lmPick.value = lmShown;
   const lmWrap = document.createElement('span');
   lmWrap.className = 'team-select';
@@ -2143,6 +2145,10 @@ async function openSettings() {
         origins.push(...(out.allowedOrigins || []));
         renderOrigins();
       }
+      lmStored = typeof out.launchModel === 'string' ? out.launchModel : null;
+      lmShown = lmStored ?? cfg.defaults?.launchModel ?? '';
+      if (out.live?.launchModel) cfg.launchModelError = null;
+      paintLaunchModel();
       saving = false;
       save.disabled = false;
       const modelMoved = out.changed?.includes('launchModel');

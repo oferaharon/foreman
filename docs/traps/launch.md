@@ -48,6 +48,53 @@ way the lead would be fresh-only, and the task said so. Re-checked end to end th
 real launcher afterwards: the lead came back with `isLead`, its pin, its history, a working
 `room_post`, and its Bash write to the checkout still denied.
 
+## A resume comes back on the transcript's model
+
+**A `--resume` comes back on the model its transcript last answered on, and
+`"model"` in `~/.claude/settings.json` does not hold it — MEASURED on Claude Code v2.1.288,
+in the sandbox, on a private tmux server. `--model` beats both.** This is what brought most
+of a bench back on Sonnet 5.5 the week Claude Code's own default moved there, although the
+user's settings said `"model": "opus"`, and it is why every launch the panel owns now says
+`--model` out loud (`launchModelArgs`, `server/session-launch.js`).
+
+Five launches, all in the sandbox, model read off the pane footer:
+
+| Launch | Footer |
+| --- | --- |
+| `claude` (settings say `"model": "opus"`) | Opus 5.5 |
+| `claude --setting-sources project,local` (user settings skipped) | Opus 5.5 |
+| `claude --model claude-sonnet-5-5`, one turn answered, then `/exit` | Sonnet 5.5 |
+| `claude --resume <that id>` | **Sonnet 5.5** |
+| `claude --resume <that id> --model claude-opus-5-5` | Opus 5.5 |
+
+Three things follow, and the first is the one a reader will otherwise get wrong:
+
+- **The alias was not the problem.** A fresh `claude` resolved `"opus"` to Opus 5.5, and so
+  did a session with user settings switched off entirely — on this account, on this day.
+  The fresh path could not reproduce the drift; only the resumed one did. Which model a
+  bare launch lands on is Claude Code's to change, and nothing here can see when it does,
+  which is the reason to stop depending on it rather than a reason to chase the alias.
+- **The transcript is where the model is remembered.** It is on every assistant record
+  (`message.model`), and a resume reads it back. A session that had drifted onto a new
+  default — by a launch that predates a settings change, by a `/model` pick, by anything —
+  stays drifted across every *keep the conversation* relaunch, however often it is
+  restarted. `relaunch all` in resume mode and the bin's *restart, keep the conversation*
+  are exactly that launch.
+- **The flag wins, on a resume too.** `--resume` is placed before the caller's flags
+  (`claudeCommand`, `server/launch.js`), so `--model` arrives after it; the resumed session
+  above came back on Opus with its earlier turn still on screen and the same transcript
+  file. Proven again end to end through the panel: a sandbox session launched on Sonnet,
+  given a turn, then restarted from the bin keeping its conversation, came back on Opus 5.5
+  with `--resume … --model claude-opus-5-5` on its command line.
+
+What this costs, stated plainly because it is a choice and not a side effect: a session
+somebody deliberately moved to another model with `/model` comes back on the launch model
+after a relaunch, not on the one they picked. That is the 2026-10-08 ruling — lock the
+launch default, do not save a per-session model in the snapshot, because by the time
+anything was saved the saved models were already the drifted ones. The setting is
+`launchModel` in the panel's `config.json`, a picker in the settings box; workers are
+excluded, because their model is the lead's per-task call through `resolveWorkerModel`.
+
 ## Relaunching the whole bench can take the tmux server down
 
 **Relaunching the whole bench can take the tmux server down with it, and pane ids restart
