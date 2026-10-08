@@ -102,6 +102,9 @@ import { ageText, groupSummary } from './group-summary.js';
 // `renderRail` lifts nested workers out before that count is taken, so a busy worker in a
 // closed team group used to light nothing until the stuck timer fired.
 import { orderWorkers } from './worker-order.js';
+// Where a dragged pinned row lands, and which block the pointer is over — the two rules in
+// the pinned group's drag that render perfectly while wrong (`pinGrip`, `renderRail`).
+import { byPinOrder, movedPinOrder, pinDropIndex } from './pin-order.js';
 import { driftRows, snapshotPrimary } from './snapshot-drift.js';
 // ^ the snapshot box's drift as named rows, each with its folder. The server sends names
 // only; the folders come from the saved entries and the live roster.
@@ -1282,6 +1285,211 @@ async function togglePin(s) {
   renderRail();
   for (const pane of panes) pane.renderHead(); // the header carries the same star
   toast(data.error || 'That pin could not be changed.');
+}
+
+/* ------------------------------------------------------- pinned order --- */
+
+/**
+ * The pinned group's drag, while one is in flight — or null.
+ *
+ * **Module scope, for `duplicating`'s reason** (launch#a-duplicate-inherits-bypass): the
+ * rail is rebuilt from scratch on every roster broadcast, so anything a row knew is gone by
+ * the next one. And here it is worse than a lost flag — the rebuild would take the row out
+ * from under the cursor holding it, and the pointer capture with it. So `renderRail` does
+ * not paint while this is set; it notes that it was asked to (`deferred`), and the drop or
+ * the cancel paints once. Set from the press rather than from the first move, because a
+ * rebuild between the two detaches the grip the pointer is captured to just the same.
+ *
+ * `blocks` is read off the DOM at the press, one per pinned session, each the rows that move
+ * together — a pinned lead's nested workers ride with it, the rail's own idea of one unit.
+ *
+ * @type {null | {paneId: string, pointerId: number, grip: HTMLElement, startY: number,
+ *   active: boolean, blocks: Array<{paneId: string, rows: HTMLElement[]}>, from: number,
+ *   target: number|null, deferred: boolean}}
+ */
+let pinDrag = null;
+
+/** How far the pointer travels before a press on the grip becomes a drag, in px. */
+const PIN_DRAG_SLOP = 4;
+
+/** The pinned group as the rail draws it: top first, by the order the server keeps. */
+function pinnedSessions() {
+  return state.sessions.filter((s) => s.pinned).sort(byPinOrder);
+}
+
+/**
+ * The left-edge grip on a pinned row: the thing you drag, and the mark that says you can.
+ *
+ * A sibling of the row's `div role="button"` rather than inside it (rail-and-groups#the-row-
+ * is-not-a-button): a press here must never open the session, and a click on the row body
+ * must still. It sits in the gutter the row's own left padding already leaves, positioned
+ * over it, so a pinned row's dot and title stay on the same x as every other row's.
+ *
+ * The keyboard half is ↑/↓ on the focused grip — one place per press, the same write.
+ */
+function pinGrip(s) {
+  const grip = document.createElement('button');
+  grip.type = 'button';
+  grip.className = 'pin-grip';
+  grip.dataset.pane = s.paneId;
+  grip.title = 'Drag to reorder the pinned sessions (or ↑ / ↓)';
+  grip.setAttribute('aria-label', `Move ${s.title || s.project || 'this session'} in the pinned group`);
+  grip.addEventListener('pointerdown', (e) => startPinDrag(e, grip, s.paneId));
+  grip.addEventListener('pointermove', movePinDrag);
+  grip.addEventListener('pointerup', (e) => endPinDrag(e, true));
+  grip.addEventListener('pointercancel', (e) => endPinDrag(e, false));
+  grip.addEventListener('lostpointercapture', (e) => endPinDrag(e, false));
+  grip.onclick = (e) => e.stopPropagation();
+  grip.onkeydown = (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (pinDrag) return;
+    const order = pinnedSessions().map((p) => p.paneId);
+    const from = order.indexOf(s.paneId);
+    const next = movedPinOrder(order, from, e.key === 'ArrowUp' ? from - 1 : from + 2);
+    if (next) savePinOrder(next);
+  };
+  return grip;
+}
+
+function startPinDrag(e, grip, paneId) {
+  // Left button only, for `resizer`'s reason: anything else would start a drag that only a
+  // pointerup ends.
+  if (e.button !== 0 || pinDrag) return;
+  e.preventDefault();
+  const blocks = [];
+  for (const row of el.railList.querySelectorAll('.session-row[data-pin-block]')) {
+    const id = row.dataset.pinBlock;
+    if (blocks.at(-1)?.paneId === id) blocks.at(-1).rows.push(row);
+    else blocks.push({ paneId: id, rows: [row] });
+  }
+  const from = blocks.findIndex((b) => b.paneId === paneId);
+  if (from < 0) return;
+  grip.setPointerCapture(e.pointerId);
+  pinDrag = { paneId, pointerId: e.pointerId, grip, startY: e.clientY, active: false, blocks, from, target: null, deferred: false };
+  document.addEventListener('keydown', pinDragKey, true);
+  // The window losing focus mid-drag can swallow the pointerup, and a drag that never ends
+  // is a rail that never repaints again — so leaving the window is a cancel.
+  window.addEventListener('blur', cancelPinDrag);
+}
+
+function cancelPinDrag() {
+  endPinDrag(null, false);
+}
+
+function movePinDrag(e) {
+  const d = pinDrag;
+  if (!d || e.pointerId !== d.pointerId) return;
+  if (!d.active) {
+    if (Math.abs(e.clientY - d.startY) < PIN_DRAG_SLOP) return;
+    d.active = true;
+    for (const row of d.blocks[d.from].rows) row.classList.add('pin-dragging');
+    document.body.classList.add('pin-reordering');
+  }
+  d.target = pinDropTarget(d, e.clientX, e.clientY);
+  paintPinDrop(d);
+}
+
+/**
+ * The insertion point under the pointer, or null when the pointer is outside the pinned
+ * group — which is what makes a drop there a cancel. The group runs from its own label down
+ * to half a row below its last block, across the rail's width; inside it, the point is in
+ * front of the first block whose middle is below the pointer.
+ */
+function pinDropTarget(d, x, y) {
+  const list = el.railList.getBoundingClientRect();
+  const first = d.blocks[0].rows[0];
+  const label = first.previousElementSibling?.classList.contains('pinned-label') ? first.previousElementSibling : first;
+  const lastRow = d.blocks.at(-1).rows.at(-1).getBoundingClientRect();
+  const top = label.getBoundingClientRect().top;
+  const bottom = lastRow.bottom + lastRow.height / 2;
+  if (x < list.left || x > list.right || y < top || y > bottom) return null;
+  return pinDropIndex(
+    d.blocks.map((b) => ({
+      top: b.rows[0].getBoundingClientRect().top,
+      bottom: b.rows.at(-1).getBoundingClientRect().bottom,
+    })),
+    y,
+  );
+}
+
+/** The line where the block will land: above the block it goes in front of, or below the last. */
+function paintPinDrop(d) {
+  for (const b of d.blocks) for (const row of b.rows) row.classList.remove('pin-drop-above', 'pin-drop-below');
+  const t = d.target;
+  if (t == null || !movedPinOrder(d.blocks.map((b) => b.paneId), d.from, t)) return;
+  if (t < d.blocks.length) d.blocks[t].rows[0].classList.add('pin-drop-above');
+  else d.blocks.at(-1).rows.at(-1).classList.add('pin-drop-below');
+}
+
+/** Escape cancels, and is spent doing it — nothing else on the page hears it mid-drag. */
+function pinDragKey(e) {
+  if (e.key !== 'Escape' || !pinDrag) return;
+  e.preventDefault();
+  e.stopPropagation();
+  endPinDrag(null, false);
+}
+
+/**
+ * The drop, or the cancel. A drop writes only from inside the group and only to a new
+ * place; everything else — Escape, a drop outside, a lost capture — changes nothing. Either
+ * way the rail paints once, here, catching up on every roster frame it held back.
+ */
+function endPinDrag(e, drop) {
+  const d = pinDrag;
+  if (!d || (e && e.pointerId !== d.pointerId)) return;
+  pinDrag = null;
+  document.removeEventListener('keydown', pinDragKey, true);
+  window.removeEventListener('blur', cancelPinDrag);
+  document.body.classList.remove('pin-reordering');
+  try {
+    d.grip.releasePointerCapture(d.pointerId);
+  } catch {
+    /* already released — the capture is gone either way */
+  }
+  if (e && drop && d.active) d.target = pinDropTarget(d, e.clientX, e.clientY);
+  const next = drop && d.active && d.target != null ? movedPinOrder(d.blocks.map((b) => b.paneId), d.from, d.target) : null;
+  if (next) return void savePinOrder(next);
+  for (const b of d.blocks) for (const row of b.rows) row.classList.remove('pin-dragging', 'pin-drop-above', 'pin-drop-below');
+  if (d.deferred) renderRail();
+}
+
+/**
+ * Write the pinned group's new order, drawing it first.
+ *
+ * The server may refuse — a pin made or dropped since the frame the rail was drawn from
+ * (409), which is its own rule that an order may only rearrange — and then it answers with
+ * the order it holds, which the rail takes rather than waiting for the next frame.
+ */
+async function savePinOrder(order) {
+  const before = new Map(state.sessions.map((s) => [s.paneId, s.pinOrder]));
+  const apply = (ids) => {
+    const at = new Map(ids.map((id, i) => [id, i]));
+    for (const s of state.sessions) if (s.pinned && at.has(s.paneId)) s.pinOrder = at.get(s.paneId);
+  };
+  apply(order);
+  renderRail();
+
+  let res;
+  let data = {};
+  try {
+    res = await fetch('/api/pins/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ panes: order }),
+    });
+    data = await res.json().catch(() => ({}));
+  } catch {
+    for (const s of state.sessions) if (before.has(s.paneId)) s.pinOrder = before.get(s.paneId);
+    renderRail();
+    return;
+  }
+  if (res.ok) return;
+  if (Array.isArray(data.order)) apply(data.order);
+  else for (const s of state.sessions) if (before.has(s.paneId)) s.pinOrder = before.get(s.paneId);
+  renderRail();
+  toast(data.error || 'The pinned order could not be saved.');
 }
 
 /* -------------------------------------------------------------- toast --- */
@@ -4107,6 +4315,17 @@ function openCreateRoom() {
 }
 
 function renderRail() {
+  // A drag in the pinned group owns the rail until it lands (see `pinDrag`): painting now
+  // would pull the row out from under the pointer. The drop paints once for everything held.
+  if (pinDrag) {
+    pinDrag.deferred = true;
+    return;
+  }
+  // A grip moved from the keyboard keeps focus across the rebuild — the whole point of ↑/↓
+  // is pressing it again — and so does one that a roster frame happens to rebuild under it.
+  const focusedGrip = document.activeElement?.classList?.contains('pin-grip')
+    ? document.activeElement.dataset.pane
+    : null;
 
   const live = state.sessions.length;
   const busy = state.sessions.filter((s) => s.status === 'working').length;
@@ -4142,9 +4361,10 @@ function renderRail() {
   //
   // The inbox comes out of the project groups on the same principle: a session appears
   // once, and leaves the queue once you've dealt with it.
-  const pinned = state.sessions
-    .filter((s) => s.pinned)
-    .sort((a, b) => (a.pinnedAt ?? Infinity) - (b.pinnedAt ?? Infinity));
+  //
+  // In the order the maintainer put them in — the server keeps it (`PinStore`), and the grip
+  // on each pinned row rearranges it.
+  const pinned = pinnedSessions();
   // A worker row comes out of the *inbox* on a related principle: a worker's permission
   // prompt is its *lead's* to answer and its finished report is its lead's to read — that
   // is what `worker_read` and the guarded answer endpoint exist for. So the lead gets first
@@ -4256,7 +4476,14 @@ function renderRail() {
 
   if (pinned.length) {
     frag.append(plainLabel(`pinned · ${pinned.length}`, 'pinned-label'));
-    for (const s of pinned) frag.append(...rowsFor(s));
+    for (const s of pinned) {
+      // A block is the row and whatever nests under it — a pinned lead's workers move with
+      // it — and the grip goes on the row itself, the only one the pin is about.
+      const rows = rowsFor(s);
+      for (const row of rows) row.dataset.pinBlock = s.paneId;
+      rows[0].prepend(pinGrip(s));
+      frag.append(...rows);
+    }
   }
   if (inbox.length) {
     frag.append(plainLabel(`needs you · ${inbox.length}`, 'inbox-label'));
@@ -4279,6 +4506,7 @@ function renderRail() {
     }
     for (const s of rest) frag.append(...rowsFor(s));
     el.railList.replaceChildren(frag);
+    refocusGrip(focusedGrip);
     renderSharedRow();
     renderRoomsBand();
     return;
@@ -4366,12 +4594,18 @@ function renderRail() {
   }
 
   el.railList.replaceChildren(frag);
+  refocusGrip(focusedGrip);
   renderSharedRow();
   // A sibling band drawn from the same frame on the same beat, for the reason the line
   // below gives about the connections: every place that already redraws the rail is a place
   // this could otherwise go stale. It holds its own signature, so a beat that changed
   // nothing costs nothing.
   renderRoomsBand();
+}
+
+function refocusGrip(paneId) {
+  if (!paneId) return;
+  el.railList.querySelector(`.pin-grip[data-pane="${CSS.escape(paneId)}"]`)?.focus();
 }
 
 /* ------------------------------------------------------------- quota --- */

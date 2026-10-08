@@ -219,11 +219,12 @@ export class SessionRegistry extends EventEmitter {
 
   list() {
     return [...this.sessions.values()].sort((a, b) => {
-      // Pinned rows come first and stay in the order they were pinned, because a pin is
-      // a request for a fixed place to look — one that re-sorted itself every time the
+      // Pinned rows come first and stay in the order the maintainer put them in (`PinStore`
+      // keeps it: new pins at the bottom, the rail's grip to rearrange), because a pin is a
+      // request for a fixed place to look — one that re-sorted itself every time the
       // session went quiet would be no better than the rail underneath it.
       if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      if (a.pinned && b.pinned) return (a.pinnedAt || 0) - (b.pinnedAt || 0);
+      if (a.pinned && b.pinned) return (a.pinOrder ?? Infinity) - (b.pinOrder ?? Infinity) || 0;
 
       // Blocked first, then replied-and-unread, then everything else by recency.
       const rank = (s) => {
@@ -597,7 +598,7 @@ export class SessionRegistry extends EventEmitter {
         lastReply,
         queued: this.#queued(bind.pane.paneId),
         pinned: Boolean(this.pins?.has(bind.pane.paneId)),
-        pinnedAt: this.pins?.at(bind.pane.paneId) ?? null,
+        pinOrder: this.pins?.rank(bind.pane.paneId) ?? null,
         // One answer, three fields: `isLead` and `workerOf` are what the rail already
         // nests and badges by, `team` is what the row's third line reads.
         isLead: team?.role === 'lead',
@@ -669,7 +670,7 @@ export class SessionRegistry extends EventEmitter {
         lastReply: null,
         queued: this.#queued(pane.paneId),
         pinned: Boolean(this.pins?.has(pane.paneId)),
-        pinnedAt: this.pins?.at(pane.paneId) ?? null,
+        pinOrder: this.pins?.rank(pane.paneId) ?? null,
         isLead: team?.role === 'lead',
         workerOf: team?.role === 'worker' ? team.repo : null,
         team,
@@ -706,6 +707,9 @@ export class SessionRegistry extends EventEmitter {
         prev.unread !== s.unread ||
         prev.needsYou !== s.needsYou ||
         prev.pinned !== s.pinned ||
+        // A drag that rearranged the pinned group changes this and nothing else on any row,
+        // so without it the new order never reaches a second window.
+        prev.pinOrder !== s.pinOrder ||
         prev.dialog !== s.dialog ||
         JSON.stringify(prev.question) !== JSON.stringify(s.question) ||
         queueSig(prev.queued) !== queueSig(s.queued) ||
