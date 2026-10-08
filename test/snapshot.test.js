@@ -206,6 +206,22 @@ test('the bench is your sessions and your lead, and not the workers', () => {
   );
 });
 
+/* A restore reads the pinned group's order off the entries' own order (`POST
+   /api/snapshot/restore`), so `benchEntries` must keep the roster's — which puts pinned rows
+   first, in the order the maintainer arranged them. A sort added here would scramble every
+   restored rail without failing anything else. */
+test('the bench keeps the roster’s order, which is how a restore knows the pinned order', () => {
+  const entries = benchEntries([
+    row({ tmuxSession: `${P}gamma-main`, paneCwd: '/Users/x/Code/gamma', pinned: true }),
+    row({ tmuxSession: `${P}alpha-main`, pinned: true }),
+    row({ tmuxSession: `${P}beta-main`, paneCwd: '/Users/x/Code/beta' }),
+  ]);
+  assert.deepEqual(
+    entries.map((e) => [e.tmuxSession, e.pinned]),
+    [[`${P}gamma-main`, true], [`${P}alpha-main`, true], [`${P}beta-main`, false]],
+  );
+});
+
 /* A planner (Gitea PR #14) is a `kind: 'plan'` task, and `sessions.js` gives it the same `worker`
    role — so it is already out. The test is here because the filter is an allow-list: if a
    planner ever gets a role of its own, this is what fails instead of a snapshot quietly

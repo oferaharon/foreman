@@ -47,7 +47,7 @@ import {
 import { parseEffortDialog, nudgeToward } from './effort.js';
 import { MessageQueue } from './queue.js';
 import { PaneLock } from './claim.js';
-import { PinStore } from './pins.js';
+import { PinStore, carryPinOrder } from './pins.js';
 import { RateLimitStore } from './rate-limits.js';
 import { GroupStore } from './groups.js';
 import {
@@ -570,6 +570,27 @@ app.post('/api/sessions/:id/pin', async (req, res) => {
     registry.refresh().catch(() => {});
   }
   res.json({ ok: true, pinned });
+});
+
+/**
+ * Rearrange the pinned group — what the rail's grip writes when a drag lands.
+ *
+ * The body is the whole group, top first, as **pane ids**: a pin is keyed by pane, and a
+ * `/clear` between the roster frame the drag was read off and this write would otherwise
+ * turn a good order into a refusal. It may only rearrange (`PinStore#reorder`): a list that
+ * pins, unpins or repeats anything is refused, 400 for a shape no client sends and 409 for
+ * one that was right a moment ago. Either way the current order rides back, so the rail can
+ * put the rows back without waiting for the next roster frame.
+ */
+app.post('/api/pins/order', (req, res) => {
+  const result = pins.reorder(req.body?.panes);
+  if (result.refused) {
+    return res
+      .status(result.refused === 'malformed' ? 400 : 409)
+      .json({ error: result.error, order: pins.order() });
+  }
+  if (result.changed) registry.refresh().catch(() => {});
+  res.json({ ok: true, order: pins.order() });
 });
 
 app.post('/api/sessions/:id/key', async (req, res) => {
@@ -4364,6 +4385,10 @@ app.post('/api/snapshot/restore', async (req, res) => {
   restoring = true;
   let results = [];
   const toPin = [];
+  // Where each pin goes back to: the saved bench lists sessions in roster order, which puts
+  // the pinned ones first and in the pinned group's own order (`benchEntries`).
+  const pinOrder = snap.sessions.filter((e) => e.pinned).map((e) => e.tmuxSession || null);
+  const startedAs = new Map(); // pane started here -> the name its entry was saved under
 
   try {
     results = await restoreSessions(snap.sessions, {
@@ -4390,6 +4415,7 @@ app.post('/api/snapshot/restore', async (req, res) => {
         if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) {
           toPin.push(done.paneId);
         }
+        if (done.state === 'started' && done.paneId) startedAs.set(done.paneId, entry.tmuxSession || null);
         for (const ws of wss.clients) send(ws, 'restore', done);
       },
     });
@@ -4402,6 +4428,7 @@ app.post('/api/snapshot/restore', async (req, res) => {
     const created = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.createdMs]));
     for (const paneId of toPin) pins.set(paneId, true, { paneCreatedMs: created.get(paneId) ?? null });
   }
+  await carryPins(pinOrder, startedAs);
 
   await registry.refresh().catch(() => {});
   broadcastRoster();
@@ -4427,6 +4454,33 @@ let relaunching = false;
 
 /** Why a session that was sent `/exit` was not started again: its name never freed. */
 const STILL_UP = 'did not close in time — still running';
+
+/** The pinned group as tmux session names, top first, or null where a pane has none. */
+async function pinnedNames() {
+  const nameOf = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.tmuxSession]));
+  return pins.order().map((paneId) => nameOf.get(paneId) ?? null);
+}
+
+/**
+ * Put the pins a relaunch or restore just made back where their names were.
+ *
+ * Every re-pin lands at the bottom of the group (`PinStore#set`), and a lead is pinned from
+ * birth by `launchLead` partway through the loop, so without this every relaunch reshuffled
+ * the group into launch order. `startedAs` is the panes this run started, each with the name
+ * its entry carried — a pin the run did not make is never moved (`carryPinOrder`).
+ *
+ * @param {Array<string|null>} wanted the group's names, top first, from before the run
+ * @param {Map<string, string|null>} startedAs pane id -> the entry's saved session name
+ */
+async function carryPins(wanted, startedAs) {
+  if (!startedAs.size) return;
+  const nameOf = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.tmuxSession]));
+  const current = pins.order().map((paneId) => ({
+    paneId,
+    name: startedAs.has(paneId) ? startedAs.get(paneId) : (nameOf.get(paneId) ?? null),
+  }));
+  pins.reorder(carryPinOrder(wanted, current, new Set(startedAs.keys())));
+}
 
 /**
  * Close these bench entries, wait for their names to free, and put them back — the one
@@ -4468,6 +4522,10 @@ const STILL_UP = 'did not close in time — still running';
 async function relaunchBench(entries, { terminal, emit = () => {} }) {
   const skipped = new Map(); // tmux session name -> why it was left alone
   const toPin = [];
+  // The pinned group by name, read before anything exits: the panes holding these pins are
+  // about to go, and with them the only thing the store knows them by.
+  const pinOrder = await pinnedNames();
+  const startedAs = new Map(); // pane started here -> the name it was relaunched from
 
   /* ---- exit: every entry that isn't holding something ---- */
   const exiting = [];
@@ -4524,6 +4582,7 @@ async function relaunchBench(entries, { terminal, emit = () => {} }) {
     startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume })).created,
     onStep: (done, entry) => {
       if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
+      if (done.state === 'started' && done.paneId) startedAs.set(done.paneId, entry.tmuxSession || null);
       emit({ ...done, phase: 'start', reason: skipped.get(done.name) ?? null });
     },
   });
@@ -4534,6 +4593,7 @@ async function relaunchBench(entries, { terminal, emit = () => {} }) {
     const created = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.createdMs]));
     for (const paneId of toPin) pins.set(paneId, true, { paneCreatedMs: created.get(paneId) ?? null });
   }
+  await carryPins(pinOrder, startedAs);
 
   // A skipped row was never exited, so `restoreSessions` reporting it as "already running"
   // is true but not the useful half; the reason it was left alone is.

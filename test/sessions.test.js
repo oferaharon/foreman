@@ -315,3 +315,19 @@ test('a row takes its forge from the pane it runs in, never from the transcript'
   // session reaches a browser only if `#diff` is asked about it.
   assert.match(src, /JSON\.stringify\(prev\.forge\) !== JSON\.stringify\(s\.forge\)/);
 });
+
+/*
+ * The pinned group is in the order the maintainer arranged it (`PinStore`, the rail's
+ * grip), not pin time — and above everything else, whatever else is going on.
+ */
+test('pinned rows come first, in the pinned group’s own order', () => {
+  const r = bareRegistry();
+  const row = (id, over) => [id, { id, pinned: false, pinOrder: null, lastActivity: 0, ...over }];
+  r.sessions = new Map([
+    row('a', { pinned: true, pinOrder: 2, lastActivity: 900 }),
+    row('b', { status: 'needs-decision', lastActivity: 999 }),
+    row('c', { pinned: true, pinOrder: 0, lastActivity: 100 }),
+    row('d', { pinned: true, pinOrder: 1, lastActivity: 500 }),
+  ]);
+  assert.deepEqual(r.list().map((s) => s.id), ['c', 'd', 'a', 'b']);
+});
