@@ -587,6 +587,40 @@ test('GET /api/config carries the version and the browsable repository from pack
   assert.match(res.body.repoUrl, /^https:\/\//, 'something a browser can open');
 });
 
+/*
+ * `launchModel` through the running panel: what the settings box reads, what it writes, and
+ * that writing it asks for no restart — the server reads it at each launch. The rules
+ * themselves are pinned in `test/launch-model.test.js`; this is that the response carries
+ * them and that the file on disk is what the next launch would read.
+ */
+test('launchModel: the default reads back, an alias is refused, a listed id is written with no restart', async () => {
+  const before = await api('GET', '/api/config');
+  assert.equal(before.status, 200);
+  assert.equal(before.body.launchModel, null, 'nothing recorded in a fresh state dir');
+  assert.equal(before.body.defaults.launchModel, 'claude-opus-5-5');
+  assert.equal(before.body.live.launchModel, 'claude-opus-5-5');
+  assert.ok(before.body.launchModels.includes('claude-opus-5-5'), 'the picker draws from the model list');
+  assert.equal(before.body.launchModelNames['claude-opus-5-5'], 'Opus 5.5');
+  assert.equal(before.body.launchModelError, null);
+
+  const alias = await api('PATCH', '/api/config', { launchModel: 'opus' });
+  assert.equal(alias.status, 400);
+  assert.match(alias.body.error, /"opus"/);
+
+  const set = await api('PATCH', '/api/config', { launchModel: 'claude-sonnet-5-5' });
+  assert.equal(set.status, 200);
+  assert.deepEqual(set.body.changed, ['launchModel']);
+  assert.equal(set.body.restartRequired, false, 'the launch model is read at launch — no restart');
+  assert.equal(set.body.live.launchModel, 'claude-sonnet-5-5');
+  const onDisk = JSON.parse(fs.readFileSync(path.join(stateDir, 'config.json'), 'utf8'));
+  assert.equal(onDisk.launchModel, 'claude-sonnet-5-5');
+  assert.ok('bindHost' in onDisk, 'the seeded keys survive the merge');
+
+  const back = await api('PATCH', '/api/config', { launchModel: 'claude-opus-5-5' });
+  assert.equal(back.status, 200);
+  assert.equal((await api('GET', '/api/config')).body.launchModel, 'claude-opus-5-5');
+});
+
 test('GET /api/team/tasks: ?folder= is an exact match, ?brief=0 omits body, absent params are unchanged', async () => {
   const repoA = path.join(stateDir, 'MobileTeamA');
   const repoB = path.join(stateDir, 'MobileTeamB');

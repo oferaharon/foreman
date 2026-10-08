@@ -920,6 +920,18 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .settings-add .ghost-btn { flex: none; }
 
+/* The launch model: a label and the team panel's own select wrapper, so the two pickers
+   that draw from one model list also look like one control. */
+.settings-model {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink);
+}
+
 /* The prefix. Drawn as a value rather than as a field, because it is not one — the tag on
    the right is what stops it reading as a text box somebody has not clicked into yet. */
 .settings-readonly {

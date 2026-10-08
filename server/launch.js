@@ -367,6 +367,26 @@ export async function attachTerminal(name) {
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 /**
+ * The `zsh -ilc` body: the bare word `claude` and its flags, each value shell-escaped.
+ *
+ * Pulled out of `createSession` unchanged so the order is tested rather than read: bypass,
+ * then `--resume`, then the caller's own flags — which is where every `--model` the panel
+ * passes rides (`launchModelArgs` for everything but a worker, the dispatch's own for a
+ * worker). A `--model` after `--resume` is measured to win over the resumed transcript's
+ * model on v2.1.288; see `docs/traps/launch.md`.
+ */
+export function claudeCommand({ skipPermissions = false, resume = null, extraArgs = [] } = {}) {
+  const flags = [
+    ...(skipPermissions ? ['--dangerously-skip-permissions'] : []),
+    // Before the caller's own flags, so a `--resume` can never be read as the value of a
+    // trailing option somebody adds to `extraArgs` later.
+    ...(resume ? ['--resume', shq(resume)] : []),
+    ...extraArgs.map(shq),
+  ];
+  return ['claude', ...flags].join(' ');
+}
+
+/**
  * Mint a session. Always a new one — there is no reuse-if-exists, same as the other launcher.
  *
  * `nameComponent` exists for workers: they launch in a *worktree* whose basename is
@@ -433,14 +453,7 @@ export async function createSession({
   //     `claude()` wrapper in ~/.zshrc apply, and that wrapper is what passes
   //     `--name "<repo>-<branch>"`. Exec the binary and the session is unnamed everywhere.
   //   • the flag composes with the wrapper's own arguments, since it forwards "$@".
-  const flags = [
-    ...(skipPermissions ? ['--dangerously-skip-permissions'] : []),
-    // Before the caller's own flags, so a `--resume` can never be read as the value of a
-    // trailing option somebody adds to `extraArgs` later.
-    ...(resume ? ['--resume', shq(resume)] : []),
-    ...extraArgs.map(shq),
-  ];
-  const cmd = ['claude', ...flags].join(' ');
+  const cmd = claudeCommand({ skipPermissions, resume, extraArgs });
   await tmux([
     'new-session', '-d', '-s', name, '-c', dir,
     '-x', '220', '-y', '50',

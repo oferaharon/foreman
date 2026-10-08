@@ -77,14 +77,26 @@
  * panel where a LAN peer is treated differently from the machine itself, and the reason is
  * on the function.
  *
- * Deliberately dependency-free: node builtins only, no import of `config.js`. `config.js`
- * owns `STATE_DIR` and therefore the file's *path*, and imports this module for the read
- * and the resolution — one direction, so there is no cycle to reason about and no
+ * **The third key, `launchModel`, is the one that is read at every launch rather than at
+ * boot.** Every session the panel starts — `+ new`, `⧉`, snapshot restore, relaunch all,
+ * restart one and a team lead — passes `--model <launchModel>`, defaulting to
+ * `DEFAULT_LAUNCH_MODEL` (Opus 5.5, the maintainer's ruling of 2026-10-08). Workers are not
+ * in that list: their model is the lead's per-task choice and the team's `defaultModel`.
+ * It is not exposure and is not gated like it — a LAN peer may change it, the same as it
+ * may launch a session — and it needs no restart, because `launchModelArgs`
+ * (`session-launch.js`) reads this file afresh at each launch.
+ *
+ * Dependency-free apart from one leaf: node builtins, plus `worker-models.js`, which has no
+ * imports of its own — the model list is spelled there once and this file must validate
+ * against that spelling, not a copy. No import of `config.js`. `config.js` owns `STATE_DIR`
+ * and therefore the file's *path*, and imports this module for the read and the
+ * resolution — one direction, so there is no cycle to reason about and no
  * temporal-dead-zone hazard on a `const` export.
  */
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { DEFAULT_LAUNCH_MODEL, WORKER_MODELS, isKnownModel } from './worker-models.js';
 
 /** What the panel binds when nothing says otherwise. Loopback: a stranger who installs
  *  this does not get a LAN-exposed panel without having asked for one. */
@@ -213,6 +225,38 @@ export function resolveSessionPrefix({ config = {}, file = 'config.json' } = {})
   return { prefix: raw, source: 'config.json', note: null };
 }
 
+/** The sentence a refused `launchModel` comes back with — at the endpoint and at a launch
+ *  alike, so the two cannot disagree about the rule. */
+export const LAUNCH_MODEL_RULE =
+  `launchModel must be a full model id this panel knows: ${WORKER_MODELS.join(', ')} ` +
+  '(optionally with a [1m] suffix). Aliases like "opus" are refused — what an alias means is ' +
+  'Claude Code\'s to change, which is the thing this setting exists to stop depending on.';
+
+/**
+ * The model every non-worker launch passes as `--model`, and where it came from. Pure, like
+ * the two resolvers above — hand it a parsed config and it answers.
+ *
+ * Returns `{ model, source, error }`. Absent (`undefined`) is the default. Anything else that
+ * is not a known id comes back with `model: null` and the reason, **not** the default: unlike
+ * the prefix, this is read at launch rather than at boot, so the caller can refuse the launch
+ * and say why — which is what `resolveWorkerModel` does with a hand-edited team.json, and for
+ * the same reason. A session quietly started on a model nobody chose is the failure this
+ * setting was made to end.
+ */
+export function resolveLaunchModel({ config = {}, file = 'config.json' } = {}) {
+  const raw = config?.launchModel;
+  if (raw === undefined) return { model: DEFAULT_LAUNCH_MODEL, source: 'default', error: null };
+  if (!isKnownModel(raw)) {
+    const shown = typeof raw === 'string' ? JSON.stringify(raw) : typeof raw;
+    return {
+      model: null,
+      source: 'config.json',
+      error: `Config at ${file} has \`launchModel\` ${shown}. ${LAUNCH_MODEL_RULE} Pick one in the panel's settings.`,
+    };
+  }
+  return { model: raw, source: 'config.json', error: null };
+}
+
 /** The `allowedOrigins` array, or an empty one. Anything that isn't an array of strings is
  *  dropped here rather than in `origin.js`, which already refuses what it cannot parse. */
 export function allowedOriginsFrom(config = {}) {
@@ -281,8 +325,14 @@ export const EXPOSURE_KEYS = ['bindHost', 'allowedOrigins'];
 
 /** Every key `PATCH /api/config` will write. A whitelist, the same stance
  *  `PATCH /api/team/config` takes: this must never become a general "write anything into
- *  config.json" channel. `sessionPrefix` is deliberately absent — see `PREFIX_REFUSAL`. */
-export const WRITABLE_KEYS = ['bindHost', 'allowedOrigins'];
+ *  config.json" channel. `sessionPrefix` is deliberately absent — see `PREFIX_REFUSAL`.
+ *  `launchModel` is here and *not* in `EXPOSURE_KEYS`: it decides what a session starts
+ *  on, never who can reach the panel. */
+export const WRITABLE_KEYS = ['bindHost', 'allowedOrigins', 'launchModel'];
+
+/** The writable keys the running panel reads only once, at boot — a change to one of these
+ *  is what a restart notice is for. `launchModel` is not among them: it is read at launch. */
+export const BOOT_READ_KEYS = ['bindHost', 'allowedOrigins'];
 
 /**
  * Why the prefix is shown and not offered.
@@ -410,7 +460,7 @@ export function validateConfigPatch(body, { normalizeOrigin } = {}) {
       ok: false,
       status: 400,
       error:
-        `This endpoint writes ${WRITABLE_KEYS.join(' and ')} and nothing else. ` +
+        `This endpoint writes ${WRITABLE_KEYS.join(', ')} and nothing else. ` +
         `Refused: ${unknown.join(', ')}.`,
     };
   }
@@ -448,6 +498,15 @@ export function validateConfigPatch(body, { normalizeOrigin } = {}) {
       if (!out.includes(norm)) out.push(norm);
     }
     patch.allowedOrigins = out;
+  }
+
+  if ('launchModel' in body) {
+    const raw = typeof body.launchModel === 'string' ? body.launchModel.trim() : body.launchModel;
+    if (!isKnownModel(raw)) {
+      const shown = typeof raw === 'string' ? JSON.stringify(raw) : typeof raw;
+      return { ok: false, status: 400, error: `launchModel ${shown} is not a model this panel knows. ${LAUNCH_MODEL_RULE}` };
+    }
+    patch.launchModel = raw;
   }
 
   return { ok: true, patch };

@@ -1530,9 +1530,9 @@ async function postJSONMethod(method, url, body) {
 /**
  * `<STATE_DIR>/config.json`, in a box.
  *
- * Three things, and only three: **who can reach the panel** (`bindHost`), **which extra
- * browser origins may write to it** (`allowedOrigins`), and the **session prefix**, which
- * is shown and cannot be changed here. Everything else that lives in that file, and every
+ * Four things: **who can reach the panel** (`bindHost`), **which extra browser origins may
+ * write to it** (`allowedOrigins`), the **session prefix**, which is shown and cannot be
+ * changed here, and the **launch model** every non-worker session starts on (`launchModel`). Everything else that lives in that file, and every
  * per-repo team toggle, has its own surface already — the lead's aside — and duplicating a
  * control is how two surfaces start disagreeing about what is true.
  *
@@ -1869,6 +1869,72 @@ async function openSettings() {
   prefSec.append(prefCap, prefRow, prefHint);
   body.append(prefSec);
 
+  /* ─────────────────────────────────────────────────────────── launch model ── */
+
+  /*
+   * What every session the panel starts is launched on — `--model` on `+ new`, `⧉`, a
+   * restore, relaunch all, restart one and a team lead. Workers are the exception and the
+   * hint says so: their model is the lead's call, per task, from the team panel.
+   *
+   * Not exposure, so not locked for a LAN browser: it is no more than that browser could do
+   * by launching a session itself. It also takes no restart — the server reads it at each
+   * launch — which is why it has no restart line beside it.
+   *
+   * The rows come from the server (`launchModels`, `launchModelNames`), the same list the
+   * team panel's worker picker draws from — never a copy here.
+   */
+  const lmSec = document.createElement('section');
+  lmSec.className = 'settings-sec';
+  const lmCap = document.createElement('h3');
+  lmCap.textContent = 'Model new sessions start on';
+  const lmRow = document.createElement('label');
+  lmRow.className = 'settings-model';
+  const lmText = document.createElement('span');
+  lmText.textContent = 'launch model';
+  const lmPick = document.createElement('select');
+  const lmStored = typeof cfg.launchModel === 'string' ? cfg.launchModel : null;
+  const lmIds = Array.isArray(cfg.launchModels) ? [...cfg.launchModels] : [];
+  // A stored id the list does not carry (a `[1m]` variant, or a hand edit) is still drawn,
+  // or the picker would show a model that is not the one on file.
+  if (lmStored && !lmIds.includes(lmStored)) lmIds.push(lmStored);
+  for (const id of lmIds) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = cfg.launchModelNames?.[id] || id;
+    opt.title = id;
+    lmPick.append(opt);
+  }
+  // What a launch would use now: the stored id, or the default when the file has none.
+  const lmShown = lmStored ?? cfg.defaults?.launchModel ?? '';
+  lmPick.value = lmShown;
+  const lmWrap = document.createElement('span');
+  lmWrap.className = 'team-select';
+  lmWrap.append(lmPick);
+  lmRow.append(lmText, lmWrap);
+  const lmHint = document.createElement('p');
+  lmHint.className = 'settings-flag';
+  const paintLaunchModel = () => {
+    if (cfg.launchModelError && lmPick.value === lmShown) {
+      lmHint.className = 'settings-flag is-restart';
+      lmHint.textContent = cfg.launchModelError;
+      return;
+    }
+    lmHint.className = 'settings-flag';
+    lmHint.textContent =
+      'Every session the panel starts — new, duplicate, restore, relaunch, restart and team leads — ' +
+      'is launched with this model, including one resumed with its conversation. Workers start on ' +
+      'their team’s worker model instead. Takes effect at the next launch; sessions already ' +
+      'running keep theirs.' +
+      (lmStored ? '' : ' The file records none, so this is the default.');
+  };
+  paintLaunchModel();
+  lmPick.onchange = () => {
+    paintLaunchModel();
+    say('');
+  };
+  lmSec.append(lmCap, lmRow, lmHint);
+  body.append(lmSec);
+
   /* ────────────────────────────────────────────────────────────── notifications ── */
 
   /*
@@ -2039,38 +2105,58 @@ async function openSettings() {
   const save = document.createElement('button');
   save.className = 'ghost-btn primary';
   save.textContent = 'save';
-  save.disabled = !canEdit;
+  // Enabled from a LAN browser too, where it writes the launch model alone: the exposure
+  // keys are left out of the patch there, and the server would refuse them anyway.
   row.append(cancel, save);
 
   save.onclick = async () => {
-    const host = chosenHost();
-    if (!host) {
-      say('Pick a bind host, or type an address.', 'err');
+    const patch = {};
+    if (canEdit) {
+      const host = chosenHost();
+      if (!host) {
+        say('Pick a bind host, or type an address.', 'err');
+        return;
+      }
+      patch.bindHost = host;
+      patch.allowedOrigins = origins;
+    }
+    // Only when it moved, so saving the host does not also write down a default nobody
+    // chose — absent in the file means "the panel's default", which is a different answer
+    // from "Opus 5.5, on purpose" the day the default changes.
+    // A file holding an id no launch accepts is rewritten by saving any listed one, even
+    // the one the picker fell back to showing.
+    const lmFixes = Boolean(cfg.launchModelError) && (cfg.launchModels || []).includes(lmPick.value);
+    if (lmPick.value && (lmPick.value !== lmShown || lmFixes)) patch.launchModel = lmPick.value;
+    if (!Object.keys(patch).length) {
+      say('Nothing to save from here — only the launch model can be changed from this browser.');
       return;
     }
     saving = true;
     save.disabled = true;
     say('Saving…');
     try {
-      const out = await postJSONMethod('PATCH', '/api/config', {
-        bindHost: host,
-        allowedOrigins: origins,
-      });
+      const out = await postJSONMethod('PATCH', '/api/config', patch);
       // Re-seat from the server's answer: it normalises origins, so what comes back is
       // what is on disk, and showing anything else would be showing the request.
-      origins.length = 0;
-      origins.push(...(out.allowedOrigins || []));
-      renderOrigins();
+      if (canEdit) {
+        origins.length = 0;
+        origins.push(...(out.allowedOrigins || []));
+        renderOrigins();
+      }
       saving = false;
-      save.disabled = !canEdit;
+      save.disabled = false;
+      const modelMoved = out.changed?.includes('launchModel');
       say(
         out.restartRequired
-          ? `Saved. Takes effect at the next restart (npm run restart-panel) — ${out.restartReason}.`
-          : 'Saved. Nothing changed.',
+          ? `Saved. Takes effect at the next restart (npm run restart-panel) — ${out.restartReason}.` +
+              (modelMoved ? ' The launch model applies from the next launch.' : '')
+          : modelMoved
+            ? 'Saved. The next session the panel starts uses it.'
+            : 'Saved. Nothing changed.',
       );
     } catch (err) {
       saving = false;
-      save.disabled = !canEdit;
+      save.disabled = false;
       say(err.message, 'err');
     }
   };
