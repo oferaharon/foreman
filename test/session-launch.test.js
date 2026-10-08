@@ -185,6 +185,8 @@ test('the flags merge the MCP config and the settings, and never replace either'
     '--append-system-prompt-file', path.join(STATE, 'session-brief.md'),
     '--mcp-config', path.join(STATE, 'session-mcp.json'),
     '--settings', path.join(STATE, 'session-settings.json'),
+    // No config.json in this state dir, so the launch model is the default.
+    '--model', 'claude-opus-5-5',
   ]);
 
   // The measured one. `--mcp-config` merges; `--strict-mcp-config` turns it into a
@@ -208,6 +210,58 @@ test('the flags are rewritten from source, not read back off disk', async () => 
     JSON.parse(fs.readFileSync(path.join(STATE, 'session-settings.json'), 'utf8')),
     mod.sessionSettings(),
   );
+});
+
+/* ------------------------------------------------------------- the launch model --- */
+
+/*
+ * `launchModelArgs` reads `config.json` at each launch. These run against scratch files
+ * through its `file` parameter; the one test that goes through `standaloneArgs` writes the
+ * real `<STATE>/config.json` and removes it again, because that is the file it reads.
+ */
+const scratchConfig = (name, body) => {
+  const file = path.join(STATE, `${name}.json`);
+  if (body !== undefined) fs.writeFileSync(file, typeof body === 'string' ? body : JSON.stringify(body));
+  return file;
+};
+
+test('no config.json, or one without the key, launches on Opus 5.5', () => {
+  assert.deepEqual(mod.launchModelArgs({ file: scratchConfig('absent') }), ['--model', 'claude-opus-5-5']);
+  assert.deepEqual(
+    mod.launchModelArgs({ file: scratchConfig('no-key', { bindHost: '127.0.0.1' }) }),
+    ['--model', 'claude-opus-5-5'],
+  );
+});
+
+test('a chosen model is what the next launch passes — read afresh, no restart', () => {
+  const file = scratchConfig('chosen', { launchModel: 'claude-sonnet-5-5' });
+  assert.deepEqual(mod.launchModelArgs({ file }), ['--model', 'claude-sonnet-5-5']);
+  fs.writeFileSync(file, JSON.stringify({ launchModel: 'claude-opus-5-5[1m]' }));
+  assert.deepEqual(mod.launchModelArgs({ file }), ['--model', 'claude-opus-5-5[1m]']);
+});
+
+test('an unknown model refuses the launch with the reason, rather than starting something nobody chose', () => {
+  const file = scratchConfig('alias', { launchModel: 'opus' });
+  assert.throws(() => mod.launchModelArgs({ file }), /launchModel.*"opus"/s);
+});
+
+test('an unparseable config.json is settings that are not there — the default, as at boot', () => {
+  assert.deepEqual(mod.launchModelArgs({ file: scratchConfig('broken', '{ nope') }), ['--model', 'claude-opus-5-5']);
+});
+
+test('standaloneArgs reads the real config.json, and an unknown model there fails it before any file is written', async () => {
+  const cfg = path.join(STATE, 'config.json');
+  try {
+    fs.writeFileSync(cfg, JSON.stringify({ launchModel: 'claude-sonnet-5-5' }));
+    assert.deepEqual((await mod.standaloneArgs()).slice(-2), ['--model', 'claude-sonnet-5-5']);
+
+    fs.writeFileSync(cfg, JSON.stringify({ launchModel: 'sonnet' }));
+    fs.writeFileSync(path.join(STATE, 'session-brief.md'), 'untouched');
+    await assert.rejects(mod.standaloneArgs(), /"sonnet"/);
+    assert.equal(fs.readFileSync(path.join(STATE, 'session-brief.md'), 'utf8'), 'untouched');
+  } finally {
+    fs.rmSync(cfg, { force: true });
+  }
 });
 
 /* -------------------------------------------------------------- the call sites --- */
@@ -289,4 +343,40 @@ test('the four standalone sites are the ones the plan names', () => {
     2,
     'snapshot restore and relaunch-all must each hand restoreSessions a startSession that passes the flags',
   );
+});
+
+/*
+ * The launch model, at every site. Four standalones get it through `standaloneArgs()`, the
+ * lead through `launchModelArgs()` spread into its own flags, and a worker through its own
+ * `--model` from `resolveWorkerModel` — and **exactly one** of those per call, because two
+ * `--model` flags leave which one counts to Claude Code's argument parser. A new launch site
+ * that carries none of them fails here rather than starting on whatever Claude Code's
+ * default is that day, which is the 2026-10-08 bug.
+ */
+test('every launch site carries exactly one model source', () => {
+  const src = fs.readFileSync(path.join(repoRoot, 'server', 'index.js'), 'utf8');
+  const calls = createSessionCalls(src);
+  const wrong = [];
+  for (const call of calls) {
+    const sources = [
+      call.block.includes('standaloneArgs('),
+      /\.\.\.model\b/.test(call.block),
+      call.block.includes("'--model'"),
+    ].filter(Boolean).length;
+    if (sources !== 1) wrong.push(`${call.line} (${sources})`);
+  }
+  assert.deepEqual(wrong, [], `server/index.js createSession calls without exactly one --model: ${wrong.join(', ')}`);
+
+  // The `...model` spread is the lead's, and it has to be the launch model — not the team's
+  // worker default, which is a different ruling about a different session.
+  const lead = calls.filter((c) => /\.\.\.model\b/.test(c.block));
+  assert.equal(lead.length, 1, 'expected the lead to be the one site spreading the launch model');
+  assert.match(lead[0].block, /label: 'lead'/);
+  assert.equal(src.match(/const model = launchModelArgs\(\);/g)?.length, 1, 'launchLead must read the launch model');
+
+  // And the worker keeps its own, untouched: never the panel's launch model on top.
+  const worker = calls.filter((c) => c.block.includes("'--model'"));
+  assert.equal(worker.length, 1);
+  assert.match(worker[0].block, /'--model', model\.model/);
+  assert.ok(!worker[0].block.includes('launchModelArgs'));
 });

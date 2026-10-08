@@ -9,6 +9,14 @@
  * `dispatch.js` itself: that pulls in `tmux.js` and the whole pane-parser stack, which a
  * stdio MCP child has no business loading. So the list moved down here and `dispatch.js`
  * re-exports it, leaving every existing importer untouched.
+ *
+ * **It is also the list every other session the panel launches is started on.** Since the
+ * maintainer's ruling of 2026-10-08 every launch the panel owns passes `--model` — `+ new`,
+ * `⧉`, snapshot restore, relaunch all, restart one and a team lead — and the id comes from
+ * `launchModel` in the panel's `config.json` (`settings-file.js`), validated against this
+ * same list. One list, not two: a second "models a session may start on" would be the
+ * sibling spelling `docs/traps/one-spelling.md` refuses, and the picker in the settings box
+ * and the picker in the team panel would then offer different answers to one question.
  */
 
 /**
@@ -45,6 +53,30 @@ export const WORKER_MODELS = [
  * what a *new* team is seeded with, and what resolves when nothing is stored.
  */
 export const DEFAULT_WORKER_MODEL = 'claude-opus-5-5';
+
+/**
+ * What every non-worker session the panel launches starts on, when `config.json` names
+ * nothing. The maintainer's ruling of 2026-10-08: Claude Code's own default moved to Sonnet
+ * 5.5, a relaunch brought most of a bench back on Sonnet, and the launch default is locked
+ * to Opus 5.5 rather than left to whatever Claude Code's default is that day.
+ *
+ * A separate constant from `DEFAULT_WORKER_MODEL` although the value is the same, because
+ * they are two rulings about two different things — what a lead's dispatch defaults to, and
+ * what the panel's own launches start on — and changing one must not quietly change the
+ * other.
+ */
+export const DEFAULT_LAUNCH_MODEL = 'claude-opus-5-5';
+
+/**
+ * Is this an id the panel will put after `--model`? On the list, optionally with the `[1m]`
+ * suffix that selects the 1M-context variant. The one test, for the dispatch and for the
+ * panel's own launch setting alike — it used to be a private helper in `dispatch.js`.
+ */
+export function isKnownModel(id) {
+  if (typeof id !== 'string') return false;
+  const base = id.endsWith('[1m]') ? id.slice(0, -4) : id;
+  return WORKER_MODELS.includes(base);
+}
 
 /**
  * What each id is called in front of a human. The panel's own picker is the reason this

@@ -2,7 +2,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
 import { trustOption } from '../web/trust-gate.js';
-import { WORKER_MODELS, DEFAULT_WORKER_MODEL } from './worker-models.js';
+import { WORKER_MODELS, DEFAULT_WORKER_MODEL, isKnownModel } from './worker-models.js';
 import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
 import { mcpServerRule } from './project-mcp.js';
 
@@ -28,10 +28,7 @@ export {
   workerModelNames,
 } from './worker-models.js';
 
-const validModel = (id) => {
-  const base = String(id).endsWith('[1m]') ? String(id).slice(0, -4) : String(id);
-  return WORKER_MODELS.includes(base);
-};
+const validModel = (id) => isKnownModel(String(id));
 
 /**
  * The one answer to "what model does this worker launch with".

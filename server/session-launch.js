@@ -1,7 +1,8 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PORT, STATE_DIR } from './config.js';
+import { CONFIG_FILE, PORT, STATE_DIR } from './config.js';
+import { readConfigFile, resolveLaunchModel } from './settings-file.js';
 
 /**
  * What an **ordinary** session the panel launches is told, and the one tool server it gets.
@@ -182,6 +183,36 @@ export async function writeSessionFiles() {
 }
 
 /**
+ * `--model <id>` — the model a session the panel launches starts on. The one helper, for the
+ * four standalone sites (through `standaloneArgs` below) and for `launchLead`, which builds
+ * its own flags and calls this directly. **Not** for a worker: its model is the lead's
+ * per-task choice through `resolveWorkerModel`, already a `--model` of its own, and a
+ * second one would leave which of the two Claude Code honours to its argument parser.
+ *
+ * Why every launch says it out loud rather than trusting `"model"` in the user's own
+ * settings: measured on v2.1.288, a `--resume` comes back on the model its transcript last
+ * answered on and ignores that setting entirely, so a relaunch of a bench that had drifted
+ * onto Claude Code's new default brought it back on that default. `--model` beats both the
+ * settings file and the resumed transcript — measured on the same version, fresh and
+ * resumed. See `docs/traps/launch.md#a-resume-comes-back-on-the-transcripts-model`.
+ *
+ * Read from `config.json` **at each launch**, not at boot, so the settings box's picker
+ * reaches the next session without a restart. An id the panel does not know **throws**
+ * rather than falling back: every caller surfaces a launch error (the endpoints as their
+ * response, `restoreSessions` as that entry's `failed`), and a session quietly started on a
+ * model nobody chose is precisely what this exists to end. An unparseable file is settings
+ * that are not there, the same as at boot, and gives the default.
+ *
+ * `file` is a parameter only so a test can point it at a scratch file; nothing in `server/`
+ * passes one.
+ */
+export function launchModelArgs({ file = CONFIG_FILE } = {}) {
+  const { model, error } = resolveLaunchModel({ config: readConfigFile(file).config, file });
+  if (error) throw new Error(error);
+  return ['--model', model];
+}
+
+/**
  * The launch flags every standalone session gets — **the one helper, called at every
  * standalone launch site**.
  *
@@ -193,6 +224,9 @@ export async function writeSessionFiles() {
  * that neither calls this nor carries the exemption marker, so a fifth launch site cannot be
  * added without answering the question.
  *
+ * It also carries `--model` (`launchModelArgs` above), which is how the four standalone
+ * sites got the launch model without a fifth thing each of them has to remember.
+ *
  * It rewrites the files first, so the flags always point at today's brief rather than at
  * whatever was written the last time the panel booted. It **throws** if it cannot: a launch
  * that failed loudly is recoverable, and a session that came up silently without the tools
@@ -201,9 +235,11 @@ export async function writeSessionFiles() {
  * that one entry's `failed`.
  */
 export async function standaloneArgs() {
+  // The model first: an unknown `launchModel` refuses the launch before anything is written.
+  const model = launchModelArgs();
   const { brief, mcp, settings } = await writeSessionFiles();
   // `--strict-mcp-config` is deliberately absent. See the header. `--settings` merges with
   // the user's own settings files (permission-rule lists combine across scopes) rather than
   // replacing them, so this adds the one `mcp__foreman` allow rule and nothing else.
-  return ['--append-system-prompt-file', brief, '--mcp-config', mcp, '--settings', settings];
+  return ['--append-system-prompt-file', brief, '--mcp-config', mcp, '--settings', settings, ...model];
 }

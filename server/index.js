@@ -96,6 +96,8 @@ import {
   DEFAULT_SESSION_PREFIX,
   BIND_HOST_RULE,
   EXPOSURE_KEYS,
+  BOOT_READ_KEYS,
+  resolveLaunchModel,
 } from './settings-file.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
@@ -131,7 +133,15 @@ import {
   slugFor,
   uniqueSessionName,
 } from './launch.js';
-import { standaloneArgs, writeSessionFiles, SESSION_BRIEF_FILE, SESSION_MCP_FILE, SESSION_SETTINGS_FILE } from './session-launch.js';
+import { DEFAULT_LAUNCH_MODEL } from './worker-models.js';
+import {
+  launchModelArgs,
+  standaloneArgs,
+  writeSessionFiles,
+  SESSION_BRIEF_FILE,
+  SESSION_MCP_FILE,
+  SESSION_SETTINGS_FILE,
+} from './session-launch.js';
 import { saveUpload, resolveImage, pruneImages } from './uploads.js';
 import { rotateLogs, rotationLines, LOG_OUT, LOG_ERR } from './logs.js';
 import { FORMULA, panelIsHomebrew } from './homebrew.js';
@@ -1001,6 +1011,11 @@ async function launchLead(folder, { terminal, resume = null }) {
     throw err;
   }
 
+  // The panel's launch model, read before anything below is written, so an unknown
+  // `launchModel` in config.json refuses the lead with the reason rather than after the
+  // brief, the MCP config and the settings were regenerated for nothing to use.
+  const model = launchModelArgs();
+
   // What this repo actually has, what the lead can reach with it, and what it will read —
   // one call, in `briefs.js`, because `GET /api/briefs` shows the maintainer exactly this
   // brief and a second copy of the assembly would be a claim that decays. Everything below
@@ -1070,6 +1085,10 @@ async function launchLead(folder, { terminal, resume = null }) {
       '--mcp-config', mcpFile,
       '--strict-mcp-config',
       '--settings', settingsFile,
+      // The panel's launch model, as every non-worker launch gets it — not the team's
+      // `defaultModel`, which is what a *worker* starts on. A resumed lead gets it too, and
+      // that is the point: `--resume` alone comes back on the transcript's last model.
+      ...model,
     ],
   });
 
@@ -4068,10 +4087,11 @@ app.post('/api/sessions/:id/exit', async (req, res) => {
 /*
  * `<STATE_DIR>/config.json`, seen and changed from the panel.
  *
- * Two keys are writable — `bindHost` and `allowedOrigins` — and one, `sessionPrefix`, is
- * shown and refused. `settings-file.js` owns every rule; these two handlers own only the
- * HTTP shape and the one gate that is a property of the *request* rather than of the
- * value: `isLoopbackRemote`.
+ * Three keys are writable — `bindHost`, `allowedOrigins` and `launchModel` — and one,
+ * `sessionPrefix`, is shown and refused. `settings-file.js` owns every rule; these two
+ * handlers own only the HTTP shape and the one gate that is a property of the *request*
+ * rather than of the value: `isLoopbackRemote`, which guards the two exposure keys and
+ * deliberately not `launchModel` — what a session starts on is not who can reach the panel.
  *
  * **Why the read reports two sets of values.** `HOST` and `SESSION_PREFIX` are resolved
  * once at boot, and the host's top rung is `$FOREMAN_HOST` — which on a machine whose
@@ -4093,6 +4113,9 @@ app.post('/api/sessions/:id/exit', async (req, res) => {
  *  infer from the fact that it reached this port. */
 app.get('/api/config', (req, res) => {
   const { config, notes, exists } = readConfigFile(CONFIG_FILE);
+  // Read at launch rather than boot, so this is the model the *next* launch would use — and
+  // an unknown stored id is said here, where the picker that fixes it is drawn.
+  const launch = resolveLaunchModel({ config, file: CONFIG_FILE });
   res.json({
     file: CONFIG_FILE,
     exists,
@@ -4109,9 +4132,16 @@ app.get('/api/config', (req, res) => {
     bindHost: typeof config.bindHost === 'string' ? config.bindHost : null,
     allowedOrigins: allowedOriginsFrom(config),
     sessionPrefix: typeof config.sessionPrefix === 'string' ? config.sessionPrefix : null,
-    defaults: { bindHost: DEFAULT_BIND_HOST, sessionPrefix: DEFAULT_SESSION_PREFIX },
+    launchModel: config.launchModel === undefined ? null : config.launchModel,
+    defaults: { bindHost: DEFAULT_BIND_HOST, sessionPrefix: DEFAULT_SESSION_PREFIX, launchModel: DEFAULT_LAUNCH_MODEL },
     // What this panel is actually running on, and which rung answered for the host.
-    live: { host: HOST, hostSource: HOST_SOURCE, sessionPrefix: SESSION_PREFIX },
+    // `launchModel` is `null` when the stored id is one no launch would accept.
+    live: { host: HOST, hostSource: HOST_SOURCE, sessionPrefix: SESSION_PREFIX, launchModel: launch.model },
+    // The picker's rows, from the one list a worker's dispatch also validates against, and
+    // their names — with the stored id named too, so a hand-edited value still draws.
+    launchModels: WORKER_MODELS,
+    launchModelNames: workerModelNames(typeof config.launchModel === 'string' ? config.launchModel : null),
+    launchModelError: launch.error,
     // Whether *this* request could have written the exposure keys. The modal disables its
     // controls on it; the PATCH re-decides it server-side, so a disabled control that
     // somebody re-enables by hand still gets the 403.
@@ -4155,7 +4185,7 @@ app.patch('/api/config', (req, res) => {
   const check = validateConfigPatch(body, { normalizeOrigin });
   if (!check.ok) return res.status(check.status).json({ error: check.error });
   if (!Object.keys(check.patch).length) {
-    return res.status(400).json({ error: 'Nothing to change — send bindHost, allowedOrigins, or both.' });
+    return res.status(400).json({ error: 'Nothing to change — send bindHost, allowedOrigins or launchModel.' });
   }
 
   const written = writeConfigFile(CONFIG_FILE, check.patch);
@@ -4172,7 +4202,11 @@ app.patch('/api/config', (req, res) => {
    * Only a value that actually *moved* counts. Re-saving the host it already had must not
    * tell somebody to restart for nothing.
    */
-  const restartRequired = written.changed.length > 0;
+  //
+  // `launchModel` is the exception and never asks for one: it is read at each launch
+  // (`launchModelArgs`), so the next session started picks it up, and a session already
+  // running keeps the model it has.
+  const restartRequired = written.changed.some((key) => BOOT_READ_KEYS.includes(key));
   const reasons = [];
   if (written.changed.includes('bindHost')) reasons.push('the bind host is read when the panel starts');
   if (written.changed.includes('allowedOrigins')) reasons.push('the origin allowlist is read when the panel starts');
@@ -4183,7 +4217,13 @@ app.patch('/api/config', (req, res) => {
     bindHost: typeof written.config.bindHost === 'string' ? written.config.bindHost : null,
     allowedOrigins: allowedOriginsFrom(written.config),
     sessionPrefix: typeof written.config.sessionPrefix === 'string' ? written.config.sessionPrefix : null,
-    live: { host: HOST, hostSource: HOST_SOURCE, sessionPrefix: SESSION_PREFIX },
+    launchModel: written.config.launchModel === undefined ? null : written.config.launchModel,
+    live: {
+      host: HOST,
+      hostSource: HOST_SOURCE,
+      sessionPrefix: SESSION_PREFIX,
+      launchModel: resolveLaunchModel({ config: written.config, file: CONFIG_FILE }).model,
+    },
     changed: written.changed,
     restartRequired,
     restartReason: reasons.join('; '),
