@@ -291,6 +291,18 @@ function isConversation(kind) {
 let leadCtx = null;
 let roomCtx = null;
 let leadEverSeen = false;
+/*
+ * Whether this screen has ever shown a row that passed its route's claim — which is a
+ * different fact from `leadEverSeen`, and the difference was measured. `leadEverSeen` arms
+ * the gone timer for *the id on screen*, so a rebound clears it: the new id has not been
+ * seen. But a rebound is the same conversation under a new id, and the commonest way a
+ * worker screen meets one is its task closing — the close types `/exit` into a pane that has
+ * not spoken yet, that writes its first transcript, and the id moves from `pane-N` to the
+ * real one a beat before the roster stops calling the row a worker. Asked off `leadEverSeen`,
+ * that read as a wrong link. This one survives a rebound and is cleared only by leaving the
+ * route; `goneText` is its only reader.
+ */
+let claimHeld = false;
 let goneTimer = null;
 
 /**
@@ -364,6 +376,7 @@ function leaveRoute() {
     leadCtx?._dispose();
     leadCtx = null;
     leadEverSeen = false;
+    claimHeld = false;
     clearTimeout(goneTimer);
     goneTimer = null;
   }
@@ -2135,6 +2148,7 @@ function enterConversation() {
 
   leadCtx = makeCtx();
   leadEverSeen = Boolean(sessionOf(route.sessionId));
+  claimHeld = leadEverSeen;
 
   // Mounted before anything paints, for the reason in `enterHome`.
   mountLead(host, leadCtx);
@@ -2355,6 +2369,7 @@ function onRoster() {
     const refusal = roleRefusal(session);
     if (refusal) return showGone(refusal);
     leadEverSeen = true;
+    claimHeld = true;
     clearTimeout(goneTimer);
     goneTimer = null;
     updateLead(session);
@@ -2417,9 +2432,11 @@ function showGone(reason = 'exited') {
  * a worker and then stops being one is, in the ordinary course, its task ending while its
  * pane is still up: a row is a worker only while its task is open (`OPEN_STATES`), the close
  * endpoint sends `/exit` but writes the final state without waiting for the pane to go, and
- * a task reported `failed` leaves its pane running. `leadEverSeen` is what tells the two
- * apart — it is set only once a row has passed this route's claim, and nothing between that
- * and here clears it. A pane that went first is the plain `exited` sentence instead.
+ * a task reported `failed` leaves its pane running. `claimHeld` is what tells the two apart
+ * — it is set only once a row has passed this route's claim, and a rebound does not clear
+ * it (see its own note; the first version asked `leadEverSeen`, which a rebound does clear,
+ * and a closing worker read as a wrong link on the bench). A pane that went first is the
+ * plain `exited` sentence instead.
  */
 function goneText(reason) {
   if (reason === 'not-lead') {
@@ -2429,7 +2446,7 @@ function goneText(reason) {
     return 'That session is not an ordinary one. Team leads and their workers open from the Leads tab.';
   }
   if (reason === 'not-worker') {
-    return leadEverSeen
+    return claimHeld
       ? 'This is no longer one of a team’s workers — its task was closed or has ended.'
       : 'That session is not one of a team’s workers. Workers open from under their lead on the Leads tab.';
   }

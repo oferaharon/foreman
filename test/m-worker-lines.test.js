@@ -343,7 +343,17 @@ test('a worker’s task ending while its screen is open falls to the gone state,
   // The roster stops calling the row a worker the moment its task leaves `OPEN_STATES`, so a
   // live screen re-asks the claim and is refused — or its pane goes and the gone timer fires.
   // Both land on `showGone`, and both say something true about a worker.
-  assert.match(app, /if \(reason === 'not-worker'\) \{\s*return leadEverSeen/);
+  assert.match(app, /if \(reason === 'not-worker'\) \{\s*return claimHeld/);
+  // …and the flag that tells the two sentences apart survives a rebound, which is exactly
+  // when a closing worker needs it: `/exit` into a pane that has not spoken yet writes its
+  // first transcript and moves the id a beat before the task's state is written. Measured
+  // on the bench — asked off `leadEverSeen`, which a rebound clears, it read as a wrong link.
+  const rebound = fn('onRebound');
+  assert.match(rebound, /leadEverSeen = false;/);
+  assert.ok(!rebound.includes('claimHeld'), 'a rebound is the same conversation; the claim stays held');
+  assert.match(fn('leaveRoute'), /claimHeld = false;/);
+  assert.equal(app.match(/claimHeld = true;/g).length, 1, 'set where the roster frame passes the claim');
+  assert.match(fn('enterConversation'), /claimHeld = leadEverSeen;/);
   assert.ok(app.includes('This is no longer one of a team’s workers — its task was closed or has ended.'));
   assert.ok(app.includes('That session is not one of a team’s workers. Workers open from under their lead on the Leads tab.'));
   assert.ok(app.includes('This worker is no longer running. Its task was closed or it exited.'));
