@@ -4,12 +4,20 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
+/* The two pure halves of this feature, driven rather than read: the worker route's claim and
+   what a worker is called. And `needsKind`, for the half of the 2026-10-08 ruling that is a
+   *non*-change — a worker that opens must still light nothing. */
+import { needsKind } from '../web/notify.js';
+import { isTeamWorker, routeRefusal, workerName } from '../web/m/roles.js';
+
 /*
  * The worker one-liners under a lead card on the phone.
  *
  * A lead card used to say `· 2 workers` and nothing else, so a team on the phone was a
- * number. It now lists them: one muted, indented, **non-interactive** line per live worker,
- * naming its branch and what it is doing.
+ * number. It now lists them: one muted, indented line per live worker, naming its branch and
+ * what it is doing — and, since the maintainer's ruling of 2026-10-08 reversed "a worker is
+ * never opened from the phone", each line is a 44px tap target that opens that worker's
+ * conversation on `#/worker/<id>`, with the same full control a standalone gets.
  *
  * `web/m/app.js` cannot be imported here — it reaches for `document.getElementById` at
  * module scope and there is no browser in `node --test` — so these are held against the
@@ -29,9 +37,16 @@ import { fileURLToPath } from 'node:url';
  *    because a reader adds them, and the *list* must never hide the one worker that has
  *    finished and is waiting on the maintainer. Both halves, or the discrepancy the
  *    maintainer accepted turns into a missing row.
- *  - **The lines are siblings of `.m-team-body` and carry no listener.** The body is a
+ *  - **The lines are siblings of `.m-team-body`, each its own `<button>`.** The body is a
  *    `<button>`; a `<button>` inside a `<button>` is invalid markup whose disabled form
- *    swallows the child's clicks, and this card has paid for that once already.
+ *    swallows the child's clicks, and this card has paid for that once already. Each line is
+ *    at least 44px tall so a press meant for one worker never lands on the card or the next.
+ *  - **The worker route is its own claim, an allow-list, re-checked every frame.** Driven
+ *    with real rows: a worker opens there and is still refused on `#/session/` and
+ *    `#/lead/`; a lead or a standalone is refused on `#/worker/`.
+ *  - **Attention is unchanged.** Opening a worker is not the same decision as being
+ *    summoned by one: a worker holding a box lights neither the Leads tab nor its lead's
+ *    card, exactly as before the ruling.
  *  - **They are in the home signature, as rendered strings.** `renderHome` returns early on
  *    an unchanged signature, so a line left out of it never repaints — and a raw timestamp
  *    put into it would differ on almost every frame and retire the guard for everything
@@ -48,6 +63,7 @@ const text = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const app = text('web/m/app.js');
 const css = text('web/m/m.css');
+const roles = text('web/m/roles.js');
 
 /** The body of one top-level function in `web/m/app.js`, by brace balance. */
 function fn(name) {
@@ -99,9 +115,11 @@ test('the sort key is never recomputed here, and never comes off activity', () =
   // and it must stay out of everything this feature touches. Ordering a team by it is the
   // one behaviour `orderWorkers` exists to prevent, and putting it in a line would put a
   // raw millisecond stamp into the home signature through the back door.
-  for (const f of ['workerLines', 'workerName', 'workerWord', 'workerLine', 'workerList']) {
+  for (const f of ['workerLines', 'workerWord', 'workerLine', 'workerList']) {
     assert.ok(!fn(f).includes('lastActivity'), `${f} does not read activity`);
   }
+  // `workerName` moved to the pure module both screens import; the same rule holds there.
+  assert.ok(!roles.includes('lastActivity'), 'roles.js does not read activity');
 });
 
 /* ─────────────────────────────────────────────────── which workers are listed ─── */
@@ -192,34 +210,194 @@ test('a worker holding a box is not sent to the maintainer to answer', () => {
   assert.match(title, /if \(word === 'waiting'\) return 'holding a box — its lead answers it';/);
 });
 
-/* ─────────────────────────────────────────────────────── not a tap target ─── */
+/* ─────────────────────────────────────────────────────────── a tap target ─── */
 
-test('the lines are siblings of the card body, never inside it, and carry no listener', () => {
+test('the lines are siblings of the card body, never inside it, and each is its own button', () => {
   const node = fn('teamNode');
   // Appended to the wrap after the body, not to the body. A `<button>` inside a `<button>`
-  // is invalid markup whose disabled form swallows the child's clicks.
+  // is invalid markup whose disabled form swallows the child's clicks — and every line is a
+  // button now, so that would be a nested button per worker.
   assert.match(node, /wrap\.appendChild\(body\);[\s\S]{0,1400}?wrap\.appendChild\(workerList\(row\)\);/);
   assert.ok(!/body\.appendChild\(workerList/.test(node));
 
-  // Nothing pressable in either builder: no listener, no button, no href.
-  for (const builder of ['workerList', 'workerLine']) {
-    const src = fn(builder);
-    assert.ok(!src.includes('addEventListener'), `${builder} adds no listener`);
-    assert.ok(!src.includes("createElement('button')"), `${builder} builds no button`);
-    assert.ok(!src.includes("createElement('a')"), `${builder} builds no link`);
-    assert.ok(!src.includes('tabIndex') && !src.includes('tabindex'), `${builder} is not focusable`);
-  }
+  // The block is a plain container: nothing on it to press, so a tap between two lines can
+  // only ever be one of them.
+  const list = fn('workerList');
+  assert.match(list, /const list = document\.createElement\('div'\);/);
+  assert.ok(!list.includes('addEventListener'), 'the block adds no listener of its own');
+
+  // Each line: a real `<button type="button">`, one listener, and the one thing it does is
+  // put this worker's id on the worker route.
+  const line = fn('workerLine');
+  assert.match(line, /const line = document\.createElement\('button'\);\s*line\.type = 'button';/);
+  assert.equal(line.match(/addEventListener\(/g).length, 1, 'one listener per line');
+  assert.match(
+    line,
+    /line\.addEventListener\('click', \(\) => \{\s*location\.hash = `#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`;\s*\}\);/,
+  );
+  // Nothing inside a line is a control of its own — a button inside this button would be
+  // the very nesting the card is built to avoid.
+  assert.equal(line.match(/createElement\('button'\)/g).length, 1, 'no button inside the line');
+  assert.ok(!line.includes("createElement('a')"), 'and no link inside it');
 
   // And the block only exists when there is something in it — no container, no empty gap.
   assert.match(node, /if \(row\.workerList\.length\) wrap\.appendChild\(workerList\(row\)\);/);
 });
 
-test('the stylesheet does not dress them as targets either', () => {
+test('the stylesheet dresses each line as a 44px target, edge to edge', () => {
   const block = css.slice(css.indexOf('.m-team-workers'), css.indexOf('.m-dots'));
   assert.ok(block.length > 200, 'the worker-line rules sit above the card gutter’s');
-  for (const dressing of ['min-height: 44px', ':active', 'cursor:']) {
-    assert.ok(!block.includes(dressing), `${dressing} promises a tap this line does not take`);
+  const line = block.slice(block.indexOf('.m-team-worker {'), block.indexOf('.m-team-worker:active'));
+  assert.ok(line.length > 100, 'the line rule precedes its :active rule');
+  // The figure the ruling names, on the line itself.
+  assert.match(line, /min-height: 44px;/);
+  assert.match(line, /width: 100%;/);
+  // The card's own gutter is carried by the line, not by the block, so the whole width is
+  // the line's to catch a thumb and there is no dead strip at either end.
+  assert.match(block, /\.m-team-workers \{\s*padding: 0 0 0\.3rem;\s*\}/);
+  assert.match(line, /padding: 0 1rem 0 2\.55rem;/);
+  // Press feedback, the card body's own.
+  assert.match(css, /\.m-team-worker:active \{ background: var\(--surface-sunk\); \}/);
+});
+
+test('the line classes are the shell’s alone — no sheet below m.css owns one', () => {
+  // `web/m/index.html` loads m.css, then lead.css, cards.css, tasks.css and rooms.css into one
+  // head, so a class a later sheet also styles is a class that sheet wins (the
+  // phone's-five-stylesheets trap). A target measured at 44px here and drawn at 34 there is
+  // exactly how that trap was found.
+  for (const sheet of ['lead.css', 'cards.css', 'tasks.css', 'rooms.css']) {
+    assert.ok(!text(`web/m/${sheet}`).includes('.m-team-worker'), `${sheet} styles no worker line`);
   }
+});
+
+/* ─────────────────────────────────────────────────────────── the worker route ─── */
+
+/* Roster rows in the shapes `server/sessions.js` writes. */
+const workerRow = (id, extra = {}) => ({
+  id,
+  interactive: true,
+  isLead: false,
+  workerOf: '/repos/alpha',
+  team: {
+    role: 'worker',
+    repo: '/repos/alpha',
+    task: id,
+    branch: `agent/${id}`,
+    state: 'working',
+    stuck: false,
+    ...extra,
+  },
+});
+const leadRow = (id) => ({
+  id,
+  interactive: true,
+  isLead: true,
+  workerOf: null,
+  team: { role: 'lead', tasks: 1, review: 0 },
+});
+const standaloneRow = (id) => ({ id, interactive: true, isLead: false, workerOf: null, team: null });
+
+test('a worker id opens on the worker route and nowhere else', () => {
+  const w = workerRow('issue-1-alpha-fix');
+  const roster = [w, leadRow('l1'), standaloneRow('s1')];
+  assert.equal(routeRefusal('worker', w, roster), null);
+  assert.equal(routeRefusal('session', w, roster), 'not-standalone');
+  assert.equal(routeRefusal('lead', w, roster), 'not-lead');
+  assert.equal(routeRefusal('worker', roster[1], roster), 'not-worker');
+  assert.equal(routeRefusal('worker', roster[2], roster), 'not-worker');
+});
+
+test('every worker line that is drawn is openable — review and planner included', () => {
+  // The lines are `allTeamWorkers`, which is `workerOf === repo`; the claim must admit every
+  // one of them or a drawn line opens onto a refusal.
+  for (const extra of [{ state: 'review' }, { state: 'queued' }, { task: 'plan-gamma' }, { stuck: true }]) {
+    assert.equal(isTeamWorker(workerRow('w', extra)), true, JSON.stringify(extra));
+  }
+  // A worker that has not spoken yet carries a synthetic id; the claim is about the row, not
+  // the id's shape.
+  assert.equal(isTeamWorker({ ...workerRow('x'), id: 'pane-19' }), true);
+});
+
+test('the worker claim is positive on every clause', () => {
+  const ok = workerRow('w');
+  assert.equal(isTeamWorker(ok), true);
+  // Each clause, broken alone, refuses — so none of them is decoration.
+  assert.equal(isTeamWorker(null), false);
+  assert.equal(isTeamWorker({ ...ok, isLead: true }), false, 'never a lead');
+  assert.equal(isTeamWorker({ ...ok, team: { ...ok.team, role: 'lead' } }), false);
+  assert.equal(isTeamWorker({ ...ok, team: { ...ok.team, role: 'reviewer' } }), false, 'an unknown role is refused');
+  assert.equal(isTeamWorker({ ...ok, team: null }), false);
+  assert.equal(isTeamWorker({ ...ok, workerOf: null }), false);
+  assert.equal(isTeamWorker({ ...ok, workerOf: '' }), false);
+  assert.equal(
+    isTeamWorker({ ...ok, workerOf: '/repos/beta' }),
+    false,
+    'workerOf and team.repo disagreeing is refused rather than believed',
+  );
+  // And it is written as an allow-list — a negative test would admit the next kind.
+  assert.ok(!/role\s*!==/.test(roles), 'no “not a …” role test in roles.js');
+  assert.match(roles, /s\.team\?\.role === 'worker' &&/);
+});
+
+test('a worker’s task ending while its screen is open falls to the gone state, with copy', () => {
+  // The roster stops calling the row a worker the moment its task leaves `OPEN_STATES`, so a
+  // live screen re-asks the claim and is refused — or its pane goes and the gone timer fires.
+  // Both land on `showGone`, and both say something true about a worker.
+  assert.match(app, /if \(reason === 'not-worker'\) \{\s*return claimHeld/);
+  // …and the flag that tells the two sentences apart survives a rebound, which is exactly
+  // when a closing worker needs it: `/exit` into a pane that has not spoken yet writes its
+  // first transcript and moves the id a beat before the task's state is written. Measured
+  // on the bench — asked off `leadEverSeen`, which a rebound clears, it read as a wrong link.
+  const rebound = fn('onRebound');
+  assert.match(rebound, /leadEverSeen = false;/);
+  assert.ok(!rebound.includes('claimHeld'), 'a rebound is the same conversation; the claim stays held');
+  assert.match(fn('leaveRoute'), /claimHeld = false;/);
+  assert.equal(app.match(/claimHeld = true;/g).length, 1, 'set where the roster frame passes the claim');
+  assert.match(fn('enterConversation'), /claimHeld = leadEverSeen;/);
+  assert.ok(app.includes('This is no longer one of a team’s workers — its task was closed or has ended.'));
+  assert.ok(app.includes('That session is not one of a team’s workers. Workers open from under their lead on the Leads tab.'));
+  assert.ok(app.includes('This worker is no longer running. Its task was closed or it exited.'));
+});
+
+test('back from a worker is Leads, even from a reload that landed on one', () => {
+  // A worker is drawn only under its lead's card, so its hash names the tab and the other
+  // conversation hashes do not.
+  assert.match(app, /const tab = conv\[1\] === 'worker' \? 'leads' : null;/);
+  assert.match(app, /return \{ kind: conv\[1\], sessionId: decodeURIComponent\(conv\[2\]\), roomId: null, tab \};/);
+});
+
+test('the worker screen is the standalone screen: no tasks tab, its own name', () => {
+  const lead = text('web/m/lead.js');
+  // `lead` only on the word `lead`, so a worker never gets a lead's tasks tab.
+  assert.match(lead, /kind: ctx\.kind === 'lead' \? 'lead' : ctx\.kind === 'worker' \? 'worker' : 'session',/);
+  // The header names it as the line did — one function for both.
+  assert.match(lead, /import \{ workerName \} from '\.\/roles\.js';/);
+  assert.match(lead, /if \(view\.kind === 'worker'\) return workerName\(s\);/);
+  // And the conversation screen draws no worker-only variant: the cards, the composer and
+  // the interrupt are built with no branch on the kind.
+  assert.ok(!/view\.kind === 'worker'[\s\S]{0,200}(buildCard|el\.stop|el\.input)/.test(lead));
+});
+
+/* ─────────────────────────────────────────────────────── attention: unchanged ─── */
+
+test('a worker holding a box lights nothing it did not light before', () => {
+  // The half of the 2026-10-08 ruling that is a non-change, driven: `needsKind`'s worker
+  // quieting is untouched, so a blocked worker answers null and nothing keyed on it lights.
+  const blocked = { ...workerRow('w'), prompt: { tool: 'Bash' }, status: 'needs-decision' };
+  assert.equal(needsKind(blocked), null, 'a worker’s box stays its lead’s business for attention');
+  assert.equal(needsKind({ ...workerRow('q'), question: { q: 'which?' } }), null);
+  assert.equal(needsKind({ ...workerRow('p'), plan: { text: 'plan' } }), null);
+
+  // The Leads tab's mark is the cards' own top dot, and a card's top dot is its **lead's**
+  // `needsKind` or a review count — nothing about a worker's box reaches either.
+  assert.match(app, /leads: live\.some\(\(r\) => r\.dot\),/);
+  const row = fn('homeRow');
+  assert.match(row, /const need = needsKind\(lead\);\s*const blocked = need != null;/);
+  assert.match(row, /dot: blocked \|\| review > 0,/);
+  // And the Standalones mark still asks only the Standalones list, which holds no worker.
+  assert.match(app, /standalones: standaloneRows\(\)\.some\(\(s\) => needsKind\(s\) != null\),/);
+  // The line's word is still the only signal, and it still says `waiting`.
+  assert.match(fn('workerWord'), /if \(hasBox\(s\)\) return 'waiting';/);
 });
 
 /* ───────────────────────────────────────────────────────────── the repaint ─── */
@@ -230,12 +408,15 @@ test('the lines are in the home signature, as the strings that are drawn', () =>
   assert.match(fn('homeRow'), /workerList: workerLines\(team\.repo\),/);
   assert.match(app, /r\.workers,\s*r\.review,\s*(?:\/\/[^\n]*\n\s*)*r\.workerList,/);
 
-  // Two rendered strings and nothing else on each entry — no id, no stamp, no session
-  // object. A raw `since` or `lastActivity` in here differs on almost every roster frame
-  // and would retire the guard for the whole screen.
+  // Two rendered strings and the id the line opens, and nothing else on each entry — no
+  // stamp, no session object. A raw `since` or `lastActivity` in here differs on almost
+  // every roster frame and would retire the guard for the whole screen. The id is in it
+  // because it is where a tap goes: a worker that has not spoken yet is `pane-19` until its
+  // first transcript lands, and a line whose signature missed that rebound would go on
+  // opening an id the roster no longer has.
   assert.match(
     fn('workerLines'),
-    /\.map\(\(s\) => \(\{\s*name: workerName\(s\),\s*word: workerWord\(s\),\s*\}\)\);/,
+    /\.map\(\(s\) => \(\{\s*id: s\.id,\s*name: workerName\(s\),\s*word: workerWord\(s\),\s*\}\)\);/,
   );
 
   // The lead-less shape stays total, or `teamNode`'s `.length` throws on a row the start
@@ -252,9 +433,17 @@ test('a worker is named by its branch, not by the roster label that repeats the 
   // rail's own (`team.branch || team.task`), with the label kept as a last resort so a row
   // the task join missed is still named something.
   assert.match(
-    fn('workerName'),
-    /return s\.team\?\.branch \|\| s\.team\?\.task \|\| s\.label \|\| 'worker';/,
+    roles,
+    /export function workerName\(s\) \{\s*return s\?\.team\?\.branch \|\| s\?\.team\?\.task \|\| s\?\.label \|\| 'worker';\s*\}/,
   );
+  // Driven: the chain in order, and a name for a row the task join missed.
+  assert.equal(workerName({ label: 'alpha-x', team: { branch: 'agent/x', task: 'x' } }), 'agent/x');
+  assert.equal(workerName({ label: 'alpha-x', team: { task: 'x' } }), 'x');
+  assert.equal(workerName({ label: 'alpha-x' }), 'alpha-x');
+  assert.equal(workerName(null), 'worker');
+  // One spelling for the line and the screen it opens — imported in both, defined in neither.
+  assert.match(app, /import \{ routeRefusal, standalonesIn, workerName \} from '\.\/roles\.js';/);
+  assert.ok(!/function workerName\(/.test(app), 'the shell does not define its own');
 });
 
 test('a long branch ellipsises rather than widening the page', () => {

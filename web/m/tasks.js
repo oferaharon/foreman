@@ -1,8 +1,10 @@
 /*
  * tasks.js — item 8. The tasks tab: the desktop's TASKS block, rebuilt for a narrow
  * column. Rows are **records**, not sessions — state, id, chips, PR link, branch. There
- * is no route from here into a worker session, and there is no close button: closing a
- * task ends a session and deletes a worktree, which is not a thing to have under a thumb.
+ * is no route from here into a worker session — a worker opens from its own line under its
+ * lead's card on the Leads tab (since 2026-10-08), and a row here opens its brief — and
+ * there is no close button: closing a task ends a session and deletes a worktree, which is
+ * not a thing to have under a thumb.
  *
  *   mountTasks(host, repo)
  *

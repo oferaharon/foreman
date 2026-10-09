@@ -1,18 +1,22 @@
 /*
  * lead.js — item 6. The conversation screen: one transcript, one box to type into.
  *
- * **It serves two routes.** `#/lead/<id>` is what it was built for; `#/session/<id>` mounts
+ * **It serves three routes.** `#/lead/<id>` is what it was built for; `#/session/<id>` mounts
  * the same screen for an ordinary session, on the maintainer's ruling of 2026-09-07 that
- * opened the phone up beyond leads. Everything that matters here is the same on both — the
- * transcript, the answer cards, the composer, the queue, the suggestion line, the interrupt
- * — and `ctx.kind` is what the two branches read: `build` draws the tasks tab only for a
- * lead, and `kindWord` picks the noun in three pieces of copy. Nothing else asks.
+ * opened the phone up beyond leads; and `#/worker/<id>` mounts it for one of a team's
+ * workers, on the ruling of 2026-10-08 that reversed "a worker is never opened from the
+ * phone". A worker gets the standalone's screen exactly — full control, no read-only
+ * variant. Everything that matters here is the same on all three — the transcript, the
+ * answer cards, the composer, the queue, the suggestion line, the interrupt — and `ctx.kind`
+ * is what the branches read: `build` draws the tasks tab only for a lead, `screenName` picks
+ * the header's name, and `kindWord` picks the noun in three pieces of copy. Nothing else
+ * asks.
  *
  * The file, the exported names and every `.m-lead-*` class still say **lead**, deliberately.
  * `server/shared-room.js` records the same call for the same reason: renaming a module, a
  * contract and a stylesheet for a label is a large diff whose failure mode is silent — a
  * class that no longer matches, a screen that draws unstyled — and the name is a name, not a
- * rule. What is a rule is that there is one screen module, so a fix reaches both routes.
+ * rule. What is a rule is that there is one screen module, so a fix reaches every route.
  *
  * The phone's whole reason for existing is the moment a session is waiting on the maintainer
  * and they are not at the Mac. So this screen is deliberately *less* than the desktop's pane
@@ -60,6 +64,10 @@ import { ghostSend } from '../prefs.js';
 // header of a session screen says exactly what the Standalones row that was tapped said, and
 // what a room chip and a delivery header say for the same session. One session, one name.
 import { rowName } from '../rooms-create.js';
+// …and what a worker is called, for the same reason: the header of a worker screen says
+// exactly what the line under its lead's card said — its branch — rather than the roster
+// label, which repeats the team's folder. The shell's line and this header ask one function.
+import { workerName } from './roles.js';
 import { mountTasks } from './tasks.js';
 
 marked.setOptions({ gfm: true, breaks: true });
@@ -94,12 +102,13 @@ const view = {
   host: null,
   ctx: null,
   /**
-   * Which route mounted this screen — `'lead'` or `'session'`.
+   * Which route mounted this screen — `'lead'`, `'session'` or `'worker'`.
    *
-   * Read in exactly two places, and both of them *branch* rather than skip: `build` draws
-   * the tasks tab only for a lead, and `kindWord` picks the noun for three sentences. It is
-   * deliberately not a field half this file consults — a screen that is mostly one thing
-   * with checks sprinkled through it is how the desktop ended up needing `createPane`.
+   * Read in exactly three places, and all of them *branch* rather than skip: `build` draws
+   * the tasks tab only for a lead, `screenName` picks what the header calls it, and
+   * `kindWord` picks the noun for three sentences. It is deliberately not a field half this
+   * file consults — a screen that is mostly one thing with checks sprinkled through it is how
+   * the desktop ended up needing `createPane`.
    */
   kind: 'lead',
   /** The id these nodes were built for, so a rebound can carry the draft across. */
@@ -197,7 +206,9 @@ export function mountLead(host, ctx) {
   Object.assign(view, {
     host,
     ctx,
-    kind: ctx.kind === 'session' ? 'session' : 'lead',
+    // Lead only on the word `lead`: anything else gets the lesser screen, so a kind this
+    // file has not heard of can never be handed a lead's tasks tab by falling through.
+    kind: ctx.kind === 'lead' ? 'lead' : ctx.kind === 'worker' ? 'worker' : 'session',
     id: ctx.sessionId,
     messages: [],
     /*
@@ -324,18 +335,19 @@ function build(host) {
 
   top.append(el.back, el.name, el.model, el.conn);
 
-  /* --- header, row 2: the tabs a lead has, and the one control both kinds have --- */
+  /* --- header, row 2: the tabs a lead has, and the one control every kind has --- */
 
   const bar = document.createElement('div');
   bar.className = 'm-lead-bar';
 
   /*
-   * **A lead's tabs are built; an ordinary session's are not built at all.**
+   * **A lead's tabs are built; an ordinary session's and a worker's are not built at all.**
    *
    * Not hidden, not left un-tapped: `mountTasksOnce` keys on `paneCwd`, and an ordinary
    * session launched inside a team's folder carries that team's — so a tasks tab merely
-   * left alone on this screen would put somebody else's team tasks one tap away. There is
-   * nothing here to tap, nothing to mount, and nothing to poll.
+   * left alone on this screen would put somebody else's team tasks one tap away. A worker's
+   * `paneCwd` is its own worktree, which keys no team at all; the tab is its lead's to show.
+   * There is nothing here to tap, nothing to mount, and nothing to poll.
    *
    * The row survives without them and does not move: `.m-tabs` is a fixed 10.5rem basis,
    * the activity is `flex: 1` right-aligned and the interrupt button is `flex: none`, so
@@ -350,10 +362,11 @@ function build(host) {
     el.tabs.append(el.tabChat, el.tabTasks);
 
     // The workers running behind this conversation. From the chat tab they are otherwise
-    // invisible — a worker is never opened from the phone, by ruling, so there is no row
-    // for one anywhere on this device — and this is a fact, not a summons: muted, no
-    // amber, no pulse, and gone entirely at zero. The amber and the pulse belong to the
-    // home list's second dot, which says *something is happening*; this says *how many*.
+    // invisible — a worker opens from its line under this lead's card on the Leads tab
+    // (since the ruling of 2026-10-08), never from here — and this is a fact, not a
+    // summons: muted, no amber, no pulse, and gone entirely at zero. The amber and the
+    // pulse belong to the home list's second dot, which says *something is happening*; this
+    // says *how many*.
     el.tabCount = document.createElement('span');
     el.tabCount.className = 'm-tab-count';
     el.tabTasks.append(el.tabCount);
@@ -420,7 +433,7 @@ function build(host) {
 
   // The pane the tasks tab mounts into, and it exists only where the tab does — see the
   // branch above. `setTab` is the only thing that ever shows it and its only callers are
-  // those two buttons, so on a session screen there is no path to it and no node either.
+  // those two buttons, so on a session or worker screen there is no path to it and no node either.
   if (view.kind === 'lead') {
     el.tasks = document.createElement('div');
     el.tasks.className = 'm-lead-tasks';
@@ -623,11 +636,12 @@ export function updateLead(session) {
  * The noun for what is on screen, for the three sentences that need one: the interrupt
  * button's tooltip, the queue's header, and the header's own fallback name.
  *
- * A function rather than three ternaries, so the two kinds cannot end up spelled
- * differently in three places — and it is the only thing besides `build` that asks.
+ * A function rather than three ternaries, so the kinds cannot end up spelled differently in
+ * three places. `view.kind` is already one of exactly three words — `mountLead` maps
+ * anything else to `session` — and each is the noun, so the word is the kind.
  */
 function kindWord() {
-  return view.kind === 'session' ? 'session' : 'lead';
+  return view.kind;
 }
 
 /**
@@ -636,11 +650,14 @@ function kindWord() {
  * A **lead** is its team's folder: that is what the Leads list calls it, what the team
  * directory is keyed on, and what the lead itself is about. An **ordinary session** is
  * `rowName`, imported — the same name the Standalones row that was tapped carried, and the
- * same one `server/rooms-line.js` writes into a member record. A screen headed with a
- * different word from the row that opened it is a screen you have to re-identify.
+ * same one `server/rooms-line.js` writes into a member record. A **worker** is
+ * `workerName`, imported — its branch, the same words its line under the lead's card carried.
+ * A screen headed with a different word from the row that opened it is a screen you have to
+ * re-identify.
  */
 function screenName(s) {
   if (view.kind === 'lead') return s?.project || s?.title || 'lead';
+  if (view.kind === 'worker') return workerName(s);
   return rowName(s) || 'session';
 }
 
@@ -709,9 +726,9 @@ function formatElapsed(total) {
  * `tasks`.
  */
 function paintTabCount() {
-  // No tab, no count. A session screen builds neither, so this is a node test and not a
-  // second opinion about what kind of screen this is — the branch that decides that is in
-  // `build`, once.
+  // No tab, no count. A session or worker screen builds neither, so this is a node test and
+  // not a second opinion about what kind of screen this is — the branch that decides that is
+  // in `build`, once.
   if (!view.el?.tabCount) return;
   const n = view.ctx?.workers?.() ?? 0;
   const text = n > 0 ? String(n) : '';

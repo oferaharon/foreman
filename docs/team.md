@@ -18,7 +18,8 @@ lead's conversation — a message sent to it, two tool calls folded into one-lin
 its answer — with a reply box at the bottom.](images/phone.png)
 
 `/m/` is a phone-sized view of the whole panel now, not leads alone — three tabs, Leads,
-Standalones and Rooms — and a lead's card lists its workers underneath exactly as shown here.
+Standalones and Rooms — and a lead's card lists its workers underneath, each line opening
+that worker's conversation (since 2026-10-08; workers were never opened from the phone before).
 See [the phone view](panel.md#the-phone-view) for the rest of it.
 
 ### Starting a lead
