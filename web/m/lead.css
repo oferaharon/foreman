@@ -196,8 +196,8 @@
 
 /*
  * How many workers are running behind this conversation — the one thing the chat tab
- * cannot otherwise tell you, since the phone shows leads only and there is no worker row
- * anywhere on this device.
+ * cannot otherwise tell you. A worker's own line, which opens it since the maintainer's
+ * ruling of 2026-10-08, is on the Leads tab under this lead's card, not on this screen.
  *
  * Deliberately quiet: `--ink-muted`, no amber, no pulse, no pill. Amber and motion are the
  * home list's second dot, which answers *is something happening*; this answers *how many*

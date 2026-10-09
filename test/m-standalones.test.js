@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
    is exactly why the sort does not live inside it any more: a tie-break that can only be read
    out of the source is a tie-break nothing ever runs. */
 import { byRecent, recentStamp } from '../web/m/recent.js';
+/* The route claims, driven for real — the reason they left `web/m/app.js` for a pure module.
+   A security check that can only be read out of the source is one nothing ever runs. */
+import { routeRefusal, standalonesIn } from '../web/m/roles.js';
 
 /*
  * The phone's Standalones tab, and the session screen behind it.
@@ -22,12 +25,14 @@ import { byRecent, recentStamp } from '../web/m/recent.js';
  * Only the things that would break **silently** are pinned, and there are five of them:
  *
  *  - **The list is an allow-list, never "not a worker".** Kinds have grown here once already
- *    (`planner`), and a negative test would quietly start offering the next one — a worker
- *    opened from the phone, which is the one thing this feature is meant to stay out of.
+ *    (`planner`), and a negative test would quietly start offering the next one. Workers do
+ *    open from the phone since the maintainer's ruling of 2026-10-08 — but from under their
+ *    lead's card, on `#/worker/<id>`, and never from this list, which did not widen.
  *  - **The role re-check is asked on every roster frame, not once at mount.** It is a
  *    security control: a lead was measured `/exit`ing and the registry re-binding that same
  *    session id to a different pane in the same folder, with the screen still updating under
- *    the same URL. Both routes ask, and they ask the same function.
+ *    the same URL. Every route asks, and they ask the same function — `routeRefusal` in
+ *    `web/m/roles.js`, which is pure and is driven below with real rows.
  *  - **There is no tasks tab on a session screen — built, not hidden.** `mountTasksOnce` keys
  *    on `paneCwd`, and an ordinary session launched inside a team's folder carries that
  *    team's; a tab merely left un-tapped would be somebody else's tasks one tap away.
@@ -43,6 +48,7 @@ const text = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const app = text('web/m/app.js');
 const lead = text('web/m/lead.js');
+const roles = text('web/m/roles.js');
 const css = text('web/m/m.css');
 
 /** The source with its prose taken out — `test/rooms-band.test.js`'s helper, for its reason.
@@ -55,22 +61,69 @@ const strip = (src) =>
     .filter((l) => !/^\s*(\/\/|\*)/.test(l))
     .join('\n');
 
+/* Roster rows in the shapes `server/sessions.js` writes — `isLead` and `workerOf` read back
+   off one `team` answer, which is the consistency `isTeamWorker` checks. */
+const standaloneRow = (id) => ({ id, interactive: true, isLead: false, workerOf: null, team: null });
+const leadRow = (id) => ({
+  id,
+  interactive: true,
+  isLead: true,
+  workerOf: null,
+  team: { role: 'lead', tasks: 1, review: 0 },
+});
+const workerRow = (id, extra = {}) => ({
+  id,
+  interactive: true,
+  isLead: false,
+  workerOf: '/repos/alpha',
+  team: { role: 'worker', repo: '/repos/alpha', task: id, branch: `agent/${id}`, state: 'working', ...extra },
+});
+
 /* ──────────────────────────────────────────────────── the list is a allow-list ─── */
 
 test('the Standalones list is roomParticipants minus the leads, and nothing else', () => {
-  assert.match(app, /import \{ roomParticipants, rowName \} from '\.\.\/rooms-create\.js';/);
+  // The rule lives in the pure module, and the shell's list is that rule over its roster.
+  assert.match(roles, /import \{ roomParticipants \} from '\.\.\/rooms-create\.js';/);
+  assert.match(
+    roles,
+    /export function standalonesIn\(sessions\) \{\s*return roomParticipants\(sessions \|\| \[\]\)\.filter\(\(s\) => !s\.isLead\);\s*\}/,
+  );
   assert.match(
     app,
-    /function standaloneRows\(\) \{\s*return roomParticipants\(state\.sessions \|\| \[\]\)\.filter\(\(s\) => !s\.isLead\);\s*\}/,
+    /function standaloneRows\(\) \{\s*return standalonesIn\(state\.sessions \|\| \[\]\);\s*\}/,
   );
 
   // The one place the membership rule is spelled. Everything else — the tab mark, the order,
-  // the route's own refusal — asks this function.
-  assert.equal(app.match(/roomParticipants\(/g).length, 1, 'one call, in the one filter');
+  // the route's own refusal — asks this function. The shell no longer calls
+  // `roomParticipants` at all, so it cannot grow a second filter beside the first.
+  assert.equal(roles.match(/roomParticipants\(/g).length, 1, 'one call, in the one filter');
+  assert.ok(!/roomParticipants\(/.test(strip(app)), 'and none in the shell');
 
-  // A negative test is what silently admits the next kind. There must be none.
-  assert.ok(!/role\s*!==\s*'worker'/.test(app), 'no “not a worker” filter in the phone shell');
-  assert.ok(!/workerOf\s*==\s*null/.test(app), 'and no spelling of it off workerOf either');
+  // A negative test is what silently admits the next kind. There must be none, in either file.
+  for (const [name, src] of [['app.js', app], ['roles.js', roles]]) {
+    assert.ok(!/role\s*!==\s*'worker'/.test(src), `no “not a worker” filter in ${name}`);
+    assert.ok(!/workerOf\s*==\s*null/.test(src), `and no spelling of it off workerOf in ${name}`);
+  }
+});
+
+test('the list is driven: an ordinary session is in, a lead and every kind of worker are out', () => {
+  const rows = [
+    standaloneRow('s1'),
+    leadRow('l1'),
+    workerRow('w1'),
+    workerRow('w2', { state: 'review' }),
+    // A planner is a worker with `kind: 'plan'` on its task; on the roster it is the same
+    // `role: 'worker'` row, and the same answer.
+    workerRow('p1', { task: 'plan-alpha' }),
+    // A row on the roster that is not an interactive Claude pane is no one's to open.
+    { ...standaloneRow('x1'), interactive: false },
+  ];
+  assert.deepEqual(
+    standalonesIn(rows).map((r) => r.id),
+    ['s1'],
+    'workers did not join the Standalones list when they became openable',
+  );
+  assert.deepEqual(standalonesIn(null), []);
 });
 
 test('the order is recency, and it still cannot change who is in it', () => {
@@ -154,18 +207,26 @@ test('the tab mark and the row ask the same question, and it is needsKind', () =
 /* ─────────────────────────────────────────────────────────── the role re-check ─── */
 
 test('one refusal function, asked at mount and on every roster frame', () => {
-  assert.match(app, /function roleRefusal\(s\) \{/);
+  // The shell's wrapper hands the pure rule the route and the roster, and does nothing else.
+  assert.match(
+    app,
+    /function roleRefusal\(s\) \{\s*return routeRefusal\(route\.kind, s, state\.sessions \|\| \[\]\);\s*\}/,
+  );
+  assert.match(app, /import \{ routeRefusal, standalonesIn, workerName \} from '\.\/roles\.js';/);
+
   // A row not yet on the roster is not a refusal — that is a beat during a rebound, and the
   // gone timer is what covers a session that never arrives.
-  assert.match(app, /function roleRefusal\(s\) \{\s*if \(!s\) return null;/);
-  assert.match(app, /if \(route\.kind === 'lead'\) return s\.isLead \? null : 'not-lead';/);
+  assert.match(roles, /export function routeRefusal\(kind, s, sessions\) \{\s*if \(!s\) return null;/);
+  assert.match(roles, /if \(kind === 'lead'\) return s\.isLead \? null : 'not-lead';/);
 
   // The standalone half asks the **list**, so there is exactly one spelling of who may be
   // opened. A second membership test here is how a worker gets in.
   assert.match(
-    app,
-    /return standaloneRows\(\)\.some\(\(r\) => r\.id === s\.id\) \? null : 'not-standalone';/,
+    roles,
+    /return standalonesIn\(sessions\)\.some\(\(r\) => r\.id === s\.id\) \? null : 'not-standalone';/,
   );
+  // And a kind the file has never heard of is refused, never sent down the last branch.
+  assert.match(roles, /return 'unknown-route';\s*\}\s*$/);
 
   // Two callers and no more: the mount, and the roster frame.
   assert.equal(app.match(/roleRefusal\(/g).length, 3, 'the definition and its two callers');
@@ -176,23 +237,68 @@ test('one refusal function, asked at mount and on every roster frame', () => {
   assert.ok(!/if \(known && !known\.isLead\)/.test(app), 'the mount-only check is gone');
 });
 
-test('the two hashes are two claims, and a rebound keeps the one it was opened on', () => {
-  assert.match(app, /const conv = \/\^#\\\/\(lead\|session\)\\\/\(\.\+\)\$\/\.exec\(hash\);/);
-  assert.match(app, /function isConversation\(kind\) \{\s*return kind === 'lead' \|\| kind === 'session';\s*\}/);
+test('the three hashes are three claims, and a rebound keeps the one it was opened on', () => {
+  assert.match(app, /const conv = \/\^#\\\/\(lead\|session\|worker\)\\\/\(\.\+\)\$\/\.exec\(hash\);/);
+  assert.match(
+    app,
+    /function isConversation\(kind\) \{\s*return kind === 'lead' \|\| kind === 'session' \|\| kind === 'worker';\s*\}/,
+  );
   // A rebound moves the id and changes nothing about what the hash claims.
   assert.match(app, /history\.replaceState\(null, '', `#\/\$\{route\.kind\}\/\$\{encodeURIComponent\(msg\.to\)\}`\);/);
-  // Each list links its own kind, and only its own.
+  // Each list links its own kind, and only its own: the card its lead, the Standalones row
+  // its session, and a worker line its worker.
   assert.match(app, /location\.hash = `#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`;/);
   assert.match(app, /location\.hash = `#\/session\/\$\{encodeURIComponent\(row\.id\)\}`;/);
-  // Subscribe, teardown and the gone timer are all kind-agnostic — one screen, two routes.
+  assert.match(app, /location\.hash = `#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`;/);
+  assert.equal(app.match(/location\.hash = `#\/worker\//g).length, 1, 'one link to a worker, on its line');
+  // Subscribe, teardown and the gone timer are all kind-agnostic — one screen, three routes.
   assert.equal(app.match(/isConversation\(/g).length, 6, 'the definition and its five sites');
 });
 
-test('a refused route says which refusal it was, and never offers to open a worker', () => {
-  assert.match(app, /reason === 'not-standalone'/);
+test('each route admits its own kind and refuses the other two, driven', () => {
+  const roster = [standaloneRow('s1'), leadRow('l1'), workerRow('w1'), workerRow('w2', { state: 'review' })];
+  const row = (id) => roster.find((r) => r.id === id);
+  const ask = (kind, id) => routeRefusal(kind, row(id), roster);
+
+  // Each kind on its own route.
+  assert.equal(ask('lead', 'l1'), null);
+  assert.equal(ask('session', 's1'), null);
+  assert.equal(ask('worker', 'w1'), null);
+  assert.equal(ask('worker', 'w2'), null, 'a worker in review is drawn, so it opens');
+
+  // A worker id on either of the older routes is still refused — the reversal opened a third
+  // door, it did not widen the first two.
+  assert.equal(ask('session', 'w1'), 'not-standalone');
+  assert.equal(ask('lead', 'w1'), 'not-lead');
+  assert.equal(ask('session', 'w2'), 'not-standalone');
+
+  // A lead or a standalone on the worker route is refused.
+  assert.equal(ask('worker', 'l1'), 'not-worker');
+  assert.equal(ask('worker', 's1'), 'not-worker');
+
+  // The other cross-refusals are unchanged.
+  assert.equal(ask('lead', 's1'), 'not-lead');
+  assert.equal(ask('session', 'l1'), 'not-standalone');
+
+  // A route nobody wrote a claim for refuses everything rather than falling through.
+  for (const id of ['l1', 's1', 'w1']) assert.equal(ask('room', id), 'unknown-route');
+  assert.equal(ask(undefined, 'w1'), 'unknown-route');
+
+  // And a row that is not on the roster is a beat, not a refusal, on every route.
+  for (const kind of ['lead', 'session', 'worker']) assert.equal(routeRefusal(kind, null, roster), null);
+});
+
+test('a refused route says which refusal it was, and points where that kind does open', () => {
+  assert.match(app, /if \(reason === 'not-standalone'\) \{/);
+  assert.match(app, /if \(reason === 'not-worker'\) \{/);
+  assert.match(app, /if \(reason === 'unknown-route'\)/);
   assert.ok(
-    app.includes('a worker is its lead’s to answer — it is never opened here'),
-    'the refusal names the ruling rather than pointing somewhere',
+    app.includes('Team leads and their workers open from the Leads tab.'),
+    'a worker refused on the session route is pointed at Leads, where it now opens',
+  );
+  assert.ok(
+    !app.includes('it is never opened here'),
+    'the old rule’s sentence is gone — reversed by the maintainer’s ruling of 2026-10-08',
   );
 });
 
@@ -216,13 +322,18 @@ test('the tasks tab and its pane are built for a lead and do not exist otherwise
 });
 
 test('the kind is read where it branches and nowhere else', () => {
-  // `build` twice (the tabs and their pane), `screenName` once, `mountLead` once to set it.
+  // `build` twice (the tabs and their pane), `screenName` twice (a lead's name, a worker's).
   // Anything more and this file is one screen with checks sprinkled through it, which is
   // how the desktop ended up needing a per-pane factory.
-  assert.equal(lead.match(/view\.kind === '(lead|session)'/g).length, 4);
-  assert.match(lead, /kind: ctx\.kind === 'session' \? 'session' : 'lead',/);
-  // The noun for the three sentences that need one, spelled once.
-  assert.match(lead, /function kindWord\(\) \{\s*return view\.kind === 'session' \? 'session' : 'lead';\s*\}/);
+  assert.equal(lead.match(/view\.kind === '(lead|session|worker)'/g).length, 4);
+  // `lead` only on the word `lead`: a kind this file has not heard of falls to the lesser
+  // screen, never to the one with a tasks tab. It used to be the other way round.
+  assert.match(
+    lead,
+    /kind: ctx\.kind === 'lead' \? 'lead' : ctx\.kind === 'worker' \? 'worker' : 'session',/,
+  );
+  // The noun for the three sentences that need one, spelled once — and it is the kind.
+  assert.match(lead, /function kindWord\(\) \{\s*return view\.kind;\s*\}/);
 });
 
 test('the merge block keeps its one guard and gains no second', () => {

@@ -683,44 +683,65 @@ select {
 .m-team-state.is-blocked { color: var(--decision); }
 
 /*
- * The team's workers, one muted line each, under the card and outside its tap target.
+ * The team's workers, one muted line each, under the card and outside its tap target —
+ * and each one a tap target of its own.
  *
  * They sit in `.m-team` as siblings of `.m-team-body`, never inside it — the body is a
  * `<button>` and a `<button>` inside a `<button>` is invalid markup whose disabled form
- * swallows the child's clicks, which this card has already paid for once. Nothing here is
- * pressable and nothing carries a listener, so there is no `:active`, no `min-height: 44px`
- * and no cursor: a 44px target is a promise about something you can tap.
+ * swallows the child's clicks, which this card has already paid for once. Each line is now
+ * its own `<button>` opening that worker's conversation (the maintainer's ruling of
+ * 2026-10-08, which reversed "workers are never opened from the phone"), so they are
+ * pressable siblings: one press, one element, one worker.
+ *
+ * The block carries no side padding of its own. The line does, so the whole width of the
+ * card — gutter included — is the line's to catch a thumb, rather than a 1rem dead strip at
+ * each end that belongs to nothing.
  *
  * The block is only in the DOM when there is at least one worker, so a lead with none has
  * no lines and no gap — the same rule every count on the card above already follows.
  */
 .m-team-workers {
-  padding: 0 1rem 0.55rem;
+  padding: 0 0 0.3rem;
 }
 
 /*
- * One line: the mark's column, the branch, and the state word.
+ * One line: the mark's column, the branch, and the state word — at least 44px tall.
  *
- * `padding-left: 1.55rem` puts the mark just right of the card's own gutter, so the
- * worker's name starts a little inside the team's name above it — indented enough to read
- * as belonging to that card, not so far that a branch has nowhere to go at 320px. The
- * columns are the card's own arithmetic: 0.9rem for the dot, then the name, then whatever
- * the word needs.
+ * `min-height: 44px` is the point of the change rather than a detail of it. These lines
+ * used to be ~20px of text and nothing else, which is a third of a fingertip: stacked under
+ * a 60px card, a press meant for one worker would land on the card above it or the worker
+ * beside it about as often as on the one it was meant for. 44px is Apple's own minimum and
+ * the figure every other target on this view is held to. The text stays the size and the
+ * muted ink it was — the line got taller, not louder, because the ruling changed what a
+ * line *does* and deliberately not how much attention it asks for.
+ *
+ * `padding-left: 2.55rem` is the card's own 1rem gutter plus the 1.55rem indent the line
+ * always had, now carried by the line itself (see the block above): the mark sits just right
+ * of the card's gutter, so the worker's name starts a little inside the team's name above
+ * it — indented enough to read as belonging to that card, not so far that a branch has
+ * nowhere to go at 320px. The columns are the card's own arithmetic: 0.9rem for the dot,
+ * then the name, then whatever the word needs.
  *
  * `minmax(0, 1fr)` on the middle column is what actually makes the ellipsis work — a plain
  * `1fr` floors at the content's own width, and `agent/<a long task name>` would then push
  * the line wider than the screen and put the whole page into a horizontal scroll.
  */
 .m-team-worker {
+  width: 100%;
+  min-height: 44px;
+  text-align: left;
   display: grid;
   grid-template-columns: 0.9rem minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.16rem 0 0.16rem 1.55rem;
+  padding: 0 1rem 0 2.55rem;
   font-family: var(--mono);
   font-size: 0.72rem;
   color: var(--ink-faint);
 }
+
+/* The card body's own press feedback, so a line answers a thumb the way the card does. */
+.m-team-worker:active { background: var(--surface-sunk); }
 
 /* Centred in its column the way `.m-dots` centres the card's pair, so the marks read as one
    column down the card rather than two that nearly line up. */

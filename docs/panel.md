@@ -1451,11 +1451,22 @@ the folder-trust gate, or — on a lead's own row — a worker's task sitting in
 mark is unseen posts from other **sessions**; your own posts from the phone never light it,
 the same rule that keeps a room's desktop badge from counting your own words back at you.
 
-**Leads** looks the same as before, one card per team lead, with its live workers now listed
-underneath as muted one-liners — branch and a state word, in the same static dispatch order
-the desktop rail uses, newest on top. The lines are not tap targets. **Workers are still never
-opened from the phone** — a worker's prompt is its lead's to answer, not something to reach
-around the lead for.
+**Leads** looks the same as before, one card per team lead, with its live workers listed
+underneath as muted lines — branch and a state word, in the same static dispatch order the
+desktop rail uses, newest on top, a worker in review and a planner included. **Each line opens
+that worker** (`#/worker/<id>`): the same conversation screen a standalone gets, with the same
+full control — read it, type to it, answer its permission, question or plan box, interrupt it.
+Every line is at least 44px tall, so a press lands on the worker you meant and never on the
+lead card above it or the worker beside it; the card itself still opens the lead. Back from a
+worker returns to Leads. This **reverses** the rule the phone kept from 2026-08-29 (reaffirmed
+2026-09-07) that a worker was never opened here — the maintainer's ruling of 2026-10-08.
+
+What the reversal did not touch is attention. A worker holding a box still lights neither the
+Leads tab nor its lead's card: the red `waiting` word on its own line is the only signal, as
+before, because a worker's prompt is still its lead's to answer in the ordinary course — the
+phone now lets you reach it, it does not summon you to it. And a worker never appears under
+Standalones. When its task closes and its pane goes, an open worker screen says so and offers
+the way back to Leads.
 
 **Standalones** lists every live session that belongs to nobody's team, including one you just
 launched that hasn't spoken yet, **most recent at the top** — whatever last said something, or
@@ -1464,7 +1475,9 @@ lead gets, minus the parts that only a team has — no tasks tab, no merge queue
 folder-trust gate gets its own card there exactly as everywhere else: the folder in full, what
 answering grants, and two rows — the Yes asking twice. If a
 session's identity turns out to belong to a worker or a lead instead, the screen shows it as
-gone rather than a conversation the phone was never meant to display.
+gone rather than showing it under the wrong claim — each kind has its own route (`#/lead/`,
+`#/session/`, `#/worker/`), and each route re-checks on every roster update that the id still
+is what it claims to be.
 
 **Rooms** lists open rooms **most recent at the top**, with an `archived (N)` fold underneath —
 recency orders the live rooms and, inside the fold, the archived ones; it never lifts an
