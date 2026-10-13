@@ -75,7 +75,8 @@ export function botActivityAt(bot) {
 /** The model as it is drawn: the resolved name, else the raw id, else nothing. The server
  *  resolves the name and sends the raw id beside it, so no formatter is ever called on
  *  `null` here (the `a-blocked-session-reports-no-model` crash) — and an id the panel has no
- *  name for (`claude-opus-4-6`) is shown exactly as the transcript wrote it. */
+ *  name for (one `modelLabel` in `server/worker-models.js` has never heard of) is shown
+ *  exactly as the transcript wrote it. */
 export function modelText(rec) {
   if (!rec || typeof rec !== 'object') return '';
   const name = typeof rec.modelName === 'string' ? rec.modelName : '';

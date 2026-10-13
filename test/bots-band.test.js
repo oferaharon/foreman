@@ -124,7 +124,7 @@ const conv = (cid, over = {}) => ({
   size: 1000,
   prompts: 1,
   model: 'claude-haiku-5-5',
-  modelName: 'claude-haiku-5-5',
+  modelName: 'Haiku 5.5',
   effort: 'medium',
   ctx: { tokens: 27_000, window: 1_000_000, pct: 3 },
   finished: true,
@@ -296,7 +296,8 @@ test('contexts are never summed or maxed — the row reads the one `current` rec
 });
 
 test('the model is the resolved name, else the raw id as written — never a formatter on null', () => {
-  assert.equal(modelText({ model: 'claude-opus-4-6', modelName: 'claude-opus-4-6' }), 'claude-opus-4-6');
+  // The server sends the raw id as the name for a model nothing names (`modelLabel`'s fallback).
+  assert.equal(modelText({ model: 'claude-future-9', modelName: 'claude-future-9' }), 'claude-future-9');
   assert.equal(modelText({ model: 'claude-fable-5-1', modelName: null }), 'claude-fable-5-1');
   assert.equal(modelText({ model: 'claude-sonnet-5-5', modelName: 'Sonnet 5.5' }), 'Sonnet 5.5');
   assert.equal(modelText({ model: null, modelName: null }), '');
@@ -367,7 +368,7 @@ test('the band is patched in place: nodes reused, nothing moved that is already 
     const list = container();
     const bots = [
       bot('alpha', { lastActiveAt: NOW - 1 * MIN, current: current(), active: 2 }),
-      bot('beta', { lastActiveAt: NOW - 30 * MIN, current: current({ modelName: 'claude-haiku-5-5' }) }),
+      bot('beta', { lastActiveAt: NOW - 30 * MIN, current: current({ model: 'claude-haiku-5-5', modelName: 'Haiku 5.5' }) }),
       bot('gamma', { lastActiveAt: NOW - 3 * 3600_000, helper: { online: false, lastSeen: NOW - 2 * 3600_000 } }),
     ];
     const first = patchBotsBand(list, bots, { now: NOW });
@@ -460,7 +461,7 @@ test('a conversation is active, finished or idle — and its line is its own rec
   );
   assert.equal(parts[0].text, 'ag-team-one');
   assert.equal(parts[1].text, 'finished');
-  assert.equal(parts[2].text, 'claude-haiku-5-5');
+  assert.equal(parts[2].text, 'Haiku 5.5');
   assert.match(parts[5].text, /^started /, 'last, because it is the part that gives way');
 });
 
