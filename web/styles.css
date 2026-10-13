@@ -6865,6 +6865,9 @@ body.pin-reordering * { cursor: grabbing !important; }
   flex: none;
   font-size: 0.6rem;
   color: var(--ink-faint);
+  /* The member count is the next span and the same faint 0.6rem, so at the row's own gap
+     `2d 3` read on the bench as one figure. A little more air keeps them two. */
+  margin-right: 0.3rem;
 }
 .room-age:empty { display: none; }
 

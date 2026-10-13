@@ -942,7 +942,9 @@ test('the floor holds a row and the head, and the ceiling has a default before l
   const min = Number(app.match(/const ROOMS_MIN = ([\d.]+);/)[1]);
   const max = Number(app.match(/const ROOMS_MAX = ([\d.]+);/)[1]);
   const list = Number(app.match(/const RAIL_LIST_MIN = ([\d.]+);/)[1]);
-  assert.ok(min >= 3.9, 'one row (1.44rem) plus the head (1.91rem) plus the list’s padding (0.55rem)');
+  // Measured, not summed from the stylesheet: head 33.7px + row 27.6px + padding 8.8px + the
+  // 1px rule = 71.1px at 16px a rem. Anything under that cuts the one row the floor promises.
+  assert.ok(min * 16 >= 71.1, 'the head, one whole row and the list’s padding');
   assert.ok(max > min && list > 0);
   const call = app.slice(app.indexOf('handle: el.roomsGrip,'));
   assert.match(call.slice(0, call.indexOf('\n});')), /if \(bottom <= top\) return ROOMS_MAX;/);

@@ -343,8 +343,9 @@ const parts = new WeakMap();
  *
  *  The order is the reading order: the two marks (activity, then who is alive), the name —
  *  the one span that gives — and then the three that never shrink: how long ago, how many,
- *  and how many unseen. The age sits against the name rather than among the numbers because
- *  it is about the conversation, and `3h 2` would otherwise read as one figure. */
+ *  and how many unseen. The age sits against the name because it is about the conversation;
+ *  the stylesheet holds it a little further off the count than the row's own gap, because
+ *  `3h 2` at one gap read on the bench as one figure. */
 function buildRow(key) {
   const row = document.createElement('button');
   row.type = 'button';
@@ -508,8 +509,11 @@ export function patchBand(list, rooms = [], opts = {}) {
  *  the two can never spell one row's age differently. */
 function setAge(span, room, now) {
   const text = roomAge(room, now);
-  span.textContent = text;
-  span.title = text ? `last post ${new Date(Number(room.lastAt)).toLocaleString()}` : '';
+  // Only when the words change: the timer walks every row on each wake, and most rows'
+  // ages have not moved since the last one.
+  if (span.textContent !== text) span.textContent = text;
+  const title = text ? `last post ${new Date(Number(room.lastAt)).toLocaleString()}` : '';
+  if (span.title !== title) span.title = title;
 }
 
 /**

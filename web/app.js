@@ -639,13 +639,15 @@ resizer({
  */
 
 /**
- * rem. The band's floor: its head and one room row with the list's bottom padding under it,
- * measured on a scratch panel at the default type scale — the head is 1.91rem, a row
- * 1.44rem and the padding 0.55rem, 3.9rem in all — and rounded up so the one row is never
- * cut by a sub-pixel. `ROOMS_MAX` only bounds what a stored value may say; the live
+ * rem. The band's floor: its head and one whole room row with the list's bottom padding
+ * under it. Measured on a scratch panel at the default type scale rather than added up from
+ * the stylesheet, because the sum was wrong — the `◎` glyph's fallback font makes a row
+ * 27.6px, not the 23 its padding and font size predict. Head 33.7px, row 27.6px, padding
+ * 8.8px and the band's 1px rule: 71.1px, 4.44rem, so 4.5. A first try at 4 cut the one row
+ * it promised by a third. `ROOMS_MAX` only bounds what a stored value may say; the live
  * ceiling is below.
  */
-const ROOMS_MIN = 4;
+const ROOMS_MIN = 4.5;
 const ROOMS_MAX = 30;
 /** rem. What the session list above keeps whatever the band asks for — the connections
  *  band's own floor for the same list: a rail whose sessions had been squeezed to nothing

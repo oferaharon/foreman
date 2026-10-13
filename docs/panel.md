@@ -1330,9 +1330,24 @@ with no creation stamp or an equal one fall back to the reverse of the store's o
 count and a count of what has arrived since anybody last opened it. Its `◎` lights in the accent
 colour while the room's last post is under ten minutes old — the one sign of activity on a room
 you have already opened — and goes out on its own timer when the ten minutes run out, without
-repainting the row. Archived rooms fold into a
-collapsed `archived · N`. The band's head and its `+ room` are in the rail even when there are
-no rooms at all — a control that only appears once you have used it is a control nobody finds.
+repainting the row. Beside it, a dot says whether the room's members are still running: **green**
+when every member's session is live, **amber** when some have gone, **grey** when none is left —
+grey rather than red, because red here means "needs you" and a room nobody is in needs nobody.
+It is resolved exactly the way the room's own member strip resolves each member, its hover says
+it in words (`2 of 3 members live`), and it repaints when a member comes or goes rather than on
+every roster beat. After the name, how long ago the room was last posted in, in the rail's own
+spelling (`now`, `5m`, `3h`, `2d`), moved on by the same timer as the `◎`; a room nobody has
+spoken in shows none. Archived rooms fold into a
+collapsed `archived · N`, and an archived row carries its age but no dot. The band's head and
+its `+ room` are in the rail even when there are no rooms at all — a control that only appears
+once you have used it is a control nobody finds.
+
+**Its height is yours.** While it has rows, the band's top edge is a grip like the rail's own:
+drag it to give the rooms more or less of the rail, and the list scrolls inside whatever you
+give it. The floor is the head and one whole row; the ceiling is live and always leaves the
+session list above it 6rem of its own, so a short window clamps the band without forgetting
+the height you chose. The height is kept in this browser, and a double-click on the
+grip puts the band back to its own content height.
 
 **A room in a pane.** Click a row. The header carries the name (click it to rename), a chip per
 member with a live status dot, an `✕` to remove one and a `+` to add, an archive control and a
