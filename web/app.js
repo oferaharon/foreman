@@ -138,7 +138,7 @@ import { colourFor } from './session-colour.js';
 // the signature are things a node test can hold, and a render function inlined here is
 // neither. `patchBand` reaches for `document` the way `buildTrustCard` does, and is
 // driven by the same kind of stub in its own test.
-import { patchBand, bandSig, nextUnlight, relightBand } from './rooms-band.js';
+import { patchBand, bandSig, nextBandTick, relightBand } from './rooms-band.js';
 import { newestCreatedFirst } from './rooms-newest.js';
 // The create modal's arithmetic: who may be in a room, in what order they are offered, and
 // what stops the button being pressable. The seventh, for the band's own reason one line up
@@ -376,6 +376,7 @@ const el = {
   railShared: document.getElementById('railShared'),
   railSharedUnseen: document.getElementById('railSharedUnseen'),
   railRooms: document.getElementById('railRooms'),
+  roomsGrip: document.getElementById('roomsGrip'),
   roomsAdd: document.getElementById('roomsAdd'),
   roomsList: document.getElementById('roomsList'),
   main: document.getElementById('main'),
@@ -385,10 +386,11 @@ const el = {
 /* ----------------------------------------------------------- resizers --- */
 
 /**
- * One draggable divider, four of them on screen.
+ * One draggable divider, five of them on screen.
  *
  * The rail's right edge shipped first (#4) and this is that code generalised, not a
- * second copy of it: the rail, the connections band, the lead's aside, the Tasks/Room
+ * second copy of it: the rail, the rooms band at its foot (the retired connections band's
+ * slot, and its shape), the lead's aside, the Tasks/Room
  * split inside it and the boundary between two panes all want the same five things — a floor, a live ceiling, a preference remembered in this
  * browser, a double-click that forgets it, and a grip you can see. What differs is only
  * *which* number the pointer is asking for and where that number lands, so those two are
@@ -610,6 +612,71 @@ resizer({
    * the same event by another route, so it takes the same door.
    */
   onMove: applyResizers,
+});
+
+/* ----------------------------------------------------- the rooms band --- */
+
+/**
+ * How much of the rail the rooms band takes, dragged from the band's top edge.
+ *
+ * The fifth divider, and the one this resizer already had once: the retired connections
+ * band sat in this same slot at the rail's foot with exactly this grip, and this is that
+ * shape put back for the band that replaced it — same `resizer`, same rem in
+ * `localStorage`, same double-click to forget. The Tasks/Room split turned to face the rail.
+ *
+ * **Nothing stored is a mode, not a size**, the way `--room-h` is in the lead's aside: with
+ * no preference the band is its content under the list's own `max-height`, byte for byte
+ * the band that shipped, and `--rooms-band-h` has no default anywhere. A preference *sets* the
+ * band's height — rows or no rows to fill it — so the grip always does something visible,
+ * which a `max-height` alone could not promise a band with three rooms in it. The list
+ * scrolls inside whatever it is given. `.rooms-band-sized` on the root says which mode is in
+ * force, because CSS cannot ask whether a custom property is set.
+ *
+ * **`rooms-band`, never `rooms`, in every spelling it has.** The aside one column over
+ * already owns `.room-sized` and `--room-h`, and `.rooms-sized` beside them would be a
+ * sibling name one letter apart — two classes for two different boxes that a typo swaps
+ * silently (`one-spelling`, the `room_*`/`group_*` rule's own family).
+ */
+
+/**
+ * rem. The band's floor: its head and one room row with the list's bottom padding under it,
+ * measured on a scratch panel at the default type scale — the head is 1.91rem, a row
+ * 1.44rem and the padding 0.55rem, 3.9rem in all — and rounded up so the one row is never
+ * cut by a sub-pixel. `ROOMS_MAX` only bounds what a stored value may say; the live
+ * ceiling is below.
+ */
+const ROOMS_MIN = 4;
+const ROOMS_MAX = 30;
+/** rem. What the session list above keeps whatever the band asks for — the connections
+ *  band's own floor for the same list: a rail whose sessions had been squeezed to nothing
+ *  would be a rail that stopped being one. */
+const RAIL_LIST_MIN = 6;
+
+resizer({
+  handle: el.roomsGrip,
+  axis: 'y',
+  storageKey: 'foreman.roomsBandHeight',
+  min: ROOMS_MIN,
+  max: ROOMS_MAX,
+  // Everything between the top of the session list and the bottom of the band, less the
+  // floor the list keeps. Measured off the page rather than declared: the rail's head grows
+  // a line when its buttons wrap, the gauges come and go, and the window resizes.
+  ceiling: () => {
+    const top = el.railList?.getBoundingClientRect().top ?? 0;
+    const bottom = el.railRooms?.getBoundingClientRect().bottom ?? 0;
+    // Before the rail is laid out — or while it is hidden at phone width — every rect is
+    // zero. The preference's own `max` is a better answer than a negative one.
+    if (bottom <= top) return ROOMS_MAX;
+    return (bottom - top) / remPx() - RAIL_LIST_MIN;
+  },
+  // The band's bottom is pinned by the peer-messages row and the footer under it, so it
+  // grows upward and the pointer's distance back from that edge *is* the height being asked
+  // for.
+  measure: (e) => (el.railRooms?.getBoundingClientRect().bottom ?? window.innerHeight) - e.clientY,
+  apply: (rem) => {
+    document.documentElement.classList.toggle('rooms-band-sized', rem != null);
+    setRootVar('--rooms-band-h', rem);
+  },
 });
 
 /* ------------------------------------------------ the split's boundary --- */
@@ -3898,41 +3965,49 @@ function renderRoomsBand() {
   const openIds = panes.map((p) => p.groupRoomId()).filter(Boolean);
 
   const archivedCollapsed = state.roomsArchivedShut;
-  const sig = bandSig(rooms, { openIds, archivedCollapsed });
+  // The roster goes in because each open row's liveness dot is resolved against it — but
+  // the signature spells only each room's `live/total`, so a beat on which nobody's session
+  // came or went still re-signs to the same string and patches nothing.
+  const sessions = state.sessions;
+  const sig = bandSig(rooms, { openIds, archivedCollapsed, sessions });
   if (sig === roomsSig) return;
   roomsSig = sig;
 
   patchBand(el.roomsList, rooms, {
     openIds,
     archivedCollapsed,
+    sessions,
     onOpen: openGroupRoom,
     onToggleArchived: toggleArchivedRooms,
   });
-  scheduleRoomsUnlight();
+  scheduleRoomsTick();
 }
 
-/** The one pending timer that puts out the next lit `◎`, or `null` when nothing is lit. */
-let roomsUnlightTimer = null;
+/** The band's one pending timer — the next lit `◎` going out or the next age changing its
+ *  words, whichever is sooner — or `null` when there is neither. */
+let roomsTickTimer = null;
 
 /**
- * Put the rooms band's lit marks out when their ten minutes run out, even if nothing else
- * changes.
+ * Keep the rooms band's clock-driven words true when nothing else changes: the lit marks go
+ * out when their ten minutes run out, and each row's age (`5m`, `3h`, `2d`) moves on.
  *
  * `bandSig` carries `lastAt` and not the clock, so a room that goes quiet never re-signs and
- * `renderRoomsBand` never patches it again — the mark would stay lit for as long as the room
- * stayed quiet, which is exactly backwards. One `setTimeout` for the soonest expiry, re-armed
- * on every patch and every firing; `relightBand` assigns a class and nothing else, so this
- * never rebuilds the band and never measures anything (`rooms#a-repaint-that-measures-anything`).
+ * `renderRoomsBand` never patches it again — the mark would stay lit and the age would stay
+ * `5m` for as long as the room stayed quiet, which is exactly backwards. One `setTimeout` for
+ * the soonest of the two (`nextBandTick`), re-armed on every patch and every firing;
+ * `relightBand` assigns a class and a string and nothing else, so this never rebuilds the
+ * band and never measures anything (`rooms#a-repaint-that-measures-anything`). Ages step a
+ * minute at a time only under an hour, so a quiet band wakes once an hour or once a day.
  */
-function scheduleRoomsUnlight() {
-  clearTimeout(roomsUnlightTimer);
-  roomsUnlightTimer = null;
-  const wait = nextUnlight(state.rooms);
+function scheduleRoomsTick() {
+  clearTimeout(roomsTickTimer);
+  roomsTickTimer = null;
+  const wait = nextBandTick(state.rooms);
   if (wait === null) return;
   // A beat past the edge, so the check lands outside the window rather than on it.
-  roomsUnlightTimer = setTimeout(() => {
+  roomsTickTimer = setTimeout(() => {
     relightBand(el.roomsList, state.rooms);
-    scheduleRoomsUnlight();
+    scheduleRoomsTick();
   }, wait + 250);
 }
 

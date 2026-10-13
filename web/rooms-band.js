@@ -34,6 +34,15 @@
  * message landing in a room would take the textarea out from under whoever is typing.
  */
 
+// The rail's own age buckets, imported rather than re-spelled: `relativeTime` in `web/app.js`
+// delegates to the same function, so a room's `3h` and a session row's `3h` one block up
+// cannot come to disagree about where an hour ends.
+import { ageText } from './group-summary.js';
+// Who a stored member is on the roster right now — the room pane's member strip asks the
+// same function for its per-member dots, so the band's one dot and the strip's several can
+// never disagree about who is live. See `roomLiveness` below.
+import { memberRow } from './rooms-pane.js';
+
 /** The archived fold's own key in the flat entry list. Rooms take `room:<id>`, so no room
  *  id can ever collide with it — the store's ids are opaque but the prefix is ours. */
 export const ARCHIVED_KEY = 'archived';
@@ -110,26 +119,39 @@ export function bandEntries(rooms = [], { archivedCollapsed = true } = {}) {
  *
  * The join is `|` within a row and `~` between rows — real punctuation, never an empty
  * string. See the header.
+ *
+ * **The liveness dot is in here as its two counts, and the roster is not.** The dot is the
+ * one thing on the row decided by the *sessions* rather than by the room record, so the
+ * signature takes `sessions` and spells each open room's `live/total` — which changes when a
+ * member's session goes or comes back, and on no other beat. Putting the roster itself in
+ * would re-sign on every status flicker of every session on the machine and patch the band
+ * every two seconds for nothing; leaving it out would leave a green dot beside a room whose
+ * members had all exited, until something else about the room happened to change.
+ *
+ * The age is deliberately **not** in here: it moves with the clock, not the frame, and the
+ * timer that ticks it (`nextBandTick`, `relightBand`) touches one span and nothing else.
+ * `lastAt` is, as it always was, so a post re-ages its row on the frame that carries it.
  */
-export function bandSig(rooms = [], { openIds = [], archivedCollapsed = true } = {}) {
+export function bandSig(rooms = [], { openIds = [], archivedCollapsed = true, sessions = [] } = {}) {
   const open = new Set(openIds);
   const entries = bandEntries(rooms, { archivedCollapsed });
   return entries
-    .map((e) =>
-      e.kind === 'fold'
-        ? ['fold', e.count, e.collapsed].join('|')
-        : [
-            'room',
-            e.room.id,
-            e.room.name,
-            e.room.memberCount,
-            e.room.unseen,
-            e.room.lastAt,
-            e.room.lastFrom,
-            e.archived ? 1 : 0,
-            open.has(e.room.id) ? 1 : 0,
-          ].join('|'),
-    )
+    .map((e) => {
+      if (e.kind === 'fold') return ['fold', e.count, e.collapsed].join('|');
+      const live = roomLiveness(e.room, sessions);
+      return [
+        'room',
+        e.room.id,
+        e.room.name,
+        e.room.memberCount,
+        e.room.unseen,
+        e.room.lastAt,
+        e.room.lastFrom,
+        e.archived ? 1 : 0,
+        open.has(e.room.id) ? 1 : 0,
+        live ? `${live.live}/${live.total}` : '-',
+      ].join('|');
+    })
     .join('~');
 }
 
@@ -143,12 +165,15 @@ export function unseenText(n) {
 
 /** The row's hover, which is where the membership actually lives — the face has room for a
  *  number and nothing else. Archived says so first, because it is the thing about the room
- *  that changes what you can do with it. */
-export function roomTitle(room, { archived = false } = {}) {
+ *  that changes what you can do with it. `live` is `roomLiveness`'s answer, and its sentence
+ *  rides on the hover as well as on the dot's own `title`: the dot is seven pixels wide, and a
+ *  fact that is only a colour on a target that small is a fact most readers never get. */
+export function roomTitle(room, { archived = false, live = null } = {}) {
   const names = (Array.isArray(room?.members) ? room.members : []).map(memberLabel).filter(Boolean);
   const lines = [room?.name || 'room'];
   if (archived) lines.push('archived — read it, but nothing more is typed into anyone');
   lines.push(names.length ? names.join(', ') : 'no members');
+  if (live && live.total) lines.push(livenessText(live));
   if (room?.lastAt) {
     lines.push(`last ${new Date(room.lastAt).toLocaleString()}${room.lastFrom ? ` · ${room.lastFrom}` : ''}`);
   }
@@ -184,8 +209,8 @@ export function isRecent(room, now = Date.now()) {
  *
  * `bandSig` carries `lastAt` and knows nothing about the clock, so a room that goes quiet
  * never re-signs and never repaints — right for everything on the row except this one mark.
- * The caller sets one `setTimeout` for this delay and calls `relightBand` when it fires; a
- * band with nothing lit holds no timer at all.
+ * The caller sets one `setTimeout` for the sooner of this and the next age step
+ * (`nextBandTick`, below) and calls `relightBand` when it fires.
  */
 export function nextUnlight(rooms = [], now = Date.now()) {
   let soonest = null;
@@ -201,6 +226,106 @@ export function nextUnlight(rooms = [], now = Date.now()) {
  *  never ride along on a reused node. */
 const markClass = (lit) => (lit ? 'room-mark is-lit' : 'room-mark');
 
+/* ------------------------------------------------------------ the age --- */
+
+/**
+ * How long ago the room was last posted in, in the rail's own spelling — `now`, `5m`, `3h`,
+ * `2d` — or `''` for a room nobody has spoken in.
+ *
+ * `ageText` is the rail's one spelling of those buckets (`web/group-summary.js`), and this
+ * hands it `lastAt` and nothing else: a room with no posts draws nothing rather than an age
+ * since it was made, because "made 3d ago" and "spoken in 3d ago" are different facts and
+ * one column cannot say which. **Archived rooms are aged too** — the maintainer's ruling of
+ * 2026-10-12 — and unlike the `◎`, which is about whether anything is being typed into
+ * anybody right now, an age is simply true of an archived room's log.
+ */
+export function roomAge(room, now = Date.now()) {
+  if (!room || typeof room !== 'object' || !room.lastAt) return '';
+  const at = Number(room.lastAt);
+  return Number.isFinite(at) ? ageText(at, now) : '';
+}
+
+/** One step of `ageText`'s ladder: the age it is in changes every minute under an hour,
+ *  every hour under a day, and every day after that. */
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
+const DAY_MS = 24 * HOUR_MS;
+
+/**
+ * How long until the next room's age changes its words, in ms, or `null` when no room has
+ * one.
+ *
+ * `nextUnlight`'s sibling and for its reason: `bandSig` knows nothing about the clock, so a
+ * row that reads `5m` would read `5m` for as long as the room stayed quiet. The steps are
+ * `ageText`'s own buckets — the next whole minute, hour or day of the age — so the timer
+ * wakes exactly when some word on the band is due to change and at no other time. Every room
+ * the frame holds counts, archived ones included; a timer that fires for a row the shut fold
+ * is hiding costs one walk over the rows that are drawn, and nothing else.
+ */
+export function nextAgeTick(rooms = [], now = Date.now()) {
+  let soonest = null;
+  for (const room of Array.isArray(rooms) ? rooms : []) {
+    if (!room || typeof room !== 'object' || !room.id || !room.lastAt) continue;
+    const at = Number(room.lastAt);
+    if (!Number.isFinite(at)) continue;
+    const age = Math.max(0, now - at);
+    const step = age < HOUR_MS ? MINUTE_MS : age < DAY_MS ? HOUR_MS : DAY_MS;
+    const left = (Math.floor(age / step) + 1) * step - age;
+    if (soonest === null || left < soonest) soonest = left;
+  }
+  return soonest;
+}
+
+/**
+ * The one delay the band's timer waits for: whichever comes first, a lit `◎` going out or an
+ * age changing its words. `null` only when there is neither — a band of rooms nobody has
+ * ever spoken in holds no timer at all.
+ */
+export function nextBandTick(rooms = [], now = Date.now()) {
+  const waits = [nextUnlight(rooms, now), nextAgeTick(rooms, now)].filter((w) => w !== null);
+  return waits.length ? Math.min(...waits) : null;
+}
+
+/* ------------------------------------------------------- the liveness --- */
+
+/**
+ * Whether a room's members are still on the roster, as two counts and a word — or `null`
+ * for an archived room, which draws no dot (the maintainer's ruling of 2026-10-12: nothing
+ * more is typed into anyone from it, so whose session is alive is not its question any more).
+ *
+ * **Resolved through `memberRow`, imported.** The room pane's member strip draws one dot per
+ * member off that function, and this is the same answer folded to one dot: a band saying
+ * "all live" beside a strip showing a member gone would be two spellings of one fact
+ * disagreeing in front of the reader (`one-spelling`). `memberRow` returns the live roster
+ * row or `null`, and the roster holds only sessions with a live pane, so a row *is* live.
+ *
+ * - `all` — every member resolves (a room of one is `all` when that one does),
+ * - `some` — at least one does and at least one does not,
+ * - `none` — none does, which includes a room whose members have all been removed: there is
+ *   nobody for a post to reach, and that is exactly what grey says.
+ */
+export function roomLiveness(room, sessions = []) {
+  if (!room || typeof room !== 'object' || room.archivedAt) return null;
+  const members = Array.isArray(room.members) ? room.members : [];
+  const total = members.length;
+  const live = members.filter((m) => memberRow(m, sessions)).length;
+  const state = total > 0 && live === total ? 'all' : live > 0 ? 'some' : 'none';
+  return { live, total, state };
+}
+
+/** The dot in words — its `title`, its accessible name and a line on the row's hover — so
+ *  nothing about it is carried by colour alone. */
+export function livenessText(live) {
+  if (!live) return '';
+  if (!live.total) return 'no members';
+  return `${live.live} of ${live.total} member${live.total === 1 ? '' : 's'} live`;
+}
+
+/** The dot's whole class. Assigned rather than toggled, `markClass`'s reason. An archived
+ *  room keeps the span — so its name lines up with the open rows above it — and wears no
+ *  state, which the stylesheet draws as nothing at all. */
+const liveClass = (live) => (live ? `room-live is-${live.state}` : 'room-live');
+
 /* ------------------------------------------------------------ the nodes --- */
 
 /**
@@ -213,8 +338,13 @@ const markClass = (lit) => (lit ? 'room-mark is-lit' : 'room-mark');
  */
 const parts = new WeakMap();
 
-/** One room, as a node with four spans and nothing measured. Built once per room and
- *  patched thereafter — see `patchBand`. */
+/** One room, as a node with six spans and nothing measured. Built once per room and
+ *  patched thereafter — see `patchBand`.
+ *
+ *  The order is the reading order: the two marks (activity, then who is alive), the name —
+ *  the one span that gives — and then the three that never shrink: how long ago, how many,
+ *  and how many unseen. The age sits against the name rather than among the numbers because
+ *  it is about the conversation, and `3h 2` would otherwise read as one figure. */
 function buildRow(key) {
   const row = document.createElement('button');
   row.type = 'button';
@@ -227,9 +357,19 @@ function buildRow(key) {
   mark.textContent = '◎';
   row.append(mark);
 
+  // The members-liveness dot. Drawn by the stylesheet from its class, and named in words by
+  // its own `title` and `aria-label` — see `livenessText`.
+  const live = document.createElement('span');
+  live.className = 'room-live';
+  row.append(live);
+
   const name = document.createElement('span');
   name.className = 'room-name';
   row.append(name);
+
+  const age = document.createElement('span');
+  age.className = 'room-age';
+  row.append(age);
 
   const count = document.createElement('span');
   count.className = 'room-count';
@@ -239,7 +379,7 @@ function buildRow(key) {
   unseen.className = 'room-unseen';
   row.append(unseen);
 
-  parts.set(row, { mark, name, count, unseen });
+  parts.set(row, { mark, live, name, age, count, unseen });
   return row;
 }
 
@@ -282,7 +422,14 @@ function buildFold(key) {
  * stale room record is exactly the class of bug the reuse is otherwise inviting.
  */
 export function patchBand(list, rooms = [], opts = {}) {
-  const { openIds = [], archivedCollapsed = true, onOpen = null, onToggleArchived = null, now = Date.now() } = opts;
+  const {
+    openIds = [],
+    archivedCollapsed = true,
+    onOpen = null,
+    onToggleArchived = null,
+    sessions = [],
+    now = Date.now(),
+  } = opts;
   if (!list) return [];
   const open = new Set(openIds);
   const entries = bandEntries(rooms, { archivedCollapsed });
@@ -314,8 +461,23 @@ export function patchBand(list, rooms = [], opts = {}) {
 
     const { room } = entry;
     const row = found || buildRow(entry.key);
-    const { mark, name, count, unseen } = parts.get(row);
+    const { mark, live, name, age, count, unseen } = parts.get(row);
     mark.className = markClass(isRecent(room, now));
+    // Archived rows get no dot (`roomLiveness` answers `null`), and lose every word the
+    // dot carried on a reused node — a row archived under the cursor keeps its node.
+    const facts = entry.archived ? null : roomLiveness(room, sessions);
+    live.className = liveClass(facts);
+    live.title = livenessText(facts);
+    if (facts) {
+      live.setAttribute('role', 'img');
+      live.setAttribute('aria-label', livenessText(facts));
+      live.removeAttribute('aria-hidden');
+    } else {
+      live.removeAttribute('role');
+      live.removeAttribute('aria-label');
+      live.setAttribute('aria-hidden', 'true');
+    }
+    setAge(age, room, now);
     const members = room.memberCount ?? (room.members?.length || 0);
     row.className = `room-row${entry.archived ? ' is-archived' : ''}${open.has(room.id) ? ' is-open' : ''}`;
     name.textContent = room.name;
@@ -328,7 +490,7 @@ export function patchBand(list, rooms = [], opts = {}) {
     unseen.hidden = n === '';
     unseen.textContent = n;
     unseen.title = n ? `${room.unseen} since you last opened this room` : '';
-    row.title = roomTitle(room, { archived: entry.archived });
+    row.title = roomTitle(room, { archived: entry.archived, live: facts });
     row.onclick = () => onOpen?.(room.id);
     have.delete(entry.key);
     list.append(row);
@@ -342,13 +504,24 @@ export function patchBand(list, rooms = [], opts = {}) {
   return drawn;
 }
 
+/** The age span, in words and in full on its hover. Shared by the patch and the timer so
+ *  the two can never spell one row's age differently. */
+function setAge(span, room, now) {
+  const text = roomAge(room, now);
+  span.textContent = text;
+  span.title = text ? `last post ${new Date(Number(room.lastAt)).toLocaleString()}` : '';
+}
+
 /**
- * Re-light the marks the band already has, against `now`, and touch nothing else.
+ * Re-light the marks and re-age the rows the band already has, against `now`, and touch
+ * nothing else.
  *
- * What the expiry timer calls. It walks the rows on screen, looks each one's room up by id
- * and assigns one class to one span — nothing is built, moved, removed or measured, so it is
- * safe under a cursor and between two patches. A row whose room has gone from `rooms` is
- * left alone: removing it is the next patch's job, not this one's.
+ * What the band's one timer calls (`nextBandTick`). It walks the rows on screen, looks each
+ * one's room up by id and assigns one class to one span and one string to another — nothing
+ * is built, moved, removed or measured, so it is safe under a cursor and between two
+ * patches. A row whose room has gone from `rooms` is left alone: removing it is the next
+ * patch's job, not this one's. The liveness dot is not touched here — it moves with the
+ * roster, not the clock, and `bandSig` already repaints on it.
  */
 export function relightBand(list, rooms = [], now = Date.now()) {
   if (!list) return;
@@ -358,7 +531,9 @@ export function relightBand(list, rooms = [], now = Date.now()) {
     const key = node.dataset?.roomKey;
     if (!key?.startsWith('room:')) continue;
     const room = byId.get(key.slice('room:'.length));
-    const mark = parts.get(node)?.mark;
-    if (room && mark) mark.className = markClass(isRecent(room, now));
+    const got = parts.get(node);
+    if (!room || !got) continue;
+    got.mark.className = markClass(isRecent(room, now));
+    setAge(got.age, room, now);
   }
 }

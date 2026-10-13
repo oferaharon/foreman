@@ -162,6 +162,22 @@
           they are **patched in place, never rebuilt**: `renderSharedRow`'s reason, one band
           down. The log itself never rides that frame.
         -->
+        <!--
+          The band's height grip: the retired connections band's grip, back in its slot. A
+          sibling *above* the band rather than a child of it, so it sits on the band's top
+          rule without being part of the box it sizes, and outside `.rail-list` so a roster
+          rebuild — which replaces every row in there — can never take it out from under a
+          pointer it has captured. Shown only while the band has rows (`.app.has-rooms`):
+          a grip over a band that is one heading line would size nothing.
+        -->
+        <div
+          class="pane-grip grip-row rooms-grip"
+          id="roomsGrip"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Rooms height"
+          title="Drag to set how much of the rail the rooms take · double-click to reset"
+        ></div>
         <div class="rail-rooms" id="railRooms">
           <div class="rooms-head">
             <span class="rooms-title">rooms</span>
