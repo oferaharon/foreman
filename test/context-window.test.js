@@ -69,6 +69,14 @@ test('windowFor: a [1m] request beats a 200k table entry; unknown is null', () =
   for (const w of Object.values(CONTEXT_WINDOWS)) assert.ok(w === 200_000 || w === 1_000_000);
 });
 
+test('the 4.6 models are 200k (measured), and [1m] still widens them', () => {
+  for (const m of ['claude-opus-4-6', 'claude-sonnet-4-6']) {
+    assert.equal(windowFor(m, null), 200_000);
+    assert.equal(windowFor(m, `${m}[1m]`), 1_000_000);
+  }
+  assert.equal(contextOf([asst({}, { input_tokens: 100_000 }, 'claude-opus-4-6')]).pct, 50);
+});
+
 test('a <synthetic>, error or unmetered record is skipped for the one before it', () => {
   const good = asst({}, { input_tokens: 1000 });
   for (const skip of [

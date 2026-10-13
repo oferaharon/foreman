@@ -43,6 +43,8 @@ export const CONTEXT_WINDOWS = {
   'claude-fable-5': 1_000_000,
   'claude-haiku-5-5': 1_000_000,
   'claude-haiku-4-5-20251001': 200_000,
+  'claude-opus-4-6': 200_000,
+  'claude-sonnet-4-6': 200_000,
 };
 
 const WIDE_SUFFIX = '[1m]';
