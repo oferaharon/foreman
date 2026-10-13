@@ -46,8 +46,9 @@ button {
 
 /* ------------------------------------------------------------- grips --- */
 
-/* The four draggable dividers: the rail's right edge, the lead aside's left edge, the
-   Tasks/Room split inside that aside, and the boundary between two panes in split view.
+/* The five draggable dividers: the rail's right edge, the rooms band's top edge, the lead
+   aside's left edge, the Tasks/Room split inside that aside, and the boundary between two
+   panes in split view.
    One class, because they are one behaviour — see `resizer` in app.js.
 
    Each overhangs its own 1px rule by three pixels each way, so there is something to grab
@@ -6754,6 +6755,34 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 .app.has-rooms .rooms-list { display: flex; }
 
+/* The band's height, once somebody has dragged it (`.rooms-band-sized`, set by the resizer in
+   app.js together with `--rooms-band-h`). The band holds the height it was given and the list
+   takes whatever the head leaves, scrolling inside it; the 11rem cap above stands down,
+   because a dragged size is an explicit answer to the question that cap was guessing at —
+   `capTaskList`'s rule one column over. Gated on `.has-rooms` as well: with no rows the band
+   is its head alone, whatever was stored. No `--rooms-band-h` default anywhere — unset *is*
+   the content-height mode — and no transition, because a height that eased into place would
+   lag the pointer dragging it. */
+:root.rooms-band-sized .app.has-rooms .rail-rooms { height: var(--rooms-band-h); }
+:root.rooms-band-sized .rooms-list {
+  flex: 1 1 auto;
+  max-height: none;
+}
+
+/* The grip on the band's top rule: the Tasks/Room grip's twin, and the retired connections
+   grip's exactly — a flex item between two blocks that simply meet, so `position: relative`
+   rather than the shared `.pane-grip`'s absolute, and `-4px / -3px` margins that net to zero
+   height and land its hairline on `.rail-rooms`'s own `border-top`. Off unless the band has
+   rows. Hidden by `display` and never by `[hidden]`: `.pane-grip`'s own `display: flex` would
+   outrank the attribute, the files views' trap. */
+.rooms-grip {
+  display: none;
+  position: relative;
+  flex: none;
+  margin: -4px 0 -3px;
+}
+.app.has-rooms .rooms-grip { display: flex; }
+
 /* One room. The same row grammar as `.rail-shared` above — a mark, a name that ellipsises,
    and numbers that do not — because they are two ways into the same kind of thing and a
    reader should not have to learn a second shape three rows down. */
@@ -6791,6 +6820,26 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 .room-mark { flex: none; }
 
+/* Whether the room's members are still on the roster (`roomLiveness`, `web/rooms-band.js`):
+   green when every one is, amber when some are not, grey when none is. Grey and not red for
+   "none" — the maintainer's ruling of 2026-10-12: red is this panel's "needs you", and a room
+   whose sessions have all exited needs nobody. The three are the session dot's own tokens,
+   because they mean the same thing one row up: `--idle` is alive and answering, `--working`
+   is the panel's amber, `--ink-faint` is present but asking for nothing. An archived row keeps
+   the span, so its name lines up with the open rows, and draws nothing in it. The words are
+   on its `title` and `aria-label` and on the row's own hover; the colour is never the only
+   carrier. No transition: it is patched on a roster beat, and an automated window runs none. */
+.room-live {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: transparent;
+}
+.room-live.is-all { background: var(--idle); }
+.room-live.is-some { background: var(--working); }
+.room-live.is-none { background: var(--ink-faint); }
+
 /* Something was posted in the last ten minutes (`isRecent`, `web/rooms-band.js`) — the
    session dot's job for a room, and the only thing on the row that says so once the room has
    been opened and its unseen count reads zero. `--accent` tracks both themes from its own
@@ -6807,6 +6856,20 @@ body.pin-reordering * { cursor: grabbing !important; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* How long ago the room was last posted in — `now`, `5m`, `3h`, `2d` (`roomAge`, the rail's
+   own buckets). Quiet like the count, and like it never shrinks: an age cut to `2…` is a
+   number that lies. Empty for a room nobody has spoken in, and then not laid out at all, so
+   the name does not give up a gap to a span with nothing in it. */
+.room-age {
+  flex: none;
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+  /* The member count is the next span and the same faint 0.6rem, so at the row's own gap
+     `2d 3` read on the bench as one figure. A little more air keeps them two. */
+  margin-right: 0.3rem;
+}
+.room-age:empty { display: none; }
 
 /* How many sessions are in it. Quiet, and always drawn — unlike the unseen count beside it,
    this is a fact about the room rather than a claim on anybody's attention, and a room with

@@ -9,15 +9,22 @@ import {
   bandEntries,
   bandSig,
   isRecent,
+  livenessText,
   memberLabel,
+  nextAgeTick,
+  nextBandTick,
   nextUnlight,
   partitionRooms,
   patchBand,
   RECENT_MS,
   relightBand,
+  roomAge,
+  roomLiveness,
   roomTitle,
   unseenText,
 } from '../web/rooms-band.js';
+import { ageText } from '../web/group-summary.js';
+import { memberRow } from '../web/rooms-pane.js';
 import { newestCreatedFirst } from '../web/rooms-newest.js';
 
 /*
@@ -129,6 +136,7 @@ function withDom(fn) {
         parent: null,
         onclick: null,
         setAttribute: (k, v) => (node.attrs[k] = v),
+        removeAttribute: (k) => delete node.attrs[k],
         append(...kids) {
           for (const kid of kids) {
             // A real `append` on a node that is already a child moves it. Model that, or a
@@ -638,15 +646,346 @@ test('the app re-arms one expiry timer on every patch, and the timer only religh
   const from = app.indexOf('\nfunction renderRoomsBand(');
   const render = app.slice(from, app.indexOf('\n}\n', from));
   assert.ok(
-    render.indexOf('scheduleRoomsUnlight();') > render.indexOf('patchBand('),
+    render.indexOf('scheduleRoomsTick();') > render.indexOf('patchBand('),
     'the timer is re-armed after the patch that may have lit a mark',
   );
-  const schedule = fn('scheduleRoomsUnlight');
-  assert.match(schedule, /clearTimeout\(roomsUnlightTimer\)/, 'one timer, never a pile of them');
-  assert.match(schedule, /nextUnlight\(state\.rooms\)/);
+  const schedule = fn('scheduleRoomsTick');
+  assert.match(schedule, /clearTimeout\(roomsTickTimer\)/, 'one timer, never a pile of them');
+  // One timer for both clock-driven words — the `◎` going out and the age moving on — never
+  // a second `setTimeout` beside it for the ages.
+  assert.match(schedule, /nextBandTick\(state\.rooms\)/);
+  assert.equal((code.match(/roomsTickTimer = setTimeout/g) || []).length, 1, 'exactly one band timer');
   assert.match(schedule, /relightBand\(el\.roomsList, state\.rooms\)/);
   assert.ok(!/patchBand|replaceChildren|roomsSig/.test(strip(schedule)), 'the timer never rebuilds the band');
   assert.match(styles, /\.room-mark\.is-lit\s*\{\s*color:\s*var\(--accent\);\s*\}/, 'lit is the accent token');
+});
+
+/* ------------------------------------------------------------- the age --- */
+
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+
+test('the age is the rail’s own buckets, read off `lastAt`, at every boundary', () => {
+  const at = (ago) => roomAge(room('r1', 'a', { lastAt: NOW - ago }), NOW);
+  assert.equal(at(0), 'now');
+  assert.equal(at(59_999), 'now', 'under a minute is now');
+  assert.equal(at(MIN), '1m', 'a minute is a minute');
+  assert.equal(at(5 * MIN), '5m');
+  assert.equal(at(HOUR - 1), '59m', 'never 60m');
+  assert.equal(at(HOUR), '1h');
+  assert.equal(at(3 * HOUR + 59 * MIN), '3h', 'floored, never rounded up');
+  assert.equal(at(DAY - 1), '23h', 'never 24h');
+  assert.equal(at(DAY), '1d');
+  assert.equal(at(2 * DAY + 23 * HOUR), '2d');
+  // The same function the rail's session rows read, so the two can never disagree.
+  for (const ago of [0, MIN, HOUR, DAY, 9 * DAY]) assert.equal(at(ago), ageText(NOW - ago, NOW));
+  // A clock a little behind the server's must not print a negative age.
+  assert.equal(roomAge(room('r1', 'a', { lastAt: NOW + 5000 }), NOW), 'now');
+});
+
+test('a room nobody has spoken in has no age, and a malformed one has none either', () => {
+  assert.equal(roomAge(room('r1', 'a', { lastAt: null }), NOW), '', 'not an age since it was made');
+  assert.equal(roomAge(room('r1', 'a', { lastAt: 0 }), NOW), '');
+  assert.equal(roomAge(room('r1', 'a', { lastAt: 'soon' }), NOW), '');
+  assert.equal(roomAge(null, NOW), '');
+});
+
+test('archived rooms carry an age — unlike the `◎`, which they never light', () => {
+  const gone = room('r1', 'gone', { archivedAt: NOW - DAY, lastAt: NOW - 2 * DAY });
+  assert.equal(roomAge(gone, NOW), '2d');
+  assert.equal(isRecent(room('r2', 'x', { archivedAt: 1, lastAt: NOW }), NOW), false, 'the mark is unchanged');
+});
+
+test('the age is imported, never re-spelled', () => {
+  const src = strip(band);
+  assert.match(band, /import \{ ageText \} from '\.\/group-summary\.js';/);
+  assert.match(fn('roomAge', band), /ageText\(/);
+  // No second spelling of the buckets' words anywhere in the module.
+  assert.ok(!/`[^`]*\}(m|h|d)`/.test(src), 'no `${n}m` / `${n}h` / `${n}d` template in the band');
+  assert.ok(!/'now'/.test(src), 'no second `now`');
+});
+
+test('the next age tick is the next whole step of the soonest-changing age', () => {
+  const tick = (...agos) => nextAgeTick(agos.map((ago, i) => room(`r${i}`, 'a', { lastAt: NOW - ago })), NOW);
+  assert.equal(tick(0), MIN, '`now` becomes `1m` a minute after the post');
+  assert.equal(tick(30_000), 30_000);
+  assert.equal(tick(5 * MIN + 20_000), 40_000, '`5m` becomes `6m` at the next whole minute');
+  assert.equal(tick(HOUR - MIN), MIN, '`59m` becomes `1h`');
+  assert.equal(tick(3 * HOUR + 10 * MIN), 50 * MIN, '`3h` only changes on the hour');
+  assert.equal(tick(DAY - HOUR), HOUR, '`23h` becomes `1d`');
+  assert.equal(tick(2 * DAY + HOUR), DAY - HOUR, '`2d` only changes on the day');
+  assert.equal(tick(2 * DAY, 4 * MIN + 1000), 59_000, 'the soonest of several');
+  // Archived rooms count: they are aged too, and their age has to move on as well.
+  assert.equal(nextAgeTick([room('r1', 'a', { lastAt: NOW - 30_000, archivedAt: 5 })], NOW), 30_000);
+  assert.equal(nextAgeTick([room('r1', 'a')], NOW), null, 'no posts, no tick');
+  assert.equal(nextAgeTick(undefined, NOW), null);
+  assert.equal(nextAgeTick([null, { id: '' }, room('r1', 'a', { lastAt: 'soon' })], NOW), null);
+});
+
+test('the band’s one timer waits for whichever comes first, the `◎` or an age', () => {
+  // Lit for two more minutes, aged `8m` — the age moves first.
+  assert.equal(nextBandTick([room('r1', 'a', { lastAt: NOW - 8 * MIN - 10_000 })], NOW), 50_000);
+  // Lit, and the `◎` goes out on exactly the beat its age turns `10m` — one wake for both.
+  assert.equal(nextBandTick([room('r1', 'a', { lastAt: NOW - 9 * MIN })], NOW), MIN);
+  // Long quiet: no mark, and the age moves on the hour.
+  assert.equal(nextBandTick([room('r1', 'a', { lastAt: NOW - 3 * HOUR })], NOW), HOUR);
+  assert.equal(nextBandTick([room('r1', 'a')], NOW), null, 'a band nobody has spoken in holds no timer');
+});
+
+test('a row draws its age beside its name, and an archived row draws one too', () => {
+  withDom(() => {
+    const list = container();
+    patchBand(
+      list,
+      [
+        room('r1', 'a', { lastAt: NOW - 3 * HOUR }),
+        room('r2', 'quiet'),
+        room('r3', 'gone', { archivedAt: 5, lastAt: NOW - 2 * DAY }),
+      ],
+      { archivedCollapsed: false, now: NOW },
+    );
+    const rows = list.children.filter((c) => /^room-row\b/.test(c.className));
+    const [spoken, quiet, gone] = rows;
+    const names = spoken.children.map((c) => c.className.split(' ')[0]);
+    assert.deepEqual(names, ['room-mark', 'room-live', 'room-name', 'room-age', 'room-count', 'room-unseen']);
+    assert.equal(span(spoken, 'room-age').textContent, '3h');
+    assert.match(span(spoken, 'room-age').title, /^last post /);
+    assert.equal(span(quiet, 'room-age').textContent, '', 'no posts, no age');
+    assert.equal(span(quiet, 'room-age').title, '');
+    assert.equal(span(gone, 'room-age').textContent, '2d', 'archived rooms are aged');
+  });
+});
+
+test('the timer re-ages a row in place, and moves and rebuilds nothing', () => {
+  withDom(() => {
+    const list = container();
+    const rooms = [room('r1', 'a', { lastAt: NOW - 59 * MIN, unseen: 2 })];
+    patchBand(list, rooms, { now: NOW });
+    const before = [...list.children];
+    const [row] = before;
+    assert.equal(span(row, 'room-age').textContent, '59m');
+    relightBand(list, rooms, NOW + MIN);
+    assert.equal(span(row, 'room-age').textContent, '1h');
+    assert.deepEqual([...list.children], before, 'same nodes, same order');
+    assert.equal(span(row, 'room-unseen').textContent, '2', 'nothing else on the row moved');
+  });
+});
+
+/* ----------------------------------------------------------- the liveness --- */
+
+/** Roster rows for the room fixture's two members, by tmux session name. */
+const alphaRow = { id: 's1', tmuxSession: 'foreman-alpha-main', paneId: '%1', label: 'alpha-main', status: 'idle' };
+const betaRow = { id: 's2', tmuxSession: 'foreman-beta-main', paneId: '%2', label: 'beta-main', status: 'working' };
+const gammaRow = { id: 's3', tmuxSession: 'foreman-gamma-master', paneId: '%3', label: 'gamma-master', status: 'idle' };
+const live = (rm, sessions) => roomLiveness(rm, sessions);
+
+test('every member live is green, some is amber, none is grey', () => {
+  const r = room('r1', 'alpha ↔ beta');
+  assert.deepEqual(live(r, [alphaRow, betaRow, gammaRow]), { live: 2, total: 2, state: 'all' });
+  assert.deepEqual(live(r, [betaRow, gammaRow]), { live: 1, total: 2, state: 'some' });
+  assert.deepEqual(live(r, [gammaRow]), { live: 0, total: 2, state: 'none' });
+  assert.deepEqual(live(r, []), { live: 0, total: 2, state: 'none' });
+  assert.deepEqual(live(r, undefined), { live: 0, total: 2, state: 'none' });
+});
+
+test('a room of one is green when that one is live, grey when it is not', () => {
+  const solo = room('r1', 'solo', { members: [{ tmuxSession: 'foreman-gamma-master', name: 'gamma-master' }] });
+  assert.deepEqual(live(solo, [gammaRow]), { live: 1, total: 1, state: 'all' });
+  assert.deepEqual(live(solo, [alphaRow]), { live: 0, total: 1, state: 'none' });
+  assert.equal(livenessText(live(solo, [gammaRow])), '1 of 1 member live');
+});
+
+test('a room with nobody left in it is grey — there is nobody for a post to reach', () => {
+  const empty = room('r1', 'empty', { members: [], memberCount: 0 });
+  assert.deepEqual(live(empty, [alphaRow]), { live: 0, total: 0, state: 'none' });
+  assert.equal(livenessText(live(empty, [alphaRow])), 'no members');
+});
+
+test('an archived room has no liveness at all, however alive its members are', () => {
+  assert.equal(live(room('r1', 'gone', { archivedAt: 5 }), [alphaRow, betaRow]), null);
+  assert.equal(livenessText(null), '');
+  assert.equal(live(null, [alphaRow]), null);
+});
+
+test('liveness is `memberRow`’s answer, member by member — never a second resolution', () => {
+  /*
+   * Fixtures picked so a looser match would disagree with `memberRow`: a member whose pane id
+   * is live but now carries a *different* name (rung 2 needs both witnesses), and a member
+   * whose tmux session holds two Claude panes, neither its own (rung 1 declines a split).
+   */
+  const members = [
+    { tmuxSession: 'foreman-alpha-main', name: 'alpha-main', paneId: '%1' },
+    { name: 'beta-old', paneId: '%2' },
+    { tmuxSession: 'foreman-gamma-master', name: 'gamma-master', paneId: '%9' },
+  ];
+  const split = [gammaRow, { ...gammaRow, id: 's4', paneId: '%4' }];
+  const sessions = [alphaRow, betaRow, ...split];
+  const expected = members.filter((m) => memberRow(m, sessions)).length;
+  assert.equal(expected, 1, 'the fixture really does exercise the rungs');
+  assert.deepEqual(live(room('r1', 'x', { members }), sessions), { live: 1, total: 3, state: 'some' });
+
+  // Imported, and the band spells none of the rungs itself.
+  assert.match(band, /import \{ memberRow \} from '\.\/rooms-pane\.js';/);
+  assert.match(fn('roomLiveness', band), /memberRow\(m, sessions\)/);
+  assert.ok(!/tmuxSession|paneId/.test(strip(fn('roomLiveness', band))), 'no rung re-spelled here');
+});
+
+test('the dot says it in words, on its own title and on the row’s hover', () => {
+  assert.equal(livenessText({ live: 2, total: 3, state: 'some' }), '2 of 3 members live');
+  assert.equal(livenessText({ live: 3, total: 3, state: 'all' }), '3 of 3 members live');
+  assert.equal(livenessText({ live: 0, total: 2, state: 'none' }), '0 of 2 members live');
+  const r = room('r1', 'alpha ↔ beta');
+  assert.match(roomTitle(r, { live: live(r, [alphaRow]) }), /\n1 of 2 members live/);
+  assert.ok(!/members live/.test(roomTitle(r)), 'no liveness line when none was worked out');
+});
+
+test('a patched row wears its liveness, and an archived row wears none', () => {
+  withDom(() => {
+    const list = container();
+    const rooms = [room('r1', 'alpha ↔ beta'), room('r2', 'gone', { archivedAt: 5 })];
+    const opts = { archivedCollapsed: false, now: NOW };
+    patchBand(list, rooms, { ...opts, sessions: [alphaRow, betaRow] });
+    const row = list.children.find((c) => c.dataset.roomKey === 'room:r1');
+    const gone = list.children.find((c) => c.dataset.roomKey === 'room:r2');
+    const dot = (n) => n.children[1];
+    assert.equal(row.children[1].className, 'room-live is-all');
+    assert.equal(row.children[1].title, '2 of 2 members live');
+    assert.equal(row.children[1].attrs['aria-label'], '2 of 2 members live');
+    assert.equal(row.children[1].attrs.role, 'img');
+    assert.match(row.title, /2 of 2 members live/);
+
+    // An archived row keeps the span, so its name lines up, and draws nothing in it.
+    assert.equal(dot(gone).className, 'room-live', 'no state, so the stylesheet draws no dot');
+    assert.equal(dot(gone).title, '');
+    assert.equal(dot(gone).attrs['aria-hidden'], 'true');
+    assert.ok(!('aria-label' in dot(gone).attrs));
+    assert.ok(!/members live/.test(gone.title));
+
+    // One member exits: amber, on the same node. Both exit: grey.
+    patchBand(list, rooms, { ...opts, sessions: [betaRow] });
+    assert.equal(list.children.find((c) => c.dataset.roomKey === 'room:r1'), row, 'patched, never rebuilt');
+    assert.equal(row.children[1].className, 'room-live is-some');
+    assert.equal(row.children[1].title, '1 of 2 members live');
+    patchBand(list, rooms, { ...opts, sessions: [] });
+    assert.equal(row.children[1].className, 'room-live is-none');
+
+    // Archived while on screen: the reused node loses every word the dot carried.
+    patchBand(list, [room('r1', 'alpha ↔ beta', { archivedAt: 9 })], { ...opts, sessions: [alphaRow, betaRow] });
+    const archived = list.children.find((c) => c.dataset.roomKey === 'room:r1');
+    assert.equal(archived, row, 'the same node, now archived');
+    assert.equal(row.children[1].className, 'room-live');
+    assert.ok(!('role' in row.children[1].attrs) && !('aria-label' in row.children[1].attrs));
+  });
+});
+
+test('the signature moves when a member’s session comes or goes, and on no other roster beat', () => {
+  const rooms = [room('r1', 'alpha ↔ beta'), room('r2', 'gone', { archivedAt: 5 })];
+  const sig = (sessions) => bandSig(rooms, { sessions, archivedCollapsed: false });
+  const both = sig([alphaRow, betaRow]);
+  assert.notEqual(sig([betaRow]), both, 'a member exiting repaints the dot');
+  assert.notEqual(sig([]), sig([betaRow]), 'and the last one exiting repaints it again');
+  // A status flicker, a stranger arriving, or the roster reordering changes no count.
+  assert.equal(sig([{ ...alphaRow, status: 'working' }, betaRow]), both);
+  assert.equal(sig([betaRow, gammaRow, alphaRow]), both);
+  // An archived room's members coming and going repaints nothing — it has no dot.
+  const archivedOnly = [room('r2', 'gone', { archivedAt: 5 })];
+  assert.equal(
+    bandSig(archivedOnly, { sessions: [alphaRow, betaRow], archivedCollapsed: false }),
+    bandSig(archivedOnly, { sessions: [], archivedCollapsed: false }),
+  );
+  // The signature never carries the clock: the age is the timer's, not the frame's.
+  assert.ok(!/Date\.now|roomAge|ageText/.test(fn('bandSig', band)));
+});
+
+test('the app hands the roster to both the signature and the patch', () => {
+  const from = app.indexOf('\nfunction renderRoomsBand(');
+  const render = app.slice(from, app.indexOf('\n}\n', from));
+  assert.match(render, /bandSig\(rooms, \{ openIds, archivedCollapsed, sessions \}\)/);
+  assert.match(render, /patchBand\(el\.roomsList, rooms, \{[\s\S]*?\bsessions,/);
+  assert.match(render, /const sessions = state\.sessions;/, 'one read, so the two cannot see different rosters');
+});
+
+test('the dot is three tokens, grey for none and never the decision red', () => {
+  assert.match(styles, /\.room-live\.is-all \{ background: var\(--idle\); \}/);
+  assert.match(styles, /\.room-live\.is-some \{ background: var\(--working\); \}/);
+  assert.match(styles, /\.room-live\.is-none \{ background: var\(--ink-faint\); \}/);
+  const block = styles.slice(styles.indexOf('.room-live {'), styles.indexOf('.room-live.is-none'));
+  assert.ok(!/--decision/.test(block), 'red is the panel’s “needs you”, and a dead room needs nobody');
+  const base = styles.match(/\.room-live \{[^}]*\}/)[0];
+  assert.match(base, /flex: none;/);
+  assert.match(base, /background: transparent;/, 'no state draws nothing — the archived row');
+  assert.ok(!/transition|animation/.test(base));
+  const age = styles.match(/\.room-age \{[^}]*\}/)[0];
+  assert.match(age, /flex: none;/, 'an age never shrinks to `2…`');
+});
+
+/* -------------------------------------------------------- the band's height --- */
+
+test('the band’s height is the shared resizer, on the y axis, and nothing else', () => {
+  const at = app.indexOf("handle: el.roomsGrip,");
+  assert.ok(at > -1, 'the grip is handed to a resizer');
+  const call = app.slice(app.lastIndexOf('resizer({', at), app.indexOf('\n});', at));
+  assert.match(call, /axis: 'y'/);
+  assert.match(call, /storageKey: 'foreman\.roomsBandHeight'/);
+  assert.match(call, /min: ROOMS_MIN/);
+  assert.match(call, /max: ROOMS_MAX/);
+  // The live ceiling keeps the session list above on screen.
+  assert.match(call, /ceiling: \(\) => \{[\s\S]*el\.railList[\s\S]*el\.railRooms[\s\S]*RAIL_LIST_MIN/);
+  assert.match(call, /setRootVar\('--rooms-band-h', rem\)/);
+  assert.match(call, /classList\.toggle\('rooms-band-sized', rem != null\)/);
+  // One resizer in the file: no second drag implementation grew beside it.
+  assert.equal((code.match(/\nfunction resizer\(/g) || []).length, 1, 'one resizer, never a second');
+  assert.ok(!/roomsGrip\.addEventListener/.test(code), 'the grip has no handlers of its own');
+});
+
+test('the floor holds a row and the head, and the ceiling has a default before layout', () => {
+  const min = Number(app.match(/const ROOMS_MIN = ([\d.]+);/)[1]);
+  const max = Number(app.match(/const ROOMS_MAX = ([\d.]+);/)[1]);
+  const list = Number(app.match(/const RAIL_LIST_MIN = ([\d.]+);/)[1]);
+  // Measured, not summed from the stylesheet: head 33.7px + row 27.6px + padding 8.8px + the
+  // 1px rule = 71.1px at 16px a rem. Anything under that cuts the one row the floor promises.
+  assert.ok(min * 16 >= 71.1, 'the head, one whole row and the list’s padding');
+  assert.ok(max > min && list > 0);
+  const call = app.slice(app.indexOf('handle: el.roomsGrip,'));
+  assert.match(call.slice(0, call.indexOf('\n});')), /if \(bottom <= top\) return ROOMS_MAX;/);
+});
+
+test('nothing stored is the stylesheet’s answer: no default height, and the cap is the fallback', () => {
+  const tokens = text('web/tokens.css');
+  assert.ok(!/--rooms-band-h/.test(tokens), 'unset is a mode, not a size');
+  assert.match(styles, /\.rooms-list\s*\{[^}]*max-height:\s*11rem/, 'the band that shipped, untouched');
+  assert.match(styles, /:root\.rooms-band-sized \.app\.has-rooms \.rail-rooms \{ height: var\(--rooms-band-h\); \}/);
+  const sized = styles.match(/:root\.rooms-band-sized \.rooms-list \{[^}]*\}/)[0];
+  assert.match(sized, /max-height: none/);
+  assert.match(sized, /flex: 1 1 auto/, 'the list scrolls inside the height it is given');
+  // Nothing a drag moves may ease into place.
+  for (const sel of ['.rail-rooms', '.rooms-list', '.rooms-grip']) {
+    for (const [decl] of styles.matchAll(new RegExp(`\\${sel}\\s*\\{[^}]*\\}`, 'g'))) {
+      assert.ok(!/transition/.test(decl), `${sel} carries no transition`);
+    }
+  }
+});
+
+test('the grip sits on the band’s top rule, outside every list a roster beat rebuilds', () => {
+  const grip = html.indexOf('id="roomsGrip"');
+  const listEnd = html.indexOf('</div>', html.indexOf('<div class="rail-list"'));
+  const band = html.indexOf('<div class="rail-rooms"');
+  assert.ok(grip > listEnd && grip < band, 'between the session list and the band, a sibling of both');
+  const tag = html.slice(html.lastIndexOf('<div', grip), html.indexOf('></div>', grip));
+  assert.match(tag, /class="pane-grip grip-row rooms-grip"/);
+  assert.match(tag, /role="separator"/);
+  assert.match(tag, /aria-orientation="horizontal"/);
+  assert.ok(!/\bhidden\b/.test(tag), '`.pane-grip`’s display beats `[hidden]` — gated by class instead');
+  assert.match(styles, /\.rooms-grip \{[^}]*display: none;[^}]*margin: -4px 0 -3px;/);
+  assert.match(styles, /\.app\.has-rooms \.rooms-grip \{ display: flex; \}/);
+});
+
+test('the band’s size never shares a name with the aside’s room one letter away', () => {
+  // `.room-sized` / `--room-h` / `foreman.roomHeight` are the lead aside's. A `rooms-sized`
+  // beside them is the sibling name the one-spelling rule refuses.
+  for (const src of [code, strip(styles), html]) {
+    assert.ok(!/rooms-sized|--rooms-h\b|roomsHeight/.test(src), 'no one-letter sibling of the aside’s names');
+  }
 });
 
 /* ---------------------------------------------------- the band in the app --- */
@@ -677,10 +1016,14 @@ test('the head is persistent — `+ room` is in the rail with `rooms: []`', () =
   const band = styles.match(/\.rail-rooms\s*\{[^}]*\}/)[0];
   assert.match(band, /display:\s*flex/, 'the band itself is never hidden');
   assert.ok(!/display:\s*none/.test(band), 'the band carries no hidden state of its own');
-  assert.ok(
-    !/\.app\.has-rooms \.rail-rooms/.test(styles) && !/\.app\.has-rooms \.rooms-head/.test(styles),
-    'the gate names the list alone — never the band, never the head',
-  );
+  // The visibility gate names the list alone. A rule on `.has-rooms .rail-rooms` does exist
+  // now — the dragged height, which must not hold an empty band open over a list that is
+  // not drawn — so the assertion is on what such a rule may *say*: a height, never a
+  // `display`, and nothing at all on the head.
+  for (const [, decl] of styles.matchAll(/\.app\.has-rooms \.rail-rooms\s*\{([^}]*)\}/g)) {
+    assert.ok(!/display/.test(decl), 'the gate names the list alone — never the band');
+  }
+  assert.ok(!/\.app\.has-rooms \.rooms-head/.test(styles), 'the gate never names the head');
   // …and the head is a sibling of the list, which is what makes that gate possible at all.
   const markup = html.slice(html.indexOf('<div class="rail-rooms"'), html.indexOf('</div>', html.indexOf('id="roomsList"')));
   const head = markup.indexOf('class="rooms-head"');
