@@ -171,6 +171,16 @@ export const ROSTER_POLL_MS = 2000;
 export const STATUS_STALE_MS = 10 * 60_000;
 
 /**
+ * How long the panel keeps its copy of a bot's conversation, counted from the newest
+ * timestamped record in it (`server/bots.js` `prune`). 90 days, by the maintainer's ruling —
+ * the deployments' own Claude Code deletes its transcripts after about 30, so past that the
+ * panel's copy is the only record. `FOREMAN_BOT_RETENTION_DAYS` exists for benches only (a
+ * fraction of a day, to watch a prune happen); nothing real should set it.
+ */
+const botRetention = Number(process.env.FOREMAN_BOT_RETENTION_DAYS);
+export const BOT_RETENTION_DAYS = Number.isFinite(botRetention) && botRetention > 0 ? botRetention : 90;
+
+/**
  * Where the trigger secret lives when it isn't in the environment.
  *
  * Under `STATE_DIR`, not `HOME`, so scratch isolation comes free — exactly like

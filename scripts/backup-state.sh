@@ -359,7 +359,7 @@ SUMMARY_LINES=()
 # 1. The whole state dir
 # ---------------------------------------------------------------------------
 
-KNOWN_STATE_ITEMS=(tasks.json teams worktrees worker-settings worker-logs snapshot.json queue.json pins.json groups.json panes trigger-token)
+KNOWN_STATE_ITEMS=(tasks.json teams worktrees worker-settings worker-logs snapshot.json queue.json pins.json groups.json panes trigger-token bots.json bots)
 
 {
   echo "1. State dir: $STATE_DIR"
