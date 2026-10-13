@@ -124,6 +124,10 @@ server/
   install-hook.js one-shot settings.json registration
   install-agent.js the LaunchAgent installer — writes and bootstraps the plist
   logs.js         where launchd's log files are, and the boot-time trim that bounds them
+  bots.js         the panel's own copy of each bot's transcripts: registry, copies, index,
+                  retention — beside the roster, never in it
+  bot-subs.js     a bot pane's subscriptions, in a map of their own
+  context-window.js  a bot's ctx by Claude Code's own rule, and the measured windows
 
   --- the team ---
   team.js         a team's folder on disk: config, toggles, decisions
@@ -155,6 +159,11 @@ web/
   notify.js       what is worth interrupting somebody for, and when it became true
   manifest.webmanifest  m/manifest.webmanifest   two installable apps, two ids
   icons/          the mark, generated — never hand-edited
+helper/
+  foreman-helper.mjs  ships a headless deployment's transcripts to the panel — one file,
+                  no dependencies, copied into the deployment (docs/bots.md)
+  example/        the reference bot: a bench container with a fake Messages API, never a
+                  real deployment
 scripts/
   make-icons.mjs  the only description of the mark: one geometry, the SVG and every PNG
   backup-state.sh a copy of the state dir and the plist, before anything risky

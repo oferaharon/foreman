@@ -177,6 +177,10 @@ were. [Docs →](docs/panel.md#split-view)
   view each ship their own web-app manifest, and notifications tell the Mac the moment a
   session walks into something it cannot get past.
   [Docs →](docs/panel.md#installing-it-as-an-app)
+- **Bots: read what your deployed agents did** — a helper beside a headless deployment (a
+  cron job running `claude -p`, a chat bridge, an Agent SDK loop) ships its transcripts to
+  the panel, which keeps its own copy for 90 days and shows each deployment as one read-only
+  row with every run in full. [Docs →](docs/bots.md)
 - **Snapshot, restore, relaunch all** — save the set of sessions you have open and put it
   back after a reboot, or close every one and start it again for the day you update Claude
   Code. [Docs →](docs/panel.md#snapshot-and-restore)
