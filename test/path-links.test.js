@@ -460,7 +460,7 @@ test('.path-link is the transcript link colour with a dotted underline', () => {
 test('a write becomes linkable when its result lands, not when the call goes out', () => {
   const src = appSrc();
   const append = src.slice(src.indexOf('function appendMessages(messages) {'));
-  const body = append.slice(0, append.indexOf('function renderMessage(m) {'));
+  const body = append.slice(0, append.indexOf('function renderMessage(m, how = null) {'));
   // `anyNewOutput` answers on the tool *call* — right for the dot, which is a boolean, and
   // a beat early for the scan, which needs the `toolUseResult` record. Measured on the
   // bench: the set came back without the file and the sentence naming it a second later

@@ -525,8 +525,12 @@ export function patchBand(list, rooms = [], opts = {}) {
  * real job — a room created above the fold now keeps the row under the cursor where it was,
  * which the old re-append also defeated. `overflow-anchor: none` would have stopped the
  * jump too, and was measured, and gives both of those up.
+ *
+ * Exported because the bots band (`web/bots-band.js`) is patched under exactly the same
+ * cursor and the same anchoring, and a second copy of this rule is a second place for the
+ * re-append to come back.
  */
-function place(list, row, index) {
+export function place(list, row, index) {
   const at = list.children[index] ?? null;
   if (at !== row) list.insertBefore(row, at);
 }

@@ -132,6 +132,31 @@
         <div class="rail-list" id="railList"></div>
 
         <!--
+          The bots band: one row per registered bot — a deployed agent the panel watches and
+          does not run — newest activity first. Two lines a row: the name and a dot, then the
+          newest reply's model · effort · ctx and the age, with `N active` when more than one
+          conversation is.
+
+          A **sibling** of `.rail-list`, never a block inside it, for the rooms band's reason
+          one block down: an open group's tint in that list is tiled from three full-width
+          rows in that flow, and `.folder-label.in-group`'s sticky `top` is hand-measured
+          against the row heights in there. Below the session list and above the rooms band,
+          the maintainer's ruling (Q1, 2026-10-12).
+
+          **The whole band** is gated on `.app.has-bots`, unlike the rooms band whose head
+          carries `+ room`: nothing here makes a bot — `foreman-panel bots add` does, on this
+          Mac — so a heading over no rows would offer nothing. Read-only throughout: no unread
+          count, no hoist, no red. The rows are filled by `renderBotsBand` from the roster
+          frame's `bots` field and patched in place (`web/bots-band.js`).
+        -->
+        <div class="rail-bots" id="railBots">
+          <div class="bots-head">
+            <span class="bots-title">bots</span>
+          </div>
+          <div class="bots-list" id="botsList"></div>
+        </div>
+
+        <!--
           The rooms band: one row per open room, and the archived ones folded away.
 
           A **sibling** of `.rail-list`, never a block inside it — it sits directly after
