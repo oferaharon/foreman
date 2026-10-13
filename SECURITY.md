@@ -25,6 +25,7 @@ Whoever can reach the panel can:
 - Answer permission prompts on your behalf.
 - Read every transcript the panel can see, including anything pasted or
   generated inside those conversations.
+- Read every conversation a registered bot has shipped to it (see below).
 
 None of this requires a password, a token, or a browser tab you opened
 yourself. It requires only that a request reach the panel's port.
@@ -64,6 +65,37 @@ script, or any other non-browser client can set whatever `Origin` header it
 likes, or none at all, and the check does not slow it down. If you have bound
 the panel wide, every device on that network has exactly the access described
 above, Origin header or not.
+
+## Bots: token-gated writes from your deployments
+
+This is a change to what reaches the panel, so it is stated here, as promised above. Since
+the bots feature ([`docs/bots.md`](docs/bots.md)), the panel accepts writes from programs
+that are not a browser and not on its own keyboard: a helper running beside a deployed agent
+ships that agent's Claude Code transcripts to it. The facts:
+
+- **Three new routes on the panel's port take a bearer token**:
+  `POST /api/bots/<bot>/hello`, `GET /api/bots/<bot>/manifest` and
+  `POST /api/bots/<bot>/append`. A token is minted by `foreman-panel bots add` on the
+  panel's machine, printed once, and stored only as its sha256. A helper holding one can add
+  conversations to **its own bot** and nothing else: it cannot type into a session, read
+  one, or reach any other route through that token.
+- **The token keeps scratch and test helpers out of a real panel. It is not
+  authentication**, in the same sense as the rest of this document: it says which bot a
+  request is for, not who sent it.
+- **Reading is not gated.** The bot routes that read — `GET /api/bots` and everything under
+  `GET /api/bots/<bot>/conversations` — answer anyone who can reach the panel, exactly as
+  every session transcript does today.
+- **The panel's copies hold everything the transcripts hold**, including, on current Claude
+  Code, a snapshot of the deployment's whole system prompt in every run. They live under the
+  state directory for 90 days after each conversation's last record, and every
+  `backup-state` archive includes them.
+- **A container on the panel's own Mac reaches a loopback-bound panel** through
+  `host.docker.internal`, and its requests arrive from `127.0.0.1` — so they already count
+  as loopback, which is what decides who may change the panel's exposure settings. That was
+  true before bots existed; bots are the first feature that expects such a container to
+  connect.
+- **The helper's requests carry no `Origin` header** (Node's `fetch` sends none), so the
+  browser-origin guard admits them without any exemption or allow-list entry.
 
 ## What is refused by design
 

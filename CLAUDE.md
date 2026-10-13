@@ -64,7 +64,8 @@ There is no API. Everything is assembled from three places:
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
 `effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
-`rooms-line.js`, `session-launch.js`, `briefs.js` and `parsePane` in `tmux.js`; on the team side `tasks.js`,
+`rooms-line.js`, `session-launch.js`, `briefs.js`, `bots.js`, `bot-subs.js`, `context-window.js` and
+`parsePane` in `tmux.js`; on the team side `tasks.js`,
 `team.js`, `room.js`, `worktree.js`, `setup-detect.js`, `forge.js`, `base-branch.js`, `watch.js`, `conflicts.js`,
 `gc.js`, `launch.js` and `project-mcp.js`. Run them before touching any of them, and note that `test/fixtures/` holds
 real `capture-pane` output, not reconstructions — and that the git wrappers are tested
@@ -820,6 +821,105 @@ clamp, how a member is resolved, and what `@name` does and does not change. Evid
   mention changes what each recipient is told, never who gets a copy.
   [rooms#name-in-a-room-is-a-signal](docs/traps/rooms.md#name-in-a-room-is-a-signal)
 
+### Bots
+
+Headless deployments the panel watches and never runs: the helper that ships their
+transcripts, the store that keeps the panel's copy, the routes and frames between them, the
+pane that draws it, and the bench that proves any of it. Evidence:
+[`docs/traps/bots.md`](docs/traps/bots.md).
+
+- `helper/example/` · `server/status.js` (`ingest`) — **A `claude -p` run from inside a panel
+  session's shell rebinds that session's row — and then drops its binding.** Every bench runs
+  `env -u TMUX -u TMUX_PANE claude … --settings '{"disableAllHooks":true}' < /dev/null`.
+  [bots#a-claude--p-run-inside-a-panel-session-rebinds-its-row](docs/traps/bots.md#a-claude--p-run-inside-a-panel-session-rebinds-its-row)
+- `helper/example/` (`bot-run.sh`, `fake-messages-api.mjs`) — **`claude -p`'s
+  `--allowedTools` takes every argument after it, and the request's last message is not the
+  prompt.**
+  [bots#the-reference-containers-two-surprises](docs/traps/bots.md#the-reference-containers-two-surprises)
+- `server/context-window.js` (`windowFor`) — **The `[1m]` suffix is only in
+  `requestedModel`** — and 2.1.263 writes no `requestedModel` at all, MEASURED.
+  [bots#the-1m-suffix-is-only-in-requestedmodel](docs/traps/bots.md#the-1m-suffix-is-only-in-requestedmodel)
+- `server/context-window.js` (`contextOf`) · `server/bots.js` (the index) — **One API
+  response is several assistant records, each with the same `usage`.** Latest record, never
+  a sum; count replies by content.
+  [bots#one-api-response-is-several-assistant-records](docs/traps/bots.md#one-api-response-is-several-assistant-records)
+- `server/bot-subs.js` · `server/index.js` (`rememberAgentFiles`, `loadEarlier`) —
+  **`rememberAgentFiles` would let a bot's transcript choose which local file the panel
+  reads.** Hence a subscription map of the bots' own.
+  [bots#rememberagentfiles-would-let-a-bot-choose-what-the-panel-reads](docs/traps/bots.md#rememberagentfiles-would-let-a-bot-choose-what-the-panel-reads)
+- `server/bot-subs.js` · `server/transcript.js` (`Tailer`) — **A `Tailer` follows a path,
+  not a file.** A store `reset` re-sends a whole `bot` frame.
+  [bots#a-tailer-follows-a-path-not-a-file](docs/traps/bots.md#a-tailer-follows-a-path-not-a-file)
+- `web/app.js` (`renderMessage`, the bot pane) — **Every prompt in a bot's transcript is a
+  `type: 'user'` record and none of it is you.** Labelled *prompt*, never the maintainer's
+  bubble.
+  [bots#every-prompt-in-a-bot-is-a-user-record-and-none-of-it-is-you](docs/traps/bots.md#every-prompt-in-a-bot-is-a-user-record-and-none-of-it-is-you)
+- `web/app.js` (`buildMessage`, `briefHtml`) — **Assistant text is `marked.parse` →
+  `innerHTML` with raw HTML passed through.** A bot's goes through the escaping renderer.
+  [bots#assistant-markdown-is-raw-html-in-a-session](docs/traps/bots.md#assistant-markdown-is-raw-html-in-a-session)
+- `web/app.js` (`imageStrip`, the agent chip) — **Images and subagent chips build
+  per-session URLs.** The bot pane hands them a bot-route builder.
+  [bots#images-and-subagent-chips-build-per-session-urls](docs/traps/bots.md#images-and-subagent-chips-build-per-session-urls)
+- `server/index.js` (`/ws`, the bots routes) — **A second `WebSocketServer` on the same
+  `http.Server` breaks `/ws`.** The bots wire is plain HTTP for that reason.
+  [bots#a-second-websocketserver-breaks-the-first](docs/traps/bots.md#a-second-websocketserver-breaks-the-first)
+- `server/index.js` (`POST /api/bots/:bot/append`) — **The global `express.json` would not
+  eat the append body — but only because of the content type.**
+  [bots#the-global-json-parser-would-read-an-append-sent-as-json](docs/traps/bots.md#the-global-json-parser-would-read-an-append-sent-as-json)
+- `helper/foreman-helper.mjs` (`--check`) — **Transcripts are `0600`.** The helper must be
+  the user that owns them.
+  [bots#transcripts-are-0600](docs/traps/bots.md#transcripts-are-0600)
+- `server/bots.js` (`lastTs`, `prune`) — **Records without a `timestamp` are why "last
+  active" reads the newest timestamped record, never the last line and never a file's
+  mtime.**
+  [bots#records-without-a-timestamp](docs/traps/bots.md#records-without-a-timestamp)
+- `server/bots.js` (`finished`) — **`finished` is read off a closing `cost-state` record, and
+  Claude Code 2.1.263 writes none** — MEASURED; such a conversation is only ever active or
+  idle.
+  [bots#finished-needs-a-cost-state-record](docs/traps/bots.md#finished-needs-a-cost-state-record)
+- `server/bots.js` (`append`) · `helper/foreman-helper.mjs` — **Two roots can share one
+  project-dir name, so a conversation id seen under a second root is refused, never
+  merged.**
+  [bots#two-roots-can-share-one-project-dir-name](docs/traps/bots.md#two-roots-can-share-one-project-dir-name)
+- `server/bots.js` (`#caseClash`, `BOT_ID_RE`) — **A root, project or agent spelling that
+  differs from one already held only in case is refused**, because this disk folds case.
+  [bots#a-spelling-that-differs-only-in-case](docs/traps/bots.md#a-spelling-that-differs-only-in-case)
+- `server/bots.js` (the copy) — **Two resumes of one conversation at once interleave in the
+  source, and the copy interleaves identically.**
+  [bots#concurrent-appends-to-one-conversation](docs/traps/bots.md#concurrent-appends-to-one-conversation)
+- `server/read-state.js` · `server/sessions.js` — **`read.prune(liveIds)` runs every poll**,
+  so bots keep no read state, and phase 2 must not borrow that store.
+  [bots#readprune-runs-every-poll](docs/traps/bots.md#readprune-runs-every-poll)
+- `server/bots.js` (`BotStore`) — **`bots.json` and every `index.json` carry unknown keys
+  through on rewrite.**
+  [bots#stores-drop-what-they-do-not-know](docs/traps/bots.md#stores-drop-what-they-do-not-know)
+- `server/bots.js` · `scripts/backup-state.sh` (`KNOWN_STATE_ITEMS`) — **A trivial run is
+  about 120 KB on current Claude Code, and most of it is a snapshot of the system prompt.**
+  [bots#sizes](docs/traps/bots.md#sizes)
+- `server/bots.js` (`tick`, `LIVENESS_TICK_MS`) — **Liveness has no event.** The store's own
+  timer flips a quiet helper offline.
+  [bots#liveness-has-no-event](docs/traps/bots.md#liveness-has-no-event)
+- `server/bots.js` (`hello`, `HELLO_WINDOW_MS`) — **A restarted helper waits out the
+  90-second instance window before it ships again** — MEASURED, 100 s and 92 s; nothing lost.
+  [bots#a-restarted-helper-waits-out-the-instance-window](docs/traps/bots.md#a-restarted-helper-waits-out-the-instance-window)
+- `server/index.js` (the boot block, `bots.start()`) · `server/bots.js` (`start`) — **A panel
+  that finds its port taken must not prune, so the store's timers start after the
+  single-instance probe.**
+  [bots#a-panel-that-stands-down-must-not-prune](docs/traps/bots.md#a-panel-that-stands-down-must-not-prune)
+- `server/index.js` (`botAuth`, `reloadBots`) — **A registry re-read on an auth miss picks
+  up `bots add`; only a re-read on a hit as well picks up `bots remove`.**
+  [bots#a-registry-check-on-misses-alone-never-sees-a-removal](docs/traps/bots.md#a-registry-check-on-misses-alone-never-sees-a-removal)
+- `bin/foreman-panel.js` (`bots`) · `server/config.js` (`resolveStateDir`) — **`bots add`
+  writes the registry of the state dir *its own* environment resolves.**
+  [bots#register-against-the-panels-own-state-dir](docs/traps/bots.md#register-against-the-panels-own-state-dir)
+- `server/bots.js` (`prune`) · `helper/foreman-helper.mjs` (`fetchManifest`) — **Retention
+  prunes the panel's copy, never the source, and the helper keeps no memory of what was
+  pruned** — MEASURED; a source older than 90 days comes back at the next manifest.
+  [bots#retention-prunes-the-copy-not-the-source](docs/traps/bots.md#retention-prunes-the-copy-not-the-source)
+- `server/dispatch.js` (`GIT_DENY`) — **A worker cannot push a rebased branch, so it brings
+  `main` in with a merge.**
+  [bots#a-rebase-cannot-be-pushed-from-a-worker](docs/traps/bots.md#a-rebase-cannot-be-pushed-from-a-worker)
+
 ### launchd
 
 Facts about this machine rather than about a file here, which is why they are filed under
@@ -1217,6 +1317,27 @@ stays, because `room.jsonl` is append-only and holds two dozen link entries acro
 rooms that a reader still has to be able to see. `~/.foreman/links.json` is left exactly where
 it is — unread, unmigrated, undeleted: it is the only record of what was ever linked, deleting
 a maintainer's state file is not a code change's call, and leaving it makes a revert clean.
+
+**Bots** (`server/bots.js` the store, `server/bot-subs.js` the subscriptions,
+`server/context-window.js` the one context rule, `helper/foreman-helper.mjs` the shipper,
+`web/bots-band.js` the band) are headless deployments — a cron job running `claude -p`, a
+chat bridge, an Agent SDK loop in a VM — that the panel watches and never runs. A helper
+beside each one dials out with its own token and appends every transcript line to the
+panel's own copy, byte-identical and kept 90 days from its last record; each deployment is
+one row in the rail's **bots** band and a read-only pane. **Bots are not in the roster, and
+that is the design rather than a gap**: they ride the roster frame as a sibling `bots` field,
+exactly as rooms do, so the "only sessions with a live pane" rule stays literally true and
+every consumer of the session list — the inbox, notifications, pins, groups, snapshot,
+relaunch, `/exit`, the queue, read state — is never handed one. An allow-list across fifteen
+consumers is fifteen places to forget; a list they are never given has nothing to forget.
+So a bot has no pane id, nothing can type into it, every `/api/sessions/:id/…` route answers
+`404` for its conversation ids, and nothing about it asks for attention (a quiet helper is a
+**grey** dot, never red). It has its own routes (`/api/bots/…` — three token-gated writes
+for the helper, ungated reads like every transcript), its own frames, its own subscription
+map and its own pane kind. Phase 1 is read-only; phase 2 (a message into the bot's own inbox,
+never a terminal) is outlined and unbuilt. `docs/bots.md` is the deployment contract and the
+panel side; `helper/example/` is the bench container every claim there was demonstrated
+against, and no real deployment uses it.
 
 **The team** has a `pending` task state — a task recorded with its brief and nothing else,
 the middle rung between an issue on a tracker and a dispatched worker: added via `task_add`,
