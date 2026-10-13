@@ -210,15 +210,20 @@ test('a pane that can hold a session is asked by kind, not by `linkId`', () => {
    * resolving onto a pane showing something else and taking it away.
    */
   const fn = app.match(/function sessionPane\(\) \{[\s\S]*?\n\}/)[0];
-  assert.match(fn, /here\.kind\(\) === 'session'/);
-  assert.match(fn, /panes\.find\(\(p\) => p\.kind\(\) === 'session'\)/);
+  assert.match(fn, /here && holdsMain\(here\)/);
+  assert.match(fn, /panes\.find\(holdsMain\)/);
   assert.ok(!/linkId\(\)/.test(fn), '`linkId` cannot answer this question any more');
+  // "Can this pane hold a session" became "does it hold main content" when a bot joined the
+  // session there (the ruling of 2026-10-13) — and it is an allow-list, so a new kind is not
+  // main content until somebody says so.
+  assert.match(app.match(/function holdsMain\(pane\) \{[\s\S]*?\n\}/)[0], /return kind === 'session' \|\| kind === 'bot';/);
   // Opening the shared room or a group room replaces a pane holding either of them, never a
-  // session pane — **one non-session pane at a time**, which is also what guarantees
-  // `sessionPane` always has somewhere to send a rail click. Three openers now — the shared
-  // room, a group room (`roomTarget`) and a bot (`openBotPane`) — and the count is the point:
-  // a fourth kind added without this line would be a second non-session pane.
-  assert.equal(app.match(/panes\.find\(\(p\) => p\.kind\(\) !== 'session'\)/g).length, 3);
+  // session or a bot — **one room pane at a time**, which is also what guarantees
+  // `sessionPane` always has somewhere to send a rail click. Two openers — the shared room
+  // and a group room (`roomTarget`) — and the count is the point: a third kind of room added
+  // without this line would be a second room pane.
+  assert.equal(app.match(/panes\.find\(\(p\) => !holdsMain\(p\)\)/g).length, 2);
+  assert.equal((app.match(/p\.kind\(\) !== 'session'/g) || []).length, 0, 'nothing asks the old question any more');
 });
 
 test('the room is remembered as its own shape, and restored on a reload', () => {

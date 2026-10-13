@@ -15,9 +15,10 @@
  *
  *  - **Its own band**, below the session list and above the rooms band — a sibling of
  *    `.rail-list`, never inside it. The word on screen is **bots**.
- *  - **Two lines, no third.** Line 1 is the name and a dot; line 2 is the *newest reply's*
- *    model · effort · ctx and the age, plus `N active` when more than one conversation is
- *    active. One record supplies all three facts (the server picks it), so they can never
+ *  - **Two lines, no third.** Line 1 is a dot, the name and — right-aligned, where the rooms
+ *    band puts a room's (the ruling of 2026-10-13) — the last-active age; line 2 is the
+ *    *newest reply's* model · effort · ctx, plus `N active` when more than one conversation
+ *    is active. One record supplies all three facts (the server picks it), so they can never
  *    come from two different replies, and **two conversations' contexts are never summed or
  *    maxed** — they do not add.
  *  - **Read-only, and asks for nothing.** No red, no inbox hoist, no notification, no
@@ -128,12 +129,24 @@ export function dotText(bot, now = Date.now()) {
 }
 
 /**
- * Line 2 of a row, as its parts in reading order: model, effort, ctx, age, and `N active`.
- * Empty parts are left out, so a bot that has shipped nothing yet is a line with nothing on
- * it rather than a line of dots. `ctx` carries the record's `{tokens, window, pct}` for
- * `ctxFor` to paint; every other part is plain text.
+ * The row's age — `now`, `5m`, `3h`, `2d` — or `''` for a bot that has shipped nothing yet.
+ * Drawn right-aligned on line 1, the place and register the rooms band gives a room's
+ * (`roomAge`), and spelled by the same `ageText`: one formatter, so a bot's `3h` and a room's
+ * `3h` one band down cannot come to disagree about where an hour ends.
  */
-export function botLineParts(bot, now = Date.now()) {
+export function botAgeText(bot, now = Date.now()) {
+  const at = botActivityAt(bot);
+  return at ? ageText(at, now) : '';
+}
+
+/**
+ * Line 2 of a row, as its parts in reading order: model, effort, ctx, and `N active`. The
+ * age is not one of them — it sits on line 1 (`botAgeText`). Empty parts are left out, so a
+ * bot that has shipped nothing yet is a line with nothing on it rather than a line of dots.
+ * `ctx` carries the record's `{tokens, window, pct}` for `ctxFor` to paint; every other part
+ * is plain text.
+ */
+export function botLineParts(bot) {
   const cur = bot?.current && typeof bot.current === 'object' ? bot.current : null;
   const parts = [];
   const model = modelText(cur);
@@ -141,16 +154,14 @@ export function botLineParts(bot, now = Date.now()) {
   if (cur?.effort) parts.push({ kind: 'effort', text: String(cur.effort) });
   const ctx = cur ? ctxText(cur.ctx) : '';
   if (ctx) parts.push({ kind: 'ctx', text: ctx, ctx: cur.ctx });
-  const at = botActivityAt(bot);
-  if (at) parts.push({ kind: 'age', text: ageText(at, now) });
   const active = activeText(bot?.active);
   if (active) parts.push({ kind: 'active', text: active });
   return parts;
 }
 
 /** Line 2 as one string — the row's hover and accessible name, and what the tests read. */
-export function botLineText(bot, now = Date.now()) {
-  return botLineParts(bot, now)
+export function botLineText(bot) {
+  return botLineParts(bot)
     .map((p) => p.text)
     .join(' · ');
 }
@@ -161,7 +172,9 @@ export function botTitle(bot, now = Date.now()) {
   lines.push(dotText(bot, now));
   const n = Number(bot?.conversations) || 0;
   lines.push(`${n} conversation${n === 1 ? '' : 's'} kept`);
-  const line = botLineText(bot, now);
+  const seen = seenText(botActivityAt(bot), now);
+  if (seen) lines.push(`last active ${seen}`);
+  const line = botLineText(bot);
   if (line) lines.push(`newest reply: ${line}`);
   lines.push('read-only — the panel watches this bot, it does not type to it');
   return lines.join('\n');
@@ -244,7 +257,8 @@ function span(cls, text = '') {
   return s;
 }
 
-/** One bot, as a button with two lines. Built once per bot and patched thereafter. */
+/** One bot, as a button with two lines — the dot, the name and the age on the first, the
+ *  meta line under the name. Built once per bot and patched thereafter. */
 function buildBotRow(key) {
   const row = document.createElement('button');
   row.type = 'button';
@@ -253,9 +267,10 @@ function buildBotRow(key) {
 
   const dot = span('bot-dot');
   const name = span('bot-name');
+  const age = span('bot-age');
   const meta = span('bot-meta');
-  row.append(dot, name, meta);
-  parts.set(row, { dot, name, meta });
+  row.append(dot, name, age, meta);
+  parts.set(row, { dot, name, age, meta });
   return row;
 }
 
@@ -292,15 +307,22 @@ export function patchBotsBand(list, bots = [], opts = {}) {
   const drawn = [];
   for (const { key, bot } of entries) {
     const row = have.get(key) || buildBotRow(key);
-    const { dot, name, meta } = parts.get(row);
+    const { dot, name, age, meta } = parts.get(row);
     const state = dotState(bot);
     dot.className = `bot-dot is-${state}`;
     dot.title = dotText(bot, now);
     dot.setAttribute('role', 'img');
     dot.setAttribute('aria-label', dot.title);
     name.textContent = bot.name || bot.id;
-    paintMeta(meta, botLineParts(bot, now));
-    row.className = `bot-row${open.has(bot.id) ? ' is-open' : ''}${state === 'offline' ? ' is-offline' : ''}`;
+    const ago = botAgeText(bot, now);
+    if (age.textContent !== ago) age.textContent = ago;
+    paintMeta(meta, botLineParts(bot));
+    // The session row's open marker, said the session row's way: a class for the band and
+    // the edge, and `aria-current` only while true — `="false"` on every other row is noise.
+    const isOpen = open.has(bot.id);
+    row.className = `bot-row${isOpen ? ' is-open' : ''}${state === 'offline' ? ' is-offline' : ''}`;
+    if (isOpen) row.setAttribute('aria-current', 'true');
+    else row.removeAttribute('aria-current');
     row.title = botTitle(bot, now);
     row.onclick = () => onOpen?.(bot.id);
     place(list, row, drawn.length);
@@ -321,9 +343,8 @@ export function relightBotsBand(list, bots = [], now = Date.now()) {
     const bot = byKey.get(node.dataset?.botKey);
     const got = parts.get(node);
     if (!bot || !got) continue;
-    const age = got.meta.children ? [...got.meta.children].find((c) => c.className === 'bot-age') : null;
-    const text = ageText(botActivityAt(bot), now);
-    if (age && age.textContent !== text) age.textContent = text;
+    const ago = botAgeText(bot, now);
+    if (got.age.textContent !== ago) got.age.textContent = ago;
     got.dot.title = dotText(bot, now);
     got.dot.setAttribute('aria-label', got.dot.title);
     node.title = botTitle(bot, now);

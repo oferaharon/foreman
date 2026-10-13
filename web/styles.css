@@ -6981,25 +6981,36 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 /* One bot: two lines and never a third. The session row's own grid and type — a 0.85rem dot
    column, the name at the session title's size and weight, the meta line at its size — so a
-   bot's `Sonnet 5.5 medium 4%` reads exactly the way a dev session's does one band up. */
+   bot's `Sonnet 5.5 medium 4%` reads exactly the way a dev session's does one band up. The
+   third column is the age, on line 1 only; the meta line spans under it.
+
+   The 3px left edge is the session row's, for its reason: carried by every row as
+   transparent rather than grown on the open one, or the content would step sideways as the
+   selection moved. The left padding gives those 3px back, so the dot sits where it did. */
 .bot-row {
   flex: none;
   display: grid;
-  grid-template-columns: 0.85rem 1fr;
+  grid-template-columns: 0.85rem 1fr auto;
   gap: 0.12rem 0.45rem;
   align-items: center;
   width: 100%;
-  padding: 0.42rem 0.75rem 0.45rem;
-  border-radius: 3px;
+  padding: 0.42rem 0.75rem 0.45rem calc(0.75rem - 3px);
+  border-left: 3px solid transparent;
+  border-radius: 0 3px 3px 0;
   text-align: left;
   color: var(--ink);
 }
 
 .bot-row:hover { background: var(--surface-sunk); }
 
-/* The bot whose pane is open — `--row-open`, the rail's own selected-row token, exactly as
-   `.room-row.is-open` borrows it. */
-.bot-row.is-open { background: var(--row-open); }
+/* The bot open in a pane — the session row's selected marker, all three signals of it
+   (`.session-row.is-open`): `--row-open`, the accent edge, and the name at full ink. A bot
+   opens where a session does (the ruling of 2026-10-13), so it is selected the way one is;
+   a quieter marker here would read as "something else is open" beside a session's. */
+.bot-row.is-open {
+  background: var(--row-open);
+  border-left-color: var(--accent);
+}
 
 /* The liveness dot: the session dot's size and tokens, because they mean the same thing one
    band up. Pulsing `--working` while a conversation is active, `--idle` while the helper is
@@ -7037,11 +7048,26 @@ body.pin-reordering * { cursor: grabbing !important; }
 /* A helper gone quiet dims the name as well as greying the dot, so the row reads as resting
    rather than as one more live bot — and still asks for nothing. */
 .bot-row.is-offline .bot-name { color: var(--ink-muted); }
+.bot-row.is-open .bot-name { color: var(--ink); }
+
+/* When the bot last did anything — `now`, `5m`, `3h`, `2d` — right-aligned on line 1, in the
+   place and register the rooms band gives a room's (`.room-age`): quiet, and never shrinking,
+   because an age cut to `2…` is a number that lies. Empty for a bot that has shipped nothing
+   yet, and then not laid out at all. */
+.bot-age {
+  grid-column: 3;
+  grid-row: 1;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.bot-age:empty { display: none; }
 
 /* Line 2: the session meta line's register. The model is the one part that gives way — a
    ctx or an age cut to `4…` would be a number that lies. */
 .bot-meta {
-  grid-column: 2;
+  grid-column: 2 / -1;
   min-width: 0;
   font-family: var(--mono);
   font-size: 0.66rem;

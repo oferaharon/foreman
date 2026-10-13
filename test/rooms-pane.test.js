@@ -741,11 +741,12 @@ test('a room replaces whatever non-session pane is open, and never takes focus',
   assert.match(open, /if \(panes\.some\(\(p\) => p\.groupRoomId\(\) === id\)\) return revealOpenRoom\(\);/);
   // The routing is one spelling in `roomTarget` and the mount is `mountGroupRoom`, since
   // item 4's auto-collapse asks the first before an aside's fold and runs the second after
-  // it. The rule itself is unchanged: a non-session pane first, then the pane you are not
-  // focused in, and focus never left on the room.
+  // it. The rule itself is unchanged: a room pane first, then the pane you are not focused
+  // in, and focus never left on the room. "A room pane" is "not main content" since a bot
+  // joined the session in the main pane (2026-10-13), so a room never replaces a bot either.
   // `fn` above reads the pane factory's own indentation; these two are module-scope.
   const top = (name) => app.match(new RegExp(`\\nfunction ${name}\\([\\s\\S]*?\\n\\}`))[0];
-  assert.match(top('roomTarget'), /const holder = panes\.find\(\(p\) => p\.kind\(\) !== 'session'\);/);
+  assert.match(top('roomTarget'), /const holder = panes\.find\(\(p\) => !holdsMain\(p\)\);/);
   assert.match(top('roomTarget'), /panes\.find\(\(p\) => p\.slot !== focusedSlot\) \|\| panes\[0\]/);
   const mount = top('mountGroupRoom');
   assert.match(mount, /const keep = sessionPane\(\);\n  if \(keep\) setFocus\(keep\.slot\);/);
@@ -768,7 +769,9 @@ test('a pane that can hold a session is asked by kind, and answers `selected` po
   // recorded reasoning, and the same shape `roomParticipants` is written in.
   assert.match(code, /selected: \(\) => \(view\.kind === 'session' \? view\.selected : null\),/);
   assert.match(code, /groupRoomId: \(\) => \(view\.kind === 'group-room' \? view\.groupRoom\?\.id \?\? null : null\),/);
-  assert.match(app.match(/\nfunction sessionPane\(\) \{[\s\S]*?\n\}/)[0], /p\.kind\(\) === 'session'/);
+  // …and so is the question the rail asks of a pane, now that a bot sits where a session does.
+  assert.match(app.match(/\nfunction sessionPane\(\) \{[\s\S]*?\n\}/)[0], /holdsMain\(here\)/);
+  assert.match(app.match(/\nfunction holdsMain\(pane\) \{[\s\S]*?\n\}/)[0], /kind === 'session' \|\| kind === 'bot'/);
 });
 
 test('a draft is kept per room, and never restored into a different one', () => {

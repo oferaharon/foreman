@@ -8,6 +8,7 @@ import {
   activeText,
   BOT_KEY_PREFIX,
   botActivityAt,
+  botAgeText,
   botEntries,
   botFacts,
   botLineParts,
@@ -44,7 +45,10 @@ import { ageText } from '../web/group-summary.js';
  *    beside the sessions; the band reads `'bots' in msg`, draws no unread count, hoists
  *    nothing and notifies nothing — and a helper gone quiet is grey, never red.
  *  - **Two lines and one record.** Line 2 is the newest reply's model · effort · ctx, never a
- *    sum or a max of two conversations' contexts, plus `N active` only when N > 1.
+ *    sum or a max of two conversations' contexts, plus `N active` only when N > 1; the age is
+ *    on line 1, right-aligned, where the rooms band puts a room's (ruling of 2026-10-13).
+ *  - **A bot opens where a session does** — the main pane, the rail's selected marker, split
+ *    and reload as for a session — and a room never replaces one (ruling of 2026-10-13).
  *  - **A row already in place is never moved** — the rooms band's scroll-jump lesson.
  *  - **A bot's `user` record is a prompt, never the maintainer's bubble; its markdown goes
  *    through the escaping renderer; its images and subagents come off the bot routes.**
@@ -272,26 +276,51 @@ test('`seenText` is the rail’s one age ladder, said as a phrase', () => {
 
 /* ------------------------------------------------------------- line two --- */
 
-test('line two is the newest reply’s model · effort · ctx, then the age, then `N active`', () => {
+test('line two is the newest reply’s model · effort · ctx, then `N active` — and no age', () => {
   const b = bot('alpha', { current: current(), lastActiveAt: NOW - 2 * MIN, active: 2 });
   assert.deepEqual(
-    botLineParts(b, NOW).map((p) => p.kind),
-    ['model', 'effort', 'ctx', 'age', 'active'],
+    botLineParts(b).map((p) => p.kind),
+    ['model', 'effort', 'ctx', 'active'],
   );
-  assert.equal(botLineText(b, NOW), 'Sonnet 5.5 · medium · 4% · 2m · 2 active');
+  assert.equal(botLineText(b), 'Sonnet 5.5 · medium · 4% · 2 active');
+});
+
+test('the age sits right-aligned on line one — the rooms band’s place and register, one formatter', () => {
+  // The words: the rail's one ladder, and nothing at all for a bot that has shipped nothing.
+  const b = bot('alpha', { current: current(), lastActiveAt: NOW - 2 * MIN });
+  assert.equal(botAgeText(b, NOW), ageText(NOW - 2 * MIN, NOW));
+  assert.equal(botAgeText(b, NOW), '2m');
+  assert.equal(botAgeText(bot('quiet'), NOW), '');
+  // One formatter: `botAgeText` asks `ageText`, and nothing in the module spells another.
+  assert.match(fn('botAgeText', band), /return at \? ageText\(at, now\) : '';/);
+  assert.doesNotMatch(strip(band), /relativeTime|toFixed|Math\.floor/);
+
+  // The place: a third grid column on line one, the meta line spanning under it — so the row
+  // stays two lines — and the rooms band's own type for an age.
+  const row = styles.match(/\.bot-row \{[\s\S]*?\n\}/)[0];
+  assert.match(row, /grid-template-columns: 0\.85rem 1fr auto;/);
+  const age = styles.match(/\.bot-age \{[\s\S]*?\n\}/)[0];
+  assert.match(age, /grid-column: 3;/);
+  assert.match(age, /grid-row: 1;/);
+  const roomAge = styles.match(/\.room-age \{[\s\S]*?\n\}/)[0];
+  for (const decl of ['font-size: 0.6rem;', 'color: var(--ink-faint);']) {
+    assert.ok(roomAge.includes(decl) && age.includes(decl), `the rooms band’s ${decl}`);
+  }
+  assert.match(styles, /\.bot-age:empty \{ display: none; \}/);
+  assert.match(styles, /\.bot-meta \{\n  grid-column: 2 \/ -1;/);
 });
 
 test('`N active` appears only when more than one conversation is', () => {
   assert.equal(activeText(0), '');
   assert.equal(activeText(1), '', 'one active conversation is what the pulsing dot already says');
   assert.equal(activeText(2), '2 active');
-  assert.ok(!botLineText(bot('a', { current: current(), active: 1 }), NOW).includes('active'));
+  assert.ok(!botLineText(bot('a', { current: current(), active: 1 })).includes('active'));
 });
 
 test('contexts are never summed or maxed — the row reads the one `current` record', () => {
   // `current` is the server's single newest qualifying reply; the row has no other source.
   const b = bot('a', { current: current({ ctx: { tokens: 50_000, window: 1_000_000, pct: 5 } }), active: 3 });
-  assert.equal(botLineParts(b, NOW).find((p) => p.kind === 'ctx').text, '5%');
+  assert.equal(botLineParts(b).find((p) => p.kind === 'ctx').text, '5%');
   assert.doesNotMatch(strip(band), /Math\.max\([^)]*ctx|reduce\([^)]*ctx|\+= [a-z.]*ctx/i);
 });
 
@@ -303,7 +332,7 @@ test('the model is the resolved name, else the raw id as written — never a for
   assert.equal(modelText({ model: null, modelName: null }), '');
   assert.equal(modelText(null), '');
   // A bot that has shipped nothing yet draws an empty line, not a line of separators.
-  assert.equal(botLineText(bot('a'), NOW), '');
+  assert.equal(botLineText(bot('a')), '');
   // Nothing in the module reaches for a model formatter.
   assert.doesNotMatch(band, /shortModel|\.replace\(\/\\s\*\\\(/);
 });
@@ -313,15 +342,17 @@ test('a reply with no effort (Haiku 4.5) and a model with no known window still 
     current: current({ model: 'claude-mystery', modelName: 'claude-mystery', effort: null, ctx: { tokens: 41_200, window: null, pct: null } }),
   });
   assert.deepEqual(
-    botLineParts(b, NOW).map((p) => p.text),
-    ['claude-mystery', '41k', '5m'],
+    botLineParts(b).map((p) => p.text),
+    ['claude-mystery', '41k'],
   );
+  assert.equal(botAgeText(b, NOW), '5m', 'the age is still drawn, on line one');
 });
 
 test('the hover spells the row out, and says it is read-only', () => {
   const t = botTitle(bot('alpha-bot', { name: 'Alpha nightly', current: current(), conversations: 3 }), NOW);
   assert.match(t, /^Alpha nightly \(alpha-bot\)\n/);
   assert.match(t, /3 conversations kept/);
+  assert.match(t, /\nlast active 5m ago\n/);
   assert.match(t, /newest reply: Sonnet 5\.5 · medium · 4%/);
   assert.match(t, /read-only/);
 });
@@ -374,12 +405,18 @@ test('the band is patched in place: nodes reused, nothing moved that is already 
     const first = patchBotsBand(list, bots, { now: NOW });
     assert.equal(list.children.length, 3);
     assert.equal(list.moves, 3, 'three new rows, three insertions');
-    assert.deepEqual(metaText(first[0]), ['Sonnet 5.5', 'medium', '4%', '1m', '2 active']);
+    assert.deepEqual(metaText(first[0]), ['Sonnet 5.5', 'medium', '4%', '2 active']);
+    assert.equal(part(first[0], 'bot-age').textContent, '1m');
+    assert.equal(part(first[1], 'bot-age').textContent, '30m');
     assert.equal(part(first[0], 'bot-dot').className, 'bot-dot is-active');
     assert.equal(part(first[2], 'bot-dot').className, 'bot-dot is-offline');
     assert.match(first[2].className, /is-offline/);
-    // Two lines, no third: a dot, a name and one meta line, and nothing else on the row.
-    assert.equal(first[0].children.length, 3);
+    // Two lines, no third: line one is a dot, a name and the age, line two the meta line —
+    // and nothing else on the row.
+    assert.deepEqual(
+      first[0].children.map((c) => c.className),
+      ['bot-dot is-active', 'bot-name', 'bot-age', 'bot-meta'],
+    );
 
     // A beat on which beta's helper flickered and alpha is now open: same nodes, no moves.
     list.moves = 0;
@@ -387,11 +424,15 @@ test('the band is patched in place: nodes reused, nothing moved that is already 
     assert.deepEqual(again, first, 'every node reused');
     assert.equal(list.moves, 0, 'a row already in place is never moved');
     assert.match(again[0].className, /is-open/);
+    // The session row's open marker, said its way: `aria-current` only while true.
+    assert.equal(again[0].attrs['aria-current'], 'true');
+    assert.equal('aria-current' in again[1].attrs, false);
 
     // Gamma speaks and goes to the top: the one row that has to move is the only one moved.
     list.moves = 0;
     bots[2] = { ...bots[2], lastActiveAt: NOW, helper: { online: true, lastSeen: NOW } };
     const moved = patchBotsBand(list, bots, { now: NOW });
+    assert.equal('aria-current' in first[0].attrs, false, 'and it comes off when the bot is no longer open');
     assert.deepEqual(
       moved.map((r) => r.dataset.botKey),
       ['bot:gamma', 'bot:alpha', 'bot:beta'],
@@ -426,8 +467,10 @@ test('the clock re-ages a row without building or moving anything', () => {
     const bots = [bot('alpha', { lastActiveAt: NOW - 2 * MIN, current: current() })];
     patchBotsBand(list, bots, { now: NOW });
     list.moves = 0;
+    const meta = part(list.children[0], 'bot-meta').children.slice();
     relightBotsBand(list, bots, NOW + 60 * MIN);
-    assert.ok(metaText(list.children[0]).includes('1h'));
+    assert.equal(part(list.children[0], 'bot-age').textContent, '1h');
+    assert.deepEqual(part(list.children[0], 'bot-meta').children, meta, 'line two untouched');
     assert.equal(list.moves, 0);
   });
   assert.equal(nextBotTick([bot('a', { lastActiveAt: NOW - 30_000 })], NOW), 30_000);
@@ -600,12 +643,18 @@ test('nothing about bots joins `composerSig`', () => {
 });
 
 test('a bot pane is remembered as its own shape and restored only while the bot is registered', () => {
-  assert.match(app, /state\.opened\[slot\] = \{ kind: 'bot', bot: botId, cid: cid \|\| null, autoSplit: Boolean\(autoSplit\) \}/);
+  // No `autoSplit`: a bot sits in the main pane and never made the split it is in.
+  assert.match(app, /state\.opened\[slot\] = \{ kind: 'bot', bot: botId, cid: cid \|\| null \};/);
+  assert.match(app, /function rememberOpenBot\(slot, botId, cid = null\) \{/);
+  assert.doesNotMatch(code, /rememberOpenBot\([^)]*threadSplit/);
   const adopt = app.match(/function adopt\(\) \{[\s\S]*?\n  \}/)[0];
-  assert.match(adopt, /if \(last\?\.kind === 'bot'\) \{/);
-  assert.match(adopt, /state\.bots\.some\(\(b\) => b\?\.id === last\.bot\)/);
-  assert.match(adopt, /return openBot\(last\.bot, last\.cid \?\? null\);/);
-  assert.match(adopt, /rememberOpenBot\(slot, null\);/);
+  const branch = adopt.slice(adopt.indexOf("if (last?.kind === 'bot') {"), adopt.indexOf('const pick ='));
+  assert.ok(branch.length > 0);
+  assert.match(branch, /if \(state\.bots\.some\(\(b\) => b\?\.id === last\.bot\)\) return openBot\(last\.bot, last\.cid \?\? null\);/);
+  assert.match(branch, /rememberOpenBot\(slot, null\);/);
+  // …and it never takes the split's ownership from a bot entry, which would overwrite a
+  // room's answer from the other slot.
+  assert.doesNotMatch(strip(branch), /threadSplit|autoSplit/);
   // A reconnect re-takes the conversation on screen, never `null` — a reader is never moved.
   assert.match(fn('resubscribe'), /send\(\{ type: 'subscribe-bot', botId: view\.bot\.id, cid: view\.botCid, slot \}\)/);
   // …and every way out gives the subscription back.
@@ -613,11 +662,70 @@ test('a bot pane is remembered as its own shape and restored only while the bot 
   for (const name of ['open', 'openShared', 'openGroup']) assert.match(fn(name), /leaveBot\(\);/, name);
 });
 
-test('a bot opens beside the session, never taking focus — one non-session pane at a time', () => {
-  const open = top('openBotPane');
-  assert.match(open, /panes\.find\(\(p\) => p\.kind\(\) !== 'session'\)/);
-  assert.match(open, /openSplit\(\{ adopt: false, focus: false \}\)/);
-  assert.match(open, /const keep = sessionPane\(\);/);
+test('a bot opens where a session does — `openSession`’s routing, line for line', () => {
+  /*
+   * The maintainer's ruling of 2026-10-13: a bot row replaces what the main pane shows,
+   * exactly as a session row does, and that pane keeps focus — so the next rail click (a
+   * session, or another bot) replaces it in turn. In split view it goes wherever a session
+   * would, the focused side; nothing here opens a split or claims one.
+   */
+  const open = strip(top('openBotPane'));
+  const session = strip(top('openSession'));
+  for (const line of ['const pane = sessionPane();', 'if (!pane) return;', 'if (!holdsMain(pane)) threadSplit = false;', 'setFocus(pane.slot);']) {
+    assert.ok(open.includes(line) && session.includes(line), `both say \`${line}\``);
+  }
+  assert.match(open, /pane\.openBot\(id\);/);
+  assert.doesNotMatch(open, /openSplit|threadSplit = true|p\.botId\(\)/);
+
+  // What "a pane the rail drives" means now: a session or a bot, said as an allow-list.
+  assert.match(top('holdsMain'), /return kind === 'session' \|\| kind === 'bot';/);
+  const pane = top('sessionPane');
+  assert.match(pane, /if \(here && holdsMain\(here\)\) return here;/);
+  assert.match(pane, /return panes\.find\(holdsMain\) \|\| here;/);
+});
+
+test('rooms keep their side-pane routing, and a room never replaces a bot', () => {
+  // "One non-session pane at a time" is now one *room* at a time: both room openers look for
+  // a pane holding something that is not main content, so a bot is passed over the way a
+  // session is — opening a room beside a lone bot splits rather than taking its pane.
+  assert.match(top('roomTarget'), /const holder = panes\.find\(\(p\) => !holdsMain\(p\)\);/);
+  assert.match(top('openSharedRoom'), /const holder = panes\.find\(\(p\) => !holdsMain\(p\)\);/);
+  assert.match(top('mountGroupRoom'), /openSplit\(\{ adopt: false, focus: false \}\)/);
+  assert.match(top('mountGroupRoom'), /if \(!existing\) threadSplit = true;/);
+});
+
+test('the bot pane’s own `close` is gone; its head carries the session head’s split control', () => {
+  /*
+   * The old `close` meant "put back what the bot was opened beside" — and in the main pane
+   * nothing is behind it. A bot is left the way a session is, by clicking another row; what
+   * the session head offers beside that is `split` / `close` (this pane), and the bot head
+   * now has that same control, worded by the same function.
+   */
+  assert.doesNotMatch(code, /closeBot|Close this bot/);
+  const pane = strip(fn('renderBotPane'));
+  assert.match(pane, /split\.className = 'ghost-btn split-toggle';/);
+  assert.match(pane, /syncSplitBtn\(split\);/);
+  // Re-worded on the beat that re-words a session's, since `openSplit` and `closePane` only
+  // call `renderHead` and never rebuild a head.
+  const head = fn('renderHead');
+  const bot = head.slice(head.indexOf("if (view.kind === 'bot') {"), head.indexOf('const s = current();'));
+  assert.match(bot, /renderBotHead\(\);\n\s+syncSplitBtn\(host\.querySelector\('\.split-toggle'\)\);\n\s+return;/);
+});
+
+test('the bot row takes the session row’s selected marker, all three signals', () => {
+  const session = styles.match(/\.session-row\.is-open \{[\s\S]*?\n\}/)[0];
+  const bot = styles.match(/\.bot-row\.is-open \{[\s\S]*?\n\}/)[0];
+  assert.match(session, /background: var\(--row-open\);/);
+  assert.match(bot, /background: var\(--row-open\);/);
+  assert.match(bot, /border-left-color: var\(--accent\);/);
+  assert.match(styles, /\.bot-row\.is-open \.bot-name \{ color: var\(--ink\); \}/);
+  // The 3px edge is carried by every row as transparent, the session row's reason: grown on
+  // the open one only, the content would step sideways as the selection moved.
+  const row = styles.match(/\.bot-row \{[\s\S]*?\n\}/)[0];
+  assert.match(row, /border-left: 3px solid transparent;/);
+  assert.match(styles.match(/\.session-row \{[\s\S]*?\n\}/)[0], /border-left: 3px solid transparent;/);
+  // And the rail's marker follows every pane holding the bot, as a session's does.
+  assert.match(top('renderBotsBand'), /const openIds = panes\.map\(\(p\) => p\.botId\(\)\)\.filter\(Boolean\);/);
 });
 
 /* ------------------------------------------------- the stream: traps 6, 7, 8 --- */

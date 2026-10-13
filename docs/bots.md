@@ -226,14 +226,19 @@ routes (`/api/bots/…`), their own socket frames (`subscribe-bot`, `bot`, `bot-
 The **bots** band sits below the session list and above the rooms band, drawn only when at
 least one bot is registered. One two-line row per bot, ordered by last activity:
 
-- line 1: the name, and a dot — pulsing while a conversation is active, **grey** while the
-  helper is offline. Never red: red means "needs you", and a bot whose helper stopped needs a
-  look at the settings list, not an alarm;
-- line 2: the **newest reply's** model · effort · ctx and its age, plus `N active` when more
-  than one conversation is. All three facts come from one record; two conversations'
-  contexts are never summed or maxed.
+- line 1: a dot, the name, and — right-aligned, as the rooms band shows a room's — when the
+  bot was last active. The dot pulses while a conversation is active and is **grey** while
+  the helper is offline. Never red: red means "needs you", and a bot whose helper stopped
+  needs a look at the settings list, not an alarm;
+- line 2: the **newest reply's** model · effort · ctx, plus `N active` when more than one
+  conversation is. All three facts come from one record; two conversations' contexts are
+  never summed or maxed.
 
-Opening a row puts a bot pane beside the session you are on. Its head shows the helper's
+Opening a row puts the bot in the **main pane**, where a session's conversation opens: it
+replaces what that pane shows, the row takes a session row's selected marker, and clicking a
+session row switches back. Split view treats a bot as it treats a session, and a reload puts
+it back. (Rooms are the other kind: they open beside the main pane and never replace a bot.)
+Its head shows the helper's
 state and the newest reply's model, effort and ctx; its body lists the conversations (title,
 root label, active / finished / idle, model · effort · ctx, when it started) and shows the
 selected one's transcript — prompts labelled **prompt** rather than drawn as your own
