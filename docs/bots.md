@@ -77,13 +77,24 @@ no real deployment uses.
 
 ### What the contract does not say, and a deployment should know
 
-- **Until the next release, copy the helper from `main`, not from a tag.** Item 1's release
-  tag does not exist yet: **v0.4.0 predates the helper**, so no tag carries the file. Copy
-  it from the commit your panel runs (`git -C <panel checkout> show
-  HEAD:helper/foreman-helper.mjs > foreman-helper.mjs`). It reports itself as `0.4.0`,
-  because its version string follows `package.json` — which still reads `0.4.0` — not the
-  tag that shipped it. Every helper copied so far is the same file, unchanged since it was
-  merged.
+- **Copy the helper from the release tag, and v0.5.0 is the first one that carries it.**
+  The commands name v0.5.0; use the tag your panel runs, which the rail's footer shows.
+  From a clone of this repository:
+
+  ```
+  git show v0.5.0:helper/foreman-helper.mjs > foreman-helper.mjs
+  ```
+
+  or, without one (a Homebrew install has no git history):
+
+  ```
+  curl -fsSL https://raw.githubusercontent.com/oferaharon/foreman/v0.5.0/helper/foreman-helper.mjs -o foreman-helper.mjs
+  ```
+
+  `node foreman-helper.mjs --version` then prints `foreman-helper 0.5.0 (protocol v1)`: its
+  version string follows `package.json`, and a test holds the two equal. A helper copied
+  from `main` before the tag existed reports `0.4.0` and is otherwise the same file — the
+  version string is the only line in it that has changed since it was merged.
 - **A restarted helper waits up to 90 seconds before it ships again.** Every start is a new
   instance, and the panel refuses a different instance for 90 s after the last hello of the
   one before it, so two helpers can never ship one bot at once. A restart or a rebuild is
@@ -149,7 +160,7 @@ Run it where the helper runs, with the same environment:
 
 ```
 $ node foreman-helper.mjs --check
-foreman-helper 0.4.0 --check (protocol v1)
+foreman-helper 0.5.0 --check (protocol v1)
 panel        http://host.docker.internal:48770  reachable
 token        accepted for bot alpha-bot
 roots        main  /home/node/.claude/projects  2 files

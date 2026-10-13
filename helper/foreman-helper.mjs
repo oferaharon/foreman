@@ -54,7 +54,7 @@ import { fileURLToPath } from 'node:url';
 
 export const PROTOCOL_VERSION = 1;
 /** The Foreman release this file shipped with; a test holds it equal to package.json. */
-export const HELPER_VERSION = '0.4.0';
+export const HELPER_VERSION = '0.5.0';
 
 // ------------------------------------------------------------------- the four components ---
 

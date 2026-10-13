@@ -169,6 +169,20 @@ were. [Docs →](docs/panel.md#split-view)
 
 </td>
 </tr>
+<tr>
+<td width="50%">
+
+<img src="docs/images/bots.png" alt="The bots screen: in the rail, a BOTS band below the session list holding three deployments, each with its model, effort and context and its last-active age right-aligned, one of them dimmed to a grey dot because its helper is offline, and the selected one open in the main pane. Its header reads helper online, seen just now; under it a list of two finished conversations with their branch, model and start time; then the open run in full — its prompt in a card, a Bash call refused at an approval check, a second Bash call, and the bot's answer rendered as a nightly test report with five passing tests and a bold verdict — and a read-only line where the composer would be, saying the panel watches this bot and never types to it." width="100%" />
+
+</td>
+<td width="50%" valign="middle">
+
+### Bots: your deployed agents, in full
+
+Some of your Claude Code agents don't live in a terminal: a cron job running `claude -p`, a chat bridge, an Agent SDK loop in a container or a VM. Put one small helper beside each, and it copies their transcripts to the panel as they're written. That covers every prompt, command, result and answer, with the model, effort and context each one ran on. The panel keeps its own copy for 90 days and shows each deployment as one read-only row. The helper only ever connects out, so the deployment opens no ports. [Docs →](docs/bots.md)
+
+</td>
+</tr>
 </table>
 
 **Also in the box:**
@@ -177,10 +191,6 @@ were. [Docs →](docs/panel.md#split-view)
   view each ship their own web-app manifest, and notifications tell the Mac the moment a
   session walks into something it cannot get past.
   [Docs →](docs/panel.md#installing-it-as-an-app)
-- **Bots: read what your deployed agents did** — a helper beside a headless deployment (a
-  cron job running `claude -p`, a chat bridge, an Agent SDK loop) ships its transcripts to
-  the panel, which keeps its own copy for 90 days and shows each deployment as one read-only
-  row with every run in full. [Docs →](docs/bots.md)
 - **Snapshot, restore, relaunch all** — save the set of sessions you have open and put it
   back after a reboot, or close every one and start it again for the day you update Claude
   Code. [Docs →](docs/panel.md#snapshot-and-restore)
