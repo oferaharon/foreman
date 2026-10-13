@@ -176,6 +176,26 @@ import {
   mentionQuery,
   roomOrdered,
 } from './rooms-pane.js';
+// Context pressure — the three bands and the node that paints them — lifted into a leaf when
+// the bots band needed it, because a bot's `ctx` has to look exactly like a dev session's and
+// the band is a pure module that cannot import this one.
+import { ctxEl, ctxFor } from './ctx.js';
+// The bots band and the bot pane's conversation list: the order, the two lines of a row, the
+// in-place patch, and the settings list's facts. Pure and node-tested like `rooms-band.js`,
+// whose `place` it imports — a row already in place is never moved.
+import {
+  botFacts,
+  botsSig,
+  dotState,
+  dotText,
+  modelText,
+  nextBotTick,
+  patchBotsBand,
+  patchConversations,
+  relightBotsBand,
+  relightConversations,
+  seenText,
+} from './bots-band.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -225,6 +245,15 @@ const state = {
   // An empty array is the ordinary answer: most of the time there are no rooms. That is what
   // makes `'rooms' in msg` the test and a truth test the bug — see the roster handler.
   rooms: [],
+  // Every registered bot — a deployed agent the panel watches and does not run — exactly as
+  // `BotStore#list` hands them over: `{id, name, helper: {online, lastSeen}, conversations,
+  // active, lastTs, lastActiveAt, current}`. A sibling of `sessions` on the roster frame like
+  // the rooms, and **never a row in `sessions`**: a bot has no pane, so nothing that walks the
+  // session list — the inbox, the notifications, read state, `adopt` — can ever be handed one.
+  // Its conversations never ride this frame; a bot pane subscribes for them.
+  //
+  // An empty array is the ordinary answer, `rooms`' reason — hence `'bots' in msg`.
+  bots: [],
   // Whether the band's `archived (N)` fold is shut. This browser's, not the server's, and
   // deliberately: a group's collapse is a fact about your filing and should follow you
   // between windows, while this is a fact about the window you are looking at — the same
@@ -343,6 +372,21 @@ function rememberOpenGroup(slot, roomId, autoSplit = false) {
   persistOpen();
 }
 
+/**
+ * The sixth shape: one bot, by id, and the conversation it was showing.
+ *
+ * Its own `kind` for the group room's reason — `adopt` reads `kind` to tell the shapes apart,
+ * and a bot id stored under a session's keys would be looked up in the roster, found missing,
+ * and replaced by whatever session sorts first. `cid` is `null` while the pane is following
+ * the bot's newest conversation; once one is on screen it is stored, so a reload comes back
+ * to the conversation that was being read rather than to whichever one ran last.
+ */
+function rememberOpenBot(slot, botId, cid = null, autoSplit = false) {
+  if (botId) state.opened[slot] = { kind: 'bot', bot: botId, cid: cid || null, autoSplit: Boolean(autoSplit) };
+  else delete state.opened[slot];
+  persistOpen();
+}
+
 function persistOpen() {
   try {
     localStorage.setItem('foreman.opened', JSON.stringify(state.opened));
@@ -375,6 +419,8 @@ const el = {
   railGrip: document.getElementById('railGrip'),
   railShared: document.getElementById('railShared'),
   railSharedUnseen: document.getElementById('railSharedUnseen'),
+  railBots: document.getElementById('railBots'),
+  botsList: document.getElementById('botsList'),
   railRooms: document.getElementById('railRooms'),
   roomsGrip: document.getElementById('roomsGrip'),
   roomsAdd: document.getElementById('roomsAdd'),
@@ -669,7 +715,11 @@ resizer({
     // Before the rail is laid out — or while it is hidden at phone width — every rect is
     // zero. The preference's own `max` is a better answer than a negative one.
     if (bottom <= top) return ROOMS_MAX;
-    return (bottom - top) / remPx() - RAIL_LIST_MIN;
+    // The bots band sits between the list and this one at its own content height, so what
+    // it takes is not the rooms band's to give away — or a drag could squeeze the session
+    // list under its floor by exactly the bots band's height. Zero while it is hidden.
+    const bots = el.railBots?.getBoundingClientRect().height ?? 0;
+    return (bottom - top - bots) / remPx() - RAIL_LIST_MIN;
   },
   // The band's bottom is pinned by the peer-messages row and the footer under it, so it
   // grows upward and the pointer's distance back from that edge *is* the height being asked
@@ -1181,6 +1231,10 @@ function handle(msg) {
     // since been deleted. `rateLimits` learned this the expensive way. `Array.isArray` inside
     // the guard so a malformed frame draws an empty band rather than throwing in `renderRail`.
     if ('rooms' in msg) state.rooms = Array.isArray(msg.rooms) ? msg.rooms : [];
+    // `in`, not a truth test, for `rooms`' reason one line up: no bots is the ordinary answer
+    // on a machine that has registered none, and a truth test would pin the last band drawn.
+    // Set before `adopt`, which is what puts a remembered bot pane back after a reload.
+    if ('bots' in msg) state.bots = Array.isArray(msg.bots) ? msg.bots : [];
     // Before the render, so a notification is never held up behind a rail repaint — and
     // before `adopt`, which can change what is on screen but never what happened.
     notifyRoster(msg.sessions);
@@ -1221,24 +1275,10 @@ function handle(msg) {
  * scannable. The whole name is the name.
  */
 
-/**
- * Context pressure, one rule shared by the rail and the header so they can't drift:
- * under 50% is fine, 50–70% is worth noticing, above that it's getting tight.
+/*
+ * Context pressure — `ctxTone` / `ctxEl`, one rule shared by the rail, the header and the
+ * bots band so they can't drift — lives in `web/ctx.js` and is imported above.
  */
-function ctxTone(pct) {
-  if (pct == null) return '';
-  if (pct < 50) return 'ctx-ok';
-  if (pct <= 70) return 'ctx-warn';
-  return 'ctx-hot';
-}
-
-function ctxEl(pct) {
-  const el = document.createElement('span');
-  el.className = `ctx ${ctxTone(pct)}`;
-  el.textContent = `${pct}%`;
-  el.title = `${pct}% of the context window used`;
-  return el;
-}
 
 /**
  * Effort, read off the footer. Colour tracks the scale rather than danger — it is a
@@ -2375,6 +2415,33 @@ async function openSettings() {
 
   body.append(gsSec);
 
+  /* ──────────────────────────────────────────────────────────────────── bots ── */
+
+  /*
+   * Every registered bot, read-only, off `GET /api/bots` — what its helper last said, where
+   * it is watching, how much of this disk its copies take, and the last thing the panel
+   * refused it. The one place a deployment that is *not* showing up becomes visible rather
+   * than silent: "never seen" and "401 unknown bot or wrong token" are two different fixes,
+   * and the band can only say "grey".
+   *
+   * Nothing here writes. Registering and removing a bot is `foreman-panel bots add|remove`
+   * on this Mac — the token is printed once, by the CLI, and never crosses this page — so the
+   * section has no control and Save does not touch it. Fetched on its own after the box is
+   * up, so a slow or failing read costs this section a sentence and the rest of the box
+   * nothing. Disk use is per bot, the maintainer's Q5: ninety days of copies is plausibly
+   * gigabytes, and all of it is in every backup.
+   */
+  const botsSec = document.createElement('section');
+  botsSec.className = 'settings-sec settings-bots';
+  const botsCap = document.createElement('h3');
+  botsCap.textContent = 'Bots';
+  const botsList = document.createElement('div');
+  botsList.className = 'settings-bots-list';
+  botsList.textContent = 'Reading…';
+  botsSec.append(botsCap, botsList);
+  body.append(botsSec);
+  fillBotsList(botsList);
+
   /* ───────────────────────────────────────────────────────────── the buttons ── */
 
   const cancel = document.createElement('button');
@@ -2443,6 +2510,62 @@ async function openSettings() {
       say(err.message, 'err');
     }
   };
+}
+
+/**
+ * The settings box's Bots list: one block per registered bot, label/value pairs from
+ * `botFacts` (`web/bots-band.js`), and a sentence when there are none or the read failed.
+ */
+async function fillBotsList(box) {
+  let rows;
+  try {
+    const res = await fetch('/api/bots');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Could not read the bots (${res.status}).`);
+    rows = Array.isArray(data.bots) ? data.bots : [];
+  } catch (err) {
+    box.textContent = err.message;
+    box.classList.add('is-err');
+    return;
+  }
+  if (!rows.length) {
+    box.textContent =
+      'None registered. A bot is added on this Mac with `foreman-panel bots add <id>`, which prints its token once; its helper then appears here within one heartbeat.';
+    return;
+  }
+  const now = Date.now();
+  box.replaceChildren(
+    ...rows.map((row) => {
+      const card = document.createElement('div');
+      card.className = 'settings-bot';
+      const head = document.createElement('div');
+      head.className = 'settings-bot-head';
+      const dot = document.createElement('span');
+      dot.className = `bot-dot is-${dotState(row)}`;
+      dot.title = dotText(row, now);
+      dot.setAttribute('role', 'img');
+      dot.setAttribute('aria-label', dot.title);
+      const name = document.createElement('span');
+      name.className = 'settings-bot-name';
+      name.textContent = row.name || row.id;
+      const id = document.createElement('span');
+      id.className = 'settings-bot-id';
+      id.textContent = row.id;
+      head.append(dot, name, id);
+      const facts = document.createElement('dl');
+      facts.className = 'settings-bot-facts';
+      for (const [label, value] of botFacts(row, { now, bytesText: shortBytes })) {
+        const dt = document.createElement('dt');
+        dt.textContent = label;
+        const dd = document.createElement('dd');
+        dd.textContent = value;
+        if (label === 'last refusal' && row.lastRefusal) dd.classList.add('is-refusal');
+        facts.append(dt, dd);
+      }
+      card.append(head, facts);
+      return card;
+    }),
+  );
 }
 
 /* ---------------------------------------------------------- snapshot --- */
@@ -3271,8 +3394,23 @@ function briefHtml(md) {
     const raw = typeof token === 'string' ? token : (token?.raw ?? token?.text ?? '');
     return String(raw).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   };
+  /*
+   * …and a link whose scheme is not one a reader means to follow is drawn as its text. A bot
+   * pane renders replies through this function too (`botRender`), and a bot quoting a
+   * third-party chat message can carry markdown as easily as markup: `[x](javascript:…)` is
+   * passed through by marked 15 untouched (checked against the vendored copy), and the
+   * `html` hook above never sees it because it is not HTML. `http(s):`, `mailto:`, a
+   * fragment and a same-origin path are kept; everything else loses its anchor and keeps its
+   * words. A brief has never carried any other kind, so this changes nothing a brief draws.
+   */
+  const link = renderer.link.bind(renderer);
+  renderer.link = (token) =>
+    SAFE_HREF_RE.test(String(token?.href ?? '').trim()) ? link(token) : renderer.parser.parseInline(token.tokens ?? []);
   return withBlankTargets(marked.parse(String(md ?? ''), { renderer }));
 }
+
+/** The link schemes `briefHtml` keeps an anchor for. */
+const SAFE_HREF_RE = /^(https?:|mailto:|#|\/(?!\/))/i;
 
 
 /* ------------------------------------------------------------- menus --- */
@@ -3684,12 +3822,15 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 const TEXT_UPLOAD_RE = /\.(txt|md)$/i;
 const isTextName = (name) => TEXT_UPLOAD_RE.test(String(name || ''));
 
-/** Sizes for a chip: short enough to sit beside a filename in 15rem. */
+/** Sizes for a chip: short enough to sit beside a filename in 15rem. Also the settings
+ *  list's per-bot disk use, which is where the gigabyte step earns its place — ninety days of
+ *  a busy bot's copies plausibly run to gigabytes (the plan's trap 16). */
 function shortBytes(n) {
   if (!Number.isFinite(n) || n < 0) return '';
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n < 1024 ** 3) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / 1024 ** 3).toFixed(2)} GB`;
 }
 
 /**
@@ -4022,6 +4163,85 @@ function toggleArchivedRooms() {
     /* quota or private mode — this window still behaves, it just won't survive a reload */
   }
   renderRoomsBand();
+}
+
+/* -------------------------------------------------------------- bots --- */
+
+/** What the bots band last drew — `roomsSig`'s twin, built in `web/bots-band.js`. */
+let botsSigLast = '';
+
+/**
+ * The rail's bots band: one row per registered bot, newest activity first.
+ *
+ * Called from the end of `renderRail` beside the rooms band, so every place that already
+ * redraws the rail redraws this too. The **whole band** comes and goes with `.app.has-bots`
+ * — unlike the rooms band, whose head carries `+ room`, this one has no control in it:
+ * registering a bot is the CLI's job (`foreman-panel bots add`), so a band over nothing would
+ * be a heading offering nothing. A machine with no bots draws the rail it drew before.
+ *
+ * Read-only and asks for nothing: no unread count, no inbox hoist, no notification, and a
+ * helper gone quiet is grey, never red. Nothing about bots joins `composerSig`.
+ */
+function renderBotsBand() {
+  const bots = state.bots;
+  el.app.classList.toggle('has-bots', bots.length > 0);
+  if (!el.botsList) return;
+  const openIds = panes.map((p) => p.botId()).filter(Boolean);
+  const sig = botsSig(bots, { openIds });
+  if (sig === botsSigLast) return;
+  botsSigLast = sig;
+  patchBotsBand(el.botsList, bots, { openIds, onOpen: openBotPane });
+  scheduleBotsTick();
+}
+
+/** The band's one pending timer: the next row age to change its words. */
+let botsTickTimer = null;
+
+/**
+ * Keep the band's ages true when nothing else changes — `scheduleRoomsTick`'s reason, for
+ * its rows: the signature carries the activity time and not the clock. The bot pane's own
+ * conversation ages ride the same beat (`relightBot`), so one timer serves both.
+ */
+function scheduleBotsTick() {
+  clearTimeout(botsTickTimer);
+  botsTickTimer = null;
+  const wait = nextBotTick(state.bots);
+  if (wait === null) return;
+  botsTickTimer = setTimeout(() => {
+    relightBotsBand(el.botsList, state.bots);
+    for (const p of panes) p.relightBot();
+    scheduleBotsTick();
+  }, wait + 250);
+}
+
+/**
+ * Put one bot on screen — `openSharedRoom`'s routing, for its reasons.
+ *
+ * **One pane open** → split, and the bot takes the new slot, so the conversation you were
+ * reading stays where it is. **Two open** → it replaces whichever pane holds something that
+ * is not a session, else the one you are *not* focused in. One non-session pane at a time,
+ * the maintainer's rule for rooms, which is also what guarantees `sessionPane` always has
+ * somewhere to send a rail click — and focus is never left on the bot, because a read-only
+ * pane is never the one the rail and the keyboard drive (#36).
+ */
+function openBotPane(id) {
+  if (!id) return;
+  if (panes.some((p) => p.botId() === id)) return;
+  const holder = panes.find((p) => p.kind() !== 'session');
+  const madeSplit = !holder && panes.length < 2;
+  const target =
+    holder ||
+    (panes.length > 1
+      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
+      : openSplit({ adopt: false, focus: false }));
+  if (!target) return;
+  if (madeSplit) threadSplit = true;
+  target.openBot(id);
+  // Put focus where a click will land, which after this is never the bot.
+  const keep = sessionPane();
+  if (keep) setFocus(keep.slot);
+  for (const p of panes) p.renderHead();
+  renderRail();
 }
 
 /**
@@ -4585,6 +4805,7 @@ function renderRail() {
     el.railList.replaceChildren(frag);
     refocusGrip(focusedGrip);
     renderSharedRow();
+    renderBotsBand();
     renderRoomsBand();
     return;
   }
@@ -4676,7 +4897,9 @@ function renderRail() {
   // A sibling band drawn from the same frame on the same beat, for the reason the line
   // below gives about the connections: every place that already redraws the rail is a place
   // this could otherwise go stale. It holds its own signature, so a beat that changed
-  // nothing costs nothing.
+  // nothing costs nothing. The bots band sits between the list and the rooms band, and is
+  // drawn on the same beat for the same reason.
+  renderBotsBand();
   renderRoomsBand();
 }
 
@@ -7213,6 +7436,38 @@ function createPane(slot, host) {
     // pane's shape rather than its contents (the composer goes), which is the one thing a
     // repaint of the head cannot do on its own. `null` means nothing has been drawn yet.
     groupArchivedDrawn: null,
+
+    /* --------------------------------------------------------- one bot --- */
+
+    /*
+     * `kind === 'bot'` is the fifth thing a pane can hold: one deployed agent the panel
+     * watches and does not run — its conversations, and any one of them in full.
+     * **Read-only**: no composer, no files view, no terminal, no pin, no pickers, and
+     * `buildComposer` is never called (`renderMain`'s reason for the other two non-session
+     * kinds). `view.selected` stays `null` the whole time, which is what keeps
+     * `markReadIfCaughtUp` and every session guard below from ever firing for a bot — a bot
+     * keeps no unread state, and `read.prune` would delete any it did two seconds later.
+     *
+     * Its frames are `bot` / `bot-messages` / `bot-earlier` / `bot-conversations`, on a
+     * subscription map of the server's own (`server/bot-subs.js`) that the session rebind
+     * loop and `rememberAgentFiles` are never handed. In the factory for the reason
+     * everything per-pane is.
+     */
+    bot: null, // {id} — the live row is `state.bots`, looked up on every paint
+    botCid: null, // the conversation on screen, or null while following the newest
+    botWant: null, // what the last `subscribe-bot` asked for — see `receiveBot`
+    botConvs: [], // the first page, as the last `bot` / `bot-conversations` frame sent it
+    botNext: null, // that page's cursor for older conversations, or null
+    botOlder: [], // older pages fetched over HTTP, in order
+    botOlderNext: null,
+    botOlderBusy: false,
+    botOlderError: null,
+    botSeq: 0, // bumped whenever the pane lets a bot go, so a late fetch paints nothing
+    botMessages: [],
+    botHasEarlier: false,
+    botLoaded: false, // a `bot` frame has arrived since the pane opened or a pick was made
+    botError: null,
+    botEls: null, // the nodes `renderBotPane` built: head parts, the list, the stream
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -7396,6 +7651,7 @@ function createPane(slot, host) {
     saveDraft(); // hold on to what was being typed in the session we're leaving
     leaveShared(); // …and the room's subscription, if that is what this pane was holding
     leaveGroup(); // …or a group room's, which is the server's to stop for the same reason
+    leaveBot(); // …or a bot's, on its own subscription map, for the same reason again
     // Coming back from a room: the pane stops being one before anything else, or the guards
     // below would keep refusing on its behalf.
     view.kind = 'session';
@@ -7446,6 +7702,7 @@ function createPane(slot, host) {
     if (view.kind === 'shared') return;
     saveDraft();
     leaveGroup(); // …or a group room, whose subscription is the server's to stop
+    leaveBot(); // …or a bot, whose subscription is on a map of its own
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'shared';
@@ -8072,6 +8329,7 @@ function createPane(slot, host) {
     saveDraft();
     leaveShared(); // …or the shared room, whose subscription is the server's to stop
     leaveGroup(); // …or another room, whose subscription is one per socket and supersedes
+    leaveBot(); // …or a bot, whose subscription is on a map of its own
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'group-room';
@@ -9561,6 +9819,519 @@ function createPane(slot, host) {
     }
   }
 
+  /* --------------------------------------------------------------- bot --- */
+
+  /**
+   * The bot's row as the roster last described it — the live answer, which moves on every
+   * beat a helper says hello or a reply lands — else the one the last `bot` frame carried,
+   * else a stand-in with the id, so the head has something honest to draw before either.
+   */
+  function botLive() {
+    const id = view.bot?.id;
+    if (!id) return null;
+    return (
+      state.bots.find((b) => b?.id === id) ||
+      view.bot.row || { id, name: id, helper: { online: false, lastSeen: null }, conversations: 0, active: 0, current: null }
+    );
+  }
+
+  /**
+   * How a bot conversation's messages are drawn: `renderMessage`'s one options argument.
+   *
+   * Three things differ from a session's stream, and each is one of the plan's traps:
+   *
+   *  - **A `user` record is a prompt, not the maintainer's bubble** (trap 6). Every one of
+   *    them is cron text, a chat message the bot was handed, or a group's message it wrapped
+   *    — none of it was typed by anybody at this panel, so it is labelled `prompt` and drawn
+   *    in a neutral register.
+   *  - **Markdown goes through `briefHtml`** (trap 7), whose `html` hook shows raw markup as
+   *    text. A bot quoting a third-party message can carry markup in its reply, and the
+   *    session renderer passes raw HTML straight into `innerHTML`.
+   *  - **Images and subagent transcripts come off the bot routes** (trap 8). The session
+   *    builders address `/api/sessions/:id/…`, which answers 404 for a conversation id, and
+   *    `/api/agent-run?file=` reads a path *the transcript names* — a path inside the bot's
+   *    container, which must never choose what this Mac reads. The agent route here takes the
+   *    bare `result.agent.id` and the server builds the path from its own components.
+   */
+  function botRender(botId, cid) {
+    const base = `/api/bots/${encodeURIComponent(botId)}/conversations/${encodeURIComponent(cid)}`;
+    return {
+      prompt: true,
+      markdown: briefHtml,
+      imageSrc: (ref) => `${base}/image/${encodeURIComponent(ref.uuid)}/${ref.index}`,
+      agentUrl: (agent) => (agent?.id ? `${base}/agent/${encodeURIComponent(agent.id)}` : null),
+    };
+  }
+
+  /** This pane's renderer options, or `null` while it shows no conversation. */
+  function botHow() {
+    return view.bot?.id && view.botCid ? botRender(view.bot.id, view.botCid) : null;
+  }
+
+  /**
+   * Put one bot in this pane, showing `cid` — or, with `cid` null, whichever conversation
+   * the server says is newest. `openBotPane` decides *which* pane; `adopt` calls this
+   * directly to put a reload back.
+   *
+   * The session's subscription goes first, the team room's with it, and any room's — all
+   * server state, and a pane that stopped drawing one while the server went on tailing it is
+   * the "subscription that outlives its slot" trap from the other end. The server drops the
+   * slot's session subscription itself on `subscribe-bot` as well (`server/bot-subs.js`'s
+   * one rule: a slot shows a session or a bot, never both).
+   */
+  function openBot(id, cid = null) {
+    if (!id) return;
+    if (view.kind === 'bot' && view.bot?.id === id && (cid === null || cid === view.botCid)) return;
+    saveDraft();
+    leaveShared();
+    leaveGroup();
+    send({ type: 'unsubscribe', slot });
+    syncRoom(null);
+    clearBot();
+    view.kind = 'bot';
+    view.selected = null;
+    view.messages = [];
+    view.hasEarlier = false;
+    view.error = null;
+    view.lastMarked = null;
+    chipNodes.clear();
+    view.bot = { id, row: state.bots.find((b) => b?.id === id) || null };
+    view.botCid = cid || null;
+    view.botWant = view.botCid;
+    // `threadSplit` is already settled by the caller, as it is for a room.
+    rememberOpenBot(slot, id, view.botCid, threadSplit);
+    send({ type: 'subscribe-bot', botId: id, cid: view.botCid, slot });
+    renderRail();
+    renderMain();
+    // A slot that was a folded room a moment ago must stop being one — `paintFolds` re-asks
+    // every pane, and a bot is never foldable.
+    paintFolds();
+  }
+
+  /** Give the bot's subscription back on the way to holding something else — `leaveGroup`'s
+   *  reason, on the server's other map. A no-op for a pane not holding one. */
+  function leaveBot() {
+    if (view.kind !== 'bot') return;
+    send({ type: 'unsubscribe-bot', slot });
+    clearBot();
+  }
+
+  /** Everything a bot pane leaves behind, dropped in one place. The seq bump is what
+   *  discards an older-conversations fetch still in flight for the bot being left. */
+  function clearBot() {
+    view.bot = null;
+    view.botCid = null;
+    view.botWant = null;
+    view.botConvs = [];
+    view.botNext = null;
+    view.botOlder = [];
+    view.botOlderNext = null;
+    view.botOlderBusy = false;
+    view.botOlderError = null;
+    view.botMessages = [];
+    view.botHasEarlier = false;
+    view.botLoaded = false;
+    view.botError = null;
+    view.botEls = null;
+    view.botSeq = (view.botSeq || 0) + 1;
+  }
+
+  /** Leave the bot, and put the panel back where it came from — `closeShared`'s two places. */
+  function closeBot() {
+    if (panes.length > 1 && threadSplit) {
+      closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
+      return;
+    }
+    send({ type: 'unsubscribe-bot', slot });
+    rememberOpenBot(slot, null);
+    view.kind = 'session';
+    clearBot();
+    adopt();
+    if (!view.selected) renderMain();
+    renderRail();
+    paintFolds();
+  }
+
+  /** Show one conversation of this bot. The server answers with a whole `bot` frame. */
+  function pickConversation(cid) {
+    if (view.kind !== 'bot' || !view.bot?.id || !cid || cid === view.botCid) return;
+    view.botCid = cid;
+    view.botWant = cid;
+    view.botMessages = [];
+    view.botHasEarlier = false;
+    view.botLoaded = false;
+    view.botError = null;
+    chipNodes.clear();
+    rememberOpenBot(slot, view.bot.id, cid, threadSplit);
+    send({ type: 'subscribe-bot', botId: view.bot.id, cid, slot });
+    renderBotList();
+    renderBotStream();
+  }
+
+  /**
+   * One of the bot frames, already known to be for this slot. Checked against this pane
+   * still holding **this** bot — a pane given something else must not go on accumulating a
+   * conversation it is not drawing.
+   */
+  function receiveBot(msg) {
+    if (view.kind !== 'bot' || !view.bot?.id || msg.botId !== view.bot.id) return;
+    if (msg.type === 'bot') {
+      /*
+       * A whole frame: the bot, its first page of conversations, and the one being tailed.
+       * Accepted when it answers what was last asked — the server's newest while following,
+       * the conversation picked, or `null` for a pick the bot no longer holds. A frame for an
+       * earlier ask that is still in flight when a row is pressed answers something else, and
+       * drawing it would put the old conversation back under the one just chosen.
+       */
+      const cid = typeof msg.cid === 'string' ? msg.cid : null;
+      if (view.botWant !== null && cid !== null && cid !== view.botWant) return;
+      if (msg.bot) view.bot.row = msg.bot;
+      view.botConvs = Array.isArray(msg.conversations) ? msg.conversations : [];
+      view.botNext = msg.next ?? null;
+      view.botCid = cid;
+      view.botMessages = Array.isArray(msg.messages) ? msg.messages : [];
+      view.botHasEarlier = Boolean(msg.hasEarlier);
+      view.botLoaded = true;
+      view.botError = null;
+      // What is on screen is what a reload should come back to — a pane showing a
+      // conversation is never moved off it, by the server or by a refresh.
+      if (cid) rememberOpenBot(slot, view.bot.id, cid, threadSplit);
+      renderBotHead();
+      renderBotList();
+      revealOpenConversation();
+      renderBotStream();
+      pinBotStream();
+      return;
+    }
+    if (msg.type === 'bot-conversations') {
+      if (msg.bot) view.bot.row = msg.bot;
+      view.botConvs = Array.isArray(msg.conversations) ? msg.conversations : [];
+      view.botNext = msg.next ?? null;
+      renderBotHead();
+      renderBotList();
+      return;
+    }
+    if (msg.cid !== view.botCid) return;
+    if (msg.type === 'bot-messages') {
+      appendBotMessages(Array.isArray(msg.messages) ? msg.messages : []);
+      return;
+    }
+    if (msg.type === 'bot-earlier') {
+      view.botMessages = (Array.isArray(msg.messages) ? msg.messages : []).concat(view.botMessages);
+      view.botHasEarlier = Boolean(msg.hasEarlier);
+      // The stream alone, holding the reader's distance from the bottom — the session
+      // pane's `earlier` rule, for its reason.
+      const stream = view.botEls?.stream;
+      if (stream?.isConnected) holdFromBottom(stream, renderBotStream);
+      else renderBotStream();
+    }
+  }
+
+  /**
+   * The bot, in a pane: its head, its conversations, the selected one's stream, and a
+   * read-only line where a composer would be.
+   *
+   * `buildComposer` is never called — `renderGroupPane`'s reason, and sharper here, since
+   * there is nothing at all to type into. Nothing the session head carries is drawn either:
+   * no files view, no terminal, no duplicate, no bin, no pin, no folder, no mode, model or
+   * effort picker, and no `@` completion, because every one of them acts on a pane this bot
+   * does not have.
+   *
+   * Everything is **painted after it is in the document** — the rooms trap
+   * `a-list-painted-at-build-time`: a list painted into a detached node paints nothing, and
+   * a quiet bot would then sit blank until its next reply.
+   */
+  function renderBotPane() {
+    host.replaceChildren();
+
+    const head = document.createElement('div');
+    head.className = 'main-head is-bot';
+    const dot = document.createElement('span');
+    dot.className = 'bot-dot';
+    dot.setAttribute('role', 'img');
+    const h1 = document.createElement('h1');
+    const meta = document.createElement('div');
+    meta.className = 'head-meta';
+    const helper = document.createElement('span');
+    helper.className = 'bot-head-helper';
+    const current = document.createElement('span');
+    current.className = 'bot-head-current';
+    const close = document.createElement('button');
+    close.className = 'ghost-btn';
+    close.type = 'button';
+    close.textContent = 'close';
+    close.title = 'Close this bot';
+    close.onclick = closeBot;
+    meta.append(helper, current, close);
+    head.append(dot, h1, meta);
+
+    const body = document.createElement('div');
+    body.className = 'bot-body';
+
+    const convs = document.createElement('div');
+    convs.className = 'bot-convs';
+    const cap = document.createElement('div');
+    cap.className = 'bot-convs-cap';
+    const list = document.createElement('div');
+    list.className = 'bot-convs-list';
+    const quiet = document.createElement('div');
+    quiet.className = 'bot-convs-quiet';
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'bot-convs-more';
+    more.onclick = loadOlderConversations;
+    convs.append(cap, list, quiet, more);
+
+    const convHead = document.createElement('div');
+    convHead.className = 'bot-conv-head';
+
+    const stream = document.createElement('div');
+    stream.className = 'stream bot-stream';
+    const inner = document.createElement('div');
+    inner.className = 'stream-inner';
+    stream.append(inner);
+
+    body.append(convs, convHead, stream);
+
+    // Where the composer would be. A line rather than a disabled box: a box that takes no
+    // typing is a control that lies about itself (the archived room's rule).
+    const ro = document.createElement('div');
+    ro.className = 'bot-readonly';
+    ro.textContent = 'read-only — the panel watches this bot and never types to it';
+
+    host.append(head, body, ro);
+    view.botEls = { head, dot, h1, helper, current, cap, list, quiet, more, convHead, stream, inner };
+
+    renderBotHead();
+    renderBotList();
+    renderBotStream();
+    pinBotStream();
+  }
+
+  /**
+   * The head's facts, patched in place on the roster beat: the name, the helper's liveness
+   * and when it was last heard from, and the newest reply's model · effort · ctx — the same
+   * record the band's row reads, so the two can never disagree.
+   */
+  function renderBotHead() {
+    const els = view.botEls;
+    const bot = botLive();
+    if (!els || !bot) return;
+    const liveness = dotState(bot);
+    els.dot.className = `bot-dot is-${liveness}`;
+    els.dot.title = dotText(bot);
+    els.dot.setAttribute('aria-label', els.dot.title);
+    els.h1.textContent = bot.name || bot.id;
+    els.h1.title = `${bot.name && bot.name !== bot.id ? `${bot.name} (${bot.id})` : bot.id} — a bot: a deployed agent this panel reads and does not run`;
+    const seen = seenText(bot.helper?.lastSeen);
+    els.helper.textContent = bot.helper?.online
+      ? `helper online${seen ? ` · seen ${seen}` : ''}`
+      : seen
+        ? `helper offline · last seen ${seen}`
+        : 'helper never seen';
+    els.helper.className = `bot-head-helper is-${liveness}`;
+    const cur = bot.current;
+    const kids = [];
+    const model = modelText(cur);
+    if (model) {
+      const m = document.createElement('span');
+      m.textContent = model;
+      m.title = cur.model || model;
+      kids.push(m);
+    }
+    if (cur?.effort) kids.push(effortEl(cur.effort));
+    const ctx = cur ? ctxFor(cur.ctx) : null;
+    if (ctx) kids.push(ctx);
+    els.current.replaceChildren(...kids);
+    els.current.title = cur ? 'The newest reply across every conversation of this bot' : '';
+  }
+
+  /** The conversations on screen: the first page, then any older pages, never one twice. */
+  function botEntries() {
+    const first = view.botConvs;
+    const seen = new Set(first.map((c) => c?.cid));
+    return first.concat(view.botOlder.filter((c) => c?.cid && !seen.has(c.cid)));
+  }
+
+  /** The list, patched in place by `cid` (`patchConversations`), and its caption. */
+  function renderBotList() {
+    const els = view.botEls;
+    if (!els?.list.isConnected) return;
+    const bot = botLive();
+    const entries = botEntries();
+    const n = Math.max(Number(bot?.conversations) || 0, entries.length);
+    els.cap.textContent = n ? `conversations · ${n}` : 'conversations';
+    patchConversations(els.list, entries, { selected: view.botCid, onPick: pickConversation });
+    // Nothing yet says what it is waiting for, and points at the one place that can say why.
+    els.quiet.hidden = Boolean(entries.length) || !view.botLoaded;
+    els.quiet.textContent = bot?.helper?.online
+      ? 'No conversations yet. They appear here the moment this bot’s helper ships its first one.'
+      : 'No conversations yet, and its helper has not reported. The Bots list in settings says when it was last seen and what it was last refused.';
+    const cursor = view.botOlder.length ? view.botOlderNext : view.botNext;
+    els.more.hidden = !cursor;
+    els.more.disabled = view.botOlderBusy;
+    els.more.textContent = view.botOlderBusy ? 'loading…' : view.botOlderError || 'older conversations';
+    renderBotConvHead();
+  }
+
+  /**
+   * Scroll the conversation list — that box and nothing else — so the open row is in view.
+   * Only on a whole `bot` frame (an open, a pick, a reload putting a pane back), never on the
+   * list's own repaints: a reader scrolled down the list while new conversations arrive must
+   * not be pulled back to the one they are reading.
+   */
+  function revealOpenConversation() {
+    const list = view.botEls?.list;
+    const row = list?.isConnected ? list.querySelector('.bot-conv.is-open') : null;
+    if (!row) return;
+    const box = list.getBoundingClientRect();
+    const at = row.getBoundingClientRect();
+    if (at.top < box.top) list.scrollTop -= box.top - at.top;
+    else if (at.bottom > box.bottom) list.scrollTop += at.bottom - box.bottom;
+  }
+
+  /** The line above the stream: which conversation this is, in a sentence. */
+  function renderBotConvHead() {
+    const els = view.botEls;
+    if (!els) return;
+    const c = botEntries().find((x) => x?.cid === view.botCid);
+    if (!c) {
+      els.convHead.replaceChildren();
+      els.convHead.hidden = true;
+      return;
+    }
+    els.convHead.hidden = false;
+    const title = document.createElement('span');
+    title.className = 'bot-conv-head-title';
+    title.textContent = c.title || `conversation ${c.cid.slice(0, 8)}`;
+    const facts = document.createElement('span');
+    facts.className = 'bot-conv-head-facts';
+    const n = Number(c.prompts) || 0;
+    facts.textContent = [
+      c.root,
+      `${n} prompt${n === 1 ? '' : 's'}`,
+      c.entrypoint,
+      c.version ? `Claude Code ${c.version}` : '',
+      c.cid.slice(0, 8),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    facts.title = c.cid;
+    els.convHead.replaceChildren(title, facts);
+  }
+
+  /**
+   * The selected conversation's stream, drawn by the session's own `groupMessages` and
+   * `renderMessage` — with `botRender`'s options, and never a copy of either.
+   */
+  function renderBotStream() {
+    const els = view.botEls;
+    if (!els?.inner.isConnected) return;
+    chipNodes.clear();
+    const frag = document.createDocumentFragment();
+    if (view.botError) {
+      const p = document.createElement('div');
+      p.className = 'composer-hint err';
+      p.textContent = view.botError;
+      frag.append(p);
+    }
+    const how = botHow();
+    if (!view.botCid) {
+      if (view.botLoaded && botEntries().length) {
+        frag.append(emptyState('Pick a conversation', 'Choose one above to read it in full.'));
+      }
+    } else if (!view.botLoaded) {
+      const p = document.createElement('div');
+      p.className = 'bot-loading';
+      p.textContent = 'loading…';
+      frag.append(p);
+    } else {
+      if (view.botHasEarlier) {
+        const btn = document.createElement('button');
+        btn.className = 'load-earlier';
+        btn.textContent = 'load earlier';
+        btn.onclick = () => {
+          btn.textContent = 'loading…';
+          send({ type: 'bot-load-earlier', slot });
+        };
+        frag.append(btn);
+      }
+      for (const m of groupMessages(view.botMessages)) frag.append(renderMessage(m, how));
+      if (!view.botMessages.length) {
+        frag.append(emptyState('Nothing yet', 'This conversation has no messages in the loaded window.'));
+      }
+    }
+    els.inner.replaceChildren(frag);
+  }
+
+  /** Put the stream on its newest line. Set directly rather than in a frame callback: an
+   *  automated Chrome window reports `visibilityState: 'hidden'` and runs none. */
+  function pinBotStream() {
+    const stream = view.botEls?.stream;
+    if (stream?.isConnected) stream.scrollTop = stream.scrollHeight;
+  }
+
+  /** Live lines for the conversation on screen — `appendMessages`' drawing half, and only
+   *  that: a bot has no files dot, no output set and no read watermark. */
+  function appendBotMessages(messages) {
+    const wasEmpty = !view.botMessages.length;
+    view.botMessages.push(...messages);
+    const els = view.botEls;
+    if (!els?.inner.isConnected) return;
+    const { stream } = els;
+    const stick = stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120;
+    if (wasEmpty) {
+      renderBotStream();
+    } else {
+      const how = botHow();
+      for (const m of messages) {
+        // A result whose chip is already on screen updates it in place.
+        if (m.kind === 'tool_result' && chipNodes.has(m.toolUseId)) {
+          applyResult(chipNodes.get(m.toolUseId), { isError: m.isError, output: m.output, diff: m.diff, images: m.images }, how);
+          continue;
+        }
+        if (m.kind === 'title') continue;
+        if (m.kind === 'thinking' && !state.showThinking) continue;
+        els.inner.append(renderMessage(m, how));
+      }
+    }
+    if (stick) pinBotStream();
+  }
+
+  /** The next page of older conversations, over HTTP — the first page rides the frames. */
+  async function loadOlderConversations() {
+    if (view.kind !== 'bot' || !view.bot?.id || view.botOlderBusy) return;
+    const cursor = view.botOlder.length ? view.botOlderNext : view.botNext;
+    if (!cursor) return;
+    const id = view.bot.id;
+    const mine = view.botSeq;
+    view.botOlderBusy = true;
+    view.botOlderError = null;
+    renderBotList();
+    try {
+      const res = await fetch(`/api/bots/${encodeURIComponent(id)}/conversations?before=${encodeURIComponent(cursor)}`);
+      const data = await res.json().catch(() => ({}));
+      if (mine !== view.botSeq) return;
+      if (!res.ok) throw new Error(data.error || `Could not read older conversations (${res.status}).`);
+      view.botOlder.push(...(Array.isArray(data.conversations) ? data.conversations : []));
+      view.botOlderNext = data.next ?? null;
+    } catch (err) {
+      if (mine === view.botSeq) view.botOlderError = err.message;
+    } finally {
+      if (mine === view.botSeq) {
+        view.botOlderBusy = false;
+        renderBotList();
+      }
+    }
+  }
+
+  /** The clock moved: re-age the conversation rows and re-word the head. Nothing is built. */
+  function relightBot() {
+    if (view.kind !== 'bot' || !view.botEls?.list.isConnected) return;
+    relightConversations(view.botEls.list, botEntries());
+    renderBotHead();
+  }
+
   /* -------------------------------------------------------------- main --- */
 
   function renderMain() {
@@ -9575,6 +10346,9 @@ function createPane(slot, host) {
     // session behind them, and neither has been allowed to teach `buildComposer` to cope
     // with that — see `renderGroupPane`.
     if (view.kind === 'group-room') return renderGroupPane();
+    // …and a bot, the third pane with no session behind it and the first with nothing to
+    // type into at all. Before `current()` for the same reason the two above are.
+    if (view.kind === 'bot') return renderBotPane();
 
     const s = current();
     host.replaceChildren();
@@ -12486,6 +13260,14 @@ function createPane(slot, host) {
       return;
     }
 
+    // A bot's head moves on this beat too — its helper says hello every thirty seconds and
+    // the newest reply's model, effort and ctx ride the roster's `bots` field — and that is
+    // all that moves here. Nothing about a bot reaches `composerSig` below.
+    if (view.kind === 'bot') {
+      renderBotHead();
+      return;
+    }
+
     const s = current();
     if (!s || !host.firstChild) return;
 
@@ -12872,6 +13654,10 @@ function createPane(slot, host) {
     // it into — the node the last session left behind is detached, and writing into it is
     // a paint nobody sees rather than an error, which is the sort of thing that survives
     // until it doesn't.
+    //
+    // A bot pane is the one non-session pane that *does* hold a transcript, so the thinking
+    // toggle redraws it through its own stream function.
+    if (view.kind === 'bot') return renderBotStream();
     if (view.kind !== 'session') return;
     if (!streamEl) return;
     chipNodes.clear();
@@ -13003,34 +13789,61 @@ function createPane(slot, host) {
    * for a chip's markdown body or for a subagent's `returned` block is prose in exactly the
    * sense the two obvious ones are. The chip summary is the one thing asked for by name,
    * because its link comes off the message's `input` rather than off the text on screen.
+   *
+   * **`how` is the one options argument, and `null` is the session path, unchanged.** A bot
+   * pane passes `botRender`'s answer, which changes three things and nothing else — a `user`
+   * record is a *prompt*, markdown goes through the escaping renderer, and images and
+   * subagent transcripts are fetched from the bot routes. It threads through every builder
+   * below that recurses or fetches, so a nested subagent step is drawn by the same rules as
+   * the conversation it sits in. Path links are a session's own outputs and a bot has none,
+   * so they are skipped outright rather than asked and refused.
    */
-  function renderMessage(m) {
-    const node = buildMessage(m);
+  function renderMessage(m, how = null) {
+    const node = buildMessage(m, how);
+    if (how) return node;
     linkPathsInTree(node);
     if (m?.kind === 'tool_use') markChipPath(node, m);
     return node;
   }
 
-  function buildMessage(m) {
+  function buildMessage(m, how = null) {
     switch (m.kind) {
       // A pasted screenshot arrives on the user's own record, beside the text — and a
       // message that was *only* an image used to be dropped in `normalize.js` and never
       // reached here at all. Hence the fragment: text, images, or both.
       case 'user': {
         const frag = document.createDocumentFragment();
-        if (m.text) {
+        if (m.text && how?.prompt) {
+          /*
+           * A bot's prompt. Every `user` record in a bot's transcript is cron text, a chat
+           * message it was handed, or a group's message it wrapped — none of it typed by
+           * anybody at this panel — so it is never the maintainer's own bubble: the
+           * `a-type-user-record-is-not-proof-a-human-typed-anything` trap at full strength.
+           * A labelled block in a neutral register, `textContent` as the bubble is.
+           */
+          const div = document.createElement('div');
+          div.className = 'msg-prompt';
+          const label = document.createElement('div');
+          label.className = 'msg-prompt-label';
+          label.textContent = 'prompt';
+          const body = document.createElement('div');
+          body.className = 'msg-prompt-body';
+          body.textContent = m.text;
+          div.append(label, body);
+          frag.append(div);
+        } else if (m.text) {
           const div = document.createElement('div');
           div.className = 'msg-user';
           div.textContent = m.text;
           frag.append(div);
         }
-        if (m.images?.length) frag.append(imageStrip(m.images));
+        if (m.images?.length) frag.append(imageStrip(m.images, how));
         return frag;
       }
       case 'assistant': {
         const div = document.createElement('div');
         div.className = 'msg-assistant';
-        div.innerHTML = withBlankTargets(marked.parse(m.text || ''));
+        div.innerHTML = how ? how.markdown(m.text || '') : withBlankTargets(marked.parse(m.text || ''));
         return div;
       }
       case 'command': {
@@ -13113,12 +13926,15 @@ function createPane(slot, host) {
       // completed`), which is why the label says only what kind of line this is. The
       // report itself is prose, so it opens as markdown rather than as `chip-out`'s mono.
       case 'task_notification':
-        return renderChip({
-          name: 'notice',
-          summary: m.summary,
-          body: m.text,
-          markdown: true,
-        });
+        return renderChip(
+          {
+            name: 'notice',
+            summary: m.summary,
+            body: m.text,
+            markdown: true,
+          },
+          how,
+        );
       /*
        * A group-room post, typed into this session's composer by the panel. The fifth time
        * this file has met the `task-notification` shape: a whole message from somewhere
@@ -13140,12 +13956,15 @@ function createPane(slot, host) {
        * keeps the quoting lined up — the same reason `msg-link` has it.
        */
       case 'group_message':
-        return renderChip({
-          name: 'room',
-          summary: `${m.from} in "${m.room}" · ${firstLine(m.text)}`,
-          mark: m.to ? `to ${m.to}` : '',
-          body: m.raw,
-        });
+        return renderChip(
+          {
+            name: 'room',
+            summary: `${m.from} in "${m.room}" · ${firstLine(m.text)}`,
+            mark: m.to ? `to ${m.to}` : '',
+            body: m.raw,
+          },
+          how,
+        );
       // What the command printed back. Sits under its `/model` or `/exit` chip and is
       // styled off it, because that is what it is — the reply, not a turn of its own.
       case 'command_output': {
@@ -13155,35 +13974,41 @@ function createPane(slot, host) {
         return div;
       }
       case 'thinking':
-        return renderChip({ name: 'thinking', summary: firstLine(m.text), body: m.text, muted: true });
+        return renderChip({ name: 'thinking', summary: firstLine(m.text), body: m.text, muted: true }, how);
       case 'tool_use': {
-        const node = renderChip({
-          name: m.name,
-          summary: m.summary,
-          body: m.result?.output,
-          isError: m.result?.isError,
-          hasResult: Boolean(m.result),
-          result: m.result,
-          images: m.result?.images,
-        });
+        const node = renderChip(
+          {
+            name: m.name,
+            summary: m.summary,
+            body: m.result?.output,
+            isError: m.result?.isError,
+            hasResult: Boolean(m.result),
+            result: m.result,
+            images: m.result?.images,
+          },
+          how,
+        );
         chipNodes.set(m.toolUseId, node);
         return node;
       }
       case 'tool_result':
-        return renderChip({
-          name: 'result',
-          summary: firstLine(m.output),
-          body: m.output,
-          isError: m.isError,
-          images: m.images,
-        });
+        return renderChip(
+          {
+            name: 'result',
+            summary: firstLine(m.output),
+            body: m.output,
+            isError: m.isError,
+            images: m.images,
+          },
+          how,
+        );
       case 'subagent': {
         const wrap = document.createElement('div');
         const label = document.createElement('div');
         label.className = 'divider';
         label.textContent = `subagent · ${m.items.length} steps`;
         wrap.append(label);
-        for (const item of m.items) wrap.append(renderMessage({ ...item, sidechain: false }));
+        for (const item of m.items) wrap.append(renderMessage({ ...item, sidechain: false }, how));
         return wrap;
       }
       default: {
@@ -13205,8 +14030,11 @@ function createPane(slot, host) {
    * 52rem at most and shrinks with the pane, and a strip of five screenshots at any pane
    * width has to stay inside that or the whole conversation starts scrolling horizontally.
    */
-  function imageStrip(images) {
+  function imageStrip(images, how = null) {
     const sessionId = view.selected;
+    // A bot's images live under the bot's own route; the session builder addresses
+    // `/api/sessions/:id/…`, which answers 404 for a conversation id (trap 8).
+    const srcOf = how ? (ref) => how.imageSrc(ref) : (ref) => imageSrc(sessionId, ref);
     const strip = document.createElement('div');
     strip.className = 'img-strip';
 
@@ -13226,11 +14054,12 @@ function createPane(slot, host) {
       // reads back `complete: false` on thumbnails that are plainly on screen. Same family
       // as the `requestAnimationFrame` / `ResizeObserver` trap the room panel hit. Worth
       // knowing before you spend an hour chasing an empty strip that a screenshot fixes.
-      img.src = imageSrc(sessionId, ref);
+      img.src = srcOf(ref);
       img.alt = '';
       btn.append(img);
 
-      btn.onclick = () => openLightbox(sessionId, images, i);
+      btn.onclick = () =>
+        how ? openLightbox(null, images, i, { src: (_id, item) => srcOf(item) }) : openLightbox(sessionId, images, i);
       strip.append(btn);
     });
     return strip;
@@ -13275,9 +14104,19 @@ function createPane(slot, host) {
    * render through exactly the same code — tool chips, diffs and all. It's fetched on
    * first open rather than up front; these files run to hundreds of kilobytes.
    */
-  function renderAgentRun(agent, finalText) {
+  function renderAgentRun(agent, finalText, how = null) {
     const el = document.createElement('div');
     el.className = 'agent-run';
+    // Where its own steps are read from. A session's subagent is the file its transcript
+    // names, through `/api/agent-run`'s allow-list; a bot's is addressed by the bare agent
+    // id under the bot's route, and the path is the server's to build — a bot's
+    // `outputFile` names a path inside its container and must never choose what this Mac
+    // reads (trap 4).
+    const runUrl = how
+      ? how.agentUrl(agent)
+      : agent.outputFile
+        ? `/api/agent-run?file=${encodeURIComponent(agent.outputFile)}`
+        : null;
 
     if (agent.prompt) {
       const details = document.createElement('details');
@@ -13294,7 +14133,7 @@ function createPane(slot, host) {
     steps.className = 'agent-steps';
     el.append(steps);
 
-    if (!agent.outputFile) {
+    if (!runUrl) {
       steps.append(note('This agent kept no separate transcript.'));
     } else {
       const load = document.createElement('button');
@@ -13304,7 +14143,7 @@ function createPane(slot, host) {
         load.disabled = true;
         load.textContent = 'loading…';
         try {
-          const res = await fetch(`/api/agent-run?file=${encodeURIComponent(agent.outputFile)}`);
+          const res = await fetch(runUrl);
           const data = await res.json();
           if (!res.ok) throw new Error(data.error || `Failed (${res.status})`);
           load.remove();
@@ -13314,7 +14153,7 @@ function createPane(slot, host) {
           for (const m of data.messages) {
             if (m.kind === 'title') continue;
             if (m.kind === 'thinking' && !state.showThinking) continue;
-            inner.append(renderMessage(m));
+            inner.append(renderMessage(m, how));
           }
           if (!inner.childElementCount) inner.append(note('Nothing recorded.'));
           steps.append(inner);
@@ -13335,7 +14174,7 @@ function createPane(slot, host) {
       label.textContent = 'returned';
       const body = document.createElement('div');
       body.className = 'msg-assistant';
-      body.innerHTML = withBlankTargets(marked.parse(finalText));
+      body.innerHTML = how ? how.markdown(finalText) : withBlankTargets(marked.parse(finalText));
       ret.append(label, body);
       el.append(ret);
     }
@@ -13350,7 +14189,7 @@ function createPane(slot, host) {
     return el;
   }
 
-  function renderChip({ name, summary, mark, body, isError, muted, hasResult, result, images, markdown }) {
+  function renderChip({ name, summary, mark, body, isError, muted, hasResult, result, images, markdown }, how = null) {
     const wrap = document.createElement('div');
     if (muted) wrap.className = 'msg-thinking';
 
@@ -13425,13 +14264,13 @@ function createPane(slot, host) {
     out.className = `chip-out${isError ? ' err' : ''}`;
     out.hidden = true;
     if (diff) out.append(renderDiff(diff));
-    else if (agent) out.append(renderAgentRun(agent, body));
+    else if (agent) out.append(renderAgentRun(agent, body, how));
     // A report written for a human to read, not command output: the same treatment the
     // subagent's `returned` block already gets, one nesting level up.
     else if (markdown && body) {
       const prose = document.createElement('div');
       prose.className = 'msg-assistant';
-      prose.innerHTML = withBlankTargets(marked.parse(body));
+      prose.innerHTML = how ? how.markdown(body) : withBlankTargets(marked.parse(body));
       out.append(prose);
     } else out.textContent = body || '';
     wrap.append(out);
@@ -13441,7 +14280,7 @@ function createPane(slot, host) {
 
     // Below the body, not inside it: `out` is collapsed by default, and a screenshot the
     // session just took is the one part of a tool result worth seeing without a click.
-    if (images?.length) wrap.append(imageStrip(images));
+    if (images?.length) wrap.append(imageStrip(images, how));
 
     chip.onclick = () => {
       if (!out.textContent && !diff && !agent) return;
@@ -13453,12 +14292,12 @@ function createPane(slot, host) {
     return wrap;
   }
 
-  function applyResult(node, { isError, output, diff, images }) {
+  function applyResult(node, { isError, output, diff, images }, how = null) {
     if (!node?._out) return;
     // The chip was drawn when the call went out, before there was a result to have
     // images. This is the live path — without it a screenshot only appeared for readers
     // who arrived after the turn, and the session that took it showed nothing.
-    if (images?.length && !node.querySelector('.img-strip')) node.append(imageStrip(images));
+    if (images?.length && !node.querySelector('.img-strip')) node.append(imageStrip(images, how));
     node._out.replaceChildren();
     if (diff) node._out.append(renderDiff(diff));
     else node._out.textContent = output || '';
@@ -15752,6 +16591,24 @@ function createPane(slot, host) {
       return;
     }
 
+    /*
+     * A bot's frames, ahead of the guard below for the reason the rooms' are: a bot pane is
+     * not a session and is entitled to them. Each carries the bot's id and `receiveBot`
+     * checks it against what this pane holds. The `error` a bot subscription can answer with
+     * is this pane's too — below the guard it would be dropped, and a pane stuck on
+     * `loading…` with the reason thrown away is the failure a reader cannot see past.
+     */
+    if (msg.type === 'bot' || msg.type === 'bot-messages' || msg.type === 'bot-earlier' || msg.type === 'bot-conversations') {
+      receiveBot(msg);
+      return;
+    }
+    if (msg.type === 'error' && view.kind === 'bot') {
+      view.botError = msg.message;
+      view.botLoaded = true;
+      renderBotStream();
+      return;
+    }
+
     if (msg.type === 'shared') {
       if (view.kind !== 'shared') return;
       view.shared = msg.entries || [];
@@ -15927,6 +16784,20 @@ function createPane(slot, host) {
       rememberOpenGroup(slot, null);
     }
 
+    /*
+     * A reload of a window that had a bot open. Restored only while the bot is still
+     * registered — the roster carries every one, so a bot absent from it has been removed
+     * with `foreman-panel bots remove`, and a pane put back onto it would draw a name with
+     * nothing behind it. `state.bots` is set before `adopt` runs, on the same frame.
+     */
+    if (last?.kind === 'bot') {
+      if (state.bots.some((b) => b?.id === last.bot)) {
+        threadSplit = Boolean(last.autoSplit);
+        return openBot(last.bot, last.cid ?? null);
+      }
+      rememberOpenBot(slot, null);
+    }
+
     const pick =
       (last && state.sessions.find((s) => s.id === last.id && free(s))) ||
       // The id rotated while the tab was closed — same terminal, new conversation.
@@ -15954,6 +16825,8 @@ function createPane(slot, host) {
     if (view.kind === 'shared') send({ type: 'unsubscribe-shared', slot });
     // …and a group room's, for every word of the same reason.
     if (view.kind === 'group-room') send({ type: 'unsubscribe-group-room', slot });
+    // …and a bot's, which the server keeps on a map of its own (`server/bot-subs.js`).
+    if (view.kind === 'bot') send({ type: 'unsubscribe-bot', slot });
     host.remove();
   }
 
@@ -15978,6 +16851,16 @@ function createPane(slot, host) {
      */
     if (view.kind === 'group-room' && view.groupRoom?.id) {
       return void send({ type: 'subscribe-group-room', roomId: view.groupRoom.id, slot });
+    }
+
+    /*
+     * …and a bot's, the same server state on a map of its own. Re-taken on the conversation
+     * that is on screen rather than `null`, so a reconnect never moves a reader off what they
+     * were reading onto whichever conversation happens to be newest; the `bot` frame that
+     * answers carries the whole of it again, so nothing has to be reconciled here.
+     */
+    if (view.kind === 'bot' && view.bot?.id) {
+      return void send({ type: 'subscribe-bot', botId: view.bot.id, cid: view.botCid, slot });
     }
 
     if (view.selected) send({ type: 'subscribe', sessionId: view.selected, slot });
@@ -16056,6 +16939,14 @@ function createPane(slot, host) {
      *  stored: a slot that has stopped holding a room answers `null` and loses its class in
      *  the same beat. */
     groupRoomId: () => (view.kind === 'group-room' ? view.groupRoom?.id ?? null : null),
+    /** Put one bot in this pane. `openBotPane` is the caller that decides which pane. */
+    openBot,
+    /** The bot this pane is holding, or null — what the band reads to mark a row open, and
+     *  what `openBotPane` asks so a second press opens nothing twice. */
+    botId: () => (view.kind === 'bot' ? view.bot?.id ?? null : null),
+    /** Re-age this pane's conversation rows; a no-op for anything but a bot. The band's one
+     *  timer calls it on every pane, which is why it is unconditional. */
+    relightBot,
     /* ---- the fold's five hooks. Exposed for `renderTasks`' own reason: the geometry lives
      * on `.main`, which is one box for the whole frame, while everything it moves is per
      * pane. `applyRoomFold` measures through `stripWidth`, pins through `freezeGroupBody`,

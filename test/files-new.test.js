@@ -224,7 +224,7 @@ test('the dot rides the head render beat and the message-arrival path, and nothi
   assert.ok(head.includes("paintFilesBtn(head.querySelector('.head-files'));"), 'painted on the roster beat');
   // …and live arrival, which is the only thing that ever sets the flag.
   const append = src.slice(src.indexOf('function appendMessages(messages) {'));
-  const body = append.slice(0, append.indexOf('function renderMessage(m) {'));
+  const body = append.slice(0, append.indexOf('function renderMessage(m, how = null) {'));
   assert.ok(body.includes('if (anyNewOutput(messages)) {'), 'asked on arrival');
   assert.ok(body.includes('if (!view.filesNew) {'), 'set once, on arrival');
   // Item 8 hangs the path-link refetch off the same predicate rather than polling: the dot

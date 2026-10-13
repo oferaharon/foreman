@@ -6921,6 +6921,429 @@ body.pin-reordering * { cursor: grabbing !important; }
 .room-fold-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .room-fold-count { flex: none; }
 
+/* ================================================================ bots === */
+
+/* The bots band, the bot pane and the settings Bots list — a deployed agent the panel
+   watches and does not run (`web/bots-band.js`). Everything is `.bot-*` / `.bots-*` with
+   rules of its own and borrows no other view's classes, so nothing that styles a session row
+   can reach one by accident: these rows are not sessions, and must never look like a row you
+   can type into.
+
+   **The band** is a sibling of `.rail-list`, between it and the rooms band (the maintainer's
+   Q1), for the reason `.rail-rooms` gives below it: an open group's tint is tiled from
+   full-width rows *in that list's flow*, and a block inside it would have to answer to that
+   and to the sticky folder offsets. No vertical margin, the same rule. Unlike the rooms band
+   the **whole** band is gated — on `.app.has-bots`, by `display` and never by `[hidden]` (the
+   files views' trap) — because it has no control in it: a heading over nothing would offer
+   nothing. */
+.rail-bots {
+  display: none;
+  flex: none;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+}
+.app.has-bots .rail-bots { display: flex; }
+
+/* The rooms band's head, value for value — two bands in one column at two scales is the
+   thing a reader notices without being able to say what is wrong. */
+.bots-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.7rem 1.1rem 0.4rem;
+  background: var(--band-head);
+}
+
+.bots-title {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+/* Content height under a ceiling, so a person with many bots scrolls the bots rather than
+   losing the sessions above. About four rows at the default type scale. */
+.bots-list {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-height: 0;
+  max-height: 10.5rem;
+  overflow-y: auto;
+  padding: 0.15rem 0.35rem 0.55rem;
+}
+
+/* One bot: two lines and never a third. The session row's own grid and type — a 0.85rem dot
+   column, the name at the session title's size and weight, the meta line at its size — so a
+   bot's `Sonnet 5.5 medium 4%` reads exactly the way a dev session's does one band up. */
+.bot-row {
+  flex: none;
+  display: grid;
+  grid-template-columns: 0.85rem 1fr;
+  gap: 0.12rem 0.45rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.42rem 0.75rem 0.45rem;
+  border-radius: 3px;
+  text-align: left;
+  color: var(--ink);
+}
+
+.bot-row:hover { background: var(--surface-sunk); }
+
+/* The bot whose pane is open — `--row-open`, the rail's own selected-row token, exactly as
+   `.room-row.is-open` borrows it. */
+.bot-row.is-open { background: var(--row-open); }
+
+/* The liveness dot: the session dot's size and tokens, because they mean the same thing one
+   band up. Pulsing `--working` while a conversation is active, `--idle` while the helper is
+   reporting and nothing runs, and **grey** — never red — once the helper has gone quiet: red
+   in this panel means "needs you", and a bot whose shipper stopped needs a look at the
+   settings list, not an alarm (ruling 6). The words are on its `title` and `aria-label`. */
+.bot-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  justify-self: center;
+  background: var(--ink-faint);
+}
+.bot-dot.is-online { background: var(--idle); }
+.bot-dot.is-active { background: var(--working); animation: pulse 1.4s ease-in-out infinite; }
+.bot-dot.is-offline { background: var(--ink-faint); }
+
+@media (prefers-reduced-motion: reduce) {
+  .bot-dot.is-active,
+  .bot-conv-dot.is-active { animation: none; }
+}
+
+.bot-name {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.79rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A helper gone quiet dims the name as well as greying the dot, so the row reads as resting
+   rather than as one more live bot — and still asks for nothing. */
+.bot-row.is-offline .bot-name { color: var(--ink-muted); }
+
+/* Line 2: the session meta line's register. The model is the one part that gives way — a
+   ctx or an age cut to `4…` would be a number that lies. */
+.bot-meta {
+  grid-column: 2;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.bot-meta > * { flex: none; }
+.bot-meta > .bot-model { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bot-active { color: var(--working); }
+
+/* ------------------------------------------------------------ the pane --- */
+
+/* The name is the one thing in this head that must survive a narrow pane. `.head-meta` is
+   `flex: none` for a session, where its controls must never be cut; here it holds facts, so
+   the head **wraps** and the facts take a second line rather than crushing the name.
+   Measured on the bench: with the session rule the name went to zero width in a split pane,
+   and with a shrink floor instead of the wrap the name, the helper line and the model were
+   all cut to `…` at once. */
+.main-head.is-bot { flex-wrap: wrap; row-gap: 0.35rem; }
+.main-head.is-bot h1 { flex: 0 1 auto; min-width: 0; }
+.main-head.is-bot .head-meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  row-gap: 0.35rem;
+}
+.bot-head-helper {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bot-head-helper.is-online,
+.bot-head-helper.is-active { color: var(--ink-muted); }
+.bot-head-current { flex: none; display: flex; gap: 0.5rem; align-items: center; white-space: nowrap; }
+.bot-head-current:empty { display: none; }
+.main-head.is-bot .head-meta > .ghost-btn { flex: none; }
+
+/* Everything between the head and the read-only line: the conversations, the line naming
+   the one on screen, and its stream. */
+.bot-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The conversation list takes at most a little over a third of the pane and scrolls inside
+   that, so the conversation itself always has the larger share. */
+.bot-convs {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 38%;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.55rem 0 0.45rem;
+}
+
+.bot-convs-cap {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 0 1.6rem 0.35rem;
+}
+
+.bot-convs-list {
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1rem;
+}
+
+.bot-convs-quiet {
+  padding: 0.35rem 1.6rem 0.5rem;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+}
+
+/* `align-self` and no `display`, so the UA's `[hidden]` still wins — an author `display`
+   beats the attribute regardless of specificity (the files views' trap). */
+.bot-convs-more {
+  align-self: flex-start;
+  margin: 0.35rem 1.6rem 0;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.bot-convs-more:hover:not(:disabled) { color: var(--accent); }
+.bot-convs-more:disabled { cursor: default; }
+
+/* One conversation: the band row's grammar at the pane's scale — a state dot, the title
+   that gives, and how long ago on line 1; where it came from and what it ran as on line 2. */
+.bot-conv {
+  flex: none;
+  display: grid;
+  grid-template-columns: 0.85rem 1fr auto;
+  gap: 0.1rem 0.5rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.38rem 0.6rem 0.42rem;
+  border-radius: 3px;
+  text-align: left;
+}
+.bot-conv:hover { background: var(--surface-sunk); }
+.bot-conv.is-open { background: var(--row-open); }
+
+.bot-conv-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  justify-self: center;
+  background: var(--ink-faint);
+}
+.bot-conv-dot.is-active { background: var(--working); animation: pulse 1.4s ease-in-out infinite; }
+/* Finished is a ring: the run closed itself (`cost-state`), which is the ordinary ending and
+   not something to draw in a colour. Idle — not finished, nothing arriving — is the plain
+   faint dot, which is also what a killed run looks like forever. */
+.bot-conv-dot.is-finished { background: transparent; border: 1px solid var(--ink-faint); }
+
+.bot-conv-title {
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-conv-age {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+}
+
+.bot-conv-meta {
+  grid-column: 2 / -1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  color: var(--ink-faint);
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* Two parts give way, in order: when it started (last on the line, and on the hover in
+   full), then the model — a raw id like `claude-haiku-5-5` is the longest thing here, and
+   at a 960px window in split view it pushed the ctx off the end. Everything else is a word
+   or a number that must not be cut. */
+.bot-conv-meta > * { flex: none; }
+.bot-conv-meta > .bot-started { flex: 0 20 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bot-conv-meta > .bot-model { flex: 0 1 auto; min-width: 2.5rem; overflow: hidden; text-overflow: ellipsis; }
+.bot-root { color: var(--ink-muted); }
+
+/* The line naming the conversation on screen. It carries a `display`, so its own `[hidden]`
+   rule is not optional — the files views' trap. */
+.bot-conv-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.55rem 1.6rem;
+  border-bottom: 1px solid var(--rule);
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  min-width: 0;
+}
+.bot-conv-head[hidden] { display: none; }
+.bot-conv-head-title {
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bot-conv-head-facts {
+  flex: none;
+  max-width: 60%;
+  color: var(--ink-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-loading {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+}
+
+/* Where the composer would be. A line rather than a disabled box — a box that takes no typing
+   is a control that lies about itself. */
+.bot-readonly {
+  flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.75rem 1.6rem 0.85rem;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--ink-faint);
+}
+
+.app.split .bot-convs-cap,
+.app.split .bot-convs-quiet,
+.app.split .bot-conv-head,
+.app.split .bot-readonly { padding-left: 1rem; padding-right: 1rem; }
+.app.split .bot-convs-more { margin-left: 1rem; }
+.app.split .bot-convs-list { padding: 0 0.4rem; }
+
+/* A bot's prompt: every `user` record in its transcript, none of which anybody at this panel
+   typed (trap 6). So never `.msg-user`'s accent bubble — which says "you said this" — but a
+   labelled block in the neutral register, `pre-wrap` as the bubble is. */
+.msg-prompt {
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--rule-strong);
+  border-radius: 4px;
+  background: var(--surface-sunk);
+  padding: 0.6rem 0.95rem 0.75rem;
+}
+.msg-prompt-label {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 0.3rem;
+}
+.msg-prompt-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------- the settings list --- */
+
+.settings-bots-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+.settings-bots-list.is-err { color: var(--working); }
+
+.settings-bot {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0.55rem 0.75rem 0.6rem;
+}
+
+.settings-bot-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.45rem;
+}
+.settings-bot-name {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.settings-bot-id {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--ink-faint);
+}
+
+.settings-bot-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.18rem 0.8rem;
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+}
+.settings-bot-facts dt { color: var(--ink-faint); }
+.settings-bot-facts dd { margin: 0; color: var(--ink-muted); overflow-wrap: anywhere; min-width: 0; }
+/* Amber, not red: a refusal is a fact about a helper's configuration, and the panel's red is
+   reserved for something that needs a human now. */
+.settings-bot-facts dd.is-refusal { color: var(--working); }
+
 /* ---------------------------------------------- the create-room modal --- */
 
 /* `+ room`'s box, in the rooms block rather than up beside `.modal.is-settings`, because

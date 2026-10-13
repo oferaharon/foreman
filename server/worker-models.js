@@ -96,16 +96,47 @@ export const WORKER_MODEL_NAMES = {
 };
 
 /**
+ * Names for models the panel **shows and never launches** — what a bot's transcript says it
+ * ran on (`server/bots.js` → `server/context-window.js`'s `modelName`), drawn beside rows
+ * that read `Sonnet 5.5` so a deployment on Haiku 5.5 does not read as `claude-haiku-5-5`.
+ *
+ * **Display only, and the separation is the point.** None of these is on `WORKER_MODELS`,
+ * so `isKnownModel` refuses every one of them: a lead cannot dispatch a worker on one, the
+ * launch-model setting cannot be saved as one, and neither picker offers one —
+ * `workerModelNames` walks `WORKER_MODELS`, never this map. Moving an id from here onto the
+ * list above is a ruling about what the panel may start, not a naming fix; `test/model-
+ * names.test.js` pins both halves.
+ *
+ * In this file rather than in `context-window.js` because `modelLabel` below is the one
+ * spelling of "what a model is called", and a second table elsewhere would be the
+ * `one-spelling` trap's sibling: a name added to one and not the other.
+ */
+export const DISPLAY_MODEL_NAMES = Object.freeze({
+  'claude-haiku-5-5': 'Haiku 5.5',
+  'claude-fable-5-1': 'Fable 5.1',
+  'claude-opus-4-6': 'Opus 4.6',
+  'claude-sonnet-4-6': 'Sonnet 4.6',
+});
+
+/**
  * One id → what to draw. Understands the `[1m]` suffix, because a stored default may carry
  * one and a picker that fell back to the raw id there would read as a different kind of
  * thing than the rows around it. An id with no name falls back to itself — a hand-edited
  * team.json must still be showable, or the picker would lie about what runs.
+ *
+ * The launchable names first, then the display-only ones (`DISPLAY_MODEL_NAMES`): naming a
+ * model here says nothing about whether the panel will put it after `--model` — that is
+ * `isKnownModel`'s question alone.
  */
 export function modelLabel(id) {
   const raw = String(id ?? '');
   const wide = raw.endsWith('[1m]');
   const base = wide ? raw.slice(0, -4) : raw;
-  const name = WORKER_MODEL_NAMES[base];
+  const name = Object.hasOwn(WORKER_MODEL_NAMES, base)
+    ? WORKER_MODEL_NAMES[base]
+    : Object.hasOwn(DISPLAY_MODEL_NAMES, base)
+      ? DISPLAY_MODEL_NAMES[base]
+      : null;
   if (!name) return raw;
   return wide ? `${name} (1M context)` : name;
 }
