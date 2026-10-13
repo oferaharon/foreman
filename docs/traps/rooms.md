@@ -66,6 +66,41 @@ read has to happen — `list.scrollTop` *after* `replaceChildren` is a forced la
 emptied box, which clamps the answer to 0 before you have read it, and the first draft put
 the reader at the top of the room on every arriving line. Read it before the swap.
 
+## Moving a row round a focused one scrolls the band
+
+**Moving a row round a focused one scrolls the band to the top, and the rail's rooms band
+did it on every click.** The band's `patchBand` used to `append` every row on every frame —
+each one moved to the end, in order, so the band came out exactly as it went in, which read
+as free. It is free until a row holds focus, and a mouse-down on a row always gives it one.
+Chrome's scroll anchoring takes the focused element as its anchor, reads its siblings
+moving round it as the anchor moving, and scrolls the list to compensate, clamped at 0.
+Nothing in the code writes `scrollTop`, so there was nothing to find by reading it.
+
+MEASURED on Chrome 155 in the sandbox, eight rooms, the band scrolled to the bottom: logpoints
+on every step of a click read `scrollTop` 54 up to the start of `patchBand` and 0 straight
+after it, on the first patch whose signature moved (the room turns `is-open`) — the step
+the click path calls from inside `openGroup`, not the split, the fold or the slide. In the
+page itself, re-appending every row kept 54 with nothing focused, went to 0 with one row
+focused, went to 0 with the focused row *never moved* and only its siblings re-appended, and
+kept 54 in every case once `.rooms-list` carried `overflow-anchor: none`. So it is neither
+the focus being lost nor the nodes being re-inserted; it is anchoring. Every shape of the
+click reproduced it — one pane, a room already open, a lead's aside folding first, the band
+dragged to its own height — and so did two things nobody had reported: a later patch under a
+row still focused from an earlier click (a room renamed on the server: 54 → 0), and the
+archived fold, whose own button is focused when its press repaints the band (79 → 0 opening,
+162 → 0 shutting).
+
+The fix is `place`: a row already at its index is not touched at all, and the nodes a frame
+no longer draws are removed *before* the pass rather than after it, because a stale node left
+in the list sits at an index a survivor belongs at and makes the pass move every row behind
+it. Two alternatives were measured and turned down. `overflow-anchor: none` stops the jump in
+one line, but still takes focus off the row just pressed and gives up anchoring's real job —
+with `place`, a room created above the fold keeps the row under the cursor where it was
+(81 → 109), which the old re-append also defeated. Holding `scrollTop` across the patch, the
+room's own rule one section up, stops it too, but in `renderRail` the read lands right after
+`el.railList.replaceChildren`, so it would force a layout of the whole rail on every band
+patch and the restore another: exactly the repaint-that-measures this file warns about.
+
 ## A clamp that can't be measured
 
 **A clamp that can't be measured can't be trusted.** `-webkit-line-clamp` is what the room
