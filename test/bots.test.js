@@ -806,3 +806,37 @@ test('the constructor prunes at boot when its timers run; the CLI\'s registry-on
   assert.ok(!fs.existsSync(copyPath(dir, bot, old)));
   assert.match(lines.join('\n'), /pruned 1 conversation, 1 file/);
 });
+
+test('with timers off, construction prunes nothing and says nothing; start() prunes once, and only once', (t) => {
+  const dir = scratch(t);
+  const s = open(dir, { now: Date.now() });
+  s.store.register('alpha-bot');
+  const old = ids();
+  append(s.store, 'alpha-bot', old, 0, line({ type: 'user', timestamp: new Date(Date.now() - 200 * DAY).toISOString(), message: { role: 'user', content: 'old' } }));
+  s.store.flush();
+  const indexFile = path.join(dir, 'bots', 'alpha-bot', 'index.json');
+  const indexBefore = fs.readFileSync(indexFile, 'utf8');
+
+  // What the panel constructs before its stand-down probe: nothing on disk moves, nothing
+  // is said — the copy and its index are exactly as they were.
+  const lines = [];
+  const panel = new BotStore({ dir, timers: false, log: (l) => lines.push(l) });
+  assert.ok(fs.existsSync(copyPath(dir, 'alpha-bot', old)));
+  assert.equal(fs.readFileSync(indexFile, 'utf8'), indexBefore);
+  assert.deepEqual(lines, []);
+
+  // …and what it does once the probe has passed.
+  panel.start();
+  panel.start();
+  panel.stop();
+  assert.ok(!fs.existsSync(copyPath(dir, 'alpha-bot', old)));
+  assert.equal(lines.filter((l) => /retention/.test(l)).length, 1, 'a second start() is not a second boot');
+  assert.match(lines.join('\n'), /pruned 1 conversation, 1 file/);
+
+  // A registry-only store has no copies to prune and no timers to start.
+  const cliLines = [];
+  const cli = new BotStore({ dir, copies: false, log: (l) => cliLines.push(l) });
+  cli.start();
+  cli.stop();
+  assert.deepEqual(cliLines, []);
+});
