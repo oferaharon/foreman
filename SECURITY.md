@@ -23,6 +23,14 @@ Whoever can reach the panel can:
 - Close (`/exit`) any of those sessions.
 - Launch new sessions, in any folder the panel can see.
 - Answer permission prompts on your behalf.
+- Answer Claude Code's folder-trust gate (*"Is this a project you created or one
+  you trust?"*), which grants that session read, edit and execute in the folder,
+  for good. The panel's own screens show the folder in full and send a yes only on
+  a second click; the endpoint behind them answers on one request. Either way the
+  answer is a cursor walk — moving to the chosen row and re-reading the screen
+  until the cursor is on it — never a digit or a bare Enter. The panel also
+  answers the gate on a dispatched worker's own fresh worktree itself, as part of
+  the dispatch, once that worktree's name is on screen.
 - Read every transcript the panel can see, including anything pasted or
   generated inside those conversations.
 - Read every conversation a registered bot has shipped to it (see below).
@@ -102,10 +110,6 @@ ships that agent's Claude Code transcripts to it. The facts:
 A few things the panel will not do, regardless of who is asking, because they
 were built to fail closed rather than to be configured safely:
 
-- **The folder-trust gate is never answered on your behalf.** Claude Code's own
-  "do you trust this folder?" prompt is recognized and deliberately left alone —
-  the panel will show it to you, but it will not click through it, from any
-  client, at any permission level.
 - **Dispatched workers never launch with permission checks bypassed.** That mode
   is not reachable from the dispatch path at all.
 - **Destructive git operations are denied in every worker's launch settings** —
