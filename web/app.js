@@ -380,9 +380,14 @@ function rememberOpenGroup(slot, roomId, autoSplit = false) {
  * and replaced by whatever session sorts first. `cid` is `null` while the pane is following
  * the bot's newest conversation; once one is on screen it is stored, so a reload comes back
  * to the conversation that was being read rather than to whichever one ran last.
+ *
+ * No `autoSplit`, unlike the three room shapes above: a bot opens in the main pane, where a
+ * session does (the ruling of 2026-10-13), so it never made the split it sits in and closing
+ * nothing about it takes the panel back to one pane. An entry an older build wrote with the
+ * flag is read without it — `adopt` never takes `threadSplit` from a bot.
  */
-function rememberOpenBot(slot, botId, cid = null, autoSplit = false) {
-  if (botId) state.opened[slot] = { kind: 'bot', bot: botId, cid: cid || null, autoSplit: Boolean(autoSplit) };
+function rememberOpenBot(slot, botId, cid = null) {
+  if (botId) state.opened[slot] = { kind: 'bot', bot: botId, cid: cid || null };
   else delete state.opened[slot];
   persistOpen();
 }
@@ -4215,33 +4220,27 @@ function scheduleBotsTick() {
 }
 
 /**
- * Put one bot on screen — `openSharedRoom`'s routing, for its reasons.
+ * Put one bot on screen — **where a session goes**, which is `openSession`'s routing line for
+ * line (the maintainer's ruling of 2026-10-13, reversing the room routing #196 shipped).
  *
- * **One pane open** → split, and the bot takes the new slot, so the conversation you were
- * reading stays where it is. **Two open** → it replaces whichever pane holds something that
- * is not a session, else the one you are *not* focused in. One non-session pane at a time,
- * the maintainer's rule for rooms, which is also what guarantees `sessionPane` always has
- * somewhere to send a rail click — and focus is never left on the bot, because a read-only
- * pane is never the one the rail and the keyboard drive (#36).
+ * A bot row is read the way a session row is: it replaces what the pane the rail drives is
+ * showing (`sessionPane`), and that pane keeps focus, so the next rail click — a session or
+ * another bot — replaces the bot in turn. In split view it lands wherever a session would,
+ * which is the focused side; nothing here opens a split, and a bot no longer owns one, so it
+ * never sets `threadSplit` and is never "the" non-session pane a room replaces
+ * (`holdsMain`). Rooms keep their side-pane routing, unchanged.
+ *
+ * Read-only all the same: `openBot` leaves `view.selected` null and builds no composer.
  */
 function openBotPane(id) {
   if (!id) return;
-  if (panes.some((p) => p.botId() === id)) return;
-  const holder = panes.find((p) => p.kind() !== 'session');
-  const madeSplit = !holder && panes.length < 2;
-  const target =
-    holder ||
-    (panes.length > 1
-      ? panes.find((p) => p.slot !== focusedSlot) || panes[0]
-      : openSplit({ adopt: false, focus: false }));
-  if (!target) return;
-  if (madeSplit) threadSplit = true;
-  target.openBot(id);
-  // Put focus where a click will land, which after this is never the bot.
-  const keep = sessionPane();
-  if (keep) setFocus(keep.slot);
-  for (const p of panes) p.renderHead();
-  renderRail();
+  const pane = sessionPane();
+  if (!pane) return;
+  // `openSession`'s own line, for its reason: the only way here lands on a room is the
+  // last-pane fallback, and it is about to stop being one.
+  if (!holdsMain(pane)) threadSplit = false;
+  setFocus(pane.slot);
+  pane.openBot(id);
 }
 
 /**
@@ -4309,7 +4308,7 @@ function openGroupRoom(id) {
  * what makes the answer honest across the 200ms in between.
  */
 function roomTarget() {
-  const holder = panes.find((p) => p.kind() !== 'session');
+  const holder = panes.find((p) => !holdsMain(p));
   if (holder) return holder;
   if (panes.length > 1) return panes.find((p) => p.slot !== focusedSlot) || panes[0];
   return null;
@@ -7441,7 +7440,9 @@ function createPane(slot, host) {
 
     /*
      * `kind === 'bot'` is the fifth thing a pane can hold: one deployed agent the panel
-     * watches and does not run — its conversations, and any one of them in full.
+     * watches and does not run — its conversations, and any one of them in full. It is
+     * **main content**, held where a session is (`holdsMain`, the ruling of 2026-10-13), not
+     * a room consulted beside one; a rail click replaces it like any session.
      * **Read-only**: no composer, no files view, no terminal, no pin, no pickers, and
      * `buildComposer` is never called (`renderMain`'s reason for the other two non-session
      * kinds). `view.selected` stays `null` the whole time, which is what keeps
@@ -9898,8 +9899,7 @@ function createPane(slot, host) {
     view.bot = { id, row: state.bots.find((b) => b?.id === id) || null };
     view.botCid = cid || null;
     view.botWant = view.botCid;
-    // `threadSplit` is already settled by the caller, as it is for a room.
-    rememberOpenBot(slot, id, view.botCid, threadSplit);
+    rememberOpenBot(slot, id, view.botCid);
     send({ type: 'subscribe-bot', botId: id, cid: view.botCid, slot });
     renderRail();
     renderMain();
@@ -9936,22 +9936,6 @@ function createPane(slot, host) {
     view.botSeq = (view.botSeq || 0) + 1;
   }
 
-  /** Leave the bot, and put the panel back where it came from — `closeShared`'s two places. */
-  function closeBot() {
-    if (panes.length > 1 && threadSplit) {
-      closePane(slot); // clears `threadSplit` itself — one pane left, no split to own
-      return;
-    }
-    send({ type: 'unsubscribe-bot', slot });
-    rememberOpenBot(slot, null);
-    view.kind = 'session';
-    clearBot();
-    adopt();
-    if (!view.selected) renderMain();
-    renderRail();
-    paintFolds();
-  }
-
   /** Show one conversation of this bot. The server answers with a whole `bot` frame. */
   function pickConversation(cid) {
     if (view.kind !== 'bot' || !view.bot?.id || !cid || cid === view.botCid) return;
@@ -9962,7 +9946,7 @@ function createPane(slot, host) {
     view.botLoaded = false;
     view.botError = null;
     chipNodes.clear();
-    rememberOpenBot(slot, view.bot.id, cid, threadSplit);
+    rememberOpenBot(slot, view.bot.id, cid);
     send({ type: 'subscribe-bot', botId: view.bot.id, cid, slot });
     renderBotList();
     renderBotStream();
@@ -9995,7 +9979,7 @@ function createPane(slot, host) {
       view.botError = null;
       // What is on screen is what a reload should come back to — a pane showing a
       // conversation is never moved off it, by the server or by a refresh.
-      if (cid) rememberOpenBot(slot, view.bot.id, cid, threadSplit);
+      if (cid) rememberOpenBot(slot, view.bot.id, cid);
       renderBotHead();
       renderBotList();
       revealOpenConversation();
@@ -10056,13 +10040,21 @@ function createPane(slot, host) {
     helper.className = 'bot-head-helper';
     const current = document.createElement('span');
     current.className = 'bot-head-current';
-    const close = document.createElement('button');
-    close.className = 'ghost-btn';
-    close.type = 'button';
-    close.textContent = 'close';
-    close.title = 'Close this bot';
-    close.onclick = closeBot;
-    meta.append(helper, current, close);
+    /*
+     * The session head's own split control and nothing of its own — the bot's `close` went
+     * when the bot moved into the main pane (the ruling of 2026-10-13). That button meant
+     * "put back what the bot was opened beside", and in the main pane nothing is behind it:
+     * a bot is left the way a session is, by clicking another row. What a session head does
+     * offer is this one — `split` alone, `close` (this pane) in split view — so a bot in
+     * either slot can be split from or closed exactly like a session, by `syncSplitBtn`
+     * itself rather than a copy of it. `current()` is null here, so the lead branch in it
+     * never fires.
+     */
+    const split = document.createElement('button');
+    split.type = 'button';
+    split.className = 'ghost-btn split-toggle';
+    syncSplitBtn(split);
+    meta.append(helper, current, split);
     head.append(dot, h1, meta);
 
     const body = document.createElement('div');
@@ -13261,10 +13253,13 @@ function createPane(slot, host) {
     }
 
     // A bot's head moves on this beat too — its helper says hello every thirty seconds and
-    // the newest reply's model, effort and ctx ride the roster's `bots` field — and that is
-    // all that moves here. Nothing about a bot reaches `composerSig` below.
+    // the newest reply's model, effort and ctx ride the roster's `bots` field — and so does
+    // its split control, which `openSplit` and `closePane` re-word through this call without
+    // rebuilding the head, exactly as they do a session's. That is all that moves here.
+    // Nothing about a bot reaches `composerSig` below.
     if (view.kind === 'bot') {
       renderBotHead();
+      syncSplitBtn(host.querySelector('.split-toggle'));
       return;
     }
 
@@ -16789,12 +16784,13 @@ function createPane(slot, host) {
      * registered — the roster carries every one, so a bot absent from it has been removed
      * with `foreman-panel bots remove`, and a pane put back onto it would draw a name with
      * nothing behind it. `state.bots` is set before `adopt` runs, on the same frame.
+     *
+     * `threadSplit` is not touched, unlike the two rooms above: a bot sits in the main pane
+     * the way a session does and never owns the split, so an `autoSplit` an older build
+     * stored is ignored rather than allowed to overwrite a room's answer from the other slot.
      */
     if (last?.kind === 'bot') {
-      if (state.bots.some((b) => b?.id === last.bot)) {
-        threadSplit = Boolean(last.autoSplit);
-        return openBot(last.bot, last.cid ?? null);
-      }
+      if (state.bots.some((b) => b?.id === last.bot)) return openBot(last.bot, last.cid ?? null);
       rememberOpenBot(slot, null);
     }
 
@@ -17015,8 +17011,28 @@ const focused = () => panes.find((p) => p.slot === focusedSlot) || panes[0];
  */
 function sessionPane() {
   const here = focused();
-  if (here && here.kind() === 'session') return here;
-  return panes.find((p) => p.kind() === 'session') || here;
+  if (here && holdsMain(here)) return here;
+  return panes.find(holdsMain) || here;
+}
+
+/**
+ * Whether a pane holds **main content** — what the rail drives and a rail click replaces —
+ * as against a room, which is consulted *beside* it.
+ *
+ * A bot joined the session here on 2026-10-13 (the maintainer: a bot opens where a lead's or a
+ * standalone session's conversation opens). So every routing question that used to ask "is
+ * this pane a session" asks this instead: `sessionPane` and `openSession` / `openBotPane` on
+ * the main side, and `roomTarget` and `openSharedRoom` on the other, where **one non-session
+ * pane at a time** now reads "one room at a time" — a room never replaces a bot, any more
+ * than it replaces a session.
+ *
+ * An allow-list rather than "not a room", because kinds have already grown three times here
+ * (`benchEntries`' recorded reasoning) and a negative test silently admits the next one. A
+ * function declaration, so it is hoisted for `openBotPane` and `roomTarget` far above.
+ */
+function holdsMain(pane) {
+  const kind = pane.kind();
+  return kind === 'session' || kind === 'bot';
 }
 
 /**
@@ -17032,8 +17048,9 @@ function openSession(id) {
   const pane = sessionPane();
   if (!pane) return;
   // The only way here lands on a room is the last-pane fallback above, and it is about to
-  // stop being one — so the split is nobody's any more.
-  if (pane.kind() !== 'session') threadSplit = false;
+  // stop being one — so the split is nobody's any more. A bot is not that case: it is main
+  // content, and a room beside it still owns the split it made.
+  if (!holdsMain(pane)) threadSplit = false;
   setFocus(pane.slot);
   pane.open(id);
 }
@@ -17501,7 +17518,7 @@ function openSharedRoom() {
   // above, and there is nothing else a second press could reveal.
   if (panes.some((p) => p.sharedOpen())) return;
 
-  const holder = panes.find((p) => p.kind() !== 'session');
+  const holder = panes.find((p) => !holdsMain(p));
   const madeSplit = !holder && panes.length < 2;
   const target =
     holder ||

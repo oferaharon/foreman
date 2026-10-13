@@ -860,6 +860,10 @@ pane that draws it, and the bench that proves any of it. Evidence:
 - `web/app.js` (`imageStrip`, the agent chip) — **Images and subagent chips build
   per-session URLs.** The bot pane hands them a bot-route builder.
   [bots#images-and-subagent-chips-build-per-session-urls](docs/traps/bots.md#images-and-subagent-chips-build-per-session-urls)
+- `web/app.js` (`holdsMain`, `sessionPane`, `openBotPane`, `roomTarget`, `openSharedRoom`) —
+  **A bot opens where a session does, so routing asks `holdsMain`, never `kind() !== 'session'`**
+  — read the old way, a room opener takes the bot's main pane.
+  [bots#a-bot-is-main-content-and-routing-asks-holdsmain](docs/traps/bots.md#a-bot-is-main-content-and-routing-asks-holdsmain)
 - `server/index.js` (`/ws`, the bots routes) — **A second `WebSocketServer` on the same
   `http.Server` breaks `/ws`.** The bots wire is plain HTTP for that reason.
   [bots#a-second-websocketserver-breaks-the-first](docs/traps/bots.md#a-second-websocketserver-breaks-the-first)

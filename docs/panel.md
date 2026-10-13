@@ -1463,18 +1463,25 @@ context. [`docs/bots.md`](bots.md) is the whole of it — the contract a deploym
 registering one, `--check`, and what the panel stores.
 
 **The bots band** sits below the session list and above the rooms band, and only exists once a
-bot is registered. One two-line row per deployment, busiest first: the name and a dot on the
-first line — pulsing while a conversation is running, grey while the helper has gone quiet —
-and the newest reply's model · effort · ctx and its age on the second, plus `N active` when
-more than one conversation is running at once. All three facts come from that one reply; two
+bot is registered. One two-line row per deployment, busiest first: a dot, the name and —
+right-aligned, where the rooms band puts a room's — how long ago it was last active on the
+first line, the dot pulsing while a conversation is running and grey while the helper has gone
+quiet; the newest reply's model · effort · ctx on the second, plus `N active` when more than
+one conversation is running at once. All three facts come from that one reply; two
 conversations' contexts are never added together.
 
-**The bot pane** opens beside the session you are on, the way a room does. Its head says
+**The bot pane** opens in the main pane, exactly where a session's conversation opens: a click
+on a bot row replaces what that pane shows and the row takes the same selected marker a
+session row does, a click on a session row switches back, split view treats it as it treats a
+session, and a reload puts it back. Rooms are the other kind of pane — they still open
+*beside* whatever is in the main pane, and never replace a bot. Its head says
 whether the helper is online and when it was last seen; its body lists the deployment's
 conversations — each cron run, each chat thread, newest first, with its root label, whether
 it is active, finished or idle, and its own model, effort and ctx — and shows the selected
 one in full. A prompt is labelled **prompt**, never drawn as your own bubble: none of it is
-you. Where a composer would be, a line says the pane is read-only.
+you. Where a composer would be, a line says the pane is read-only. The head carries the one
+control a session head shares with it, `split` (`close` for this pane, in split view), and
+nothing else.
 
 **It is read-only, and it asks for nothing.** No composer, no pin, no group, no Files view, no
 terminal, no unread count, no notification, no red. A bot is not a session and is not in the
