@@ -111,6 +111,8 @@ import { RoomStore } from './room.js';
 import { assertSendableBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
 import { GroupRoomStore, memberKey, MAX_MEMBERS } from './rooms.js';
+import { BotStore } from './bots.js';
+import { BotSubs } from './bot-subs.js';
 import {
   callerMember,
   memberFor,
@@ -192,6 +194,7 @@ sharedRoom.setMaxListeners(0);
  * rotates.
  */
 const rooms = new GroupRoomStore();
+const bots = new BotStore();
 rooms.setMaxListeners(0);
 
 // A worker whose tmux session vanished has crashed — the spec's failure table says mark
@@ -469,6 +472,69 @@ app.get('/api/agent-run', async (req, res) => {
     res.json({ messages });
   } catch (err) {
     res.status(404).json({ error: `Could not read that agent's transcript: ${err.message}` });
+  }
+});
+
+/* ------------------------------------------------------- bots: the reads --- */
+
+/*
+ * A bot's conversations, read off the panel's own copy (`server/bots.js`). Ungated, like
+ * every session transcript: anything that can reach the panel can read them.
+ *
+ * **Every path here comes from `bots.pathOf`**, built from the store's own validated
+ * components for a conversation the bot actually holds — never from a path a transcript
+ * named. That is why the subagent route takes an *id* and not `/api/agent-run`'s `file`:
+ * a bot's `outputFile` is a path inside its container, and `rememberAgentFiles` must never
+ * see one, or a bot's transcript would choose which local file the panel reads.
+ *
+ * A bot conversation id is a session id in shape and nothing else — the registry has never
+ * heard of it, so every `/api/sessions/:id/…` route answers it 404, and these answer only
+ * what the named bot holds.
+ */
+
+/** Registry, helper liveness and disk use for the settings list. `describe()` carries no
+ *  token and no hash. */
+app.get('/api/bots', (_req, res) => {
+  res.json({ bots: bots.describe() });
+});
+
+/** One page of a bot's conversations, newest first; `before` is a previous page's `next`. */
+app.get('/api/bots/:bot/conversations', (req, res) => {
+  const before = typeof req.query.before === 'string' && req.query.before ? req.query.before : undefined;
+  const page = bots.conversations(req.params.bot, { before });
+  if (!page) return res.status(404).json({ error: 'Unknown bot.' });
+  res.json(page);
+});
+
+/** One image's bytes from a bot conversation — the session image route's contract. */
+app.get('/api/bots/:bot/conversations/:cid/image/:uuid/:index', async (req, res) => {
+  const file = bots.pathOf(req.params.bot, req.params.cid);
+  if (!file) return res.status(404).end();
+  try {
+    const found = await readImage(file, req.params.uuid, Number(req.params.index));
+    if (!found || !IMAGE_MEDIA.has(found.media)) return res.status(404).end();
+    res.set('Content-Type', found.media);
+    res.set('Cache-Control', 'public, max-age=31536000, immutable');
+    res.set('Content-Length', String(found.buffer.length));
+    res.end(found.buffer);
+  } catch {
+    res.status(404).end();
+  }
+});
+
+/** A subagent's transcript, `subagents/agent-<agentId>.jsonl` of the copy — the
+ *  `/api/agent-run` shape, and nothing remembered from it. */
+app.get('/api/bots/:bot/conversations/:cid/agent/:agentId', async (req, res) => {
+  const file = bots.pathOf(req.params.bot, req.params.cid, `agent-${req.params.agentId}`);
+  if (!file) return res.status(404).json({ error: 'Unknown agent transcript.' });
+  const tailer = new Tailer(file);
+  try {
+    const { messages } = await tailer.start();
+    res.json({ messages });
+  } catch (err) {
+    res.status(404).json({ error: `Could not read that agent's transcript: ${err.message}` });
+  } finally {
+    tailer.stop();
   }
 });
 
@@ -4893,6 +4959,8 @@ function slotsOf(ws) {
 
 async function subscribe(ws, sessionId, slot = 'a') {
   unsubscribe(ws, slot);
+  // A slot shows a session or a bot, never both — see `botSubs` below.
+  botSubs.unsubscribe(ws, slot);
   const session = registry.get(sessionId);
   if (!session) return send(ws, 'error', { message: 'Unknown session.', slot });
 
@@ -5105,6 +5173,29 @@ function unsubscribeGroupRoom(ws) {
   groupRoomSubs.delete(ws);
 }
 
+/* ------------------------------------------------------- bot subscriptions --- */
+
+/**
+ * A bot pane's frames: `subscribe-bot` / `unsubscribe-bot` / `bot-load-earlier` in, `bot` /
+ * `bot-messages` / `bot-earlier` / `bot-conversations` out (`server/bot-subs.js` has the
+ * shapes).
+ *
+ * **A separate map, `ws -> Map(slot -> sub)`, and never a kind on `subs`.** The rebind loop
+ * in `registry.on('update')` walks `subs` and would read a bot conversation as a session
+ * that vanished; the `loadEarlier` handler walks it too and hands what it reads to
+ * `rememberAgentFiles`, which must never see a bot's container paths. Neither is handed this
+ * map, so neither can get it wrong. Per slot, like `subs` — split view can show a bot beside
+ * a session — and a slot holds one or the other: each subscribe drops the other kind.
+ *
+ * **`ws.onopen` must re-subscribe this**, as it does every open pane: a subscription is
+ * server state and dies with the socket while the roster keeps arriving.
+ */
+const botSubs = new BotSubs({ store: bots, send });
+
+function unsubscribeBot(ws, slot) {
+  botSubs.unsubscribe(ws, slot);
+}
+
 wss.on('connection', (ws) => {
   send(ws, 'sessions', rosterFrame());
 
@@ -5134,6 +5225,16 @@ wss.on('connection', (ws) => {
       if (typeof msg.roomId === 'string' && msg.roomId) subscribeGroupRoom(ws, msg.roomId, slot);
     } else if (msg.type === 'unsubscribe-group-room') {
       unsubscribeGroupRoom(ws);
+    } else if (msg.type === 'subscribe-bot') {
+      if (typeof msg.botId !== 'string' || !msg.botId) return;
+      unsubscribe(ws, slot);
+      await botSubs.subscribe(ws, { botId: msg.botId, cid: typeof msg.cid === 'string' ? msg.cid : null, slot });
+    } else if (msg.type === 'unsubscribe-bot') {
+      unsubscribeBot(ws, slot);
+    } else if (msg.type === 'bot-load-earlier') {
+      // Its own frame and its own map, never `loadEarlier`'s: that handler feeds
+      // `rememberAgentFiles`, and a bot's transcript must not choose what this Mac reads.
+      await botSubs.loadEarlier(ws, slot);
     } else if (msg.type === 'markGroupRoomRead') {
       // Per room, and it is the store that holds the mark — `rosterFrame` reads it out of
       // memory every couple of seconds and must never read a file to answer it.
@@ -5166,12 +5267,14 @@ wss.on('connection', (ws) => {
     unsubscribeRoom(ws);
     unsubscribeShared(ws);
     unsubscribeGroupRoom(ws);
+    unsubscribeBot(ws);
   });
   ws.on('error', () => {
     unsubscribe(ws);
     unsubscribeRoom(ws);
     unsubscribeShared(ws);
     unsubscribeGroupRoom(ws);
+    unsubscribeBot(ws);
   });
 });
 
@@ -5299,6 +5402,11 @@ function sharedSummary() {
    per five minutes, so a broadcast per entry is nothing. */
 rooms.on('post', () => broadcastRoster());
 
+/* A bot row moved — a new conversation, a reply, the helper going quiet. The store emits
+   `change` at most once a second per bot and only when something a reader sees moved, and
+   its own liveness tick is what notices a helper that stopped saying hello. */
+bots.on('change', () => broadcastRoster());
+
 function rosterFrame(sessions = registry.list()) {
   return {
     sessions,
@@ -5322,6 +5430,14 @@ function rosterFrame(sessions = registry.list()) {
      * did not mention it". `rateLimits` learned this the expensive way.
      */
     rooms: rooms.list(),
+    /*
+     * Every registered bot, from **memory only** — `rooms.list()`'s rule, for its reason.
+     * A sibling of `sessions` and never a row in it: a bot is not a session, has no pane,
+     * and nothing that reads `sessions` (snapshot, relaunch, `/exit`, the queue, pins, the
+     * inbox, notifications, read state) is handed one. The client tests `'bots' in msg`; an
+     * empty array is the ordinary answer.
+     */
+    bots: bots.list(),
   };
 }
 
@@ -5522,7 +5638,7 @@ process.on('SIGTERM', () => {
   // sweep firing into a process that is on its way out would read transcripts nobody is
   // going to be told about.
   clearInterval(sharedSweep);
-  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, rooms]) {
+  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, rooms, bots]) {
     try {
       store.flush();
     } catch {
