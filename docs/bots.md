@@ -14,7 +14,7 @@ Phase 1 is **read-only**: no composer, no buttons, nothing that asks for attenti
 cannot be typed to, closed, pinned or filed in a group, and it never enters the session
 roster (see [The panel side](#the-panel-side)).
 
-![The bots band with two bench bots, and one of them open: its conversation list, the selected run's prompt, its Bash call and its reply, and the read-only line where a composer would be.](images/bots.png)
+![The bots band with three bench bots, each row's age right-aligned, and one of them open in the main pane and selected in the rail: its conversation list, the selected run's prompt, its Bash calls and its report, and the read-only line where a composer would be.](images/bots.png)
 
 What follows is the contract a deployment meets, how to register one, how to check it, and
 what the panel does with what it receives. The evidence behind the rules is in

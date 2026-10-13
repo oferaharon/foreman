@@ -129,6 +129,23 @@ builder for `/api/bots/:bot/conversations/:cid/…` instead, and the agent route
 bare agent id. Large tool outputs Claude Code moved into a `tool-results/` file are not
 shipped in phase 1; the transcript's own preview shows.
 
+## A bot is main content, and routing asks holdsMain
+
+**A bot opens where a session does, so "is this pane a session" stopped being the routing
+question — `holdsMain` is.** Until 2026-10-13 a bot opened beside the session, by the rooms'
+routing, and every opener read `kind() !== 'session'` as "a room-like pane I may replace".
+Once a bot sits in the main pane (the maintainer's ruling of that day) that test is wrong in
+the quiet direction: `roomTarget` and `openSharedRoom` would find the bot as the
+"non-session pane" and put a room *over* it, and `openSession` would clear `threadSplit` on a
+bot it was replacing, so a room beside it would no longer close back to one pane. All four ask
+`holdsMain(pane)` — session or bot, an allow-list — and `sessionPane` sends a bot row to the
+same pane it sends a session row. A bot entry in `state.opened` carries no `autoSplit`, and
+`adopt` never takes `threadSplit` from one, or a reload would overwrite the room's answer from
+the other slot. Demonstrated on a scratch panel (bot ⇄ session ⇄ bot, split with a bot in
+either slot, reload, a panel restart re-subscribing the bot, and a room opened beside a lone
+bot); pinned by `test/bots-band.test.js`, `test/shared-room-pane.test.js` and
+`test/rooms-pane.test.js`.
+
 ## A second WebSocketServer breaks the first
 
 **A second `WebSocketServer` on the same `http.Server` breaks `/ws`.** In `ws` 8.21.3 every
