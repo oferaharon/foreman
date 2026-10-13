@@ -3,6 +3,7 @@ import { execFile, spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -381,6 +382,69 @@ test('/hook still takes a body with no JSON content type and answers 204', async
     body: JSON.stringify({ hook_event_name: 'Notification', session_id: randomUUID(), cwd: stateDir }),
   });
   assert.equal(res.status, 204);
+});
+
+/* ------------------------------------------------------------- the stand-down --- */
+
+/** Run `server/index.js` to its own exit, collecting both streams. */
+function runToExit(env) {
+  return new Promise((resolve) => {
+    const proc = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    proc.stdout.setEncoding('utf8').on('data', (d) => { out += d; });
+    proc.stderr.setEncoding('utf8').on('data', (d) => { out += d; });
+    const kill = setTimeout(() => proc.kill('SIGKILL'), 20_000);
+    proc.once('exit', (code, signal) => { clearTimeout(kill); resolve({ code, signal, out }); });
+  });
+}
+
+/*
+ * A panel that finds the port already answering stands down — and must leave the running
+ * panel's state dir exactly as it found it. The store is constructed at module load, long
+ * before the probe, so the first prune and its line are deferred to `bots.start()` in the
+ * boot block. Proved against a fresh state dir holding one conversation 200 days old with a
+ * flushed index (so loading it is silent), first with something squatting on the port, then
+ * — the control — with the port free, where the same boot prunes it and says so.
+ */
+test('a panel that stands down prunes no copy and prints no [bots] line; one that boots does', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-bots-ingest-standdown-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  const seeder = new BotStore({ dir, timers: false, log: () => {} });
+  seeder.register('old-bot');
+  const where = conv();
+  const longAgo = new Date(Date.now() - 200 * 86_400_000).toISOString();
+  const r = seeder.append('old-bot', where, 0, Buffer.from(line({ type: 'user', timestamp: longAgo, message: { role: 'user', content: 'long ago' } })));
+  assert.equal(r.status, 200);
+  seeder.stop(); // flushes the index
+  const copy = path.join(dir, 'bots', 'old-bot', where.root, where.project, `${where.session}.jsonl`);
+  const index = path.join(dir, 'bots', 'old-bot', 'index.json');
+  const before = { copy: fs.readFileSync(copy), index: fs.readFileSync(index), registry: fs.readFileSync(path.join(dir, 'bots.json')) };
+
+  const squatter = http.createServer((_req, res) => res.end('already here'));
+  await new Promise((r2) => squatter.listen(0, '127.0.0.1', r2));
+  const squatPort = squatter.address().port;
+  const env = scratchEnv({ FOREMAN_PORT: String(squatPort), FOREMAN_STATE_DIR: dir, FOREMAN_LOG_DIR: path.join(dir, 'logs') });
+
+  const stood = await runToExit(env);
+  await new Promise((r2) => { squatter.close(r2); squatter.closeAllConnections(); });
+  assert.equal(stood.code, 0, stood.out);
+  assert.match(stood.out, /already answers/, 'it did not stand down, so this proves nothing');
+  assert.ok(!stood.out.includes('[bots]'), stood.out);
+  assert.ok(fs.readFileSync(copy).equals(before.copy), 'the copy moved');
+  assert.ok(fs.readFileSync(index).equals(before.index), 'the index moved');
+  assert.ok(fs.readFileSync(path.join(dir, 'bots.json')).equals(before.registry), 'the registry moved');
+
+  // The control: the port is free, the same state dir, and this boot does prune.
+  const proc = spawn(process.execPath, [path.join(ROOT, 'server', 'index.js')], { cwd: ROOT, env, stdio: ['ignore', 'ignore', 'pipe'] });
+  t.after(() => stopProc(proc));
+  let err = '';
+  proc.stderr.setEncoding('utf8').on('data', (d) => { err += d; });
+  const deadline = Date.now() + 20_000;
+  while (!/\[bots\] retention/.test(err) && Date.now() < deadline) await sleep(100);
+  await stopProc(proc);
+  assert.match(err, /\[bots\] retention \d+ days: pruned 1 conversation, 1 file/, err);
+  assert.equal(fs.existsSync(copy), false);
 });
 
 /* ------------------------------------------------------------- the real helper --- */

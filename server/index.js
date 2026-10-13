@@ -193,7 +193,7 @@ sharedRoom.setMaxListeners(0);
  * rotates.
  */
 const rooms = new GroupRoomStore();
-const bots = new BotStore();
+const bots = new BotStore({ timers: false });
 rooms.setMaxListeners(0);
 
 // A worker whose tmux session vanished has crashed — the spec's failure table says mark
@@ -5710,6 +5710,11 @@ sharedSweep = setInterval(() => observer.sweep().catch(() => {}), 60_000);
 sharedSweep.unref?.();
 
 pruneImages(Date.now()).catch(() => {});
+// The bots' retention run and their timers. Constructed with `timers: false` above and
+// started only here, past the stand-down probe and the log rotation, because the first
+// thing `start()` does is delete copies older than 90 days and print a line saying so —
+// neither of which a panel that is about to stand down may do to the one already running.
+bots.start();
 // Worktree housekeeping, boot-only by design: prune stale bookkeeping everywhere the
 // task store knows, then sweep failed worktrees old enough to stop being evidence —
 // each with a room line first, so nothing disappears unannounced.

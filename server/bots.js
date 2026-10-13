@@ -307,7 +307,9 @@ export class BotStore extends EventEmitter {
    * @param {boolean}  [opts.copies]        false: the registry only — no index load, no
    *                                        timers (the CLI's `bots add|remove|list`)
    * @param {boolean}  [opts.timers]        false: no liveness tick, flush or prune timers,
-   *                                        and no prune at construction (tests)
+   *                                        and no prune at construction, until `start()`
+   *                                        (the panel, which starts it after its boot
+   *                                        probe; tests)
    * @param {function} [opts.now]           the panel clock, ms
    * @param {function} [opts.log]           one stderr line
    */
@@ -327,7 +329,20 @@ export class BotStore extends EventEmitter {
       if (isBotId(id) && plainDir(path.join(this.botsDir, id))) this.#loadBook(id);
     }
     this.#ensureBooks();
-    if (!timers) return;
+    if (timers) this.start();
+  }
+
+  /**
+   * Run retention once and start the three timers — liveness, the index flush, retention.
+   *
+   * The constructor calls this itself unless it was given `timers: false`. The panel passes
+   * that and calls this from its boot block, **after** the single-instance probe and the
+   * log rotation: a panel that stands down because another already holds the port must not
+   * delete that panel's copies or print into its log, and constructing the store reads but
+   * never writes. Idempotent while running; a registry-only store has nothing to start.
+   */
+  start() {
+    if (!this.copies || this.#timers.length) return;
     this.prune();
     const every = (ms, fn) => {
       const t = setInterval(fn, ms);
