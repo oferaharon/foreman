@@ -55,6 +55,7 @@ const COMMANDS = [
   ['install-statusline', 'wrap the status line so the panel sees the rate-limit numbers'],
   ['uninstall-statusline', 'put the original status line back'],
   ['logs', 'print the two log paths this panel is actually using'],
+  ['bots', 'register a headless deployment (`bots add|remove|list`); `bots` alone says more'],
   ['version', 'print the version'],
 ];
 
@@ -97,6 +98,133 @@ function passThrough(command, args) {
   // A signal death is not an exit code. Report it as a failure rather than as 0, which is
   // what `code ?? 1` would otherwise quietly become.
   child.on('exit', (code, signal) => process.exit(signal ? 1 : code ?? 1));
+}
+
+const BOTS_USAGE = [
+  `Usage: ${FORMULA} bots <command>`,
+  '',
+  '  add <id> [--name "…"]   register a headless deployment and print its token, once',
+  '  remove <id>             revoke its token; the copies stay until they age out',
+  '  list                    the registered bots (never a token)',
+  '',
+  'An id is lowercase letters, digits and dashes, starting with a letter, up to 32 characters.',
+  '',
+].join('\n');
+
+/**
+ * `bots add|remove|list` — the registry of headless deployments, `<STATE_DIR>/bots.json`.
+ *
+ * The store is opened with `copies: false`: the registry and nothing else — no index load,
+ * no timers, no retention run — so a registration typed into a terminal never touches the
+ * copies a running panel is writing. That panel needs no restart: it re-reads `bots.json`
+ * when the file changes, at the next request a helper makes.
+ *
+ * `add` prints the three env lines on **stdout** and everything a human reads on stderr, so
+ * `bots add <id> > bot.env` leaves a file holding exactly what the deployment needs and the
+ * token never has to be copied out of a scrollback. It is printed this once: the panel keeps
+ * only its sha256.
+ */
+async function bots(args) {
+  const { BotStore } = await import('../server/bots.js');
+  const { PORT, STATE_DIR, BOT_RETENTION_DAYS } = await import('../server/config.js');
+  const [verb, ...rest] = args;
+
+  const refuse = (message) => {
+    console.error(`${FORMULA} bots: ${message}`);
+    return 1;
+  };
+
+  switch (verb) {
+    case 'add': {
+      let id = null;
+      let name;
+      for (let i = 0; i < rest.length; i++) {
+        const arg = rest[i];
+        if (arg === '--name') {
+          if (i + 1 >= rest.length) return refuse('--name needs a value');
+          name = rest[++i];
+        } else if (arg.startsWith('--name=')) {
+          name = arg.slice('--name='.length);
+        } else if (arg.startsWith('-')) {
+          return refuse(`unknown option ${arg}`);
+        } else if (id === null) {
+          id = arg;
+        } else {
+          return refuse(`one id at a time (got "${id}" and "${arg}")`);
+        }
+      }
+      if (id === null) return refuse('add needs an id: bots add <id> [--name "…"]');
+      let bot;
+      try {
+        bot = new BotStore({ copies: false }).register(id, { name });
+      } catch (err) {
+        if (err.code === 'EEXIST') return refuse(`${err.message}. Its token is not shown again: \`bots remove ${id}\`, then add it again for a new one.`);
+        return refuse(err.message);
+      }
+      console.error(`Registered bot ${bot.id}${bot.name !== bot.id ? ` ("${bot.name}")` : ''}.`);
+      console.error('Put these three lines in the deployment\'s environment — an env file or a secret');
+      console.error('store, never the image. The token is shown this once; the panel keeps only its hash.');
+      console.error('');
+      // A real address rather than a `<placeholder>`: the file is meant to be loaded, and a
+      // shell reads `<` as a redirect and an apostrophe as an open quote. This one is right
+      // for the commonest case, and anywhere it is wrong `--check` says "unreachable".
+      console.log(`FOREMAN_URL=http://host.docker.internal:${PORT}`);
+      console.log(`FOREMAN_BOT=${bot.id}`);
+      console.log(`FOREMAN_BOT_TOKEN=${bot.token}`);
+      console.error('');
+      console.error('FOREMAN_URL is the panel as the deployment reaches it. As printed, it is right for a');
+      console.error('Docker Desktop container on this Mac; from anywhere else, replace host.docker.internal');
+      console.error('with an address of this Mac that the deployment can reach. Then set FOREMAN_WATCH and');
+      console.error('run `node foreman-helper.mjs --check` there. A running panel needs no restart.');
+      return 0;
+    }
+
+    case 'remove': {
+      if (rest.length !== 1) return refuse('remove takes exactly one id: bots remove <id>');
+      const [id] = rest;
+      let removed;
+      try {
+        removed = new BotStore({ copies: false }).unregister(id);
+      } catch (err) {
+        return refuse(err.message);
+      }
+      if (!removed) return refuse(`no bot "${id}" is registered`);
+      console.log(`Removed bot ${id}. A running panel refuses its token within a couple of seconds.`);
+      console.log(`Its copies stay in ${path.join(STATE_DIR, 'bots', id)} until they age out,`);
+      console.log(`${BOT_RETENTION_DAYS} days after each conversation's last record.`);
+      return 0;
+    }
+
+    case 'list': {
+      if (rest.length) return refuse('list takes no arguments');
+      const all = new BotStore({ copies: false }).registered();
+      if (!all.length) {
+        console.log(`No bots are registered. \`${FORMULA} bots add <id>\` registers one.`);
+        return 0;
+      }
+      const width = Math.max(...all.map((b) => b.id.length)) + 2;
+      for (const b of all) {
+        // This Mac's own calendar date, not UTC's — it is the day somebody here typed `add`.
+        const d = b.createdAt ? new Date(b.createdAt) : null;
+        const when = d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` : 'unknown';
+        console.log(`${b.id.padEnd(width)}registered ${when}${b.name !== b.id ? `  "${b.name}"` : ''}`);
+      }
+      return 0;
+    }
+
+    case undefined:
+    case 'help':
+    case '--help':
+    case '-h':
+      console.log(BOTS_USAGE);
+      return 0;
+
+    default:
+      console.error(`${FORMULA} bots: unknown command "${verb}"`);
+      console.error('');
+      console.error(BOTS_USAGE);
+      return 1;
+  }
 }
 
 function services(verb) {
@@ -163,6 +291,10 @@ switch (command) {
     console.log(LOG_ERR);
     break;
   }
+
+  case 'bots':
+    process.exit(await bots(rest));
+    break;
 
   case 'version':
   case '--version':

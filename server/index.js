@@ -111,6 +111,7 @@ import { RoomStore } from './room.js';
 import { assertSendableBody, MAX_MESSAGE_TEXT } from './envelope.js';
 import { SharedRoomStore } from './shared-room.js';
 import { GroupRoomStore, memberKey, MAX_MEMBERS } from './rooms.js';
+import { BotStore, CHUNK_MAX as BOT_CHUNK_MAX, isBotId } from './bots.js';
 import {
   callerMember,
   memberFor,
@@ -192,6 +193,7 @@ sharedRoom.setMaxListeners(0);
  * rotates.
  */
 const rooms = new GroupRoomStore();
+const bots = new BotStore();
 rooms.setMaxListeners(0);
 
 // A worker whose tmux session vanished has crashed — the spec's failure table says mark
@@ -3599,6 +3601,160 @@ app.post('/api/rooms/:id/post', async (req, res) => {
   }
 });
 
+/* --------------------------------------------------------------- bots --- */
+
+/*
+ * The bots wire, protocol v1 — where a helper beside a headless deployment ships its
+ * transcripts in. Three routes, each a thin wrapper over the store: `bots.js` answers
+ * `{status, body}` and this sends it, so the contract is pinned there and in
+ * `test/fake-bot-panel.js`, not here.
+ *
+ *   POST /api/bots/:bot/hello      JSON `{v, instance, helperVersion, host, roots, files}`
+ *   GET  /api/bots/:bot/manifest   what the panel holds for the bot
+ *   POST /api/bots/:bot/append     octet-stream, at `?root=&project=&session=&agent=&offset=&reset=`
+ *
+ * Plain HTTP, never a second `WebSocketServer`: `ws` hands every upgrade on this server to
+ * every server attached to it, and one that does not own the path aborts it with a 400 —
+ * so a second one would break `/ws`.
+ *
+ * **An append's body is read only after the token is checked.** `botAuth` runs ahead of
+ * each route's own parser, so an append from a stranger is refused without five megabytes
+ * being buffered first. (A hello sent as JSON is parsed by the global parser before any
+ * route runs, like every JSON request here, and is capped by it.) The append body has its
+ * own `express.raw`, because the global
+ * `express.json` above only parses JSON types: it leaves an octet-stream body alone, and
+ * would parse — and cap — an append that called itself JSON, which the store then refuses
+ * as not bytes. Hello gets its own JSON parser for the opposite reason: the fake panel
+ * reads a hello whatever it calls itself, and so does this.
+ *
+ * **One 401 for an unknown bot and a wrong token**, same body, and `verify` costs the same
+ * for both. Every refusal is one stderr line per (bot, remote address, reason) and never a
+ * room line — the trigger endpoint's rule, for the trigger's reason: anything that can
+ * reach the port could otherwise write into a log the maintainer scans. The `409 {size}`
+ * that tells a helper where to resume is the protocol working, not a refusal, and is not
+ * logged.
+ *
+ * **A registration reaches a running panel without a restart.** `foreman-panel bots add`
+ * writes `bots.json` from another process; `reloadRegistry` re-reads it when its mtime, size
+ * or inode moved. Checked on a miss — that is how an `add` is picked up — and on a hit too,
+ * each at most once every two seconds, because a check on misses alone would never see a
+ * `bots remove`: a revoked token still verifies against the registry in memory, so it would
+ * keep being accepted until the next restart.
+ *
+ * The routes are token-gated writes and nothing else. A helper can add conversations to its
+ * own bot and cannot type, read a session, or touch anything else; what a bot looks like
+ * from the panel's side — the roster field, the reads — is built elsewhere.
+ */
+
+/** How often each of the two registry checks may stat `bots.json`. */
+const BOT_RELOAD_MS = 2_000;
+const botRegistryCheckedAt = { hit: -Infinity, miss: -Infinity };
+
+/** Re-read `bots.json` if it changed, at most once per `BOT_RELOAD_MS` for this kind of check. */
+function reloadBots(kind) {
+  const now = Date.now();
+  if (now - botRegistryCheckedAt[kind] < BOT_RELOAD_MS) return false;
+  botRegistryCheckedAt[kind] = now;
+  return bots.reloadRegistry();
+}
+
+/**
+ * The refusals already logged, as `bot \0 address \0 reason`. Capped, because the bot in the
+ * key comes from the URL: a caller cycling made-up ids would otherwise grow it, and the log,
+ * without end. In memory on purpose — a restart printing each one once more is the point.
+ */
+const botRefusalsLogged = new Set();
+const BOT_REFUSALS_LOGGED_MAX = 1_000;
+
+function logBotRefusal(req, bot, status, reason) {
+  // Only an id that passes the regex is printed: `:bot` is decoded from the URL and could
+  // carry a newline into the log.
+  const who = isBotId(bot) ? bot : '(not a bot id)';
+  const addr = req.socket?.remoteAddress || 'unknown';
+  const key = `${who}\0${addr}\0${reason}`;
+  if (botRefusalsLogged.has(key)) return;
+  if (botRefusalsLogged.size >= BOT_REFUSALS_LOGGED_MAX) return;
+  botRefusalsLogged.add(key);
+  console.error(`[bots] refused ${who} from ${addr}: ${reason} (${status})`);
+  if (botRefusalsLogged.size === BOT_REFUSALS_LOGGED_MAX) {
+    console.error(`[bots] ${BOT_REFUSALS_LOGGED_MAX} different refusals logged; no more until the panel restarts`);
+  }
+}
+
+function botAuth(req, res, next) {
+  const bot = req.params.bot;
+  const m = /^Bearer\s+(\S+)$/.exec(String(req.get('authorization') || '').trim());
+  const token = m ? m[1] : '';
+  let ok = bots.verify(bot, token);
+  if (ok) {
+    if (reloadBots('hit')) ok = bots.verify(bot, token);
+  } else if (reloadBots('miss')) {
+    ok = bots.verify(bot, token);
+  }
+  if (ok) return next();
+  const reason = !m ? 'no bearer token' : bots.has(bot) ? 'wrong token' : 'unknown bot';
+  // The store keeps the last refusal for its settings list — for a bot it knows, and the
+  // reason stays on this Mac either way; the caller is told nothing that tells the two apart.
+  bots.noteRefusal(bot, 401, reason);
+  logBotRefusal(req, bot, 401, reason);
+  return res.status(401).json({ error: 'unknown bot or wrong token' });
+}
+
+/** Send what the store answered, logging it if it is a refusal. */
+function answerBot(req, res, { status, body }) {
+  if (status >= 400 && !(status === 409 && Number.isSafeInteger(body?.size))) {
+    const reason = body?.error
+      ?? (status === 426 ? 'unsupported protocol' : status === 409 ? 'another helper instance is reporting for this bot' : `HTTP ${status}`);
+    logBotRefusal(req, req.params.bot, status, reason);
+  }
+  res.status(status).json(body);
+}
+
+/**
+ * A body the route's own parser refused (too big, not JSON, cut off) or anything the store
+ * threw. Mounted last in each route, so it sees only what that route raised — the token was
+ * already accepted, so the bot is a known one and the refusal is noted against it.
+ */
+function botFault(err, req, res, _next) {
+  const status = Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+  const reason = err?.type === 'entity.too.large' ? `a chunk is at most ${BOT_CHUNK_MAX} bytes`
+    : err?.type === 'entity.parse.failed' ? 'the body is not JSON'
+    : status < 500 ? String(err?.message || `HTTP ${status}`)
+    : 'the panel could not store this';
+  if (status >= 500) console.error(`[bots] ${isBotId(req.params.bot) ? req.params.bot : '(not a bot id)'}: ${err?.stack || err}`);
+  bots.noteRefusal(req.params.bot, status, reason);
+  logBotRefusal(req, req.params.bot, status, reason);
+  if (!res.headersSent) res.status(status).json({ error: reason });
+}
+
+app.post(
+  '/api/bots/:bot/hello',
+  botAuth,
+  express.json({ type: () => true, limit: '256kb' }),
+  (req, res) => answerBot(req, res, bots.hello(req.params.bot, req.body)),
+  botFault,
+);
+
+app.get(
+  '/api/bots/:bot/manifest',
+  botAuth,
+  (req, res) => answerBot(req, res, bots.manifest(req.params.bot)),
+  botFault,
+);
+
+app.post(
+  '/api/bots/:bot/append',
+  botAuth,
+  // 5 MB against a 4 MiB chunk: a body between the two reaches the store, which answers
+  // its own 413; past 5 MB the parser stops reading and this route's `botFault` does.
+  express.raw({ type: 'application/octet-stream', limit: '5mb' }),
+  (req, res) => {
+    const { root, project, session, agent, offset, reset } = req.query;
+    answerBot(req, res, bots.append(req.params.bot, { root, project, session, agent }, offset, req.body, { reset }));
+  },
+  botFault,
+);
+
 /* -------------------------------------------------------------- model --- */
 
 /*
@@ -5522,7 +5678,7 @@ process.on('SIGTERM', () => {
   // sweep firing into a process that is on its way out would read transcripts nobody is
   // going to be told about.
   clearInterval(sharedSweep);
-  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, rooms]) {
+  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, rooms, bots]) {
     try {
       store.flush();
     } catch {

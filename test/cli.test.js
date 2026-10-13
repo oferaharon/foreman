@@ -84,7 +84,7 @@ test('--help lists every subcommand, and exits 0', async () => {
   const { code, stdout } = await cli(['--help']);
   assert.equal(code, 0);
   const names = ['serve', 'start', 'stop', 'restart', 'install-hook', 'uninstall-hook',
-    'install-statusline', 'uninstall-statusline', 'logs', 'version'];
+    'install-statusline', 'uninstall-statusline', 'logs', 'bots', 'version'];
   for (const name of names) {
     assert.match(stdout, new RegExp(`\\b${name}\\b`), `--help does not mention ${name}`);
   }
@@ -218,6 +218,88 @@ test('a refusal from the status-line installer is the shim\'s exit code too', as
   });
   assert.notEqual(code, 0, 'a refusal must not look like success to a shell script');
   assert.match(stderr, /UNREADABLE_SETTINGS/);
+});
+
+// -------------------------------------------------------------------------- the bots ---
+
+/*
+ * `bots add|remove|list`, against a scratch `FOREMAN_STATE_DIR` and never the real one —
+ * set in the child's environment, which is the only place it can be set before `config.js`
+ * resolves it. What a running panel then does with the file is `test/bots-ingest.test.js`'s.
+ */
+function scratchState(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-cli-bots-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+test('bots add prints the three env lines on stdout, once, and keeps only the hash', async (t) => {
+  const state = scratchState(t);
+  const { code, stdout, stderr } = await cli(['bots', 'add', 'alpha-bot', '--name', 'Alpha sandbox'], { FOREMAN_STATE_DIR: state });
+  assert.equal(code, 0, stderr);
+  const lines = stdout.trim().split('\n');
+  // Exactly the three, so `bots add <id> > bot.env` is a file the deployment can load.
+  assert.deepEqual(lines.map((l) => l.split('=')[0]), ['FOREMAN_URL', 'FOREMAN_BOT', 'FOREMAN_BOT_TOKEN']);
+  assert.equal(lines[1], 'FOREMAN_BOT=alpha-bot');
+  // Loadable as it stands: no quote, no `<`, nothing a shell or an env file reads as syntax.
+  for (const l of lines) assert.match(l, /^[A-Z_]+=[A-Za-z0-9_.:/-]+$/, l);
+  const token = lines[2].slice('FOREMAN_BOT_TOKEN='.length);
+  assert.match(token, /^[A-Za-z0-9_-]{43}$/, '32 random bytes, base64url');
+  assert.match(stderr, /shown this once/);
+
+  const file = fs.readFileSync(path.join(state, 'bots.json'), 'utf8');
+  assert.equal(file.includes(token), false, 'the token itself is never written down');
+  assert.equal(fs.statSync(path.join(state, 'bots.json')).mode & 0o777, 0o600);
+
+  const list = await cli(['bots', 'list'], { FOREMAN_STATE_DIR: state });
+  assert.equal(list.code, 0);
+  assert.match(list.stdout, /^alpha-bot\s+registered \d{4}-\d{2}-\d{2}\s+"Alpha sandbox"$/m);
+  assert.equal(list.stdout.includes(token), false, 'list never prints a token');
+});
+
+test('bots add refuses a second registration and a bad id, and says why', async (t) => {
+  const state = scratchState(t);
+  assert.equal((await cli(['bots', 'add', 'alpha-bot'], { FOREMAN_STATE_DIR: state })).code, 0);
+  const again = await cli(['bots', 'add', 'alpha-bot'], { FOREMAN_STATE_DIR: state });
+  assert.notEqual(again.code, 0);
+  assert.match(again.stderr, /already registered/);
+  assert.equal(again.stdout, '', 'no second token, and nothing on stdout to mistake for one');
+  for (const bad of [['bots', 'add', 'Alpha'], ['bots', 'add', '../x'], ['bots', 'add'], ['bots', 'add', 'a', 'b'], ['bots', 'add', 'beta', '--nmae', 'x']]) {
+    const res = await cli(bad, { FOREMAN_STATE_DIR: state });
+    assert.notEqual(res.code, 0, bad.join(' '));
+    assert.equal(res.stdout, '', bad.join(' '));
+  }
+  const list = await cli(['bots', 'list'], { FOREMAN_STATE_DIR: state });
+  assert.deepEqual(list.stdout.trim().split('\n').map((l) => l.split(/\s+/)[0]), ['alpha-bot']);
+});
+
+test('bots remove revokes the registration and leaves the copies where they are', async (t) => {
+  const state = scratchState(t);
+  assert.equal((await cli(['bots', 'add', 'alpha-bot'], { FOREMAN_STATE_DIR: state })).code, 0);
+  // A copy the panel would have written; `remove` must not touch it.
+  const copy = path.join(state, 'bots', 'alpha-bot', 'main', '-work', '00000000-0000-4000-8000-000000000000.jsonl');
+  fs.mkdirSync(path.dirname(copy), { recursive: true });
+  fs.writeFileSync(copy, '{"type":"user"}\n');
+
+  const res = await cli(['bots', 'remove', 'alpha-bot'], { FOREMAN_STATE_DIR: state });
+  assert.equal(res.code, 0, res.stderr);
+  assert.match(res.stdout, /until they age out/);
+  assert.equal(fs.readFileSync(copy, 'utf8'), '{"type":"user"}\n');
+  const list = await cli(['bots', 'list'], { FOREMAN_STATE_DIR: state });
+  assert.match(list.stdout, /No bots are registered/);
+
+  const gone = await cli(['bots', 'remove', 'alpha-bot'], { FOREMAN_STATE_DIR: state });
+  assert.notEqual(gone.code, 0, 'removing what is not there must not look like success');
+  assert.match(gone.stderr, /no bot "alpha-bot"/);
+});
+
+test('bots alone prints its usage; an unknown bots command is an error', async () => {
+  const bare = await cli(['bots']);
+  assert.equal(bare.code, 0);
+  assert.match(bare.stdout, /add <id>/);
+  const typo = await cli(['bots', 'ad', 'x']);
+  assert.notEqual(typo.code, 0);
+  assert.match(typo.stderr, /unknown command "ad"/);
 });
 
 // --------------------------------------------------------------------- the detector ---
