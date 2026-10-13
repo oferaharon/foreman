@@ -162,15 +162,29 @@ function withDom(fn) {
   }
 }
 
-/** A container shaped like the one `patchBand` is handed. */
+/**
+ * A container shaped like the one `patchBand` is handed.
+ *
+ * `moves` counts every insertion, a new node's included, because a move is what the band
+ * must not make for a row already in place (`place` in `web/rooms-band.js`): moving rows
+ * round a focused one is what scrolled the real band to the top. `append` is still modelled
+ * and still counted, so a patch that drifted back to re-appending would show up as moves
+ * rather than as a missing method.
+ */
 const container = () => ({
   children: [],
+  moves: 0,
   append(...kids) {
-    for (const kid of kids) {
-      if (kid.parent) kid.parent.children.splice(kid.parent.children.indexOf(kid), 1);
-      kid.parent = this;
-      this.children.push(kid);
-    }
+    for (const kid of kids) this.insertBefore(kid, null);
+  },
+  insertBefore(kid, ref) {
+    this.moves += 1;
+    if (kid.parent) kid.parent.children.splice(kid.parent.children.indexOf(kid), 1);
+    kid.parent = this;
+    const at = ref ? this.children.indexOf(ref) : -1;
+    if (ref && at < 0) throw new Error('insertBefore: the reference node is not a child');
+    if (at < 0) this.children.push(kid);
+    else this.children.splice(at, 0, kid);
   },
 });
 
@@ -555,6 +569,103 @@ test('the room you are looking at shows no unseen count, whatever the summary sa
     assert.match(row.className, /is-open/);
     assert.equal(span(row, 'room-unseen').hidden, true, '`markGroupRoomRead` is a round trip');
   });
+});
+
+/* ------------------------------------- a row in place is never moved --- */
+
+/** Node identity, element by element — `deepEqual` would also pass on two equal copies. */
+const sameNodes = (a, b) => a.length === b.length && a.every((n, i) => n === b[i]);
+
+const eight = () => Array.from({ length: 8 }, (_, i) => room(`r${8 - i}`, `room ${8 - i}`, { createdAt: 8 - i }));
+
+test('a click’s repaint moves no row — moving them round a focused one scrolled the band to the top', () => {
+  withDom(() => {
+    const list = container();
+    patchBand(list, eight());
+    const before = [...list.children];
+    list.moves = 0;
+
+    // Exactly the patch a band click causes: the lowest room turns `is-open`, nothing else.
+    patchBand(list, eight(), { openIds: ['r1'] });
+    assert.equal(list.moves, 0, 'a row already in place is left where it is');
+    assert.ok(sameNodes(list.children, before), 'and every node is the one it was');
+    assert.match(list.children[7].className, /is-open/, 'while still being patched');
+
+    // And the frames after it, which a roster beat re-signs on anything the band shows.
+    patchBand(list, eight().map((r) => ({ ...r, unseen: 2 })), { openIds: ['r1'] });
+    assert.equal(list.moves, 0);
+  });
+});
+
+test('pressing the archived fold moves neither the rows above it nor the fold itself', () => {
+  withDom(() => {
+    const list = container();
+    const rooms = [...eight(), room('r0', 'gone', { createdAt: 0, archivedAt: 5 })];
+    patchBand(list, rooms, { archivedCollapsed: true });
+    list.moves = 0;
+    patchBand(list, rooms, { archivedCollapsed: false });
+    assert.equal(list.moves, 1, 'only the archived row arriving below the fold');
+    list.moves = 0;
+    patchBand(list, rooms, { archivedCollapsed: true });
+    assert.equal(list.moves, 0, 'and shutting it only takes that row away');
+    assert.equal(list.children.length, 9);
+  });
+});
+
+test('a room arriving above the rows is the only node that moves', () => {
+  withDom(() => {
+    const list = container();
+    patchBand(list, eight());
+    const before = [...list.children];
+    list.moves = 0;
+    patchBand(list, [room('r9', 'room 9', { createdAt: 9 }), ...eight()]);
+    assert.equal(list.moves, 1);
+    assert.ok(sameNodes(list.children.slice(1), before));
+  });
+});
+
+test('a room going away is taken out before the pass, so the rows behind it stay put', () => {
+  withDom(() => {
+    const list = container();
+    patchBand(list, eight());
+    const behind = [...list.children].slice(4);
+    list.moves = 0;
+    // `r5` is the fourth row. Removed only after the pass, its node would sit at index 3 and
+    // every row behind it would be moved in front of it, one by one.
+    patchBand(list, eight().filter((r) => r.id !== 'r5'));
+    assert.equal(list.moves, 0);
+    assert.ok(sameNodes(list.children.slice(3), behind));
+  });
+});
+
+test('a reorder still comes out in the order the frame says', () => {
+  withDom(() => {
+    const list = container();
+    const rooms = eight();
+    patchBand(list, rooms);
+    // `r6` archived with the fold open: it leaves the open rows for the foot of the band.
+    const next = rooms.map((r) => (r.id === 'r6' ? { ...r, archivedAt: 5 } : r));
+    patchBand(list, next, { archivedCollapsed: false });
+    assert.deepEqual(
+      list.children.map((n) => n.dataset.roomKey),
+      ['r8', 'r7', 'r5', 'r4', 'r3', 'r2', 'r1', ARCHIVED_KEY, 'r6'].map((k) => (k === ARCHIVED_KEY ? k : `room:${k}`)),
+    );
+    // And back again, unarchived into its created position.
+    patchBand(list, rooms, { archivedCollapsed: false });
+    assert.deepEqual(
+      list.children.map((n) => n.dataset.roomKey),
+      rooms.map((r) => `room:${r.id}`),
+    );
+  });
+});
+
+test('`patchBand` places rows through `place` and never re-appends them', () => {
+  const start = band.indexOf('export function patchBand(');
+  const body = strip(band.slice(start, band.indexOf('\n}\n', start)));
+  assert.ok(start >= 0, '`patchBand` must exist');
+  assert.ok(!/\blist\.append\(/.test(body), 'a re-append moves a row that is already in place');
+  assert.match(body, /place\(list, row, drawn\.length\)/);
+  assert.match(strip(band), /function place\(list, row, index\) \{[\s\S]*?if \(at !== row\) list\.insertBefore\(row, at\);/);
 });
 
 /* ------------------------------------------------------------- the mark --- */

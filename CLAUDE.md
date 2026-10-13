@@ -784,6 +784,11 @@ clamp, how a member is resolved, and what `@name` does and does not change. Evid
   place.** `scrollTop` is held across the whole paint and read *before* `replaceChildren`, and
   nothing is drawn until it is known to be needed.
   [rooms#a-repaint-that-measures-anything](docs/traps/rooms.md#a-repaint-that-measures-anything)
+- `web/rooms-band.js` (`patchBand`, `place`) — **Moving a row round a focused one scrolls the
+  band to the top — MEASURED on Chrome 155, 54 → 0 across one patch.** Chrome's scroll
+  anchoring follows the focused row; a row already in place is never moved, and stale nodes go
+  before the pass.
+  [rooms#moving-a-row-round-a-focused-one-scrolls-the-band](docs/traps/rooms.md#moving-a-row-round-a-focused-one-scrolls-the-band)
 - `web/styles.css` (`.room-clamp`) — **A clamp that can't be measured can't be trusted.** The
   standard `line-clamp` is deliberately not set beside `-webkit-line-clamp`; add it the day it
   can be measured, not the day it parses.

@@ -415,8 +415,8 @@ function buildFold(key) {
  * The index is read off the children the container already has rather than held in a
  * module-scope Map, which is what makes this both stateless and provable: a test can call
  * it twice against a stub container and compare node identity, and a second band on screen
- * one day would need nothing here to change. `append` on a node that is already a child
- * **moves** it, so the reorder and the reuse are one pass.
+ * one day would need nothing here to change. A node is moved only when it is not already
+ * where it belongs, and that is a measurement rather than tidiness — see `place`.
  *
  * `handlers.onOpen(id)` and `handlers.onToggleArchived()` are the only two ways out. They
  * are re-bound on every patch rather than only at build, because a handler closing over a
@@ -435,10 +435,18 @@ export function patchBand(list, rooms = [], opts = {}) {
   const open = new Set(openIds);
   const entries = bandEntries(rooms, { archivedCollapsed });
 
+  // Whatever the last frame drew and this one does not goes **first** — a room archived
+  // while the fold is shut, or one somebody deleted. Left in the list until the end, a stale
+  // node sits at an index a survivor belongs at, and `place` would then move every row
+  // behind it, a focused one included. None of these nodes is reused, so taking them out
+  // before the pass removes nothing that is re-created in the same beat.
+  const wanted = new Set(entries.map((entry) => entry.key));
   const have = new Map();
   for (const node of [...list.children]) {
     const key = node.dataset?.roomKey;
-    if (key) have.set(key, node);
+    if (!key) continue;
+    if (wanted.has(key)) have.set(key, node);
+    else node.remove();
   }
 
   const drawn = [];
@@ -454,8 +462,7 @@ export function patchBand(list, rooms = [], opts = {}) {
         ? `Show ${entry.count} archived room${entry.count === 1 ? '' : 's'}`
         : 'Hide the archived rooms';
       row.onclick = () => onToggleArchived?.();
-      have.delete(entry.key);
-      list.append(row);
+      place(list, row, drawn.length);
       drawn.push(row);
       continue;
     }
@@ -493,16 +500,35 @@ export function patchBand(list, rooms = [], opts = {}) {
     unseen.title = n ? `${room.unseen} since you last opened this room` : '';
     row.title = roomTitle(room, { archived: entry.archived, live: facts });
     row.onclick = () => onOpen?.(room.id);
-    have.delete(entry.key);
-    list.append(row);
+    place(list, row, drawn.length);
     drawn.push(row);
   }
-
-  // Whatever the last frame drew and this one does not. A room that was archived while the
-  // fold is shut, or one somebody deleted — either way its node goes, and it goes after the
-  // survivors have been re-appended so nothing is removed and re-created in one beat.
-  for (const node of have.values()) node.remove();
   return drawn;
+}
+
+/**
+ * Put `row` at `index` in `list`, and leave it alone if it is already there.
+ *
+ * **A row already in place is never moved, because moving rows is what scrolled the band to
+ * the top.** The patch used to `append` every row on every frame — each one moved to the
+ * end, in order, so the band came out exactly as it went in — and that was harmless until
+ * one of the rows held focus, which a mouse-down on a row always gives it. Chrome's scroll
+ * anchoring takes the focused element as its anchor, reads its siblings moving round it as
+ * the anchor moving, and scrolls the list to compensate, clamped at 0. MEASURED on Chrome
+ * 155 in the sandbox, with eight rooms and the band scrolled to the bottom: `scrollTop` 54
+ * before this function and 0 after it, on the first patch after a click (the room turns
+ * `is-open`, so the signature moves); 54 held with nothing focused, and with
+ * `overflow-anchor: none` on the list. A later patch under a row still focused from an
+ * earlier click, and the one under the archived fold just pressed, jumped the same way.
+ *
+ * A row left where it is keeps its focus and costs nothing, and anchoring is left to do its
+ * real job — a room created above the fold now keeps the row under the cursor where it was,
+ * which the old re-append also defeated. `overflow-anchor: none` would have stopped the
+ * jump too, and was measured, and gives both of those up.
+ */
+function place(list, row, index) {
+  const at = list.children[index] ?? null;
+  if (at !== row) list.insertBefore(row, at);
 }
 
 /** The age span, in words and in full on its hover. Shared by the patch and the timer so
