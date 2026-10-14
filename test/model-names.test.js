@@ -36,14 +36,13 @@ const text = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const SHOWN_ONLY = {
   'claude-haiku-5-5': 'Haiku 5.5',
-  'claude-fable-5-1': 'Fable 5.1',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-sonnet-4-6': 'Sonnet 4.6',
 };
 
 /* ------------------------------------------------------------ the names --- */
 
-test('the four display-only ids have proper names, through the one `modelLabel`', () => {
+test('the three display-only ids have proper names, through the one `modelLabel`', () => {
   assert.deepEqual({ ...DISPLAY_MODEL_NAMES }, SHOWN_ONLY);
   for (const [id, name] of Object.entries(SHOWN_ONLY)) {
     assert.equal(modelLabel(id), name, id);
@@ -51,6 +50,7 @@ test('the four display-only ids have proper names, through the one `modelLabel`'
   }
   // The launchable names are untouched and still win.
   assert.equal(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
+  assert.equal(modelLabel('claude-fable-5-1'), 'Fable 5.1');
   assert.equal(modelLabel('claude-haiku-4-5-20251001'), 'Haiku 4.5');
   // An id nobody named is still drawn as itself, and an inherited key is not a name.
   assert.equal(modelLabel('claude-nonsense'), 'claude-nonsense');
@@ -117,4 +117,13 @@ test('neither picker offers one: the served name maps walk `WORKER_MODELS` alone
   assert.doesNotMatch(index, /DISPLAY_MODEL_NAMES/);
   assert.doesNotMatch(text('server/dispatch.js'), /DISPLAY_MODEL_NAMES/);
   assert.doesNotMatch(text('server/settings-file.js'), /DISPLAY_MODEL_NAMES/);
+});
+
+test('Fable 5.1 moved across by the maintainer\'s ruling of 2026-10-14: launchable, named, on the list', () => {
+  assert.ok(WORKER_MODELS.includes('claude-fable-5-1'));
+  assert.ok(WORKER_MODELS.includes('claude-fable-5'), 'its predecessor still validates');
+  assert.equal(WORKER_MODEL_NAMES['claude-fable-5-1'], 'Fable 5.1');
+  assert.ok(!Object.hasOwn(DISPLAY_MODEL_NAMES, 'claude-fable-5-1'));
+  assert.equal(isKnownModel('claude-fable-5-1'), true);
+  assert.equal(isKnownModel('claude-fable-5-1[1m]'), true);
 });

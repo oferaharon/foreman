@@ -39,6 +39,7 @@ export const WORKER_MODELS = [
   'claude-opus-5',
   'claude-sonnet-5-5',
   'claude-sonnet-5',
+  'claude-fable-5-1',
   'claude-fable-5',
   'claude-haiku-4-5-20251001',
 ];
@@ -91,6 +92,7 @@ export const WORKER_MODEL_NAMES = {
   'claude-opus-5': 'Opus 5',
   'claude-sonnet-5-5': 'Sonnet 5.5',
   'claude-sonnet-5': 'Sonnet 5',
+  'claude-fable-5-1': 'Fable 5.1',
   'claude-fable-5': 'Fable 5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
 };
@@ -105,7 +107,8 @@ export const WORKER_MODEL_NAMES = {
  * launch-model setting cannot be saved as one, and neither picker offers one —
  * `workerModelNames` walks `WORKER_MODELS`, never this map. Moving an id from here onto the
  * list above is a ruling about what the panel may start, not a naming fix; `test/model-
- * names.test.js` pins both halves.
+ * names.test.js` pins both halves. (`claude-fable-5-1` made that move on 2026-10-14, by the
+ * maintainer's ruling.)
  *
  * In this file rather than in `context-window.js` because `modelLabel` below is the one
  * spelling of "what a model is called", and a second table elsewhere would be the
@@ -113,7 +116,6 @@ export const WORKER_MODEL_NAMES = {
  */
 export const DISPLAY_MODEL_NAMES = Object.freeze({
   'claude-haiku-5-5': 'Haiku 5.5',
-  'claude-fable-5-1': 'Fable 5.1',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-sonnet-4-6': 'Sonnet 4.6',
 });
