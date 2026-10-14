@@ -6955,7 +6955,11 @@ body.pin-reordering * { cursor: grabbing !important; }
    a block did for free. Folded it reads `bots · N`, plus the band's own pulsing dot while any
    bot is active; the caret sits at the right end, where the rooms head keeps `+ room`, so
    the two titles stay on one left edge. Nothing in it changes the line's height between the
-   two states, so the head never moves under the pointer that just pressed it. */
+   two states (33.7px both, measured) — but the head itself **does move** when the band folds:
+   the rail's column is packed from the bottom (the rooms band, peer messages and the footer
+   hold the foot), so the list going away drops the head onto the rooms band's top rule and
+   the session list above takes the room. Measured at 1440×900 with three bots: 422.8 → 590.8.
+   The rooms band does not move at all, which is the half the rail's layout can promise. */
 .bots-head {
   flex: none;
   display: flex;

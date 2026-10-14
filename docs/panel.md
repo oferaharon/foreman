@@ -1470,6 +1470,12 @@ quiet; the newest reply's model · effort · ctx on the second, plus `N active` 
 one conversation is running at once. All three facts come from that one reply; two
 conversations' contexts are never added together.
 
+Click the band's **bots** heading to fold it down to that one line, and again to open it. Folded,
+it reads `bots · N` — N the bots registered — and carries the same pulsing amber dot while any
+of them is running, so a fold hides no activity; it is never red, because a bot asks for
+nothing. The fold is remembered by this browser. Folding drops the heading onto the rooms band
+and gives the session list the room; the rooms band itself does not move.
+
 **The bot pane** opens in the main pane, exactly where a session's conversation opens: a click
 on a bot row replaces what that pane shows and the row takes the same selected marker a
 session row does, a click on a session row switches back, split view treats it as it treats a

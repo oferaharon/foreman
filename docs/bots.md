@@ -245,6 +245,10 @@ least one bot is registered. One two-line row per bot, ordered by last activity:
   conversation is. All three facts come from one record; two conversations' contexts are
   never summed or maxed.
 
+The band's own heading folds it to one line (`bots · N`, N the bots registered), with the
+row's pulsing dot while any of them is active, so folding hides no activity. The fold is a
+per-browser preference (`foreman.botsFolded`); with storage blocked the band simply opens.
+
 Opening a row puts the bot in the **main pane**, where a session's conversation opens: it
 replaces what that pane shows, the row takes a session row's selected marker, and clicking a
 session row switches back. Split view treats a bot as it treats a session, and a reload puts
