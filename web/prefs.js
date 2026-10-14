@@ -121,6 +121,7 @@ export const ASIDE_FOLDED_KEY = 'foreman.asideFolded';
 export const ROOM_FOLDED_KEY = 'foreman.roomFolded';
 export const PHONE_TAB_KEY = 'foreman.m.tab';
 export const FILES_VIEW_KEY = 'foreman.filesView';
+export const BOTS_FOLDED_KEY = 'foreman.botsFolded';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -177,6 +178,21 @@ export const asideFolded = flag(ASIDE_FOLDED_KEY);
  * the room pane is restored from `state.opened`.
  */
 export const roomFolded = flag(ROOM_FOLDED_KEY);
+
+/**
+ * Whether the rail's bots band is folded down to its head (`bots · N`, the maintainer's ask
+ * of 2026-10-13).
+ *
+ * Off — open — by default, and for `asideFolded`'s reason: `flag()` answers `false` both
+ * for a browser that was never told anything and for one whose storage is blocked, and a
+ * band folded shut by a preference nobody set, in a window that cannot remember being told
+ * to open it, would be a band that had quietly hidden its rows.
+ *
+ * A fold hides no activity. The folded head still pulses while any bot is active
+ * (`botsHead` in `web/bots-band.js`), which is what makes remembering a fold affordable.
+ * One answer for the whole browser, because there is one rail.
+ */
+export const botsFolded = flag(BOTS_FOLDED_KEY);
 
 /**
  * The three tabs of the phone's home screen, in the order they are drawn.

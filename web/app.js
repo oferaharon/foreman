@@ -53,6 +53,8 @@ import { asideFolded, ghostSend, hideFinished, isFinishedState } from './prefs.j
 import { roomFolded } from './prefs.js';
 // …and the `files` modal's remembered grid/list choice, on its own line for the same reason.
 import { filesView } from './prefs.js';
+// Whether the rail's bots band is folded to its head — a browser preference, `prefs.js`'s.
+import { botsFolded } from './prefs.js';
 // What a session still has running behind its composer, in Claude Code's own words. Two
 // readers — the rail row's second dot and the line above the composer — and one answer.
 import { backgroundWords } from './background.js';
@@ -185,11 +187,14 @@ import { ctxEl, ctxFor } from './ctx.js';
 // whose `place` it imports — a row already in place is never moved.
 import {
   botFacts,
+  botsBandShape,
+  botsHead,
   botsSig,
   dotState,
   dotText,
   modelText,
   nextBotTick,
+  paintBotsHead,
   patchBotsBand,
   patchConversations,
   relightBotsBand,
@@ -425,6 +430,10 @@ const el = {
   railShared: document.getElementById('railShared'),
   railSharedUnseen: document.getElementById('railSharedUnseen'),
   railBots: document.getElementById('railBots'),
+  botsHead: document.getElementById('botsHead'),
+  botsCaret: document.getElementById('botsCaret'),
+  botsCount: document.getElementById('botsCount'),
+  botsHeadDot: document.getElementById('botsHeadDot'),
   botsList: document.getElementById('botsList'),
   railRooms: document.getElementById('railRooms'),
   roomsGrip: document.getElementById('roomsGrip'),
@@ -705,7 +714,10 @@ const ROOMS_MAX = 30;
  *  would be a rail that stopped being one. */
 const RAIL_LIST_MIN = 6;
 
-resizer({
+/** The rooms band's resizer, held so the bots band can re-ask its ceiling: folding or
+ *  opening the bots band changes how much of the rail the rooms band may have, and that is
+ *  not a window resize, so `applyResizers` would never hear of it (`renderBotsBand`). */
+const roomsBand = resizer({
   handle: el.roomsGrip,
   axis: 'y',
   storageKey: 'foreman.roomsBandHeight',
@@ -4180,9 +4192,10 @@ let botsSigLast = '';
  *
  * Called from the end of `renderRail` beside the rooms band, so every place that already
  * redraws the rail redraws this too. The **whole band** comes and goes with `.app.has-bots`
- * — unlike the rooms band, whose head carries `+ room`, this one has no control in it:
+ * — unlike the rooms band, whose head carries `+ room`, nothing in this one makes anything:
  * registering a bot is the CLI's job (`foreman-panel bots add`), so a band over nothing would
- * be a heading offering nothing. A machine with no bots draws the rail it drew before.
+ * be a heading offering nothing. A machine with no bots draws the rail it drew before. Its
+ * one control is its own head, which folds it (`toggleBotsFold`).
  *
  * Read-only and asks for nothing: no unread count, no inbox hoist, no notification, and a
  * helper gone quiet is grey, never red. Nothing about bots joins `composerSig`.
@@ -4191,12 +4204,59 @@ function renderBotsBand() {
   const bots = state.bots;
   el.app.classList.toggle('has-bots', bots.length > 0);
   if (!el.botsList) return;
+  paintBotsFold();
   const openIds = panes.map((p) => p.botId()).filter(Boolean);
   const sig = botsSig(bots, { openIds });
-  if (sig === botsSigLast) return;
-  botsSigLast = sig;
-  patchBotsBand(el.botsList, bots, { openIds, onOpen: openBotPane });
-  scheduleBotsTick();
+  if (sig !== botsSigLast) {
+    botsSigLast = sig;
+    // Patched folded or open alike: the rows are kept current under a shut fold, so opening
+    // it is the list's `hidden` flag and nothing else — never a patch, never a row moved.
+    patchBotsBand(el.botsList, bots, { openIds, onOpen: openBotPane });
+    scheduleBotsTick();
+  }
+  followBotsHeight();
+}
+
+/**
+ * The fold, as the head and the list's `hidden` say it — and nothing about the rows.
+ *
+ * The head's four parts are markup and only written here (`paintBotsHead` compares before
+ * every write), and the list is hidden by its own attribute, which `.bots-list[hidden]`
+ * has to back because the list carries a `display` of its own (the files views' trap). The
+ * rows are not touched: a fold that re-appended them round a focused node is the rooms
+ * band's scroll jump (`rooms#moving-a-row-round-a-focused-one-scrolls-the-band`).
+ */
+function paintBotsFold() {
+  const folded = botsFolded.on;
+  paintBotsHead(
+    { head: el.botsHead, caret: el.botsCaret, count: el.botsCount, dot: el.botsHeadDot },
+    botsHead(state.bots, { folded }),
+  );
+  if (el.botsList && el.botsList.hidden !== folded) el.botsList.hidden = folded;
+  el.railBots?.classList.toggle('is-folded', folded);
+}
+
+/** The bots band's height, as `botsBandShape` last spelled it. */
+let botsShapeLast = '';
+
+/**
+ * Re-ask the rooms band's height whenever this band's changes — the rooms grip's ceiling is
+ * net of this band (#196), and a fold is not a window resize, so nothing else would. Only
+ * when the shape moved, and `applyNow` measures nothing unless a rooms height has been
+ * dragged: with no preference it takes the property off and stops.
+ */
+function followBotsHeight() {
+  const shape = botsBandShape(state.bots, { folded: botsFolded.on });
+  if (shape === botsShapeLast) return;
+  botsShapeLast = shape;
+  roomsBand?.applyNow();
+}
+
+/** Fold the band to its head, or open it — the head's own click. Kept in this browser. */
+function toggleBotsFold() {
+  botsFolded.set(!botsFolded.on);
+  paintBotsFold();
+  followBotsHeight();
 }
 
 /** The band's one pending timer: the next row age to change its words. */
@@ -17600,6 +17660,9 @@ if (el.railShared) el.railShared.onclick = openSharedRoom;
 // — they are built on demand and their handlers are re-bound on every patch, because a
 // handler closing over a stale room record is exactly what reuse would otherwise invite.
 if (el.roomsAdd) el.roomsAdd.onclick = openCreateRoom;
+// The bots band's head is its fold, bound once for the same reason — and it is the band's
+// only control: a bot is registered from the CLI, never from here.
+if (el.botsHead) el.botsHead.onclick = toggleBotsFold;
 
 function paintFlatToggle() {
   el.flatRail.setAttribute('aria-pressed', String(state.flatRail));
