@@ -36,6 +36,7 @@ process.env.FOREMAN_PORT = '48999';
 process.on('exit', () => fs.rmSync(STATE, { recursive: true, force: true }));
 
 const mod = await import('../server/session-launch.js');
+const { NODE_BINARY } = await import('../server/node-binary.js');
 
 /* ----------------------------------------------------------------- the three files --- */
 
@@ -67,7 +68,15 @@ test('the MCP config names the session role, no repo, and no credential', async 
   const cfg = JSON.parse(fs.readFileSync(path.join(STATE, 'session-mcp.json'), 'utf8'));
   const entry = cfg.mcpServers.foreman;
   assert.equal(entry.type, 'stdio');
-  assert.equal(entry.command, process.execPath);
+  // The boot-resolved stable spelling, never `process.execPath`: on a Homebrew Mac that is a
+  // versioned keg path, and an upgrade under a running panel left every session launched
+  // after it with a dead `foreman` server (2026-10-13). `test/node-binary.test.js` proves the
+  // constant itself; this proves the writer uses it.
+  assert.equal(entry.command, NODE_BINARY);
+  if (fs.realpathSync(NODE_BINARY) === fs.realpathSync(process.execPath) && NODE_BINARY !== process.execPath) {
+    assert.ok(!entry.command.includes('/Cellar/'), `a stable link resolves to the running node, yet the config names ${entry.command}`);
+  }
+  assert.equal(mod.sessionMcpConfig({ node: '/x/bin/node' }).mcpServers.foreman.command, '/x/bin/node');
   assert.equal(entry.args.length, 1);
   assert.ok(entry.args[0].endsWith(path.join('mcp', 'foreman.js')), `not the MCP server: ${entry.args[0]}`);
   assert.ok(fs.existsSync(entry.args[0]), `${entry.args[0]} does not exist`);
@@ -80,8 +89,15 @@ test('the MCP config names the session role, no repo, and no credential', async 
 
   // World-readable, and nothing here is ever copied from the user's own config — so there is
   // no `credentialKeys` refusal to make, and there must never be anything for one to catch.
-  // Checked against the serialized file rather than the object: this is about the bytes.
-  const raw = fs.readFileSync(path.join(STATE, 'session-mcp.json'), 'utf8');
+  // Checked against the serialized file rather than the object: this is about the bytes —
+  // less the two absolute paths, which are this checkout's own and say nothing about a
+  // credential. A worktree named for "path" spells `PATH`, and `PAT` is a substring of it
+  // (`docs/traps/files-and-images.md#the-pat-substring-in-a-worktree-path`).
+  const raw = fs
+    .readFileSync(path.join(STATE, 'session-mcp.json'), 'utf8')
+    .replaceAll(JSON.stringify(entry.command), '"<node>"')
+    .replaceAll(JSON.stringify(entry.args[0]), '"<mcp/foreman.js>"');
+  assert.ok(raw.includes('"<node>"') && raw.includes('"<mcp/foreman.js>"'), 'the paths were not where the scan expected them');
   for (const word of ['TOKEN', 'SECRET', 'PASSWORD', 'API_KEY', 'PAT', 'Authorization']) {
     assert.ok(!raw.toUpperCase().includes(word.toUpperCase()), `session-mcp.json mentions ${word}`);
   }

@@ -2,9 +2,9 @@
 
 The evidence behind the **launchd** block of [`CLAUDE.md`](../../CLAUDE.md)'s Traps index —
 facts about this machine rather than about a file in this repo, which is why they are filed
-under the tool's name and not a path: the plist, the label's three copies, the job's `PATH`,
-the log rotation, the state dir's four rungs, Homebrew's own rename, and the tmux server
-every session on this Mac shares. Each section below is one trap, opening with the bold
+under the tool's name and not a path: the plist, the node path it and every MCP config name,
+the label's three copies, the job's `PATH`, the log rotation, the state dir's four rungs,
+Homebrew's own rename, and the tmux server every session on this Mac shares. Each section below is one trap, opening with the bold
 sentence its index line quotes.
 
 ## `launchctl kickstart -k` does not re-read the plist
@@ -45,11 +45,60 @@ nothing — VERIFIED.** Both `StandardOutPath` and `StandardErrorPath` come back
 `log show` has nothing, and the label simply doesn't show up as running — from outside,
 the job never existed. `install-agent.js` captures an absolute node path at install time
 rather than trusting `PATH` to resolve it inside the job. `process.execPath` is the
-obvious source (`index.js` already uses it for the MCP config) but resolves through the
-Homebrew symlink to a versioned Cellar path that `brew upgrade node` deletes — which
-reproduces the same silent exit 78 after the next upgrade — so the installer prefers the
-stable `/opt/homebrew/bin/node` spelling whenever `realpathSync` proves it points at the
-same binary `process.execPath` did.
+obvious source but resolves through the Homebrew symlink to a versioned Cellar path that
+`brew upgrade node` deletes — which reproduces the same silent exit 78 after the next
+upgrade — so the installer prefers the stable `/opt/homebrew/bin/node` spelling whenever
+`realpathSync` proves it points at the same binary `process.execPath` did. That choice now
+lives in `server/node-binary.js` (`NODE_BINARY`), because the MCP configs needed it too —
+see the next section, which is what it cost them not to have it.
+
+## A Homebrew upgrade breaks the MCP configs' node path
+
+**A Homebrew upgrade under a running panel broke every session it launched afterwards,
+because the MCP configs named the versioned Cellar node — MEASURED on 2026-10-13. The
+stable spelling is resolved once, at boot, because resolving it per launch after an upgrade
+answers the dead path.** The plist had been protected from this since it was written (the
+section above); the configs the panel writes for each session it launches had not.
+
+What happened. A `brew install` upgraded node 26.8.1 → 26.11.1 and `simdjson` to 5.0.4 while
+the panel was running (install receipts 21:24:22 and 21:24:26 UTC). `/opt/homebrew/opt/simdjson`
+was repointed at a keg with no `libsimdjson.33.dylib`, so the old node keg's binary — still on
+disk — now aborted in dyld before running any JavaScript. The panel itself was unharmed: a
+running process already has its libraries mapped. But every MCP config it writes carried
+`command: process.execPath` — `foremanEntry` (`server/briefs.js`, the lead's `mcp.json` and
+every worker's and planner's) and `sessionMcpConfig` (`server/session-launch.js`, every
+standalone) — and on a Homebrew Mac that is `/opt/homebrew/Cellar/node/<version>/bin/node`.
+Every lead, worker and standalone launched after 21:24 failed its `foreman` server at spawn:
+`CONNECTION_CLOSED`, under `failedMcpServers` in the transcript's first attachment record. A
+session that is not told about its tools says nothing about it on screen. `/mcp` cannot help —
+it respawns the same dead path. A restart of the panel was the mitigation, because the plist
+runs `/opt/homebrew/bin/node` and `process.execPath` then became the new keg — until the next
+upgrade.
+
+The fix, and the trap inside it. `server/node-binary.js` is a leaf that both the installer and
+the two config writers import, holding the resolver the installer already had: take
+`/opt/homebrew/bin/node`, then `/usr/local/bin/node`, then the formula's own
+`…/opt/<formula>/bin/node` (derived from the keg path — the one stable spelling a keg-only
+`node@NN` has), each only when its realpath **is the binary running**; otherwise the real path,
+unchanged, so a machine whose node is somebody else's (nvm, a second install) gets what it
+really runs. The trap is *when*. The realpath check only passes while the stable link still
+points at this process's keg. After an upgrade it points at the new one, the check fails, and
+the fallback is `process.execPath` — the dead keg. A resolver called per launch would therefore
+be right every day except the day it exists for, and would write the broken path into every
+config from the upgrade to the next restart: the incident, reproduced by its own fix. So
+`NODE_BINARY` is a constant captured at module load, which for the panel is boot, and both
+writers default to it. Captured then, it is the stable link, which after an upgrade simply runs
+the new node.
+
+`test/node-binary.test.js` proves all of that on a real throwaway Homebrew-shaped tree of
+symlinks — never by installing or upgrading anything on the real Homebrew, which is how this
+began — including the upgrade itself: the boot-time answer survives it, and a fresh resolution
+afterwards names the old keg, both before and after `brew cleanup` deletes it. It also refuses
+any code line in `server/` or `mcp/` that reads `process.execPath` outside an allow-list with a
+reason, because the cause was two writers each spelling the node path for themselves, and a
+third would bring it back silently. Running sessions are unaffected by the fix either way —
+their `foreman` child was spawned before the upgrade — and a session launched while a config
+still named a dead keg needs a relaunch, not `/mcp`.
 
 ## Stopping the job does not kill the tmux server
 

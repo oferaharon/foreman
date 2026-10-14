@@ -77,13 +77,16 @@ until the next result.
 
 ## The PAT substring in a worktree path
 
-**`test/session-launch.test.js` greps the serialised MCP config for `PAT` and trips on any
-worktree whose path contains "path."** The test asserts `session-mcp.json` never mentions a
+**`test/session-launch.test.js` grepped the serialised MCP config for `PAT` and tripped on
+any worktree whose path contains "path."** The test asserts `session-mcp.json` never mentions a
 credential-shaped word, checked against the whole serialised file — which also contains the
 absolute path to `mcp/foreman.js`, worktree directory included. `PAT` is a substring of
 `PATH`, so a worktree named along the lines of `agent/paths-and-files` fails a test about
-credentials for a reason that has nothing to do with one. Known, not fixed here — the fix is
-anchoring the assertion to the `env` block rather than the whole serialisation.
+credentials for a reason that has nothing to do with one. Fixed on 2026-10-13, by a worktree
+named for "node-path" that tripped it: the scan still reads the serialised bytes, with the
+two absolute paths (`command` and `args[0]`) replaced by placeholders first — and asserts the
+placeholders landed, so a change of shape cannot quietly turn the scan into a scan of
+nothing.
 
 ## The gallery reads the whole file
 
