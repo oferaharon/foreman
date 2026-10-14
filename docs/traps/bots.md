@@ -146,6 +146,32 @@ either slot, reload, a panel restart re-subscribing the bot, and a room opened b
 bot); pinned by `test/bots-band.test.js`, `test/shared-room-pane.test.js` and
 `test/rooms-pane.test.js`.
 
+## The rooms grip's ceiling is net of the bots band, and a fold is not a resize
+
+**The rooms band's height grip takes its ceiling net of the bots band (#196), so anything
+that changes the bots band's height has to re-ask the rooms band's applied height — a fold is
+not a window resize, and `applyResizers` never hears of it.** The ceiling is measured off the
+page on every drag and every window resize, never on a change *inside* the rail. So a rooms
+band dragged to its 30rem maximum while the bots were folded kept 30rem when they opened:
+measured at 1440×900 with three bots, unfolding grows the bots band from 34.7px to 202.7px,
+so without a re-ask the session list above would go from 209.2px to 41.2px — the measured
+heights' own arithmetic, the one number here not read off the page — well under its 96px
+(6rem) floor. `followBotsHeight` re-asks through the rooms resizer's own
+`applyNow` whenever `botsBandShape` moves (folded or not, how many rows, how many two lines
+tall): unfolding clamps the band to 26.57rem with the list at exactly 96px and the footer
+still inside the rail, folding again gives the 30rem back, and the stored preference is never
+written by either. Re-asking measures the rail, which is why it is keyed on the shape and not
+run on every roster beat (`rooms#a-repaint-that-measures-anything`). A future third line on
+a bot row, or anything else that changes this band's height, belongs in `botsBandShape`.
+
+Two facts measured alongside it. The fold never touches a row — tagged row nodes survived
+fold, unfold and live patches under a shut fold, and the rooms list's `scrollTop` held — so
+the archived fold's scroll jump (`rooms#moving-a-row-round-a-focused-one-scrolls-the-band`)
+has nothing to act on. And the head **does** move: the rail's column is packed from the
+bottom, so folding drops the head from 422.8px to 590.8px onto the rooms band's top rule; a
+second click at the same spot lands in the session list. The rooms band is the half that
+stays put.
+
 ## A second WebSocketServer breaks the first
 
 **A second `WebSocketServer` on the same `http.Server` breaks `/ws`.** In `ws` 8.21.3 every

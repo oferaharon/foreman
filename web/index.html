@@ -148,11 +148,28 @@
           Mac — so a heading over no rows would offer nothing. Read-only throughout: no unread
           count, no hoist, no red. The rows are filled by `renderBotsBand` from the roster
           frame's `bots` field and patched in place (`web/bots-band.js`).
+
+          **The head is the fold** (the maintainer's ask of 2026-10-13): a button the width of
+          the band, never a control added to the rail head. Folded, the list goes and the head
+          reads `bots · N` with the band's pulsing dot while any bot is active, so a fold hides
+          no activity. All four of its parts are here from the start and `paintBotsHead` only
+          writes them — the caret on the right, where the rooms band's head keeps `+ room`, so
+          the two titles stay on one left edge.
         -->
         <div class="rail-bots" id="railBots">
-          <div class="bots-head">
+          <button
+            class="bots-head"
+            id="botsHead"
+            type="button"
+            aria-expanded="true"
+            aria-controls="botsList"
+            title="Fold the bots band to its header"
+          >
             <span class="bots-title">bots</span>
-          </div>
+            <span class="bots-count" id="botsCount" hidden></span>
+            <span class="bot-dot is-active bots-head-dot" id="botsHeadDot" role="img" hidden></span>
+            <span class="bots-caret" id="botsCaret" aria-hidden="true">▾</span>
+          </button>
           <div class="bots-list" id="botsList"></div>
         </div>
 

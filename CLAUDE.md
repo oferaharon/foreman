@@ -864,6 +864,11 @@ pane that draws it, and the bench that proves any of it. Evidence:
   **A bot opens where a session does, so routing asks `holdsMain`, never `kind() !== 'session'`**
   — read the old way, a room opener takes the bot's main pane.
   [bots#a-bot-is-main-content-and-routing-asks-holdsmain](docs/traps/bots.md#a-bot-is-main-content-and-routing-asks-holdsmain)
+- `web/app.js` (`followBotsHeight`, `roomsBand`) · `web/bots-band.js` (`botsBandShape`) —
+  **The rooms grip's ceiling is net of the bots band, and a fold is not a resize** — so a
+  change to the bots band's height re-asks the rooms band's, or the session list goes under
+  its floor (41px against 96, from measured heights).
+  [bots#the-rooms-grips-ceiling-is-net-of-the-bots-band-and-a-fold-is-not-a-resize](docs/traps/bots.md#the-rooms-grips-ceiling-is-net-of-the-bots-band-and-a-fold-is-not-a-resize)
 - `server/index.js` (`/ws`, the bots routes) — **A second `WebSocketServer` on the same
   `http.Server` breaks `/ws`.** The bots wire is plain HTTP for that reason.
   [bots#a-second-websocketserver-breaks-the-first](docs/traps/bots.md#a-second-websocketserver-breaks-the-first)

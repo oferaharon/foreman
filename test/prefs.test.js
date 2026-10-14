@@ -328,3 +328,44 @@ test('no localStorage at all is grid, not a crash', async () => {
     assert.doesNotThrow(() => filesView.set('list'));
   });
 });
+
+/*
+ * The rail's bots band fold — `asideFolded`'s shape for a third panel. Open with nothing
+ * stored, open where storage is blocked, and its own key: folding the bots band answers for
+ * nothing else, and nothing else answers for it.
+ */
+
+test('the bots band is open with nothing stored, and its key is named once', async () => {
+  const store = fakeStore();
+  await withStorage(store, ({ botsFolded, BOTS_FOLDED_KEY }) => {
+    assert.equal(BOTS_FOLDED_KEY, 'foreman.botsFolded');
+    assert.equal(botsFolded.on, false);
+    assert.equal(botsFolded.set(true), true);
+    assert.equal(store.map.get(BOTS_FOLDED_KEY), '1');
+    botsFolded.set(false);
+    assert.equal(store.map.get('foreman.botsFolded'), '0');
+  });
+});
+
+test('a browser told so comes back with the bots folded, and no other fold follows it', async () => {
+  await withStorage(fakeStore({ 'foreman.botsFolded': '1' }), ({ botsFolded, asideFolded, roomFolded }) => {
+    assert.equal(botsFolded.on, true);
+    assert.equal(asideFolded.on, false);
+    assert.equal(roomFolded.on, false);
+  });
+  await withStorage(fakeStore({ 'foreman.roomFolded': '1', 'foreman.asideFolded': '1' }), ({ botsFolded }) => {
+    assert.equal(botsFolded.on, false, 'the other folds never fold the bots band');
+  });
+});
+
+test('a store that throws, or none at all, leaves the bots band open and the page standing', async () => {
+  await withStorage(deniedStore, ({ botsFolded }) => {
+    assert.equal(botsFolded.on, false);
+    assert.equal(botsFolded.set(true), true, 'this visit still behaves');
+    assert.equal(botsFolded.on, true);
+  });
+  await withStorage(undefined, ({ botsFolded }) => {
+    assert.equal(botsFolded.on, false);
+    assert.doesNotThrow(() => botsFolded.set(true));
+  });
+});

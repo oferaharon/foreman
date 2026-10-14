@@ -13,6 +13,8 @@ import {
   botFacts,
   botLineParts,
   botLineText,
+  botsBandShape,
+  botsHead,
   botsSig,
   botTitle,
   convLineParts,
@@ -22,6 +24,7 @@ import {
   dotText,
   modelText,
   nextBotTick,
+  paintBotsHead,
   patchBotsBand,
   patchConversations,
   relightBotsBand,
@@ -567,9 +570,175 @@ test('the settings list says enough to tell "never deployed" from "refused" from
   assert.match(top('openSettings'), /fillBotsList\(botsList\);/);
 });
 
+/* ------------------------------------------------------------- the fold --- */
+
+/** A head node that counts its writes — a fold repaint that changed nothing writes nothing. */
+function headNode(init = {}) {
+  const node = { writes: 0, attrs: {}, ...init };
+  return new Proxy(node, {
+    set(target, key, value) {
+      if (key !== 'writes') target.writes += 1;
+      target[key] = value;
+      return true;
+    },
+    get(target, key) {
+      if (key === 'setAttribute') return (k, v) => ((target.attrs[k] = String(v)), (target.writes += 1));
+      if (key === 'removeAttribute') return (k) => delete target.attrs[k];
+      if (key === 'getAttribute') return (k) => (k in target.attrs ? target.attrs[k] : null);
+      return target[key];
+    },
+  });
+}
+
+const headNodes = () => ({
+  head: headNode({ title: '', attrs: { 'aria-expanded': 'true' } }),
+  caret: headNode({ textContent: '▾' }),
+  count: headNode({ textContent: '', hidden: true }),
+  dot: headNode({ hidden: true, title: '' }),
+});
+
+const writes = (n) => n.head.writes + n.caret.writes + n.count.writes + n.dot.writes;
+
+test('open, the head reads `bots` and nothing else — exactly what it read before it could fold', () => {
+  const bots = [bot('a', { active: 2 }), bot('b')];
+  const h = botsHead(bots, { folded: false });
+  assert.equal(h.folded, false);
+  assert.equal(h.caret, '▾');
+  assert.equal(h.countText, '', 'no count while the rows are on screen to count');
+  assert.equal(h.dot, false, 'no head dot while the rows are on screen saying it themselves');
+  assert.equal(h.count, 2);
+  assert.equal(h.active, 1);
+  assert.match(h.title, /^Fold the bots band/);
+  assert.equal(botsHead().folded, false, 'open by default');
+});
+
+test('folded, the head reads `bots · N`, N the bots registered — every row the band would draw', () => {
+  const bots = [bot('a'), bot('b'), bot('c', { helper: { online: false } }), null, { id: '' }, 'x'];
+  const h = botsHead(bots, { folded: true });
+  assert.equal(h.caret, '▸');
+  assert.equal(h.count, 3, 'malformed entries are not bots, as the band itself does not draw them');
+  assert.equal(h.countText, '· 3');
+  assert.equal(h.countText, `· ${botEntries(bots).length}`, 'one count: the band’s own entries');
+  assert.equal(h.dot, false, 'nothing running, no dot');
+  assert.equal(h.title, 'Show the bots — 3 bots');
+  assert.equal(botsHead([bot('a')], { folded: true }).title, 'Show the bots — 1 bot');
+});
+
+test('folded, the band’s amber dot shows while any bot is active — so a fold never hides activity', () => {
+  const bots = [bot('a'), bot('b', { active: 1 }), bot('c', { active: 3 })];
+  const h = botsHead(bots, { folded: true });
+  assert.equal(h.dot, true);
+  assert.equal(h.active, 2);
+  assert.equal(h.dotText, '2 bots active');
+  assert.equal(h.title, 'Show the bots — 3 bots, 2 active');
+  assert.equal(botsHead([bot('a', { active: 1 })], { folded: true }).dotText, '1 bot active');
+});
+
+test('the folded dot is the rows’ own `dotState`: a quiet helper’s stale `active` lights nothing', () => {
+  // Offline wins over active on the row (a grey dot), so the folded head must agree with the
+  // row you would see if you opened it — never pulse for a bot whose row would not.
+  const quiet = bot('q', { active: 2, helper: { online: false, lastSeen: NOW - 10 * MIN } });
+  assert.equal(dotState(quiet), 'offline');
+  const h = botsHead([quiet, bot('b')], { folded: true });
+  assert.equal(h.active, 0);
+  assert.equal(h.dot, false);
+  for (const b of [quiet, bot('b', { active: 1 })]) {
+    assert.equal(botsHead([b], { folded: true }).dot, dotState(b) === 'active', b.id);
+  }
+});
+
+test('the fold paints the head’s own four nodes, and a repaint that changed nothing writes nothing', () => {
+  // No `withDom` here on purpose: a paint that built a node would throw on `document`.
+  const n = headNodes();
+  const bots = [bot('a', { active: 1 }), bot('b')];
+  paintBotsHead(n, botsHead(bots, { folded: true }));
+  assert.equal(n.head.attrs['aria-expanded'], 'false');
+  assert.equal(n.caret.textContent, '▸');
+  assert.equal(n.count.textContent, '· 2');
+  assert.equal(n.count.hidden, false);
+  assert.equal(n.dot.hidden, false);
+  assert.equal(n.dot.title, '1 bot active');
+  assert.equal(n.dot.attrs['aria-label'], '1 bot active');
+  assert.match(n.head.title, /^Show the bots — 2 bots, 1 active$/);
+
+  const before = writes(n);
+  paintBotsHead(n, botsHead(bots, { folded: true }));
+  // The dot's aria-label is the one attribute set unconditionally while it shows.
+  assert.equal(writes(n) - before, 1, 'only the dot’s label is re-said; nothing else is touched');
+
+  paintBotsHead(n, botsHead(bots, { folded: false }));
+  assert.equal(n.head.attrs['aria-expanded'], 'true');
+  assert.equal(n.caret.textContent, '▾');
+  assert.equal(n.count.textContent, '');
+  assert.equal(n.count.hidden, true);
+  assert.equal(n.dot.hidden, true);
+  assert.equal(n.dot.attrs['aria-label'], undefined);
+  assert.doesNotThrow(() => paintBotsHead({}, botsHead(bots)), 'no head, no paint');
+  assert.doesNotThrow(() => paintBotsHead(n, null));
+});
+
+test('the band’s height shape moves on a fold and on rows coming or going, and not on activity', () => {
+  const quiet = [bot('a', { current: current() }), bot('b')];
+  assert.equal(botsBandShape([]), 'none');
+  assert.equal(botsBandShape([], { folded: true }), 'none', 'no bots, no band, folded or not');
+  assert.equal(botsBandShape(quiet), '2|1', 'two rows, one of them two lines tall');
+  assert.equal(botsBandShape(quiet, { folded: true }), 'folded');
+  // A reply landing changes the ages and the meta words, never the band's height…
+  const busy = [bot('a', { current: current({ effort: 'high' }), active: 1, lastActiveAt: NOW }), bot('b')];
+  assert.equal(botsBandShape(busy), botsBandShape(quiet));
+  // …while a bot's first reply grows its row a line, and a new bot adds one.
+  assert.equal(botsBandShape([bot('a', { current: current() }), bot('b', { current: current() })]), '2|2');
+  assert.equal(botsBandShape([...quiet, bot('c')]), '3|1');
+  // Folded, nothing a row does can change the head's height.
+  assert.equal(botsBandShape([...quiet, bot('c')], { folded: true }), 'folded');
+});
+
+test('the fold toggle hides the list by its own flag and never touches a row', () => {
+  const toggle = top('toggleBotsFold');
+  assert.match(toggle, /botsFolded\.set\(!botsFolded\.on\)/);
+  const paint = top('paintBotsFold');
+  assert.match(paint, /el\.botsList\.hidden = folded/);
+  // The rooms band's archived fold repainted its rows round its own focused button and the
+  // band jumped to the top; this fold re-appends, patches and rebuilds nothing.
+  for (const body of [strip(toggle), strip(paint)]) {
+    assert.doesNotMatch(body, /patchBotsBand|replaceChildren|\.append\(|insertBefore|innerHTML|renderRail/);
+  }
+  assert.match(code, /if \(el\.botsHead\) el\.botsHead\.onclick = toggleBotsFold;/, 'bound once, the head is markup');
+});
+
+test('the rows are patched under a shut fold too, so opening it is a flag and not a patch', () => {
+  const render = strip(top('renderBotsBand'));
+  assert.ok(render.indexOf('paintBotsFold()') < render.indexOf('patchBotsBand('), 'the head is painted every beat');
+  assert.doesNotMatch(render, /botsFolded\.on\)?\s*(\)|&&)\s*return/, 'no early return on the fold');
+  assert.match(render, /followBotsHeight\(\);\n\}$/, 'the rooms band is re-asked after every beat that reaches it');
+});
+
+test('the rooms grip’s ceiling follows the bots band: net of its height, and re-asked when it changes', () => {
+  assert.match(code, /const roomsBand = resizer\(\{\n  handle: el\.roomsGrip,/);
+  // #196's subtraction stays, and it is measured, so a folded band gives the room back.
+  assert.match(code, /const bots = el\.railBots\?\.getBoundingClientRect\(\)\.height \?\? 0;/);
+  assert.match(code, /return \(bottom - top - bots\) \/ remPx\(\) - RAIL_LIST_MIN;/);
+  const follow = strip(top('followBotsHeight'));
+  assert.match(follow, /botsBandShape\(state\.bots, \{ folded: botsFolded\.on \}\)/);
+  assert.match(follow, /if \(shape === botsShapeLast\) return;/, 'only when the height can have moved');
+  assert.match(follow, /roomsBand\?\.applyNow\(\);/);
+  assert.match(strip(top('toggleBotsFold')), /followBotsHeight\(\);/);
+});
+
+test('the fold is a browser preference, and the head’s hidden parts each carry their own `[hidden]` rule', () => {
+  assert.match(app, /import \{ botsFolded \} from '\.\/prefs\.js';/);
+  assert.doesNotMatch(code, /localStorage[^\n]*botsFolded|foreman\.botsFolded/, 'one spelling of the key, in prefs.js');
+  assert.match(styles, /\.bots-list\[hidden\] \{ display: none; \}/);
+  assert.match(styles, /\.bots-count\[hidden\],\n\.bots-head-dot\[hidden\] \{ display: none; \}/);
+  // The head's dot is the row's own amber pulse and nothing louder.
+  assert.match(html, /<span class="bot-dot is-active bots-head-dot" id="botsHeadDot" role="img" hidden><\/span>/);
+  const headCss = styles.slice(styles.indexOf('.bots-head {'), styles.indexOf('.bots-list {')).replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.doesNotMatch(headCss, /--decision|--danger|\bred\b/);
+});
+
 /* ---------------------------------------------------- the rail and the frame --- */
 
-test('the band is a sibling of `.rail-list`, below the sessions and above the rooms, and has no control', () => {
+test('the band is a sibling of `.rail-list`, below the sessions and above the rooms, and its one control is its head', () => {
   const list = html.indexOf('id="railList"');
   const bots = html.indexOf('id="railBots"');
   const rooms = html.indexOf('id="railRooms"');
@@ -577,7 +746,9 @@ test('the band is a sibling of `.rail-list`, below the sessions and above the ro
   const listTag = html.slice(list, html.indexOf('</div>', list));
   assert.ok(!listTag.includes('railBots'), 'never inside the session list');
   const markup = html.slice(html.indexOf('<div class="rail-bots"'), rooms);
-  assert.doesNotMatch(markup, /<button/, 'registering a bot is the CLI’s job — no control in the band');
+  // Registering a bot is the CLI's job, so the only button in the band is the head folding it.
+  assert.equal((markup.match(/<button/g) || []).length, 1, 'one button: the head');
+  assert.match(markup, /<button\s+class="bots-head"\s+id="botsHead"\s+type="button"\s+aria-expanded="true"\s+aria-controls="botsList"/);
   assert.match(markup, /<span class="bots-title">bots<\/span>/, 'the word on screen is "bots" (Q2)');
   // …and nothing was added to the rail head, which cannot take a sixth control.
   const head = html.slice(html.indexOf('<div class="rail-actions">'), html.indexOf('<div class="rail-stat"'));

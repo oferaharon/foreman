@@ -245,6 +245,96 @@ export function nextBotTick(bots = [], now = Date.now()) {
   return nextAgeTick(rows, now);
 }
 
+/* ------------------------------------------------------------- the head --- */
+
+/**
+ * What the band's head says, open or folded (the maintainer's ask of 2026-10-13).
+ *
+ * The head **is** the fold control — a button the width of the band, the rooms band's head
+ * value for value, and nothing added to the rail head, which cannot take another control
+ * (`rail-and-groups#a-fifth-button-in-the-rail-head`). Open, it reads `bots` and nothing
+ * else, exactly as it did before it could fold. Folded, it reads `bots · N` — N the bots
+ * registered, every row the band would draw — and carries the band's own pulsing dot while
+ * any of them is active, so folding the band never hides that something is running.
+ *
+ * **Active is the row's own `dotState`, asked of every row**, not a second reading of
+ * `bot.active`: a helper gone quiet draws a grey dot on its row even with `active` still
+ * counting the last minute's bytes, and the folded head must not light for a row that would
+ * not pulse if you opened it. One test, so the two can never disagree. And the dot is only
+ * ever amber: nothing here asks for attention, folded or not — no red, no count of anything
+ * unread.
+ *
+ * Plain data in, plain data out; `paintBotsHead` puts it on screen.
+ */
+export function botsHead(bots = [], { folded = false } = {}) {
+  const entries = botEntries(bots);
+  const count = entries.length;
+  const active = entries.filter((e) => dotState(e.bot) === 'active').length;
+  const shut = Boolean(folded);
+  const registered = `${count} bot${count === 1 ? '' : 's'}`;
+  const busy = active ? `, ${active} active` : '';
+  return {
+    folded: shut,
+    count,
+    active,
+    caret: shut ? '▸' : '▾',
+    countText: shut ? `· ${count}` : '',
+    dot: shut && active > 0,
+    dotText: `${active} bot${active === 1 ? '' : 's'} active`,
+    title: shut ? `Show the bots — ${registered}${busy}` : 'Fold the bots band to its header',
+  };
+}
+
+/**
+ * The facts that decide how tall the band is, as one string: folded or not, how many rows,
+ * and how many of them draw a second line (a bot that has replied to nothing yet is one line
+ * tall). Nothing else on a row changes its height — the age and the meta line's words never
+ * wrap.
+ *
+ * Why it exists: the rooms band's height grip takes its ceiling *net of this band*
+ * (#196), so whenever this band changes height the rooms band's applied height has to be
+ * re-asked — otherwise a band dragged tall while the bots were folded keeps that height when
+ * they open, and the session list above is squeezed under its floor. The caller re-asks only
+ * when this string moves, because re-asking measures the rail, and a measurement on every
+ * roster beat is the repaint-that-measures `docs/traps/rooms.md` warns about.
+ */
+export function botsBandShape(bots = [], { folded = false } = {}) {
+  const entries = botEntries(bots);
+  if (!entries.length) return 'none';
+  if (folded) return 'folded';
+  const twoLine = entries.filter((e) => botLineParts(e.bot).length > 0).length;
+  return `${entries.length}|${twoLine}`;
+}
+
+/**
+ * Put `botsHead`'s answer on the head's own nodes — `{ head, caret, count, dot }`, all four
+ * in the page's markup from the start, so nothing is built, moved or removed here: a fold
+ * is the caret's character, the count's text, two `hidden` flags and an `aria-expanded`.
+ * Every write is compared first. It never touches the list — the fold hides the list by its
+ * own `hidden`, set by the caller, and **never re-appends a row**: the rooms band's archived
+ * fold repainting its rows round a focused button is how that band learned to jump to the
+ * top (`rooms#moving-a-row-round-a-focused-one-scrolls-the-band`).
+ */
+export function paintBotsHead(nodes, head) {
+  if (!nodes?.head || !head) return;
+  const { head: btn, caret, count, dot } = nodes;
+  const set = (node, key, value) => {
+    if (node && node[key] !== value) node[key] = value;
+  };
+  const expanded = String(!head.folded);
+  if (btn.getAttribute?.('aria-expanded') !== expanded) btn.setAttribute('aria-expanded', expanded);
+  set(btn, 'title', head.title);
+  set(caret, 'textContent', head.caret);
+  set(count, 'textContent', head.countText);
+  set(count, 'hidden', !head.countText);
+  if (dot) {
+    set(dot, 'hidden', !head.dot);
+    set(dot, 'title', head.dot ? head.dotText : '');
+    if (head.dot) dot.setAttribute('aria-label', head.dotText);
+    else dot.removeAttribute('aria-label');
+  }
+}
+
 /* ------------------------------------------------------------ the nodes --- */
 
 /** Spans inside a row, by the row — `rooms-band.js`'s `WeakMap`, for its reason. */
