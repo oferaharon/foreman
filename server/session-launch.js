@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CONFIG_FILE, PORT, STATE_DIR } from './config.js';
 import { readConfigFile, resolveLaunchModel } from './settings-file.js';
+import { NODE_BINARY } from './node-binary.js';
 
 /**
  * What an **ordinary** session the panel launches is told, and the one tool server it gets.
@@ -142,16 +143,18 @@ member's name, spelled exactly as \`group_list\` gives it.
 /**
  * The standalone MCP config, as an object.
  *
- * `port` and `repo` are defaulted parameters rather than read inside, so a test can prove
+ * `port`, `repo` and `node` are defaulted parameters rather than read inside, so a test can prove
  * the shape without reaching for the boot-time constants — the same reason `launch.js` takes
  * its prefix that way.
  */
-export function sessionMcpConfig({ port = PORT, repo = PANEL_REPO } = {}) {
+export function sessionMcpConfig({ port = PORT, repo = PANEL_REPO, node = NODE_BINARY } = {}) {
   return {
     mcpServers: {
       foreman: {
         type: 'stdio',
-        command: process.execPath,
+        // The stable node spelling resolved at boot, never `process.execPath` — the same
+        // rule and the same reason as `foremanEntry` in `briefs.js`; see `node-binary.js`.
+        command: node,
         args: [path.join(repo, 'mcp', 'foreman.js')],
         // No FOREMAN_REPO and no FOREMAN_TASK: a standalone is pinned to neither, and
         // `TMUX_PANE` — inherited, never an argument — is how it names itself.

@@ -10,6 +10,7 @@ import { workerBrief, plannerBrief } from './worker-brief.js';
 import { teamDir, planPath, readTeam, teamDefaults } from './team.js';
 import { sessionBrief } from './session-launch.js';
 import { resolveProjectMcp } from './project-mcp.js';
+import { NODE_BINARY } from './node-binary.js';
 
 /**
  * One assembly of what a session is launched *reading* — used by the launch that writes
@@ -50,11 +51,16 @@ const FOREMAN_MCP = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
  * The panel's own stdio MCP entry, scoped to a repo and a role by env. Built here so the
  * launch and anything that describes the launch spell it once — an entry that differed by
  * a field between the two would be a tool surface nobody could check.
+ *
+ * `command` is `NODE_BINARY`, never `process.execPath`: the file outlives this process, and
+ * on a Homebrew Mac `execPath` is a versioned keg path an upgrade breaks under a running
+ * panel — every session launched after it then loses its `foreman` tools at spawn. See
+ * `node-binary.js` for why that constant is resolved at boot and not here.
  */
-export function foremanEntry({ repo, role, task = null, port = PORT }) {
+export function foremanEntry({ repo, role, task = null, port = PORT, node = NODE_BINARY }) {
   return {
     type: 'stdio',
-    command: process.execPath,
+    command: node,
     args: [FOREMAN_MCP],
     env: {
       FOREMAN_PORT: String(port),

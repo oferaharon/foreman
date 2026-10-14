@@ -34,6 +34,7 @@ const { assembleLead, briefsFor, foremanEntry, mcpFilePath } = await import('../
 const { resetForgeCache } = await import('../server/forge.js');
 const { resetBaseBranchCache } = await import('../server/base-branch.js');
 const { teamDir, teamDefaults, readTeam } = await import('../server/team.js');
+const { NODE_BINARY } = await import('../server/node-binary.js');
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-briefs-'));
@@ -179,7 +180,9 @@ test('the self-merge paragraphs follow the team’s own toggle, not a default', 
 test('the foreman MCP entry has one spelling, and a worker’s carries its task', () => {
   const lead = foremanEntry({ repo: '/x/alpha', role: 'lead', port: 1234 });
   assert.equal(lead.type, 'stdio');
-  assert.equal(lead.command, process.execPath);
+  // The boot-resolved stable spelling, never `process.execPath` — see `node-binary.js`.
+  assert.equal(lead.command, NODE_BINARY);
+  assert.equal(foremanEntry({ repo: '/x/alpha', role: 'lead', node: '/x/bin/node' }).command, '/x/bin/node');
   assert.equal(lead.args.length, 1);
   assert.ok(lead.args[0].endsWith(path.join('mcp', 'foreman.js')), 'resolved, never a bare name');
   assert.deepEqual(lead.env, { FOREMAN_PORT: '1234', FOREMAN_REPO: '/x/alpha', FOREMAN_ROLE: 'lead' });
@@ -188,6 +191,26 @@ test('the foreman MCP entry has one spelling, and a worker’s carries its task'
   const worker = foremanEntry({ repo: '/x/alpha', role: 'worker', task: 'issue-9-thing', port: 1234 });
   assert.equal(worker.env.FOREMAN_TASK, 'issue-9-thing');
   assert.equal(worker.env.FOREMAN_ROLE, 'worker');
+});
+
+test('the lead’s mcp.json and the briefs route both come out of the stable node path', async () => {
+  const repo = makeRepo('stable-node', { origin: 'https://github.com/example/stable-node.git' });
+  resetForgeCache();
+  resetBaseBranchCache();
+  const args = { repo, teamDir: teamDir(repo), decisionsFile: path.join(teamDir(repo), 'decisions.md') };
+
+  // What `launchLead` serialises into `mcp.json`.
+  const launch = await assembleLead({ ...args, config: teamDefaults(repo), fresh: true });
+  assert.equal(launch.mcpServers.foreman.command, NODE_BINARY);
+
+  // The modal draws briefs, not the MCP config — so what it can show is that nothing in its
+  // payload names a versioned keg, whatever the brief text says about the tool surface.
+  const route = await briefsFor(repo);
+  const stable = NODE_BINARY !== process.execPath && fs.realpathSync(NODE_BINARY) === fs.realpathSync(process.execPath);
+  if (stable) {
+    assert.ok(!launch.mcpServers.foreman.command.includes('/Cellar/'), `mcp.json would name ${launch.mcpServers.foreman.command}`);
+    assert.ok(!JSON.stringify(route).includes('/Cellar/'), 'the briefs route names a versioned keg path');
+  }
 });
 
 /* --------------------------------------------------- and it writes nothing --- */

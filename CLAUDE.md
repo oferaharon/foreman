@@ -552,9 +552,9 @@ be cached, and the gallery that reads the whole file. Evidence:
   scan a beat early.
   [files-and-images#when-the-files-view-refreshes](docs/traps/files-and-images.md#when-the-files-view-refreshes)
 - `test/session-launch.test.js` · `server/session-launch.js` —
-  **`test/session-launch.test.js` greps the serialised MCP config for `PAT` and trips on any
-  worktree whose path contains "path."** `PAT` is a substring of `PATH`, and the
-  serialisation carries the absolute path to `mcp/foreman.js`, worktree directory included.
+  **`test/session-launch.test.js` grepped the serialised MCP config for `PAT` and tripped on
+  any worktree whose path contains "path."** `PAT` is a substring of `PATH`; the two absolute
+  paths are now masked before the scan, and the test asserts the masks landed.
   [files-and-images#the-pat-substring-in-a-worktree-path](docs/traps/files-and-images.md#the-pat-substring-in-a-worktree-path)
 - `server/images.js` (`scanImages`, `readImage`) — **The gallery has to read the whole file,
   and nothing else here does.** The tailer, `loadEarlier` and `probe` each read a window, and
@@ -927,9 +927,10 @@ pane that draws it, and the bench that proves any of it. Evidence:
 ### launchd
 
 Facts about this machine rather than about a file here, which is why they are filed under
-the tool's name and not a path — the plist, the label's three copies, the job's `PATH`, the
-log rotation, the state dir's four rungs, Homebrew's own rename, and the tmux server every
-session on this Mac shares. Read them before changing the plist, the label or the log paths.
+the tool's name and not a path — the plist, the node path it and every MCP config name, the
+label's three copies, the job's `PATH`, the log rotation, the state dir's four rungs,
+Homebrew's own rename, and the tmux server every session on this Mac shares. Read them before
+changing the plist, the label, the log paths or any node path the panel writes down.
 Evidence:
 [`docs/traps/platform-launchd.md`](docs/traps/platform-launchd.md).
 
@@ -943,11 +944,18 @@ Evidence:
   and nothing else — VERIFIED.** Bare `git` works and bare `node` and `tmux` do not, and a
   worktree's prepare command fails *quietly* when they don't resolve.
   [platform-launchd#launchds-path](docs/traps/platform-launchd.md#launchds-path)
-- **launchd** (`ProgramArguments`, `nodeBinary` in `server/install-agent.js`) — **A bare
+- **launchd** (`ProgramArguments`, `NODE_BINARY` in `server/node-binary.js`) — **A bare
   program name in `ProgramArguments` fails with exit 78 `EX_CONFIG` and writes nothing —
   VERIFIED.** From outside the job never existed, so the installer captures an absolute node
   path — and prefers the stable Homebrew spelling over the Cellar path an upgrade deletes.
   [platform-launchd#a-bare-program-name-in-programarguments](docs/traps/platform-launchd.md#a-bare-program-name-in-programarguments)
+- `server/node-binary.js` (`NODE_BINARY`, `stableNodePath`) · `server/briefs.js`
+  (`foremanEntry`) · `server/session-launch.js` (`sessionMcpConfig`) — **A Homebrew upgrade
+  under a running panel broke every session it launched afterwards, because the MCP configs
+  named the versioned Cellar node — MEASURED on 2026-10-13.** The stable spelling is resolved
+  once, at boot: per launch, after an upgrade, the realpath check fails and answers the dead
+  keg.
+  [platform-launchd#a-homebrew-upgrade-breaks-the-mcp-configs-node-path](docs/traps/platform-launchd.md#a-homebrew-upgrade-breaks-the-mcp-configs-node-path)
 - **launchd** (`bootout`, `bootstrap`, `kickstart -k`) — **Stopping the job does not kill the
   tmux server — VERIFIED, and worth it as a reassurance.** The tmux server daemonizes to
   `ppid 1` and leaves the job's process tree entirely.

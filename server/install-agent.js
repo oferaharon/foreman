@@ -41,6 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { PORT, HOST, HOST_SOURCE, STATE_DIR, HOME, CONFIG_FILE, TRIGGER_TOKEN_FILE, readTokenFile, resolveStateDir } from './config.js';
 import { DEFAULT_BIND_HOST } from './settings-file.js';
 import { AGENT_LABEL as LABEL, DEFAULT_AGENT_LABEL, LOG_DIR, DEFAULT_LOG_DIR, LOG_OUT, LOG_ERR } from './logs.js';
+import { NODE_BINARY } from './node-binary.js';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ENTRY = path.join(REPO, 'server', 'index.js');
@@ -175,36 +176,6 @@ export function jobEnvironment({
   return env;
 }
 
-/**
- * The absolute node binary, captured now — but the *stable* spelling of it where there
- * is one.
- *
- * A bare `node` in `ProgramArguments` fails with exit 78 EX_CONFIG and writes nothing to
- * stdout or stderr (measured), so the job simply appears not to exist. `process.execPath`
- * is the right source and `index.js` already uses it for the MCP config — but on this Mac
- * it resolves the Homebrew symlink all the way to
- * `/opt/homebrew/Cellar/node/25.6.1_1/bin/node`, a path that `brew upgrade node` deletes.
- * The panel would then die at the next restart in exactly the silent way above.
- *
- * So: if `/opt/homebrew/bin/node` (or `/usr/local/bin/node`) is the *same file* — checked
- * by realpath, at install time, not assumed — prefer it. Still absolute, still captured
- * now, and it survives a version bump.
- */
-function nodeBinary() {
-  let real;
-  try {
-    real = fs.realpathSync(process.execPath);
-  } catch {
-    return process.execPath;
-  }
-  for (const candidate of ['/opt/homebrew/bin/node', '/usr/local/bin/node']) {
-    try {
-      if (fs.realpathSync(candidate) === real) return candidate;
-    } catch { /* not there, or a broken link — try the next one */ }
-  }
-  return process.execPath;
-}
-
 const escape = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function plistValue(value, indent) {
@@ -227,7 +198,13 @@ function plistValue(value, indent) {
 function plistXml() {
   const job = {
     Label: LABEL,
-    ProgramArguments: [nodeBinary(), ENTRY],
+    // Absolute, because a bare `node` here fails with exit 78 EX_CONFIG and writes nothing
+    // to either log (measured) — the job simply appears not to exist. And the *stable*
+    // spelling of it, because the versioned Cellar path `process.execPath` resolves to is
+    // deleted by `brew upgrade node`, which reproduces that same silent exit at the next
+    // restart. `node-binary.js` is the one place that choice is made; the MCP configs the
+    // panel writes read the same constant.
+    ProgramArguments: [NODE_BINARY, ENTRY],
     // Not load-bearing — nothing in `server/` reads `process.cwd()`; `WEB_DIR`, the
     // marked path and `PANEL_REPO` all resolve off `import.meta.url`. Matching what
     // `npm start` did costs nothing and makes a stray relative path behave the same.
@@ -695,7 +672,7 @@ function install() {
      * would be a reinstall that quietly ended something.
      */
     ...displaced.done.map((job) => ['displaced', `${job.label} — booted out, plist backed up to ${job.backup}`]),
-    ['runs', `${nodeBinary()} ${ENTRY}`],
+    ['runs', `${NODE_BINARY} ${ENTRY}`],
     ...Object.entries(env).map(([k, v]) => [k, k === 'PATH' ? `${v.split(':').length} entries` : v]),
     ['log', LOG_OUT],
     ['errors', LOG_ERR],
