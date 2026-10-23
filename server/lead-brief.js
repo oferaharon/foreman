@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { FALLBACK, humanPhrase } from './human-name.js';
 import { HUMAN_PREFIX, LEAD_PREFIX } from './envelope.js';
+import { TAG_MEANINGS, WHAT_TAGS } from '../web/task-tags.js';
 
 /**
  * The lead's brief — appended to Claude Code's own system prompt at launch
@@ -87,6 +88,8 @@ complexity: the team default when unsure, a lighter model for small well-scoped
 mechanical work, the heaviest for genuinely hard problems. Naming a non-default model
 requires a one-line reason; it is posted to the room, where ${human} judges whether you
 called it right. That accountability is the deal — use the judgment, own it.
+
+${tagsSection(human)}
 
 ## Planners — when to send one instead of a builder
 
@@ -255,6 +258,31 @@ write only there; the checkout is read-only to you.
  * of is a lock that lies), so the rule that two workers never drive it at once is the
  * lead's, and has to be said where the lead reads its rules.
  */
+/**
+ * How a lead tags a task — the words and their meanings interpolated from the leaf, so the
+ * brief can never offer a tag the store would refuse.
+ *
+ * Two words are named in the prose itself, because the rule is about them; the one-spelling
+ * guard for those is `test/brief.test.js`, which holds every backticked word in this
+ * paragraph to a tool, a parameter or the leaf's list. What it deliberately does **not**
+ * say is "go and tag your backlog": that is the maintainer's to start, per lead, by ruling.
+ * "Tags authorize nothing" is pinned by sentence, as the self-merge refusals are.
+ */
+export function tagsSection(human = FALLBACK) {
+  const words = WHAT_TAGS.map((t) => `\`${t}\` (${TAG_MEANINGS[t]})`);
+  const list = `${words.slice(0, -1).join(', ')} or ${words.at(-1)}`;
+  return `**Every task carries one tag saying what it is, and you name it**: \`what\` on every
+\`task_add\` and every \`task_dispatch\`, exactly one of
+${list}.
+A planner is tagged by what it plans; \`research\` is for a task whose result is an answer,
+not code and not a plan. The tag stays on the task for its whole life and shows on its row,
+and \`task_start\` keeps the one it was recorded with. When a task turns out to be something
+else, correct it with \`task_set_tags\` — but a tag ${human} changed in the panel is their
+call: if a task carries a tag you did not give it, leave it. **Tags authorize nothing.** A
+\`bug\` is never a reason to start a pending task without ${human}'s fresh, per-task yes,
+and no tag is ever a reason to start, merge or put off anything.`;
+}
+
 export function projectToolsSection(projectServers = []) {
   if (!projectServers.length) return '';
   const names = projectServers.map((n) => `\`${n}\``).join(', ');
