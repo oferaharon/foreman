@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
+import { parseTags } from '../web/task-tags.js';
 
 const FILE = path.join(STATE_DIR, 'tasks.json');
 
@@ -50,6 +51,13 @@ const ACTIVE = new Set(['queued', 'dispatched', 'working']);
  */
 export const OPEN_STATES = new Set(['queued', 'dispatched', 'working', 'review']);
 
+/** `parseTags`, as a store wants it: the clean list, or a throw carrying its sentence. */
+function checkedTags(input) {
+  const parsed = parseTags(input);
+  if (parsed.error) throw new Error(parsed.error);
+  return parsed.tags;
+}
+
 /**
  * The team's tickets — one record per task, one task per worker.
  *
@@ -80,8 +88,15 @@ export class TaskStore {
         if (!t || !TASK_STATES.includes(t.state)) continue;
         // Additive fields: every task on disk before planners existed is a build task,
         // and reads as one rather than as `undefined` deciding something later. Same for
-        // the two the pending state added — a record written before them answers `null`.
-        this.tasks.set(id, { kind: DEFAULT_TASK_KIND, modelReason: null, startedBy: null, ...t });
+        // the two the pending state added — a record written before them answers `null` —
+        // and for tags, where a record from before them is untagged.
+        //
+        // The spread is also why this store keeps a field it has never heard of: a stored
+        // key this build does not know rides `...t` into the Map and `#flush` writes it
+        // back, so a rollback past a field loses nothing. The price is that an invalid
+        // value is kept just as faithfully, which is why every reader of `tags` goes
+        // through `readTags`/`whatTag` (`web/task-tags.js`) and never reads it raw.
+        this.tasks.set(id, { kind: DEFAULT_TASK_KIND, modelReason: null, startedBy: null, tags: [], ...t });
       }
     } catch {
       /* first run, or hand-edited into nonsense — start clean */
@@ -107,7 +122,7 @@ export class TaskStore {
    * @param {{id: string, repo: string, body: string, kind?: 'build'|'plan', source?: string,
    *          state?: string, branch?: string, worktree?: string, base?: string,
    *          staleBase?: boolean, model?: string, modelReason?: string,
-   *          startedBy?: string, planFile?: string}} t
+   *          startedBy?: string, planFile?: string, tags?: string[]}} t
    */
   create(t, { now = Date.now() } = {}) {
     if (!t?.id) throw new Error('A task needs an id.');
@@ -120,6 +135,10 @@ export class TaskStore {
     // when a dispatch tries to promote a record nothing can read back.
     const state = t.state ?? 'queued';
     if (!TASK_STATES.includes(state)) throw new Error(`No such state: ${state}`);
+    // Omitted means untagged; given means validated, and a bad set fails here for the same
+    // reason a bad state does. The record below is built field by field, so a `tags` this
+    // block did not carry onto it would be dropped without a word.
+    const tags = t.tags === undefined ? [] : checkedTags(t.tags);
     const rec = {
       id: t.id,
       repo: t.repo,
@@ -145,6 +164,8 @@ export class TaskStore {
       // Where a planner's output will land. Recorded at dispatch, before the file
       // exists, so `plan_read` can tell "not written yet" from "wrong task".
       planFile: t.planFile ?? null,
+      // What the task *is* — one word from `WHAT_TAGS`, for the task's whole life.
+      tags,
       tmuxSession: null,
       pane: null,
       pr: null,
@@ -171,15 +192,38 @@ export class TaskStore {
     return this.list(repo).filter((t) => ACTIVE.has(t.state));
   }
 
-  /** @param {string} id @param {object} patch fields to merge; `state` validated */
+  /** @param {string} id @param {object} patch fields to merge; `state` and `tags` validated */
   update(id, patch, { now = Date.now() } = {}) {
     const rec = this.tasks.get(id);
     if (!rec) return null;
     if (patch.state && !TASK_STATES.includes(patch.state)) {
       throw new Error(`No such state: ${patch.state}`);
     }
+    // So the general path cannot write what `setTags` would refuse.
+    if (Object.hasOwn(patch, 'tags')) patch = { ...patch, tags: checkedTags(patch.tags) };
     Object.assign(rec, patch, { updatedAt: now });
     if (patch.state === 'dispatched' && !rec.dispatchedAt) rec.dispatchedAt = now;
+    this.dirty = true;
+    return rec;
+  }
+
+  /**
+   * Replace a task's tags, in any state — the tag describes the record for its whole life,
+   * so a `done` task can be retagged as freely as a pending one.
+   *
+   * Deliberately leaves `updatedAt` alone, unlike `update`. Both task lists sort
+   * newest-first on it within each tier, so a retag that stamped it would jump the row the
+   * maintainer just clicked to the top of its tier, under the cursor — and the lead's
+   * closed `recent` list is ordered by it too, so retagging a month-old task would put it
+   * back in front of the lead as though something had happened to it.
+   *
+   * @param {string} id @param {string[]} tags validated by `parseTags`, which throws here
+   * @returns {object|null} the record, or `null` for an unknown id
+   */
+  setTags(id, tags) {
+    const rec = this.tasks.get(id);
+    if (!rec) return null;
+    rec.tags = checkedTags(tags);
     this.dirty = true;
     return rec;
   }

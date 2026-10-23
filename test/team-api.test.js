@@ -516,6 +516,153 @@ test('dropping a pending task marks it abandoned and says so, without claiming a
 });
 
 /*
+ * Tags — one word from `web/task-tags.js` per task. The two routes that record a task take
+ * one (and, until every lead is relaunched, also take none), and a route of its own changes
+ * one. A repo of their own, because `gitRepo`'s cap is full of `filler-*` workers by now;
+ * the same `exit 7` setup, so a dispatch gets its worktree and its record and stops one
+ * step short of a session.
+ */
+
+let tagRepo;
+
+function prepareTagRepo() {
+  if (tagRepo) return;
+  tagRepo = path.join(stateDir, 'TagRepo');
+  fs.mkdirSync(tagRepo, { recursive: true });
+  const git = (args) => execFileSync('git', args, { cwd: tagRepo, encoding: 'utf8' });
+  git(['init', '-b', 'main']);
+  git(['config', 'user.email', 'test@test']);
+  git(['config', 'user.name', 'test']);
+  fs.writeFileSync(path.join(tagRepo, 'README.md'), 'hello\n');
+  git(['add', '.']);
+  git(['commit', '-m', 'first']);
+  const dir = path.join(stateDir, 'teams', teamKeyFor(tagRepo));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'team.json'), JSON.stringify({ repo: tagRepo, setup: 'exit 7' }, null, 2));
+}
+
+/** What a refused dispatch must not leave behind: a checkout, or the branch it is cut on.
+ *  `createWorktree` names the directory `<basename of the repo>-<label>`. */
+function leftBehind(label) {
+  const dir = path.join(stateDir, 'worktrees', `${path.basename(tagRepo)}-${label}`);
+  const branches = execFileSync('git', ['branch', '--list', `agent/${label}`], { cwd: tagRepo, encoding: 'utf8' });
+  return { worktree: fs.existsSync(dir), branch: branches.trim() !== '' };
+}
+
+const taskById = async (id) => (await api('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === id);
+
+test('task_add’s route stores a tag, takes none, and refuses a bad set before recording anything', async () => {
+  prepareTagRepo();
+  const tagged = await api('POST', '/api/team/tasks', { folder: tagRepo, label: 'tag-add-bug', body: 'b', tags: ['bug'] });
+  assert.equal(tagged.status, 200, tagged.body.error);
+  assert.deepEqual(tagged.body.task.tags, ['bug']);
+  assert.deepEqual((await taskById('tag-add-bug')).tags, ['bug'], 'and it is on the stored record');
+
+  // What a lead whose MCP process predates tags sends — accepted, and untagged.
+  const bare = await api('POST', '/api/team/tasks', { folder: tagRepo, label: 'tag-add-none', body: 'b' });
+  assert.equal(bare.status, 200, bare.body.error);
+  assert.deepEqual(bare.body.task.tags, []);
+
+  const roomBefore = roomLines(tagRepo).length;
+  for (const [i, tags] of [[], ['bug', 'feature'], ['blocked'], 'bug', null].entries()) {
+    const label = `tag-add-refused-${i}`;
+    const res = await api('POST', '/api/team/tasks', { folder: tagRepo, label, body: 'b', tags });
+    assert.equal(res.status, 400, JSON.stringify(tags));
+    assert.match(res.body.error, /bug, feature, research or chore/);
+    assert.equal(await taskById(label), undefined, `${JSON.stringify(tags)} recorded nothing`);
+  }
+  assert.equal(roomLines(tagRepo).length, roomBefore, 'and posted no pending line');
+});
+
+test('a dispatch refuses a bad tag before it cuts a worktree', async () => {
+  prepareTagRepo();
+  const res = await api('POST', '/api/team/dispatch', {
+    folder: tagRepo, label: 'tag-dispatch-bad', body: 'b', tags: ['urgent'],
+  });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /No such tag: "urgent"/);
+  // Past `createWorktree` a failed task keeps its checkout as evidence — so a tag checked any
+  // later would have turned this typo into a stranded worktree.
+  assert.deepEqual(leftBehind('tag-dispatch-bad'), { worktree: false, branch: false });
+  assert.equal(await taskById('tag-dispatch-bad'), undefined);
+});
+
+test('a dispatch stores its tag, and one without a tag is still accepted', async () => {
+  prepareTagRepo();
+  const tagged = await api('POST', '/api/team/dispatch', {
+    folder: tagRepo, label: 'tag-dispatch-feature', body: 'b', tags: ['feature'],
+  });
+  // Stopped at setup, past the record — which is where this test wants to be.
+  assert.equal(tagged.status, 500, tagged.body.error);
+  assert.match(tagged.body.error, /Setup failed/);
+  assert.deepEqual((await taskById('tag-dispatch-feature')).tags, ['feature']);
+
+  const bare = await api('POST', '/api/team/dispatch', { folder: tagRepo, label: 'tag-dispatch-none', body: 'b' });
+  assert.equal(bare.status, 500, bare.body.error);
+  assert.deepEqual((await taskById('tag-dispatch-none')).tags, []);
+});
+
+test('a promotion keeps the recorded tag, and refuses one sent with the start', async () => {
+  prepareTagRepo();
+  await api('POST', '/api/team/tasks', { folder: tagRepo, label: 'tag-promote', body: 'b', tags: ['research'] });
+
+  // Refused out loud, not ignored: a tag silently dropped on a start looks like it worked.
+  const sent = await api('POST', '/api/team/dispatch', { folder: tagRepo, id: 'tag-promote', tags: ['bug'] });
+  assert.equal(sent.status, 400);
+  assert.match(sent.body.error, /task_set_tags/);
+  const still = await taskById('tag-promote');
+  assert.equal(still.state, 'pending');
+  assert.deepEqual(still.tags, ['research']);
+  assert.deepEqual(leftBehind('tag-promote'), { worktree: false, branch: false });
+
+  const started = await api('POST', '/api/team/dispatch', { folder: tagRepo, id: 'tag-promote' });
+  assert.equal(started.status, 500, started.body.error);
+  assert.match(started.body.error, /Setup failed/);
+  const task = await taskById('tag-promote');
+  assert.equal(task.branch, 'agent/tag-promote', 'it really went through promotion');
+  assert.deepEqual(task.tags, ['research'], 'the promotion merge carried the tag through');
+});
+
+test('POST /api/team/tasks/:id/tags: 200 on any state with updatedAt held, 404, folder 400, invalid 400', async () => {
+  prepareTagRepo();
+  // `tag-dispatch-feature` failed at setup above — a closed task, and still retaggable.
+  const before = await taskById('tag-dispatch-feature');
+  assert.equal(before.state, 'failed');
+
+  await new Promise((r) => setTimeout(r, 10)); // so a moved updatedAt would be visible
+  const ok = await api('POST', '/api/team/tasks/tag-dispatch-feature/tags', { folder: tagRepo, tags: ['bug'] });
+  assert.equal(ok.status, 200, ok.body.error);
+  assert.equal(ok.body.ok, true);
+  assert.deepEqual(ok.body.task.tags, ['bug']);
+  const after = await taskById('tag-dispatch-feature');
+  assert.deepEqual(after.tags, ['bug']);
+  assert.equal(after.updatedAt, before.updatedAt, 'a retag does not move the row');
+  assert.equal(after.state, 'failed');
+
+  // No folder is fine — the row's menu and a lead both send one, but the route does not need it.
+  const noFolder = await api('POST', '/api/team/tasks/tag-add-none/tags', { tags: ['chore'] });
+  assert.equal(noFolder.status, 200, noFolder.body.error);
+  assert.deepEqual((await taskById('tag-add-none')).tags, ['chore'], 'an untagged task can be tagged');
+
+  const missing = await api('POST', '/api/team/tasks/no-such-tag-task/tags', { tags: ['bug'] });
+  assert.equal(missing.status, 404);
+  assert.match(missing.body.error, /Unknown task/);
+
+  const elsewhere = await api('POST', '/api/team/tasks/tag-add-bug/tags', { folder: '/somewhere/Else', tags: ['chore'] });
+  assert.equal(elsewhere.status, 400);
+  assert.match(elsewhere.body.error, /belongs to/);
+
+  const roomBefore = roomLines(tagRepo).length;
+  for (const tags of [undefined, [], ['bug', 'chore'], ['idea'], 'bug']) {
+    const res = await api('POST', '/api/team/tasks/tag-add-bug/tags', { folder: tagRepo, tags });
+    assert.equal(res.status, 400, JSON.stringify(tags));
+    assert.match(res.body.error, /bug, feature, research or chore/);
+  }
+  assert.deepEqual((await taskById('tag-add-bug')).tags, ['bug'], 'every refusal changed nothing');
+  assert.equal(roomLines(tagRepo).length, roomBefore, 'and a retag is never a room line');
+});
+
+/*
  * The mobile view's three additive API changes: `GET /api/teams`, the `folder`/`brief`
  * query params on `GET /api/team/tasks`, and `GET /api/team/tasks/:id`. None of them may
  * change what the desktop already gets from `GET /api/team/tasks` with no query string.

@@ -61,6 +61,7 @@ import {
   liveWorkers,
 } from './snapshot.js';
 import { TaskStore, TASK_KINDS } from './tasks.js';
+import { parseTags } from '../web/task-tags.js';
 import { createWorktree, removeWorktree, pruneWorktrees, runSetup, tidyLabel, WORKTREES_DIR } from './worktree.js';
 import {
   writeWorkerSettings,
@@ -1618,6 +1619,24 @@ async function teamListEntry(repo) {
 const WORKER_CAP = Number(process.env.FOREMAN_WORKER_CAP || 3);
 
 /**
+ * A task's tags as a request carries them, for the two routes that record a task.
+ *
+ * Absent is accepted and means untagged, for now. A running lead's MCP process keeps the
+ * code it was started with until the lead is relaunched, so a lead launched before tags
+ * existed sends none — and refusing it would break `task_add` and `task_dispatch` on every
+ * running team the moment the panel restarts. Present means `parseTags`, strictly: `[]`,
+ * two words, an unknown word or a non-list are all refused, so nothing can *write* a task
+ * untagged.
+ *
+ * @returns {{tags: string[]|undefined} | {error: string}} `undefined` for absent, which
+ *   `TaskStore#create` reads as `[]`
+ */
+function requestTags(body) {
+  if (body?.tags === undefined) return { tags: undefined };
+  return parseTags(body.tags);
+}
+
+/**
  * The rail group a repo's workers are filed under — found by name, made if missing.
  *
  * Made with `auto`, which is the only thing that will ever let the panel delete it again:
@@ -1683,6 +1702,20 @@ app.post('/api/team/dispatch', async (req, res) => {
   if (!TASK_KINDS.includes(kind)) {
     return res.status(400).json({ error: `No such task kind: ${kind} — it is one of ${TASK_KINDS.join(', ')}.` });
   }
+
+  // The tag is checked here, with the rest of the request, and long before `createWorktree`:
+  // past that line a failed task keeps its checkout as evidence, so a tag checked any later
+  // would turn a typo into a stranded worktree. A promotion carries the tag it was recorded
+  // with — it rides the `tasks.update` merge below untouched — and one sent with the start is
+  // refused out loud rather than ignored, because quietly dropping it would look like it
+  // worked. Changing a tag is `POST /api/team/tasks/:id/tags`, on its own.
+  if (pending && req.body?.tags !== undefined) {
+    return res.status(400).json({
+      error: `${promoteId} keeps the tag it was recorded with — a start does not change it; task_set_tags does.`,
+    });
+  }
+  const requested = requestTags(req.body);
+  if (requested.error) return res.status(400).json({ error: requested.error });
 
   // No `tidyLabel` on a promotion: the id was tidied when the task was recorded, and
   // re-tidying a stored id is a rename waiting to happen.
@@ -1784,6 +1817,10 @@ app.post('/api/team/dispatch', async (req, res) => {
         id: label,
         repo,
         source: req.body?.source || 'chat',
+        // Not in `fields`, and must never be: a promotion is a merge, so the recorded tag
+        // carries through it on its own, and a `tags` in `fields` would overwrite it on
+        // every start.
+        tags: requested.tags,
       });
 
   // Setup before launch, so the worker's first look at the tree is a working one. A
@@ -1956,6 +1993,10 @@ app.post('/api/team/tasks', (req, res) => {
   if (!TASK_KINDS.includes(kind)) {
     return res.status(400).json({ error: `No such task kind: ${kind} — it is one of ${TASK_KINDS.join(', ')}.` });
   }
+  // Refused before anything is recorded or posted, so a bad set leaves no record and no
+  // room line behind it.
+  const requested = requestTags(req.body);
+  if (requested.error) return res.status(400).json({ error: requested.error });
 
   // `tidyLabel` rewrites what the lead typed, and the response carries the result: the id
   // is the name the task will be started by, and a lead holding the untidied string would
@@ -1998,6 +2039,7 @@ app.post('/api/team/tasks', (req, res) => {
     state: 'pending',
     model: req.body?.model ?? null,
     modelReason: modelReason || null,
+    tags: requested.tags,
   });
 
   // `event` names the machinery so the room can style this without reading the sentence —
@@ -2387,6 +2429,35 @@ app.patch('/api/team/tasks/:id', async (req, res) => {
       .catch(() => {});
   }
 
+  broadcastRoster();
+  res.json({ ok: true, task: tasks.get(task.id) });
+});
+
+/**
+ * Change a task's tag — the lead's `task_set_tags`, and the menu on a task row.
+ *
+ * A route of its own rather than a third shape on the PATCH above, which a worker holds and
+ * which carries a state or a pr and never a free-for-all. Any state may be retagged, `done`
+ * included, because the tag describes the record for its whole life; `setTags` leaves
+ * `updatedAt` alone so the row does not jump under the cursor that just changed it. No room
+ * line: the row already shows the tag, and the room is a log a human scans.
+ *
+ * `folder` is optional and checked when given, worded as the dispatch words it — a lead
+ * passes its own repo, so a task id that belongs to another team is refused, not retagged.
+ * Not an exposure key: a LAN peer can already drop a task, and may retag one.
+ */
+app.post('/api/team/tasks/:id/tags', (req, res) => {
+  const task = tasks.get(req.params.id);
+  if (!task) return res.status(404).json({ error: `Unknown task: ${req.params.id}` });
+  const askedFolder = String(req.body?.folder || '').trim();
+  if (askedFolder && askedFolder !== task.repo) {
+    return res.status(400).json({ error: `${task.id} belongs to ${task.repo}, not ${askedFolder}.` });
+  }
+  // Strict, unlike the two routes that record a task: absent is a refusal here, because
+  // setting a tag is the whole of this request.
+  const parsed = parseTags(req.body?.tags);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  tasks.setTags(task.id, parsed.tags);
   broadcastRoster();
   res.json({ ok: true, task: tasks.get(task.id) });
 });
