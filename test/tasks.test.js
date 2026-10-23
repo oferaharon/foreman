@@ -174,3 +174,113 @@ test('a task written before pending existed answers null for its new fields', ()
   assert.equal(store.get('old').startedBy, null);
   store.stop();
 });
+
+/*
+ * Tags — one word from `web/task-tags.js` saying what the task is, for its whole life.
+ * The store is where a bad set has to fail, and where two things that look like tidiness
+ * would quietly break the feature: `create` building its record field by field, and
+ * `updatedAt` moving on a retag.
+ */
+
+test('create keeps a valid tag, refuses a bad set, and an omitted one is untagged', () => {
+  const store = new TaskStore(file('tags-create'));
+  // `create` builds the record from a fixed list of fields, so a `tags` it did not carry
+  // would vanish without a word — and the call would still look as though it worked.
+  assert.deepEqual(store.create({ id: 'tagged', repo: '/x/Repo', tags: ['feature'] }).tags, ['feature']);
+  assert.deepEqual(store.create({ id: 'untagged', repo: '/x/Repo' }).tags, []);
+
+  for (const bad of [[], ['bug', 'chore'], ['blocked'], 'bug', null]) {
+    assert.throws(
+      () => store.create({ id: 'refused', repo: '/x/Repo', tags: bad }),
+      /bug, feature, research or chore/,
+      JSON.stringify(bad),
+    );
+    assert.equal(store.get('refused'), null, 'nothing was written');
+  }
+  store.stop();
+});
+
+test('a task written before tags existed reads as untagged', () => {
+  const f = file('tags-legacy');
+  fs.writeFileSync(f, JSON.stringify({
+    old: { id: 'old', repo: '/x/Repo', body: 'from before', state: 'done', branch: 'agent/old' },
+  }));
+  const store = new TaskStore(f);
+  assert.deepEqual(store.get('old').tags, []);
+  store.stop();
+});
+
+test('update validates tags, so the general path cannot write what setTags would refuse', () => {
+  const store = new TaskStore(file('tags-update'));
+  store.create({ id: 't', repo: '/x/Repo', tags: ['bug'] });
+  assert.throws(() => store.update('t', { tags: ['nonsense'] }), /No such tag/);
+  assert.throws(() => store.update('t', { tags: undefined }), /a list holding exactly one/, 'an explicit undefined is a write');
+  assert.deepEqual(store.get('t').tags, ['bug'], 'a refused patch changed nothing');
+  assert.deepEqual(store.update('t', { tags: ['chore'] }).tags, ['chore']);
+  // A patch that does not mention tags leaves them alone — the promotion path relies on it.
+  assert.deepEqual(store.update('t', { state: 'working' }).tags, ['chore']);
+  store.stop();
+});
+
+test('setTags retags any state and leaves updatedAt alone', () => {
+  const store = new TaskStore(file('tags-set'));
+  store.create({ id: 'old-news', repo: '/x/Repo', tags: ['bug'] }, { now: 1000 });
+  store.update('old-news', { state: 'done' }, { now: 2000 });
+
+  // Both task lists sort on `updatedAt`, so a retag that moved it would jump the row the
+  // maintainer just clicked to the top of its tier — and put a month-old task back in the
+  // lead's recent list.
+  const rec = store.setTags('old-news', ['research']);
+  assert.deepEqual(rec.tags, ['research']);
+  assert.equal(rec.updatedAt, 2000, 'unchanged by a retag');
+  assert.equal(rec.state, 'done', 'a done task may be retagged');
+
+  assert.throws(() => store.setTags('old-news', ['research', 'chore']), /exactly one tag/);
+  assert.deepEqual(store.get('old-news').tags, ['research']);
+  assert.equal(store.setTags('no-such-task', ['bug']), null);
+
+  const input = ['feature'];
+  store.setTags('old-news', input);
+  input.push('chore');
+  assert.deepEqual(store.get('old-news').tags, ['feature'], 'the caller’s array is not the stored one');
+  store.stop();
+});
+
+test('a retag survives a restart', () => {
+  const f = file('tags-persist');
+  const a = new TaskStore(f);
+  a.create({ id: 'one', repo: '/x/Repo', tags: ['bug'] });
+  a.setTags('one', ['chore']);
+  a.stop(); // flushes — `setTags` marked the store dirty
+
+  const b = new TaskStore(f);
+  assert.deepEqual(b.get('one').tags, ['chore']);
+  b.stop();
+});
+
+test('a field the store has never heard of survives load and flush', () => {
+  // The rollback guarantee. Unlike `GroupStore` and `PinStore`, `#load` spreads the stored
+  // record, so a field a later build wrote rides through an older one untouched — which is
+  // what lets a rollback past tags lose none, and a second tag group join the same array
+  // later. The price is that a bad value is kept just as faithfully, so readers go through
+  // `readTags`; the store does not "clean" it.
+  const f = file('tags-unknown-field');
+  fs.writeFileSync(f, JSON.stringify({
+    later: {
+      id: 'later', repo: '/x/Repo', body: 'from a later build', state: 'pending',
+      tags: ['bug', 'blocked'], futureField: { nested: [1, 2] },
+    },
+    junk: { id: 'junk', repo: '/x/Repo', body: 'hand-edited', state: 'done', tags: ['nonsense'] },
+  }));
+  const a = new TaskStore(f);
+  assert.deepEqual(a.get('later').futureField, { nested: [1, 2] });
+  assert.deepEqual(a.get('later').tags, ['bug', 'blocked']);
+  a.update('later', { state: 'abandoned' }); // dirty, so the next flush rewrites the file
+  a.stop();
+
+  const onDisk = JSON.parse(fs.readFileSync(f, 'utf8'));
+  assert.deepEqual(onDisk.later.futureField, { nested: [1, 2] });
+  assert.deepEqual(onDisk.later.tags, ['bug', 'blocked']);
+  assert.deepEqual(onDisk.junk.tags, ['nonsense'], 'kept verbatim — the reader drops it, the store does not');
+  assert.equal(onDisk.later.state, 'abandoned');
+});
