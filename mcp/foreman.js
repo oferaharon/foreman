@@ -9,6 +9,10 @@ import { TASK_STATES, OPEN_STATES } from '../server/tasks.js';
 // `docs/traps/one-spelling.md` is about. `worker-models.js` is a leaf with no imports for
 // exactly this caller: `dispatch.js` would drag `tmux.js` and the pane parsers in here.
 import { WORKER_MODELS } from '../server/worker-models.js';
+// The four task tags, from the leaf that spells them once — this is the first import from
+// `../web/` here, and it is safe for the reason `worker-models.js` is: the leaf imports
+// nothing, so nothing else rides into a stdio child with it.
+import { TAG_MEANINGS, WHAT_TAGS, readTags } from '../web/task-tags.js';
 
 /**
  * The team's hands — a stdio MCP server over the panel's HTTP API, serving three very
@@ -204,6 +208,42 @@ const requireConfirmation = (confirmation) => {
   }
 };
 
+/**
+ * A task's tag, as the lead names it: `what`, one string, never `kind` — `kind` already
+ * means build or plan on the same two tools. One string rather than a list so "exactly one"
+ * is the schema's to enforce; the store and the route take a list so a second group can
+ * join one day without a migration, which is why the handlers send `tags: [what]` and why
+ * neither side may be "simplified" into the other's shape.
+ *
+ * Not checked here beyond `required`: a word off the list goes to the panel and comes back
+ * as the panel's own sentence (`parseTags`), the way every other refusal reaches a lead.
+ */
+const TAG_CHOICES = WHAT_TAGS.map((t) => `${t} (${TAG_MEANINGS[t]})`).join(', ');
+
+const WHAT_PARAM = {
+  type: 'string',
+  enum: [...WHAT_TAGS],
+  description: `What the task is — exactly one of: ${TAG_CHOICES}. A planner is tagged by what it plans, not as research. It shows on the task's row for its whole life, and it authorizes nothing.`,
+};
+
+/**
+ * The stale-server check, for the two tools that record a task.
+ *
+ * A panel still running code from before tags reads only the fields it knows, so it drops
+ * `tags` without a word and answers 200 — a lead would believe the task was tagged. Its
+ * answer carries the stored record, so whether the tag landed is checked off that record
+ * rather than assumed from the success, and a miss is said with the result rather than
+ * thrown over it: the task *was* recorded, or the worker *is* running, either way.
+ */
+function withTagCheck(result, what) {
+  const stored = readTags(result?.task?.tags);
+  if (stored.length === 1 && stored[0] === what) return result;
+  return {
+    ...result,
+    warning: `The panel recorded this task but did not store its tag (${what}) — it is running code from before tags and needs a restart. Tell ${HUMAN}; once it has restarted, task_set_tags sets this one.`,
+  };
+}
+
 /** Markdown lines that carry no prose of their own — a brief almost always opens with
  *  one of these (every brief in this file starts `## Why`), so the preview has to look
  *  past them for the first line that actually says something. */
@@ -240,6 +280,9 @@ function summarizeTask(t) {
   return {
     id: t.id,
     kind: t.kind,
+    // Through the tolerant reader, never raw: the store keeps whatever is on disk, a
+    // hand-edited word included, and a lead must only ever be shown one of the four.
+    tags: readTags(t.tags),
     state: t.state,
     branch: t.branch,
     pr: t.pr,
@@ -267,15 +310,16 @@ function summarizeTask(t) {
 const CLOSED_STATES = TASK_STATES.filter((s) => s !== 'pending' && !OPEN_STATES.has(s));
 
 /**
- * A closed task, trimmed to the four fields worth naming once it is done: which one, what
- * it ended as, where its PR landed, and when. Everything else on a closed record — the
- * brief, `selfMerge`, `changed`, the deploy tracker — is exactly what made `team_status`
- * unusable at scale (256 tasks, 243 of them done, came back as 190k characters): a merged
- * task's full record is worth reading once, off the panel's own `tasks.json`, not on every
- * status call for the rest of the project's life.
+ * A closed task, trimmed to the five fields worth naming once it is done: which one, what
+ * it was, what it ended as, where its PR landed, and when. Everything else on a closed
+ * record — the brief, `selfMerge`, `changed`, the deploy tracker — is exactly what made
+ * `team_status` unusable at scale (256 tasks, 243 of them done, came back as 190k
+ * characters): a merged task's full record is worth reading once, off the panel's own
+ * `tasks.json`, not on every status call for the rest of the project's life. The tag is one
+ * word and stays because it is a fact about the task for its whole life, done included.
  */
 function closedRecord(t) {
-  return { id: t.id, state: t.state, pr: t.pr, updatedAt: t.updatedAt };
+  return { id: t.id, tags: readTags(t.tags), state: t.state, pr: t.pr, updatedAt: t.updatedAt };
 }
 
 /** Resolve the lead's chosen options (labels or indexes) against the live box, and build
@@ -517,7 +561,7 @@ const LEAD_TOOLS = [
   {
     name: 'team_status',
     description:
-      'The team at a glance: `tasks` is every OPEN task on this repo (queued, dispatched, working, review) plus every PENDING one — ones recorded with task_add that have no worker, no branch and no session — each with its stored state and, when the worker is alive, its live status, model, and whether it is waiting on a human. Each carries `brief`, a short preview of its recorded body, not the whole thing. PENDING tasks are why this, not your own memory, is where the backlog lives; it survives your /clear and your memory does not. Closed tasks (done, failed, abandoned) are NOT listed here in full — `closed` gives you `{total, done, failed, abandoned, recent}`, `recent` being the last 10 by update time as `{id, state, pr, updatedAt}` and nothing more. A closed task\'s full record — brief, selfMerge, changed paths — lives in the panel\'s own `tasks.json` (or `GET /api/team/tasks`), not here: a team with years of merged history would otherwise hand you its whole shut record on every call. Call this before reporting status or deciding anything.',
+      'The team at a glance: `tasks` is every OPEN task on this repo (queued, dispatched, working, review) plus every PENDING one — ones recorded with task_add that have no worker, no branch and no session — each with its stored state and, when the worker is alive, its live status, model, and whether it is waiting on a human. Each carries `brief`, a short preview of its recorded body, not the whole thing, and `tags`, the one word saying what the task is (`[]` on a task recorded before tags). PENDING tasks are why this, not your own memory, is where the backlog lives; it survives your /clear and your memory does not. Closed tasks (done, failed, abandoned) are NOT listed here in full — `closed` gives you `{total, done, failed, abandoned, recent}`, `recent` being the last 10 by update time as `{id, tags, state, pr, updatedAt}` and nothing more. A closed task\'s full record — brief, selfMerge, changed paths — lives in the panel\'s own `tasks.json` (or `GET /api/team/tasks`), not here: a team with years of merged history would otherwise hand you its whole shut record on every call. Call this before reporting status or deciding anything.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => {
       const { tasks } = await api('GET', '/api/team/tasks');
@@ -542,7 +586,7 @@ const LEAD_TOOLS = [
   {
     name: 'task_dispatch',
     description:
-      `Create a worktree branched from main and start a worker session on it; the body becomes the worker's first message. Only after ${HUMAN} has confirmed the task in conversation — never dispatch unconfirmed work. Set kind "plan" to dispatch a PLANNER instead of a builder: it researches the repo and writes a plan document, and its permissions deny writing code at all. Use a planner for anything big or vague, or where ${HUMAN} would want to see the shape before code exists — then bring them the plan (plan_read) for approval before dispatching builders against it. The worker's model is your call, judged per task on its size and complexity: omit it for the team default, or name one of ${WORKER_MODELS.join(', ')} (a [1m] suffix selects the 1M-context variant). Naming a non-default model requires a modelReason — it is posted to the room, where ${HUMAN} judges the call. Note Haiku cannot run auto mode (measured): a Haiku worker prompts on everything, so it is almost never the right choice.`,
+      `Create a worktree branched from main and start a worker session on it; the body becomes the worker's first message. Only after ${HUMAN} has confirmed the task in conversation — never dispatch unconfirmed work. Set kind "plan" to dispatch a PLANNER instead of a builder: it researches the repo and writes a plan document, and its permissions deny writing code at all. Use a planner for anything big or vague, or where ${HUMAN} would want to see the shape before code exists — then bring them the plan (plan_read) for approval before dispatching builders against it. The worker's model is your call, judged per task on its size and complexity: omit it for the team default, or name one of ${WORKER_MODELS.join(', ')} (a [1m] suffix selects the 1M-context variant). Naming a non-default model requires a modelReason — it is posted to the room, where ${HUMAN} judges the call. Note Haiku cannot run auto mode (measured): a Haiku worker prompts on everything, so it is almost never the right choice. Name what the task is in \`what\` — required, one of four, and it stays on the task for its whole life.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -553,10 +597,11 @@ const LEAD_TOOLS = [
           enum: ['build', 'plan'],
           description: 'Omit or "build" for an ordinary worker. "plan" dispatches a planner, which writes a plan and cannot write code.',
         },
+        what: WHAT_PARAM,
         model: { type: 'string', description: 'The model to launch this worker with. Omit for the team default.' },
         modelReason: { type: 'string', description: 'One line on why this task needs a non-default model. Required when model departs from the default.' },
       },
-      required: ['label', 'body'],
+      required: ['label', 'body', 'what'],
       additionalProperties: false,
     },
     handler: async (args) => {
@@ -564,21 +609,23 @@ const LEAD_TOOLS = [
       // No setup override: the worktree-prepare command is detected server-side from
       // the repo's files (setup-detect.js), one answer for every dispatch. Model is
       // validated server-side against the known list — never a flags channel.
-      return api('POST', '/api/team/dispatch', {
+      const started = await api('POST', '/api/team/dispatch', {
         folder: REPO,
         label: args.label,
         body: args.body,
         kind: args.kind,
+        tags: [args.what],
         model: args.model,
         modelReason: args.modelReason,
         source: 'lead',
       });
+      return withTagCheck(started, args.what);
     },
   },
   {
     name: 'task_add',
     description:
-      `Record a task WITHOUT starting anything: a task record with the brief on it, a label and a kind, and no session, no worktree, no branch and no cost. Only after ${HUMAN} has confirmed the task in conversation — the same discipline as task_dispatch, and you may batch several once they have said yes to them. What it is for: an idea worth keeping that is not worth starting right now, and an approved task that has nowhere to go because the worker cap is full. Write the body as if a worker were about to read it — the moment you discuss an idea is the moment you know most about it, and an hour later that context is gone. ADDING IS NOT STARTING. A pending task never becomes a worker on its own — not on a freed slot, not on a timer, and not on the yes that got it recorded. Starting one needs a fresh, per-task yes from ${HUMAN}, however short. The model is validated now and stored as you gave it; omit it and it resolves to the team default at the moment it actually starts, which is the right answer for an idea that may sit for a month. Returns the tidied id — that, not the label you typed, is the name to start it by later, with task_start.`,
+      `Record a task WITHOUT starting anything: a task record with the brief on it, a label and a kind, and no session, no worktree, no branch and no cost. Only after ${HUMAN} has confirmed the task in conversation — the same discipline as task_dispatch, and you may batch several once they have said yes to them. What it is for: an idea worth keeping that is not worth starting right now, and an approved task that has nowhere to go because the worker cap is full. Write the body as if a worker were about to read it — the moment you discuss an idea is the moment you know most about it, and an hour later that context is gone. ADDING IS NOT STARTING. A pending task never becomes a worker on its own — not on a freed slot, not on a timer, and not on the yes that got it recorded. Starting one needs a fresh, per-task yes from ${HUMAN}, however short. The model is validated now and stored as you gave it; omit it and it resolves to the team default at the moment it actually starts, which is the right answer for an idea that may sit for a month. Name what the task is in \`what\` — required, one of four; it is recorded now and carried through the start, and task_set_tags changes it. Returns the tidied id — that, not the label you typed, is the name to start it by later, with task_start.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -589,23 +636,26 @@ const LEAD_TOOLS = [
           enum: ['build', 'plan'],
           description: 'Omit or "build" for an ordinary task. "plan" records a planner, which when started writes a plan and cannot write code.',
         },
+        what: WHAT_PARAM,
         model: { type: 'string', description: 'The model to start this task on. Omit for the team default as it stands when it starts.' },
         modelReason: { type: 'string', description: 'One line on why this task needs a non-default model. Required when model departs from the default.' },
       },
-      required: ['label', 'body'],
+      required: ['label', 'body', 'what'],
       additionalProperties: false,
     },
     handler: async (args) => {
       if (!REPO) throw new Error('This lead has no FOREMAN_REPO — refusing to record a task anywhere.');
-      return api('POST', '/api/team/tasks', {
+      const recorded = await api('POST', '/api/team/tasks', {
         folder: REPO,
         label: args.label,
         body: args.body,
         kind: args.kind,
+        tags: [args.what],
         model: args.model,
         modelReason: args.modelReason,
         source: 'lead',
       });
+      return withTagCheck(recorded, args.what);
     },
   },
   {
@@ -684,6 +734,38 @@ const LEAD_TOOLS = [
     },
     handler: async (args) =>
       api('PATCH', `/api/team/tasks/${encodeURIComponent(args.id)}`, { pr: args.url }),
+  },
+  {
+    /*
+     * Its own tool rather than an argument on another: `task_set_pr` is about PRs,
+     * `task_start` is about the human's second yes, and a general update tool would bring
+     * back the free-for-all the PATCH route was written to refuse. Plural so it need not be
+     * renamed if a second group of tags ever joins the first. Starts nothing and posts
+     * nothing to the room — the row shows the change — so it needs no confirmation.
+     */
+    name: 'task_set_tags',
+    description:
+      `Change what a task is tagged as — one of: ${TAG_CHOICES}. Any task in any state, done included: the tag describes the record for its whole life. Use it when a task turns out to be something other than what you tagged it. If a task's tag is not the one you gave it, ${HUMAN} changed it in the panel — that is their call, so leave it. A tag authorizes nothing: it never starts, merges or orders a task.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'The task id, as team_status lists it.' },
+        what: WHAT_PARAM,
+      },
+      required: ['id', 'what'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      if (!REPO) throw new Error('This lead has no FOREMAN_REPO — refusing to tag anything anywhere.');
+      // `folder` is the repo pin: the route refuses an id that belongs to another team.
+      const { task } = await api('POST', `/api/team/tasks/${encodeURIComponent(args.id)}/tags`, {
+        folder: REPO,
+        tags: [args.what],
+      });
+      // The stored record trimmed to what changed — the whole of a done task's record is
+      // what `team_status` exists to keep out of a lead's context.
+      return { ok: true, id: task.id, state: task.state, tags: readTags(task.tags) };
+    },
   },
   {
     name: 'task_merge_check',

@@ -8,6 +8,11 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FALLBACK, humanName } from '../server/human-name.js';
 import { WORKER_MODELS, DEFAULT_WORKER_MODEL } from '../server/worker-models.js';
+import { TAG_MEANINGS, WHAT_TAGS, parseTags } from '../web/task-tags.js';
+
+// The tags by position, imported rather than retyped — the one-spelling rule
+// `test/task-tags.test.js` holds every script to, kept here too.
+const [BUG, FEATURE, RESEARCH, CHORE] = WHAT_TAGS;
 
 /*
  * The real process, the real protocol, both roles. A stub panel answers the HTTP side,
@@ -79,11 +84,12 @@ const GROUP_ENTRIES = Array.from({ length: 25 }, (_, i) => ({
 const BIG_REPO = '/Users/x/Code/Big';
 
 const BIG_OPEN_TASKS = [
-  { id: 'p1', repo: BIG_REPO, state: 'pending', kind: 'build', body: 'Add a retry to the sync job.', updatedAt: 100 },
+  { id: 'p1', repo: BIG_REPO, state: 'pending', kind: 'build', tags: [BUG], body: 'Add a retry to the sync job.', updatedAt: 100 },
   {
-    id: 'o1', repo: BIG_REPO, state: 'working', kind: 'build', branch: 'agent/o1',
+    id: 'o1', repo: BIG_REPO, state: 'working', kind: 'build', tags: [FEATURE], branch: 'agent/o1',
     body: 'Migrate the queue store.', updatedAt: 101, live: { sessionId: 'sess-3', status: 'working' },
   },
+  // Recorded before tags existed: no field at all, which must read as `[]`, never be left out.
   { id: 'o2', repo: BIG_REPO, state: 'review', kind: 'build', branch: 'agent/o2', body: 'Tighten the retry backoff.', updatedAt: 102 },
 ];
 
@@ -98,6 +104,9 @@ const BIG_CLOSED_TASKS = CLOSED_MIX.map((state, i) => ({
   repo: BIG_REPO,
   state,
   kind: 'build',
+  // The store keeps whatever is on disk, a hand-edited word included (T2), so every fourth
+  // closed record carries one beside its real tag — the reader must drop it.
+  tags: i % 4 === 3 ? [CHORE, 'nonsense'] : [WHAT_TAGS[i % WHAT_TAGS.length]],
   branch: `agent/c${i + 1}`,
   pr: 200 + i,
   // Every real brief opens with a heading — the measured shape of the bug, not a
@@ -130,7 +139,7 @@ function briefOfMirror(body) {
 }
 function summarizeTaskMirror(t) {
   return {
-    id: t.id, kind: t.kind, state: t.state, branch: t.branch, pr: t.pr, model: t.model,
+    id: t.id, kind: t.kind, tags: t.tags, state: t.state, branch: t.branch, pr: t.pr, model: t.model,
     modelReason: t.modelReason, startedBy: t.startedBy, staleBase: t.staleBase,
     brief: briefOfMirror(t.body), selfMerge: t.selfMerge, live: t.live,
     deploy: t.deploy && { state: t.deploy.state, deployed: t.deploy.deployed },
@@ -159,7 +168,21 @@ const stubState = {
   // arrives after its own follow-up message has been typed has stopped nothing.
   paneCalls: [],
   sendQueued: false,
+  // A panel from before tags: it reads only the fields it knows, so its answer carries no
+  // `tags` even though the request did (T6).
+  staleTags: false,
+  retags: [],
 };
+
+/** What the stub's record of a request looks like — tags echoed back, as the real routes
+ *  store them, unless the stub is playing a panel from before tags. */
+const echoTags = (parsed) => (stubState.staleTags || parsed.tags === undefined ? {} : { tags: parsed.tags });
+
+/** The two recording routes' tag check — absent passes, present goes through the leaf the
+ *  real routes call, so a refusal reaches the tool in the panel's own words. A panel from
+ *  before tags checks nothing. */
+const tagRefusal = (parsed) =>
+  (stubState.staleTags || parsed.tags === undefined ? null : parseTags(parsed.tags).error ?? null);
 
 function makeChild(env) {
   const child = spawn(process.execPath, [SERVER], {
@@ -280,13 +303,38 @@ test.before(async () => {
       } else if (req.url === '/api/sessions/sess-1/question' && req.method === 'POST') {
         stubState.questionAnswers.push(parsed);
         res.end(JSON.stringify({ ok: true }));
+      } else if (req.url === '/api/team/dispatch' && req.method === 'POST' && tagRefusal(parsed)) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: tagRefusal(parsed) }));
+      } else if (req.url === '/api/team/tasks' && req.method === 'POST' && tagRefusal(parsed)) {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: tagRefusal(parsed) }));
       } else if (req.url === '/api/team/dispatch' && req.method === 'POST') {
         stubState.dispatches.push(parsed);
         // A promotion carries `id` and no `label` — the record's own id is the name.
-        res.end(JSON.stringify({ ok: true, task: { id: parsed.id || parsed.label, kind: parsed.kind || 'build' } }));
+        res.end(JSON.stringify({ ok: true, task: { id: parsed.id || parsed.label, kind: parsed.kind || 'build', ...echoTags(parsed) } }));
       } else if (req.url === '/api/team/tasks' && req.method === 'POST') {
         stubState.added.push(parsed);
-        res.end(JSON.stringify({ ok: true, id: parsed.label, task: { id: parsed.label, state: 'pending' } }));
+        res.end(JSON.stringify({ ok: true, id: parsed.label, task: { id: parsed.label, state: 'pending', ...echoTags(parsed) } }));
+      } else if (/^\/api\/team\/tasks\/[^/]+\/tags$/.test(req.url) && req.method === 'POST') {
+        // The real route's three refusals, worded by the real code where there is real code
+        // to word them: `parseTags` is the leaf the route itself calls.
+        const id = decodeURIComponent(req.url.split('/')[4]);
+        stubState.retags.push({ id, body: parsed });
+        const task = id === 'c5' ? { id, repo: BIG_REPO, state: 'done' } : id === 'one' ? { id, repo: REPO, state: 'working' } : null;
+        const checked = parseTags(parsed.tags);
+        if (!task) {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ error: `Unknown task: ${id}` }));
+        } else if (parsed.folder && parsed.folder !== task.repo) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: `${id} belongs to ${task.repo}, not ${parsed.folder}.` }));
+        } else if (checked.error) {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: checked.error }));
+        } else {
+          res.end(JSON.stringify({ ok: true, task: { ...task, body: 'x'.repeat(500), tags: checked.tags, updatedAt: 1 } }));
+        }
       } else if (req.url === '/api/team/plans/one' && req.method === 'GET') {
         res.end(JSON.stringify({ ok: true, id: 'one', state: 'review', path: '/t/plans/one.md', text: '# Plan\n\nDo the thing.' }));
       } else if (req.url === '/api/team/tasks/w-task' && req.method === 'PATCH') {
@@ -381,7 +429,7 @@ test('the lead surface: dispatch, status, read, send, close, the room, and the g
     [
       'group_list', 'group_post', 'group_read',
       'plan_read', 'room_post', 'room_read', 'task_add', 'task_close', 'task_dispatch',
-      'task_merge_check', 'task_set_pr', 'task_start', 'team_status',
+      'task_merge_check', 'task_set_pr', 'task_set_tags', 'task_start', 'team_status',
       'worker_answer_permission', 'worker_answer_question', 'worker_approve_plan',
       'worker_interrupt', 'worker_read', 'worker_send',
     ],
@@ -475,8 +523,8 @@ test('team_status trims closed tasks to counts + a recent tail, and keeps open/p
     );
     for (const r of out.closed.recent) {
       assert.deepEqual(
-        Object.keys(r).sort(), ['id', 'pr', 'state', 'updatedAt'],
-        'a recent record carries exactly these four fields — no brief, no selfMerge, no changed',
+        Object.keys(r).sort(), ['id', 'pr', 'state', 'tags', 'updatedAt'],
+        'a recent record carries exactly these five fields — no brief, no selfMerge, no changed',
       );
     }
 
@@ -740,13 +788,13 @@ test('kind rides the dispatch through to the panel, and defaults to nothing at a
   // nothing and a lead that says "build" reach the same place by the same route.
   await lead.rpc({
     jsonrpc: '2.0', id: 20, method: 'tools/call',
-    params: { name: 'task_dispatch', arguments: { label: 'ordinary', body: 'fix it' } },
+    params: { name: 'task_dispatch', arguments: { label: 'ordinary', body: 'fix it', what: BUG } },
   });
   assert.equal(stubState.dispatches.at(-1).kind, undefined);
 
   await lead.rpc({
     jsonrpc: '2.0', id: 21, method: 'tools/call',
-    params: { name: 'task_dispatch', arguments: { label: 'shape-it', body: 'plan it', kind: 'plan' } },
+    params: { name: 'task_dispatch', arguments: { label: 'shape-it', body: 'plan it', kind: 'plan', what: FEATURE } },
   });
   const sent = stubState.dispatches.at(-1);
   assert.equal(sent.kind, 'plan');
@@ -757,7 +805,7 @@ test('kind rides the dispatch through to the panel, and defaults to nothing at a
 test('task_add records a task and starts nothing — a different route from task_dispatch', async () => {
   const res = await lead.rpc({
     jsonrpc: '2.0', id: 30, method: 'tools/call',
-    params: { name: 'task_add', arguments: { label: 'Search Index!', body: 'index the transcripts' } },
+    params: { name: 'task_add', arguments: { label: 'Search Index!', body: 'index the transcripts', what: FEATURE } },
   });
   assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
 
@@ -782,7 +830,7 @@ test('a planner can be recorded pending too, and the model rides along', async (
     params: {
       name: 'task_add',
       arguments: {
-        label: 'shape-search', body: 'plan the index', kind: 'plan',
+        label: 'shape-search', body: 'plan the index', kind: 'plan', what: FEATURE,
         model: 'claude-sonnet-5', modelReason: 'mechanical survey',
       },
     },
@@ -875,6 +923,151 @@ test('a worker cannot record tasks — task_add is the lead\'s alone', async () 
   });
   assert.ok(res.error, 'refused at the protocol layer — a worker records nothing');
   assert.equal(stubState.added.at(-1)?.label, 'shape-search', 'and nothing reached the panel');
+});
+
+/* ------------------------------------------------------------- task tags --- */
+
+/*
+ * What a task is — one of four, named by the lead when it records or dispatches a task,
+ * changeable later, and never `kind`: `kind` is build or plan on the same two tools (T4).
+ * The tool takes one string and the route takes a list, on purpose (T15).
+ */
+
+test('task_add and task_dispatch require `what`, offered as exactly the leaf\'s list', async () => {
+  const tools = await toolsOf(lead, 300);
+  for (const name of ['task_add', 'task_dispatch', 'task_set_tags']) {
+    const tool = tools.find((t) => t.name === name);
+    assert.ok(tool.inputSchema.required.includes('what'), `${name} requires what`);
+    assert.deepEqual(tool.inputSchema.properties.what.enum, [...WHAT_TAGS], `${name}: the leaf's list, in its order`);
+    assert.equal(tool.inputSchema.properties.what.type, 'string', `${name}: one word, never a list of them`);
+    for (const tag of WHAT_TAGS) {
+      assert.ok(
+        tool.inputSchema.properties.what.description.includes(`${tag} (${TAG_MEANINGS[tag]})`),
+        `${name}: ${tag} is offered with its meaning`,
+      );
+    }
+    // T4: `kind` is build or plan on these same tools, and the two must never share a word.
+    const kinds = tool.inputSchema.properties.kind?.enum ?? [];
+    assert.ok(!kinds.some((k) => WHAT_TAGS.includes(k)), `${name}: the tag is never kind`);
+  }
+  const start = tools.find((t) => t.name === 'task_start');
+  assert.equal(start.inputSchema.properties.what, undefined, 'task_start takes no tag — task_set_tags changes one');
+  assert.equal(start.inputSchema.properties.tags, undefined);
+});
+
+test('a task_add or task_dispatch without `what` is refused at the protocol layer, and sends nothing', async () => {
+  const added = stubState.added.length;
+  const dispatched = stubState.dispatches.length;
+  const add = await call(lead, 301, 'task_add', { label: 'untagged', body: 'no tag' });
+  assert.ok(add.error, 'refused at the protocol layer');
+  assert.match(add.error.message, /task_add needs: what/);
+  const dispatch = await call(lead, 302, 'task_dispatch', { label: 'untagged', body: 'no tag' });
+  assert.ok(dispatch.error);
+  assert.match(dispatch.error.message, /task_dispatch needs: what/);
+  assert.equal(stubState.added.length, added, 'nothing recorded');
+  assert.equal(stubState.dispatches.length, dispatched, 'nothing dispatched');
+});
+
+test('the tag rides as a one-word list on both recording tools, and task_start sends none', async () => {
+  const add = await call(lead, 303, 'task_add', { label: 'tagged-add', body: 'b', what: RESEARCH });
+  assert.notEqual(add.result.isError, true, add.result.content?.[0]?.text);
+  assert.deepEqual(stubState.added.at(-1).tags, [RESEARCH]);
+  assert.equal(stubState.added.at(-1).what, undefined, 'the route reads tags, never what');
+  assert.equal(stubState.added.at(-1).kind, undefined, 'and the tag is not sent as kind');
+  assert.equal(out(add).warning, undefined, 'a panel that stored it says nothing more');
+
+  const dispatch = await call(lead, 304, 'task_dispatch', { label: 'tagged-go', body: 'b', what: CHORE });
+  assert.notEqual(dispatch.result.isError, true, dispatch.result.content?.[0]?.text);
+  assert.deepEqual(stubState.dispatches.at(-1).tags, [CHORE]);
+  assert.equal(out(dispatch).warning, undefined);
+
+  await call(lead, 305, 'task_start', { id: 'tagged-add', confirmation: 'yes, start it' });
+  const started = stubState.dispatches.at(-1);
+  assert.equal(started.id, 'tagged-add');
+  assert.equal(started.tags, undefined, 'a start carries the recorded tag; it never sends one');
+});
+
+test('a word off the list is refused in the panel\'s own sentence', async () => {
+  const added = stubState.added.length;
+  const res = await call(lead, 306, 'task_add', { label: 'bad-tag', body: 'b', what: 'blocked' });
+  assert.equal(res.result.isError, true);
+  assert.equal(res.result.content[0].text, `Error: ${parseTags(['blocked']).error}`, 'verbatim, not restated');
+  assert.equal(stubState.added.length, added, 'and nothing was recorded');
+
+  const go = await call(lead, 307, 'task_dispatch', { label: 'bad-tag', body: 'b', what: 'idea' });
+  assert.equal(go.result.isError, true);
+  assert.match(go.result.content[0].text, /No such tag: "idea"/);
+});
+
+test('a panel from before tags drops the tag silently, and the tool says so rather than trusting the 200', async () => {
+  stubState.staleTags = true;
+  try {
+    const add = await call(lead, 308, 'task_add', { label: 'stale-add', body: 'b', what: BUG });
+    assert.notEqual(add.result.isError, true, 'the task was recorded — this is not a failure');
+    const added = out(add);
+    assert.equal(added.id, 'stale-add', 'the panel\'s answer is all still there');
+    assert.match(added.warning, new RegExp(`did not store its tag \\(${BUG}\\)`));
+    assert.match(added.warning, /needs a restart/);
+    assert.match(added.warning, /task_set_tags/, 'and names how to put it right afterwards');
+
+    const go = await call(lead, 309, 'task_dispatch', { label: 'stale-go', body: 'b', what: FEATURE });
+    assert.notEqual(go.result.isError, true, 'the worker is running — this is not a failure either');
+    assert.match(out(go).warning, new RegExp(`did not store its tag \\(${FEATURE}\\)`));
+  } finally {
+    stubState.staleTags = false;
+  }
+});
+
+test('team_status carries the tag on open, pending and recent closed rows, through the tolerant reader', async () => {
+  const bigLead = makeChild({ FOREMAN_ROLE: 'lead', FOREMAN_REPO: BIG_REPO });
+  try {
+    const status = out(await call(bigLead, 310, 'team_status'));
+    const byId = Object.fromEntries(status.tasks.map((t) => [t.id, t]));
+    assert.deepEqual(byId.p1.tags, [BUG], 'pending');
+    assert.deepEqual(byId.o1.tags, [FEATURE], 'open');
+    assert.deepEqual(byId.o2.tags, [], 'a record from before tags reads as untagged, and is not left out');
+    const recent = Object.fromEntries(status.closed.recent.map((r) => [r.id, r]));
+    assert.deepEqual(recent.c30.tags, [FEATURE], 'recent closed');
+    assert.deepEqual(recent.c29.tags, [BUG]);
+    assert.deepEqual(recent.c28.tags, [CHORE], 'a word the store kept and this build does not know is dropped');
+  } finally {
+    bigLead.child.kill();
+  }
+});
+
+test('task_set_tags replaces the tag through its own route, pinned to this repo, and answers trimmed', async () => {
+  const res = await call(lead, 311, 'task_set_tags', { id: 'one', what: RESEARCH });
+  assert.notEqual(res.result.isError, true, res.result.content?.[0]?.text);
+  assert.deepEqual(stubState.retags.at(-1), { id: 'one', body: { folder: REPO, tags: [RESEARCH] } });
+  assert.deepEqual(
+    out(res), { ok: true, id: 'one', state: 'working', tags: [RESEARCH] },
+    'the change and nothing else — never the whole record back',
+  );
+});
+
+test('task_set_tags hands back every refusal in the panel\'s words', async () => {
+  const bad = await call(lead, 312, 'task_set_tags', { id: 'one', what: 'deadline' });
+  assert.equal(bad.result.isError, true);
+  assert.match(bad.result.content[0].text, /No such tag: "deadline"/);
+
+  const theirs = await call(lead, 313, 'task_set_tags', { id: 'c5', what: BUG });
+  assert.equal(theirs.result.isError, true, 'another team\'s task is refused, not retagged');
+  assert.match(theirs.result.content[0].text, /c5 belongs to \/Users\/x\/Code\/Big, not \/Users\/x\/Code\/Fake/);
+
+  const missing = await call(lead, 314, 'task_set_tags', { id: 'nope', what: BUG });
+  assert.equal(missing.result.isError, true);
+  assert.match(missing.result.content[0].text, /Unknown task: nope/);
+
+  const none = await call(lead, 315, 'task_set_tags', { id: 'one' });
+  assert.ok(none.error, 'no tag is refused at the protocol layer');
+  assert.match(none.error.message, /task_set_tags needs: what/);
+});
+
+test('a worker cannot tag anything — task_set_tags is the lead\'s alone', async () => {
+  const before = stubState.retags.length;
+  const res = await call(worker, 316, 'task_set_tags', { id: 'w-task', what: BUG });
+  assert.ok(res.error, 'refused at the protocol layer — the tool does not exist for this role');
+  assert.equal(stubState.retags.length, before, 'and nothing reached the panel');
 });
 
 test('the lead reads a plan as a document, not as a room post', async () => {

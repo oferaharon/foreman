@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { forgeSection, leadBrief } from '../server/lead-brief.js';
+import { forgeSection, leadBrief, tagsSection } from '../server/lead-brief.js';
+import { TAG_MEANINGS, WHAT_TAGS } from '../web/task-tags.js';
 import { FALLBACK } from '../server/human-name.js';
 import { HUMAN_PREFIX, LEAD_PREFIX } from '../server/envelope.js';
 import { workerBrief, plannerBrief } from '../server/worker-brief.js';
@@ -969,4 +970,76 @@ test('the three rules are the worker\'s, and they carry the detected name like t
     decisionsFile: DECISIONS,
   });
   assert.doesNotMatch(planner, /pbcopy/, 'a planner launches nothing and gets no bench rule');
+});
+
+/* ------------------------------------------------------------- task tags --- */
+
+/*
+ * Every task carries one tag saying what it is, and the lead names it. The words and their
+ * meanings come from the leaf (`web/task-tags.js`), so a lead is never offered a tag the
+ * store would refuse; what is pinned here is that they arrive, where they arrive, and the
+ * one sentence that keeps a tag from turning into a reason to act.
+ */
+
+const leadWith = (human) =>
+  leadBrief({ repo: REPO, teamDir: '/Users/x/State/teams/Users-x-Code-Fake', decisionsFile: DECISIONS, human });
+
+test('the lead brief names every tag with its meaning, from the leaf', () => {
+  const brief = leadWith(NAME);
+  for (const tag of WHAT_TAGS) {
+    assert.ok(brief.includes(`\`${tag}\` (${TAG_MEANINGS[tag]})`), `${tag} is offered with its meaning`);
+  }
+  assert.ok(brief.includes(tagsSection(NAME)), 'the section is the brief\'s, whole');
+  assert.match(tagsSection(NAME), /`what` on every\s+`task_add` and every `task_dispatch`/, 'both recording tools, by name');
+  assert.match(tagsSection(NAME), /correct it with `task_set_tags`/);
+});
+
+test('the tags paragraph sits under "Your workers", before the planners', () => {
+  const brief = leadWith(NAME);
+  const at = brief.indexOf(tagsSection(NAME));
+  assert.ok(at > brief.indexOf('## Your workers'), 'after the workers heading');
+  assert.ok(at < brief.indexOf('## Planners'), 'and before the next one');
+});
+
+test('tags authorize nothing — pinned by sentence, as the self-merge refusals are', () => {
+  const section = tagsSection(NAME);
+  assert.match(section, /\*\*Tags authorize nothing\.\*\*/);
+  assert.match(
+    section,
+    new RegExp(`\`bug\` is never a reason to start a pending task without ${NAME}'s fresh, per-task yes`),
+    'the per-task yes survives a tag that sounds urgent',
+  );
+  assert.match(section, /no tag is ever a reason\s+to start, merge or put off anything/);
+});
+
+test('a planner is tagged by what it plans, and a tag the maintainer set stays', () => {
+  const section = tagsSection(NAME);
+  assert.match(section, /A planner is tagged by what it plans/);
+  assert.match(section, /`research` is for a task whose result is an answer,\s+not code and not a plan/);
+  assert.match(section, new RegExp(`a tag ${NAME} changed in the panel is their\\s+call`));
+  assert.match(section, /if a task carries a tag you did not give it, leave it/);
+});
+
+test('every word the tags paragraph puts in backticks is a tool, a parameter or a tag on the list', () => {
+  // The prose names two tags itself, because the rule is about them. This is the one
+  // spelling's guard for that: rename a tag in the leaf and the stale word fails here,
+  // rather than living on in the brief of every lead launched afterwards.
+  const known = new Set(['what', 'task_add', 'task_dispatch', 'task_start', 'task_set_tags', ...WHAT_TAGS]);
+  const ticked = [...tagsSection(NAME).matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.ok(ticked.length > WHAT_TAGS.length, 'the scan found the words');
+  for (const word of ticked) assert.ok(known.has(word), `\`${word}\` is not a tool, a parameter or a tag`);
+});
+
+test('the tags paragraph sends nobody to tag a backlog, and offers no second group', () => {
+  // Tagging what is already recorded is the maintainer's to start, per lead, by ruling —
+  // and the "why it is waiting" group was ruled out. Neither belongs in the brief.
+  const section = tagsSection(NAME);
+  assert.doesNotMatch(section, /backlog/i);
+  assert.doesNotMatch(section, /\b(blocked|idea|deadline)\b/);
+});
+
+test('workers and planners are told nothing about tags — they have no tool for one', () => {
+  for (const [which, brief] of everyBrief(NAME).filter(([w]) => w !== 'lead')) {
+    assert.doesNotMatch(brief, /task_set_tags/, which);
+  }
 });
