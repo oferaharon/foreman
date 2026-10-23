@@ -104,6 +104,12 @@ import { ageText, groupSummary } from './group-summary.js';
 // `renderRail` lifts nested workers out before that count is taken, so a busy worker in a
 // closed team group used to light nothing until the stuck timer fired.
 import { orderWorkers } from './worker-order.js';
+// A team task's tag: the leaf that spells the four words (read here for the repaint
+// signature and the brief's `tag` fact), and the pill and menu built off it. The tag is a
+// fact beside the state chips, never one of them — it has its own class and its colour
+// comes in as `--tag`, so no `.team-chip` rule can reach it. See `renderTasks`.
+import { whatTag } from './task-tags.js';
+import { tagChip, tagMenu } from './task-tag-chip.js';
 // Where a dragged pinned row lands, and which block the pointer is over — the two rules in
 // the pinned group's drag that render perfectly while wrong (`pinGrip`, `renderRail`).
 import { byPinOrder, movedPinOrder, pinDropIndex } from './pin-order.js';
@@ -6003,6 +6009,9 @@ function openTaskBrief(t, chipState) {
     meta.append(dt, dd);
   };
   fact('state', chipState);
+  // Read-only here, like everything else in this box: the picker lives on the row, and this
+  // copy is a snapshot that would go stale the moment anything retagged the task.
+  fact('tag', whatTag(t.tags));
   fact('kind', t.kind);
   fact('model', t.model);
   // The lead's justification for departing from the team default, on its own line. This is
@@ -11348,6 +11357,58 @@ function createPane(slot, host) {
     note.textContent = on && n > 0 ? `${n} hidden` : '';
   }
 
+  /**
+   * The tag on a task row: a filled pill in the tag's own colour, or a faint `+ tag` on a
+   * row that has none, and either way the control that changes it. Offered on every row in
+   * every state, `done` included — the tag describes the record for its whole life.
+   *
+   * Three things about it are load-bearing:
+   *
+   * - **It stops its own click and its own Enter/Space.** The row opens the brief, and the
+   *   row's `keydown` calls `preventDefault` on any Enter or Space that reaches it — which
+   *   would cancel this button's own activation, so a keyboard press opened the brief
+   *   instead of the menu. Stopping the key here means the row never sees it.
+   * - **A retag does not move `updatedAt`** (`TaskStore#setTags`), so the row stays where it
+   *   was under the cursor — and so `refreshTasks`' signature carries the tag itself, or
+   *   the change would never be drawn.
+   * - **The menu lives on `body`** (`openMenu`), so the poll rebuilding this row underneath
+   *   it does not take the menu with it.
+   */
+  function taskTagControl(t) {
+    const pill = tagChip(t.tags);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = pill.tag ? 'team-task-tag' : 'team-task-tag untagged';
+    btn.textContent = pill.text;
+    btn.title = `${pill.title} Click to change it.`;
+    btn.setAttribute('aria-haspopup', 'menu');
+    btn.setAttribute('aria-label', pill.tag ? `Tag: ${pill.tag}. Change it` : `Tag ${t.id}`);
+    if (pill.colour) btn.style.setProperty('--tag', pill.colour);
+    btn.onclick = (e) => {
+      e.stopPropagation(); // or the click also opens the brief under the menu
+      openMenu(
+        btn,
+        tagMenu(t.tags).map((item) => ({
+          label: item.label,
+          hint: item.hint,
+          checked: item.checked,
+          // A refusal throws, and `openMenu` keeps the menu up with the server's sentence.
+          onPick: async () => {
+            await postJSON(`/api/team/tasks/${encodeURIComponent(t.id)}/tags`, {
+              folder: roomView.repo,
+              tags: [item.tag],
+            });
+            refreshTasks(true);
+          },
+        })),
+      );
+    };
+    btn.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+    };
+    return btn;
+  }
+
   function renderTasks() {
     const list = roomView.tasksEl;
     if (!list || !list.isConnected) return;
@@ -11425,6 +11486,7 @@ function createPane(slot, host) {
       id.className = 'team-task-id';
       id.textContent = t.id;
       line.append(chip, id);
+      line.append(taskTagControl(t));
       // A planner reads and writes a document; it never opens a PR and its branch stays
       // empty, so a row that looked like every other one would read as a build worker
       // that achieved nothing. Bare `.team-chip` on purpose — muted, because this is a
@@ -11548,8 +11610,10 @@ function createPane(slot, host) {
         // `updatedAt` is in here for the brief: edit one from another window and none of
         // the other five fields move, so the list would keep showing the old text until
         // some unrelated task changed state. It only moves on a real `tasks.update`, so
-        // it costs no extra paints.
-        .map((t) => [t.id, t.state, t.live?.status, t.live?.stuck, t.pr, t.updatedAt].join(':'))
+        // it costs no extra paints. The tag is in here on its own because a retag
+        // deliberately leaves `updatedAt` alone (so the row does not jump under the
+        // cursor) — without it a pick from the row's menu would never be drawn.
+        .map((t) => [t.id, t.state, t.live?.status, t.live?.stuck, t.pr, t.updatedAt, whatTag(t.tags)].join(':'))
         .join('~');
       if (sig !== roomView.tasksSig) {
         roomView.tasksSig = sig;

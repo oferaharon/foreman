@@ -144,9 +144,75 @@ test('the four words are spelled in one file: no other script quotes one', () =>
 
 test('the store and the routes import the leaf, and the leaf imports nothing', () => {
   // The readers item 1 adds, then the lead's tool server and its brief (item 2). The two
-  // task lists join this list as they start reading tags.
+  // task lists import it from inside `web/`, at their own relative paths — the next test.
   for (const file of ['server/tasks.js', 'server/index.js', 'mcp/foreman.js', 'server/lead-brief.js']) {
     assert.match(text(file), /from '\.\.\/web\/task-tags\.js';/, file);
   }
   assert.doesNotMatch(text('web/task-tags.js'), /^\s*import\s/m, 'a leaf, so a stdio child can load it');
+});
+
+test('the two task lists read the leaf too — the desktop row and the phone row', () => {
+  // Item 3's readers, at their own relative paths. Both also import the pill and the menu
+  // from `web/task-tag-chip.js`, which reads the same leaf; neither may hold a copy.
+  assert.match(text('web/app.js'), /from '\.\/task-tags\.js';/, 'web/app.js');
+  assert.match(text('web/m/tasks.js'), /from '\.\.\/task-tags\.js';/, 'web/m/tasks.js');
+  assert.match(text('web/task-tag-chip.js'), /from '\.\/task-tags\.js';/, 'web/task-tag-chip.js');
+});
+
+/* ----------------------------------------------------------- the tokens --- */
+
+/**
+ * Every `--tag-<word>: #hex;` declaration in `web/tokens.css`, split into the runs it
+ * appears in — `test/group-hue.test.js`'s reader, for the same three blocks.
+ */
+function tagBlocks(css) {
+  const blocks = [];
+  let current = null;
+  for (const line of css.split('\n')) {
+    const m = line.match(/^\s*--tag-([a-z]+):\s*(#[0-9a-f]{6});\s*$/);
+    if (m) {
+      if (!current) {
+        current = [];
+        blocks.push(current);
+      }
+      current.push({ tag: m[1], value: m[2] });
+    } else if (current && line.trim() !== '') {
+      current = null;
+    }
+  }
+  return blocks;
+}
+
+test('every tag has a --tag-<word> colour in each of tokens.css’s three blocks', () => {
+  // Light `:root`, the dark `prefers-color-scheme` block, and `:root[data-theme="dark"]`.
+  // A token missing from any one of them draws that tag with no colour in that mode, and
+  // nothing fails — the rule falls back and the pill goes grey.
+  const css = text('web/tokens.css');
+  const blocks = tagBlocks(css);
+  assert.equal(blocks.length, 3, 'light, prefers-color-scheme dark, data-theme dark');
+  for (const block of blocks) {
+    assert.deepEqual(block.map((d) => d.tag), [...WHAT_TAGS], 'one token per tag, in the leaf’s order');
+  }
+  // The explicit-choice block mirrors the media query exactly, as every other token does.
+  assert.deepEqual(blocks[1], blocks[2]);
+  // And each one is the name `tagVar` resolves through — the one spelling of the token.
+  for (const tag of WHAT_TAGS) {
+    assert.equal(tagVar(tag), `var(--tag-${tag})`);
+    assert.equal(css.split(`--tag-${tag}:`).length - 1, 3, `--tag-${tag} is declared three times`);
+  }
+});
+
+test('the four colours are four, and none of them is a state colour', () => {
+  // A tag must never read as a state, and two tags must never read as one.
+  const css = text('web/tokens.css');
+  const [light, dark] = tagBlocks(css);
+  for (const block of [light, dark]) {
+    assert.equal(new Set(block.map((d) => d.value)).size, WHAT_TAGS.length, 'four distinct values');
+  }
+  const stateValues = new Set(
+    [...css.matchAll(/--(?:decision|working|idle|accent):\s*(#[0-9a-f]{6});/g)].map((m) => m[1]),
+  );
+  for (const d of [...light, ...dark]) {
+    assert.equal(stateValues.has(d.value), false, `--tag-${d.tag} is ${d.value}, a state colour`);
+  }
 });

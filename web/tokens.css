@@ -193,6 +193,21 @@
   --group-8: #a08800;
   --group-9: #9219aa;
   --group-10: #379e00;
+
+  /* A team task's tag — one filled pill per row, its label in `--surface` on this fill
+     (`.team-task-tag`, `.m-tk-tag`; the name is spelled by `tagVar` in `web/task-tags.js`).
+     Four, one per word in `WHAT_TAGS`, and each kept off the state chips' hues so a tag can
+     never read as a state: `--decision` sits at 3°, `--working` 36°, `--idle` 149°,
+     `--accent` 235°. Every chip on a task row is an *outline*; the fill is the rest of the
+     difference. The dark blocks below are the measured ones (dark is the deliverable); these
+     are the same four hues darkened until the white label clears 5:1.
+
+       bug       #b8329f  311°  label 5.26:1      research  #7448d0  259°  label 5.87:1
+       feature   #1f73b0  205°  label 5.08:1      chore     #0f7a6f  174°  label 5.21:1 */
+  --tag-bug: #b8329f;
+  --tag-feature: #1f73b0;
+  --tag-research: #7448d0;
+  --tag-chore: #0f7a6f;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -252,6 +267,16 @@
     --group-8: #ddb800;
     --group-9: #d399ff;
     --group-10: #79d12d;
+
+    /* The task tags, dark values — the label is this theme's `--surface` (#191a22) on the
+       fill. Magenta, sky, violet, teal: hue and contrast of each, against that label.
+
+         bug       #e75fd0  310°  label 5.73:1      research  #b98cff  263°  label 6.81:1
+         feature   #3fb4f5  201°  label 7.47:1      chore     #2fc4b2  173°  label 7.97:1 */
+    --tag-bug: #e75fd0;
+    --tag-feature: #3fb4f5;
+    --tag-research: #b98cff;
+    --tag-chore: #2fc4b2;
   }
 }
 
@@ -296,4 +321,11 @@
   --group-8: #ddb800;
   --group-9: #d399ff;
   --group-10: #79d12d;
+
+  /* The task tags — the explicit-choice mirror of the `prefers-color-scheme` block above,
+     same values. */
+  --tag-bug: #e75fd0;
+  --tag-feature: #3fb4f5;
+  --tag-research: #b98cff;
+  --tag-chore: #2fc4b2;
 }

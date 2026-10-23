@@ -2905,6 +2905,43 @@ body.pin-reordering * { cursor: grabbing !important; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A task's tag — what it *is* — and the control that changes it. A rule of its own, never
+   built from `.team-chip`: every chip on this line is an outline in a text colour, so a
+   solid pill reads as a different kind of thing at a glance, which matters most beside the
+   red outlined `blocked`. The hue arrives as `--tag`, set inline from `tagVar` in
+   `web/task-tag-chip.js`, so there is no class per tag for a chip rule to reach. The
+   transparent border keeps the pill the same height as the outlined chips beside it. */
+.team-task-tag {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: inherit;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  flex: none;
+  cursor: pointer;
+  background: var(--tag, var(--ink-faint));
+  color: var(--surface);
+}
+.team-task-tag:hover { filter: brightness(1.12); }
+.team-task-tag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* No tag yet: a faint offer in the same place rather than an empty pill. No fill and no
+   border at rest, so it cannot be mistaken for a chip or a tag; the dashed edge appears
+   only under the pointer, to say it is pressable. */
+.team-task-tag.untagged {
+  font-weight: 400;
+  background: none;
+  color: var(--ink-faint);
+}
+.team-task-tag.untagged:hover {
+  filter: none;
+  color: var(--ink-muted);
+  border-color: var(--rule-strong);
+  border-style: dashed;
+}
 .team-task-pr { font-family: var(--mono); font-size: 0.68rem; color: var(--accent); flex: none; }
 .team-task-close {
   font-family: var(--mono);
