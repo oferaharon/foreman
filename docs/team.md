@@ -298,6 +298,17 @@ context, but only for open and pending tasks — a closed one comes back as a co
 short recent list, never its full record, so a long-lived team's merged history doesn't ride
 along on every call.
 
+**Every task also carries one tag saying what it is** — `bug`, `feature`, `research` or
+`chore` — drawn as a coloured pill right after the task's id. It is not a state and has
+nothing to do with the chip: `blocked` is the chip a worker earns by sitting on a question,
+and a tag never reads or changes it. The lead sets the tag when it records or dispatches a
+task (`what` on `task_add` / `task_dispatch`) and changes it with `task_set_tags`; you can
+change it yourself by clicking the pill, and it stays on the task from `pending` to `done`. A
+task recorded before tags existed shows a faint `+ tag` until someone names one. A tag
+authorizes nothing: nothing starts, merges, orders or refuses a task because of it, and a
+pending task still needs your own yes to start. The list is spelled once, in
+`web/task-tags.js`.
+
 ![The task list: one task blocked with a link to its PR, two pending, one done and carrying
 a deployed pill, one done plan task — each with its state as a chip and its branch
 underneath.](images/team-tasks.png)
