@@ -144,7 +144,7 @@ test('the four words are spelled in one file: no other script quotes one', () =>
 
 test('the store and the routes import the leaf, and the leaf imports nothing', () => {
   // The readers item 1 adds, then the lead's tool server and its brief (item 2). The two
-  // task lists join this list as they start reading tags.
+  // task lists import it from inside `web/`, at their own relative paths — the next test.
   for (const file of ['server/tasks.js', 'server/index.js', 'mcp/foreman.js', 'server/lead-brief.js']) {
     assert.match(text(file), /from '\.\.\/web\/task-tags\.js';/, file);
   }
