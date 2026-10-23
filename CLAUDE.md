@@ -1363,7 +1363,9 @@ brief modal on click, showing a planner's plan alongside its brief where one exi
 rendering both as markdown rather than raw text. The lead's own `room_read` returns a tail
 rather than the whole log, and `team_status` the same for closed tasks — open and pending
 ones in full, `done`/`failed`/`abandoned` as counts plus a 10-record recent list — so a
-long-running lead's context doesn't fill up on its own history either way.
+long-running lead's context doesn't fill up on its own history either way. Every task also
+carries exactly one what-it-is tag — `bug`, `feature`, `research` or `chore`, spelled once in
+`web/task-tags.js` — set by the lead, changeable from the row, and authorizing nothing.
 
 **A known gap: there is no "refresh brief" control.** A brief change needs a panel restart
 *and* a lead relaunch to take effect. `plannerBrief` reaches a planner at its next dispatch,

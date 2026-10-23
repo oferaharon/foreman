@@ -216,6 +216,16 @@ before any rollback of a commit that added a state.** The same paragraph applies
 `TASK_KINDS`, which is loaded more leniently (an unknown kind survives as itself) — the
 state list is the strict one.
 
+**Unknown *fields* are the opposite case.** `TaskStore` spreads the stored record on load
+(`{ ...defaults, ...t }`) and `#flush` writes the Map back whole, so a field this build has
+never heard of survives both — measured when tags shipped — unlike `GroupStore` and
+`PinStore`, which rebuild a record field by field and drop what they don't know. A rollback
+past tags therefore keeps every task's `tags` on disk, and the build that comes back finds
+them. The flip side: the store keeps *invalid* values just as faithfully, a hand-edited
+`['nonsense']` included, so nothing may read `task.tags` raw — every reader goes through the
+tolerant `readTags` / `whatTag` in `web/task-tags.js`, and only `parseTags` (strict) gates a
+write.
+
 ## Merged versus live here
 
 **"Merged" and "live here" are different facts, and the boot sha is how you tell.** A PR

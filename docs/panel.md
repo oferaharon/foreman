@@ -1212,6 +1212,20 @@ Both folds are remembered **per browser**, one answer per panel, alongside the w
 dragged — and a fold never writes a width, so the panel you dragged comes straight back at the
 size you left it. Under `prefers-reduced-motion` both steps are instant.
 
+### Task tags
+
+Every row in the team panel's task list carries a **tag pill** after the task id: `bug`,
+`feature`, `research` or `chore`, each with its own colour, and the meaning as the pill's
+tooltip. **On the desktop it is a control**: click it and a four-item menu opens, each item
+with its one-line meaning and a tick on the current one; picking one writes it
+(`POST /api/team/tasks/:id/tags`) and the row repaints on the next task poll. A task with no
+tag yet shows a faint `+ tag` in the same place, opening the same menu. **On the phone the
+pill is read-only** — drawn when the task has a tag, absent when it doesn't, and not a
+button. The task's brief modal shows it read-only too, because that modal is the one place
+nothing can be changed from. The pill sits beside the state chip and is never drawn through
+any of its classes: a tag is not a state, and `blocked` stays what it was. See [the
+team panel](team.md#the-team-panel) for what a tag means and what it doesn't authorize.
+
 ### Rooms
 
 A room is a named place where a handful of sessions coordinate on one thing — a feature
