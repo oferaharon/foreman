@@ -18,6 +18,12 @@
 
 import { marked } from '/vendor/marked.js';
 import { withBlankTargets } from '../anchor-target.js';
+// The task's tag, read-only here: the four words live in one leaf and the pill is built by
+// the same function the desktop row uses, so the phone draws the same word in the same
+// colour. Imported, never copied the way `taskChipState` below was — a second spelling of
+// the list is refused by `test/task-tags.test.js`.
+import { whatTag } from '../task-tags.js';
+import { tagChip } from '../task-tag-chip.js';
 
 marked.setOptions({ gfm: true, breaks: true });
 
@@ -123,9 +129,10 @@ export function mountTasks(host, repo) {
     });
 
     // Skip the repaint when nothing on screen would actually move — a poll fires every
-    // three seconds and most of them change nothing.
+    // three seconds and most of them change nothing. The tag is in here on its own: a
+    // retag leaves `updatedAt` alone on purpose, so nothing else in this line moves.
     const sig = rows
-      .map((t) => [t.id, t.state, t.live?.status, t.live?.stuck, t.pr, t.deploy?.label, t.updatedAt].join(':'))
+      .map((t) => [t.id, t.state, t.live?.status, t.live?.stuck, t.pr, t.deploy?.label, t.updatedAt, whatTag(t.tags)].join(':'))
       .join('~');
     if (sig === view.sig) return;
     view.sig = sig;
@@ -153,6 +160,19 @@ export function mountTasks(host, repo) {
     id.className = 'm-tk-id';
     id.textContent = t.id;
     line.appendChild(id);
+
+    // What the task is, as the desktop draws it — a filled pill in the tag's own colour,
+    // never a chip. Read-only: no control on this screen changes a task (see the header),
+    // and an untagged row draws nothing rather than an offer it cannot keep.
+    const pill = tagChip(t.tags);
+    if (pill.tag) {
+      const tag = document.createElement('span');
+      tag.className = 'm-tk-tag';
+      tag.textContent = pill.text;
+      tag.title = pill.title;
+      tag.style.setProperty('--tag', pill.colour);
+      line.appendChild(tag);
+    }
 
     // A planner never opens a PR and its branch stays empty — bare, muted chip, a fact
     // about the task rather than a state competing with the one beside it.
@@ -286,6 +306,7 @@ function openBrief(t, chipState) {
     meta.append(dt, dd);
   };
   fact('state', chipState);
+  fact('tag', whatTag(t.tags));
   fact('kind', t.kind);
   fact('model', t.model);
   fact('why', t.modelReason);
