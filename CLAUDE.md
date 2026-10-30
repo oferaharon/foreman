@@ -1279,12 +1279,14 @@ every rule in `sleepVerdict`, in words, and every doubt a no. **Sleepers ride be
 roster, never in it**: an `asleep` sibling on the frame, the `rooms`/`bots` precedent, so the
 inbox, notifications, the queue, pins, snapshot, relaunch, `/exit` and read state are never
 handed one. The rail draws each greyed in place; clicking opens the conversation read-only
-with **Wake**, which is `startEntries` — the restore half of `relaunchBench` — on `--resume`
+with **Wake**, which is `wakeSleeper` → `startEntries` — the restore half of `relaunchBench` — on `--resume`
 of the same conversation, under the same name and role, on the **launch model**, re-pinned
 where it was. **Messages wait**: `sendOrHold` holds anything sent to a sleeping name
 (nudges, triggers, merge presses, room copies, still `handed`) in the hibernation store and
 moves it into the new pane's queue on wake, so delivery is still `PaneLock` →
-`assertNotBlocked`. **Keep awake** is per session, by tmux name; **forget** (the bin on a
+`assertNotBlocked`. A group room's pane greys its sleeping members and offers **wake N asleep**
+(`POST /api/rooms/:id/wake-asleep`): the same `wakeSleeper`, serially, holding `relaunching`
+across the whole run, a human press only. **Keep awake** is per session, by tmux name; **forget** (the bin on a
 sleeping row) drops the record and its held messages and leaves the transcript on disk.
 Everything is keyed by name in `STATE_DIR/hibernate.json`, which carries unknown keys through;
 launches reserve sleepers' names, a save includes them, a restore skips them. A panel restart
