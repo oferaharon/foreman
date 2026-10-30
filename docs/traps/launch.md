@@ -464,7 +464,7 @@ is not fixed: the planner's capture read `See ya!`, the desktop bench's read `Go
 the transcripts on this Mac hold four wordings in near-equal numbers — `Bye!`, `Catch you
 later!`, `See ya!`, `Goodbye!` — so it is picked at random, and nothing may key on it (nothing
 does). That record is also what makes a sleeper's transcript its folder's freshest, which is
-the open binding gap in
+why `binding.js` claims it — see
 [binding#a-sleepers-transcript-is-its-folders-freshest](binding.md#a-sleepers-transcript-is-its-folders-freshest).
 
 **`--resume`.** Same file, same id (the `--resume` trap above). About a second after launch it

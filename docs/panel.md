@@ -533,9 +533,10 @@ Wake. There is no keep-awake toggle and no forget on the phone.
 after a restart every session starts its idle time again from the restart. A woken session's
 clock also starts at the wake, not at its last message.
 
-**A known gap, open:** after a panel restart, a session with no hook receipt running in the
-same folder as a sleeper can be mistaken for the sleeper's conversation, because the sleeper's
-`/exit` makes its transcript the newest file there. A fix is pending; the trap is
+**A sleeper's conversation is claimed.** The sleeper's `/exit` makes its transcript the newest
+file in its folder, and after a panel restart a session with no hook receipt running beside it
+used to be mistaken for it. While a sleep record stands, nothing but the woken session itself
+can be bound to that transcript; the trap is
 [binding#a-sleepers-transcript-is-its-folders-freshest](traps/binding.md#a-sleepers-transcript-is-its-folders-freshest).
 
 ### Briefs

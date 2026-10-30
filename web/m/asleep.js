@@ -21,6 +21,8 @@
  * for the same reason).
  */
 
+import { wokenSession } from '../asleep.js';
+
 /**
  * The sleepers that are really asleep — every record whose name is not live right now.
  *
@@ -80,17 +82,21 @@ export function sleeperFor(asleep, sessions, sessionId) {
 /**
  * The live row a woken sleeper came back as, or null while it is still on its way.
  *
- * By **tmux session name** first: names are the contract a wake is held to (it refuses to
- * mint any other) and pane ids reset. The session id is the fallback, for the one window in
- * which the roster has the row and not yet its name.
+ * The desktop's own rule (`wokenSession`, `web/asleep.js`), imported rather than restated —
+ * the phone used to fall back to the session id alone while the record still stood, and a
+ * receipt-less sibling inferred onto the sleeper's transcript after a panel restart then
+ * carried that id: an open `#/asleep/<name>` followed it onto the sibling's live route,
+ * showing the sleeper's conversation over the sibling's composer (MEASURED, binding.md). So
+ * while the record stands, a row is followed only under the sleeper's own **name**; once it
+ * has gone, by id first and name second.
+ *
+ * @param {Array<any>|null} sessions the roster
+ * @param {{name?: string, sessionId?: string}} view the sleeper being shown
+ * @param {Array<any>|null} asleep the frame's raw `asleep` — **not** `sleepersIn`, which
+ *   drops a record whose name is live and would make the stranger look like the wake
  */
-export function wokenRow(sessions, { name, sessionId } = {}) {
-  const rows = sessions || [];
-  return (
-    (name && rows.find((s) => s?.tmuxSession === name)) ||
-    (sessionId && rows.find((s) => s?.id === sessionId)) ||
-    null
-  );
+export function wokenRow(sessions, { name, sessionId } = {}, asleep = null) {
+  return wokenSession({ name, sessionId }, sessions, asleep);
 }
 
 /**

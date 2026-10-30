@@ -2397,7 +2397,7 @@ function enterAsleep() {
  */
 function onAsleepRoster() {
   const record = sleeperNamed(state.asleep, state.sessions, route.name);
-  const live = wokenRow(state.sessions, { name: route.name, sessionId: record?.sessionId ?? route.sessionId });
+  const live = wokenRow(state.sessions, { name: route.name, sessionId: record?.sessionId ?? route.sessionId }, state.asleep);
   if (live) {
     const hash = liveRouteFor(live);
     if (hash) {
@@ -2424,7 +2424,7 @@ function onAsleepRoster() {
     goneTimer = null;
     if (route.kind !== 'asleep') return;
     if (sleeperNamed(state.asleep, state.sessions, route.name)) return;
-    if (wokenRow(state.sessions, { name: route.name, sessionId: route.sessionId })) return onAsleepRoster();
+    if (wokenRow(state.sessions, { name: route.name, sessionId: route.sessionId }, state.asleep)) return onAsleepRoster();
     showGone('not-asleep');
   }, leadEverSeen ? 4000 : 0);
 }

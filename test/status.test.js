@@ -252,3 +252,14 @@ test('a SessionEnd from a foreign server does not unbind one of ours', async () 
   assert.equal(st.paneBinding('%0'), 's1', 'the refusal is of the whole receipt, every event');
   assert.equal(st.stateOf('s1'), 'working');
 });
+
+test('a pane receipt carries the time it was written, for the sleeper claim in binding.js', () => {
+  const st = engine();
+  assert.equal(st.paneReceipt('%7'), null);
+  const before = Date.now();
+  st.ingest('SessionStart', HOOK('s1'), '%7');
+  const r = st.paneReceipt('%7');
+  assert.equal(r.sessionId, 's1');
+  assert.ok(r.ts >= before && r.ts <= Date.now());
+  assert.equal(st.paneBinding('%7'), 's1', 'paneBinding is unchanged');
+});

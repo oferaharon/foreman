@@ -344,3 +344,143 @@ test('a moved session counts as a candidate when saying why a pane is unbound', 
   assert.equal(unboundReason(p, [moved('s2', 'someone-else', 6, 'alpha-dev/backend')]), 'ambiguous');
   assert.equal(unboundReason(p, []), 'new');
 });
+
+/*
+ * A sleeper's transcript is claimed. MEASURED on the hibernation bench: a session slept, the
+ * panel restarted, and the live sibling in that folder — no hook receipt — was inferred onto
+ * the sleeper's file, because its `/exit` record made it the folder's freshest. These pin the
+ * exclusion: it adds a claim and changes none of the heuristics around it.
+ */
+const named = (paneId, tmuxSession, label, createdHour) => ({ ...pane(paneId, label, createdHour), tmuxSession });
+const sleeper = (over = {}) => ({
+  name: 'foreman-alpha-sleepy',
+  sessionId: 's-sleepy',
+  transcriptPath: '/projects/alpha/s-sleepy.jsonl',
+  sleptAt: T(6),
+  ...over,
+});
+const withPath = (m) => ({ ...m, path: `/projects/alpha/${m.sessionId}.jsonl` });
+
+test('sleeper: a lone receipt-less sibling is not handed the sleeper’s freshest file', () => {
+  const panes = [named('%0', 'foreman-alpha-live', null, 1)];
+  const metas = [meta('s-live', null, 3), meta('s-sleepy', 'alpha-sleepy', 6)];
+  // The bug, as it was: with no claim, rule 3 hands the lone pane the newest fresh file.
+  assert.equal(bindPanes({ panes, metas }).bound.has('s-sleepy'), true);
+  const { bound } = bindPanes({ panes, metas, sleeping: [sleeper()] });
+  assert.equal(bound.has('s-sleepy'), false);
+  assert.equal(bound.get('s-live').pane.paneId, '%0');
+});
+
+test('sleeper: a sibling whose only fresh file is the sleeper’s stays unbound, and reads as new', () => {
+  const p = named('%0', 'foreman-alpha-live', null, 5);
+  const metas = [meta('s-sleepy', 'alpha-sleepy', 6)];
+  const { bound, unbound } = bindPanes({ panes: [p], metas, sleeping: [sleeper()] });
+  assert.equal(bound.size, 0);
+  assert.equal(unbound[0].paneId, '%0');
+  assert.equal(unboundReason(p, metas, [sleeper()]), 'new');
+  assert.equal(unboundReason(p, metas), 'ambiguous', 'without the claim it was a candidate');
+});
+
+test('sleeper: the claim matches by path as well as by id', () => {
+  const panes = [named('%0', 'foreman-alpha-live', null, 1)];
+  const metas = [withPath(meta('s-live', null, 3)), withPath(meta('s-sleepy', null, 6))];
+  const { bound } = bindPanes({ panes, metas, sleeping: [sleeper({ sessionId: 'not-this-id' })] });
+  assert.equal(bound.has('s-sleepy'), false);
+  assert.equal(bound.has('s-live'), true);
+});
+
+test('sleeper: a label match does not take the sleeper’s file either', () => {
+  // A sibling that happens to carry the sleeper's title as its label.
+  const panes = [named('%0', 'foreman-alpha-other', 'alpha-sleepy', 1)];
+  const { bound } = bindPanes({ panes, metas: [meta('s-sleepy', 'alpha-sleepy', 6)], sleeping: [sleeper()] });
+  assert.equal(bound.size, 0);
+});
+
+test('sleeper: replay is no way round the claim', () => {
+  // A binding remembered from a poll made before the claim existed — or by a build without it.
+  const panes = [named('%0', 'foreman-alpha-live', null, 1)];
+  const metas = [meta('s-live', null, 3), meta('s-sleepy', 'alpha-sleepy', 6)];
+  const { bound } = bindPanes({
+    panes,
+    metas,
+    rememberedFor: () => ({ sessionId: 's-sleepy', confidence: 'inferred' }),
+    sleeping: [sleeper()],
+  });
+  assert.equal(bound.has('s-sleepy'), false);
+  assert.equal(bound.get('s-live').pane.paneId, '%0', 'and the pane falls through to its own file');
+});
+
+test('sleeper: a fresh hook receipt still overrules everything', () => {
+  // A receipt written after the sleep, by a pane that existed when it was written: the woken
+  // session's own, even if it came back under another name (`-2`).
+  const panes = [named('%3', 'foreman-alpha-sleepy-2', null, 7)];
+  const { bound } = bindPanes({
+    panes,
+    metas: [meta('s-sleepy', 'alpha-sleepy', 8)],
+    hookBindingFor: () => ({ sessionId: 's-sleepy', ts: T(8) }),
+    sleeping: [sleeper()],
+  });
+  assert.equal(bound.get('s-sleepy').confidence, 'hook');
+});
+
+test('sleeper: a receipt left over from before the sleep, or from before the pane, is refused', () => {
+  const metas = [meta('s-live', null, 3), meta('s-sleepy', 'alpha-sleepy', 6)];
+  // Written before the sleep: the sleeper's own pane said it, and that pane is gone — a pane
+  // id reused after a tmux restart would otherwise inherit it.
+  let r = bindPanes({
+    panes: [named('%0', 'foreman-alpha-live', null, 1)],
+    metas,
+    hookBindingFor: () => ({ sessionId: 's-sleepy', ts: T(5) }),
+    sleeping: [sleeper()],
+  });
+  assert.equal(r.bound.has('s-sleepy'), false);
+  assert.equal(r.bound.get('s-live').confidence, 'inferred');
+  // Written after the sleep but before this pane existed.
+  r = bindPanes({
+    panes: [named('%0', 'foreman-alpha-live', null, 7)],
+    metas: [meta('s-sleepy', 'alpha-sleepy', 8)],
+    hookBindingFor: () => ({ sessionId: 's-sleepy', ts: T(6) + 1 }),
+    sleeping: [sleeper()],
+  });
+  assert.equal(r.bound.size, 0);
+  // A bare id with no time on it is a doubt.
+  r = bindPanes({ panes: [named('%0', 'foreman-alpha-live', null, 1)], metas, hookBindingFor: () => 's-sleepy', sleeping: [sleeper()] });
+  assert.equal(r.bound.has('s-sleepy'), false);
+});
+
+test('sleeper: an ordinary receipt (no sleeper involved) still binds on a bare id, as before', () => {
+  const { bound } = bindPanes({
+    panes: [named('%0', 'foreman-alpha-live', null, 1)],
+    metas: [meta('s-live', null, 3)],
+    hookBindingFor: () => 's-live',
+    sleeping: [sleeper()],
+  });
+  assert.equal(bound.get('s-live').confidence, 'hook');
+});
+
+test('sleeper: the wake window — the pane wearing the sleeper’s name gets its own file before the record goes', () => {
+  // The woken pane exists, a live sibling is in the folder, the record has not been deleted yet,
+  // and no receipt has landed: the woken session must still end up on its own transcript.
+  const panes = [named('%0', 'foreman-alpha-live', null, 1), named('%4', 'foreman-alpha-sleepy', 'alpha-sleepy', 7)];
+  const metas = [meta('s-live', null, 3), meta('s-sleepy', 'alpha-sleepy', 8)];
+  const remembered = new Map([['%0', { sessionId: 's-live', confidence: 'inferred' }]]);
+  const { bound } = bindPanes({ panes, metas, rememberedFor: (id) => remembered.get(id) || null, sleeping: [sleeper()] });
+  assert.equal(bound.get('s-sleepy').pane.paneId, '%4');
+  assert.equal(bound.get('s-live').pane.paneId, '%0');
+});
+
+test('sleeper: the wake window — the woken pane alone in its folder, before any receipt, binds by inference', () => {
+  const panes = [named('%4', 'foreman-alpha-sleepy', null, 7)];
+  const { bound } = bindPanes({ panes, metas: [meta('s-sleepy', null, 8)], sleeping: [sleeper()] });
+  assert.equal(bound.get('s-sleepy').pane.paneId, '%4');
+});
+
+test('sleeper: the claim is the record’s — gone with wake or forget, the ordinary rules apply again', () => {
+  const panes = [named('%0', 'foreman-alpha-live', null, 1)];
+  const metas = [meta('s-live', null, 3), meta('s-sleepy', 'alpha-sleepy', 6)];
+  assert.equal(bindPanes({ panes, metas, sleeping: [sleeper()] }).bound.has('s-sleepy'), false);
+  // Forgotten: the file is an exited session's like any other, and the heuristics — not the
+  // claim — decide it. (Freshness still lets it through here; that is the old behaviour, and
+  // a forgotten sleeper is no longer the panel's to protect.)
+  assert.equal(bindPanes({ panes, metas, sleeping: [] }).bound.has('s-sleepy'), true);
+});
