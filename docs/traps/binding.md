@@ -167,10 +167,9 @@ hop headings, and out of the group you filed it under, mid-conversation.
 ## A sleeper's transcript is its folder's freshest
 
 **A sleeper's `/exit` record makes its transcript the newest file in its folder, so after a
-panel restart a sibling pane with no hook receipt can be bound to it by inference — OPEN,
-found on the hibernation desktop bench; the fix is pending as its own task.** Written down
-here because hibernation ships off by default and this is the thing to know before turning
-it on.
+panel restart a sibling pane with no hook receipt was bound to it by inference — FIXED, by
+claiming every sleeper's transcript in `binding.js`, MEASURED before and after on Claude Code
+v2.1.296.** Found on the hibernation desktop bench; fixed as its own task.
 
 The shape. A session sleeps; another pane is still running in the same folder. The `/exit`
 record is timestamped (see
@@ -179,19 +178,55 @@ so the sleeper's file was written *after* the sibling pane was created — it pa
 freshness rule — and nothing live claims it, because a sleeper is not a roster row. Within one
 panel run the sibling keeps its own binding (`rememberedFor`). After a restart there is
 nothing to remember: the sibling is now the folder's only pane, and rule 3 hands a lone pane
-the newest fresh transcript, which is the sleeper's. A hook receipt overrules all of it and
-survives the restart, so a sibling that has posted one is safe; a pane-only row is not.
+the newest fresh transcript, which was the sleeper's. The sibling's row then carried the
+sleeper's session id and history — one conversation drawn over another session's terminal,
+with that terminal's composer under it.
 
-What it costs: the sibling's row carries the sleeper's session id and history, so its pane
-shows one conversation over another session's terminal, and its composer types into the
-sibling. What already guards against part of it: the desktop's asleep pane goes back to a
-live row by session id only when that row wears the sleeper's own name (`wokenSession`,
-`web/asleep.js`), so an open asleep pane does not follow the id onto the stranger. **The
-phone has no such guard:** `wokenRow` (`web/m/asleep.js`) tries the name first and then falls
-back to the session id while the record still stands, so an open `#/asleep/<name>` screen
-would follow the id onto the sibling's live route.
+**Before**, on main at `80246b6`: a scratch panel (no hooks, by design), two Haiku sessions in
+the sandbox's `alpha` — `alpha-live` with no `--name`, `alpha-sleepy` bound by label — the
+sleepy one recorded with `sleepRecord` and `/exit`ed, the panel restarted. The roster read
+`foreman-alpha-live 8f202d3b… inferred %0`, the sleeper's id on the live pane. The phone's
+`#/asleep/foreman-alpha-sleepy`, opened in a headless Chrome at 390 px, redirected within two
+seconds to `#/session/8f202d3b…`, headed `alpha-live`, showing the sleeper's `sleepy` / `/exit`
+turns above `alpha-live`'s composer.
 
-The proposed fix is in `binding.js`, not in either front end: treat every sleep record's
-`transcriptPath` as claimed, so no inference can hand it to anyone else. Until it lands,
-"a panel restart with sleepers on the rail and a receipt-less sibling in their folder" is the
-case to watch.
+**The fix** (`sleeperClaim`, `bindPanes`'s `sleeping`, fed by `registry.sleepers` from the
+hibernation store on every poll):
+
+- **Every sleep record claims its transcript**, by session id and by path, from rule 1b
+  (replay — a binding remembered from before the claim does not get to keep it), rule 2
+  (label) and rule 3 (inference), and from `unboundReason`, so a sibling whose only fresh file
+  is the sleeper's reads `new`, not `ambiguous`. Nothing else about the heuristics changed.
+- **Except for the pane wearing the sleeper's own tmux name.** That is the wake, in the beat
+  between the new pane appearing and `hibernation.remove` — it must still bind its own
+  conversation. A stranger cannot wear the name: launches reserve it, the wake refuses while
+  anything holds it, and one that took it after the `/exit` would fail freshness anyway.
+- **A hook receipt still overrules** — but for a claimed transcript only when the receipt was
+  written after `sleptAt` **and** after the pane was created. Receipts persist per pane id in
+  `PANES_DIR` and survive restarts, and pane ids restart at `%0` with the tmux server, so the
+  sleeper's own last receipt could otherwise ride a reused id onto a stranger. A woken session's
+  `SessionStart` is both, so it binds even if it came back under another name. A receipt with
+  no time on it is a doubt, and a doubt is a no. (`status.paneReceipt` carries the time.)
+- **The claim is the record's.** Wake and forget delete the record, and the next poll reads
+  the store afresh, so the claim goes with it.
+
+**After**, same bench, same state rebuilt (the sleeper re-slept so its file was again the
+folder's newest, and main's code run against it first to confirm it still mis-bound): the
+roster read `foreman-alpha-live bfe639be… inferred %0` — its own conversation — with the
+sleeper still on the `asleep` list; the phone stayed on `#/asleep/<name>`, drawn as the
+greyed read-only conversation with **Wake**; and Wake brought the sleeper back as a pane
+bound to `8f202d3b…`, its own, with the sibling untouched.
+
+**The phone half.** `wokenRow` (`web/m/asleep.js`) used to try the name and then fall back
+to the session id while the record still stood, which is how the phone followed the id onto
+the sibling. It now *is* the desktop's `wokenSession` (`web/asleep.js`), imported: while a
+record stands, a live row is followed only under the sleeper's own name; once it has gone, by
+id first and name second. It must be handed the frame's **raw** `asleep`, never
+`sleepersIn`'s, which drops a record whose name is live and would make a squatter on the name
+look like the wake.
+
+**What the claim does not cover**, seen on the same bench and older than hibernation: a
+session that simply exited (no sleep record) still leaves a file the lone-pane rule can hand
+a receipt-less sibling, if that file is newer than the sibling's own. A sleeper is claimed
+because the panel still owns it; an exited stranger is the ownership guard's job, and that
+guard only fires on a titled file.

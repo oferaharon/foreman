@@ -261,9 +261,10 @@ transcript really lives in, and the hook receipts that overrule every heuristic.
   [binding#a-transcripts-cwd-moves](docs/traps/binding.md#a-transcripts-cwd-moves)
 - `server/binding.js` · `web/asleep.js` (`wokenSession`) · `web/m/asleep.js` (`wokenRow`) —
   **A sleeper's `/exit` record makes its transcript the newest file in its folder, so after a
-  panel restart a sibling pane with no hook receipt can be bound to it by inference — OPEN,
-  fix pending as its own task.** The desktop's asleep pane is guarded against following the
-  id onto the stranger; the phone's is not.
+  panel restart a sibling pane with no hook receipt was bound to it by inference — FIXED,
+  MEASURED before and after.** Every sleep record claims its transcript from replay, label and
+  inference, except for the pane wearing the sleeper's own name (the wake); a receipt binds it
+  only if written after the sleep and the pane. The phone's `wokenRow` is the desktop's guard.
   [binding#a-sleepers-transcript-is-its-folders-freshest](docs/traps/binding.md#a-sleepers-transcript-is-its-folders-freshest)
 
 ### Pane parsers
@@ -1285,8 +1286,8 @@ moves it into the new pane's queue on wake, so delivery is still `PaneLock` →
 sleeping row) drops the record and its held messages and leaves the transcript on disk.
 Everything is keyed by name in `STATE_DIR/hibernate.json`, which carries unknown keys through;
 launches reserve sleepers' names, a save includes them, a restore skips them. A panel restart
-resets every idle clock, by design. **One known gap is open**: after a restart a receipt-less
-sibling can be bound to a sleeper's transcript —
+resets every idle clock, by design. A sleeper's transcript is **claimed** while its record
+stands, so no receipt-less sibling can be inferred onto it after a restart —
 [binding#a-sleepers-transcript-is-its-folders-freshest](docs/traps/binding.md#a-sleepers-transcript-is-its-folders-freshest).
 
 **The room reads as three tiers of loudness, not three shapes any more.** Tier 1
