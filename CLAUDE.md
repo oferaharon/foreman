@@ -12,8 +12,11 @@ terminal, a shell function, another launcher — and the panel finds them; it ca
 one itself, from `+ new`, from a row's `⧉`, by restoring a snapshot, or when a team lead
 dispatches a worker (`server/launch.js`). It still starts nothing on its own: a dispatch
 happens because a lead asked you first. It *ends* a session
-in exactly two places — the bin on a rail row, and a task closed `done` once its PR is
-verified merged. Everything else it does is observe and inject. See `docs/panel.md` for how each
+in exactly three places — the bin on a rail row, a task closed `done` once its PR is
+verified merged, and **automatic hibernation**, which is **off by default** and, once a
+human turns it on, `/exit`s an eligible idle session through the guarded path from one
+function (`Hibernator#hibernate`, `server/hibernate-loop.js`) and keeps its row to be woken.
+Everything else it does is observe and inject. See `docs/panel.md` for how each
 feature works and `docs/team.md` for the team; this file is the things that will bite you.
 
 **Five screens, five parsers, and they must keep refusing each other's boxes.**
@@ -64,7 +67,8 @@ There is no API. Everything is assembled from three places:
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
 `effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
-`rooms-line.js`, `session-launch.js`, `briefs.js`, `bots.js`, `bot-subs.js`, `context-window.js` and
+`rooms-line.js`, `session-launch.js`, `briefs.js`, `bots.js`, `bot-subs.js`, `context-window.js`,
+`hibernate.js`, `hibernate-loop.js` and
 `parsePane` in `tmux.js`; on the team side `tasks.js`,
 `team.js`, `room.js`, `worktree.js`, `setup-detect.js`, `forge.js`, `base-branch.js`, `watch.js`, `conflicts.js`,
 `gc.js`, `launch.js` and `project-mcp.js`. Run them before touching any of them, and note that `test/fixtures/` holds
@@ -255,6 +259,12 @@ transcript really lives in, and the hook receipts that overrule every heuristic.
   `~/.claude/projects/<cwd with each slash as a dash>`, which is named at launch and never
   rewritten.
   [binding#a-transcripts-cwd-moves](docs/traps/binding.md#a-transcripts-cwd-moves)
+- `server/binding.js` · `web/asleep.js` (`wokenSession`) · `web/m/asleep.js` (`wokenRow`) —
+  **A sleeper's `/exit` record makes its transcript the newest file in its folder, so after a
+  panel restart a sibling pane with no hook receipt can be bound to it by inference — OPEN,
+  fix pending as its own task.** The desktop's asleep pane is guarded against following the
+  id onto the stranger; the phone's is not.
+  [binding#a-sleepers-transcript-is-its-folders-freshest](docs/traps/binding.md#a-sleepers-transcript-is-its-folders-freshest)
 
 ### Pane parsers
 
@@ -432,8 +442,9 @@ subscription that carries them to a browser. Evidence:
 
 ### Launch and relaunch
 
-Starting a session, duplicating one, ending one, putting a whole bench back, the prefix
-every one of those names is built from, and the folder-trust gate a fresh launch lands on.
+Starting a session, duplicating one, ending one, putting one to sleep and waking it, putting a
+whole bench back, the prefix every one of those names is built from, and the folder-trust
+gate a fresh launch lands on.
 Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
 
 - `web/app.js` (`sessionRow`, `duplicating`) · `server/launch.js` (`slugFor`) — **A duplicate
@@ -502,6 +513,28 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   witness follows the pane process, not the path; the lock is matched by pid, never by
   session id; and `/exit` with a cron live raises a box rather than exiting.
   [launch#a-loop-outlives-clear-and-only-the-transcript-and-one-lock-file-know-it-exists](docs/traps/launch.md#a-loop-outlives-clear-and-only-the-transcript-and-one-lock-file-know-it-exists)
+- `server/hibernate-loop.js` (`Hibernator#hibernate`) · `server/hibernate.js` (`sleepVerdict`)
+  — **Hibernation `/exit`s a session nobody pressed anything to close, so it is off by
+  default, it has one caller of `/exit`, and that caller re-reads everything before it
+  types.** Record flushed before the `/exit`, a box after it Escaped and never answered, at
+  most one sleep a pass, and every doubt a "no".
+  [launch#hibernation-is-the-third-place-the-panel-ends-a-session](docs/traps/launch.md#hibernation-is-the-third-place-the-panel-ends-a-session)
+- `server/hibernate.js` (`idleSince`, `IdleClock`) — **`/exit` writes a timestamped record and
+  `--resume` writes only an untimestamped one, so a woken session's transcript says it has
+  been idle since it went to sleep — MEASURED on v2.1.296.** Idle is the latest of four times,
+  wake and pane creation among them; a panel restart restarts every clock; and the farewell
+  in the `/exit` record is one of four, at random.
+  [launch#exit-and---resume-leave-different-marks-so-the-idle-clock-has-four-inputs](docs/traps/launch.md#exit-and---resume-leave-different-marks-so-the-idle-clock-has-four-inputs)
+- `server/launch.js` (`createSession`'s `reserved`) · `server/snapshot.js` (`restoreSessions`,
+  `drift`) · `server/index.js` (`launchLead`, the wake) — **A sleeper's name is free as far as
+  tmux is concerned, so every launch passes the sleepers' names as `reserved` — except a
+  wake, and `liveSessionNames()` itself must never learn about them.**
+  [launch#a-sleeping-name-is-a-free-name-to-tmux](docs/traps/launch.md#a-sleeping-name-is-a-free-name-to-tmux)
+- `web/hibernate-choices.js` (`HIBERNATE_CHOICES`) · `server/settings-file.js` — **The
+  hibernation choices are spelled once, and both the settings picker and the validator import
+  them.**
+  [launch#the-hibernation-choices-are-spelled-once](docs/traps/launch.md#the-hibernation-choices-are-spelled-once)
+  · [one-spelling](docs/traps/one-spelling.md)
 
 ### Sending and claiming
 
@@ -611,6 +644,11 @@ fact; the front end's own cascade traps are here too. Evidence:
   is measured after hoisting.** A group with nothing running anywhere has no heading, so
   there is nothing to rename or delete it from until one of its folders wakes up.
   [rail-and-groups#an-empty-heading-isnt-drawn](docs/traps/rail-and-groups.md#an-empty-heading-isnt-drawn)
+- `web/app.js` (`renderRail`) · `web/asleep.js` (`mergeByActivity`, `placePinned`) — **A folder
+  whose only sessions are asleep still draws its heading, because sleepers are merged into the
+  rail's rows before the folder map is built.** Never into the inbox, never unread, and the
+  collapsed group's dot reads the rows with sleepers filtered out.
+  [rail-and-groups#a-folder-of-sleepers-keeps-its-heading](docs/traps/rail-and-groups.md#a-folder-of-sleepers-keeps-its-heading)
 - `web/rail-fold.js` · `web/app.js` (`renderRail`) — **A collapsed group hides one thing for
   ordinary rows and two for workers.** `working` is neither blocked nor unread, so it is the
   one state the inbox never hoists out — and a worker row no longer hoists until `stuck`
@@ -665,7 +703,7 @@ fact; the front end's own cascade traps are here too. Evidence:
   way `.files-grid`'s did.** Scoped rather than a blanket `[hidden]` override, which would
   have to be proven safe against every other `hidden` toggle in the stylesheet.
   [rail-and-groups#the-menu-items-display-rule](docs/traps/rail-and-groups.md#the-menu-items-display-rule)
-- `web/styles.css` (`.shelf-label.collapsed`, `.shelf-summary`) — **Turning `flex-wrap` on
+- `web/styles.css` (`.shelf-label.collapsed`, `.shelf-summary`, `.rail-stat`) — **Turning `flex-wrap` on
   hands the container's own `gap` to the row gap as well, silently.** `.shelf-summary`'s
   `row-gap: 0` sits beside the wrap for exactly that reason.
   [rail-and-groups#turning-flex-wrap-on](docs/traps/rail-and-groups.md#turning-flex-wrap-on)
@@ -1115,8 +1153,8 @@ would cost an ordinary session. Evidence:
 ### One spelling
 
 The one lesson here with no home of its own, because no single file owns it: it was learned
-eight times, in eight subsystems, and each story stays where it was learned. This file states
-the shared conclusion and links all eight. Evidence:
+eight times, in eight subsystems, and applied before the fact a ninth; each story stays where
+it was learned. This file states the shared conclusion and links all nine. Evidence:
 [`docs/traps/one-spelling.md`](docs/traps/one-spelling.md).
 
 - `server/launch.js` (`sessionName`, `slugFor`, `isLeadName`, `uniqueSessionName`) ·
@@ -1125,7 +1163,8 @@ the shared conclusion and links all eight. Evidence:
   `server/outputs.js` (`outputBlocks`) · `server/rooms-line.js` (`resolveMember`) with
   `web/rooms-pane.js` (`memberRow`) · `mcp/foreman.js` (`room_*` vs `group_*`) ·
   `web/prefs.js` · `web/group-hue.js` (`GROUP_COLOUR_COUNT`) with `web/tokens.css`
-  (`--group-N`) · `server/room-header.js` — **Two spellings of one contract agree the day
+  (`--group-N`) · `server/room-header.js` · `web/hibernate-choices.js` (`HIBERNATE_CHOICES`)
+  — **Two spellings of one contract agree the day
   they are written and diverge silently afterwards.** One spelling, imported, wherever an
   import is possible; a test where it genuinely is not; and a *sibling* name one letter
   apart refused outright, because nothing can hold that together.
@@ -1146,7 +1185,8 @@ didn't mean, and never demand attention for something you can't act on.
 
 **Only sessions with a live pane make the roster.** There is no finished-session list and no
 toggle for one — a transcript whose terminal has closed used to arrive in the inbox with an
-unread badge nobody could clear. Reading one back is `claude --resume`'s job.
+unread badge nobody could clear. Reading one back is `claude --resume`'s job. A hibernated
+session is not an exception: it rides beside the roster, never in it (below).
 
 **Split view** puts two sessions side by side, which is why everything per-session lives
 inside the `createPane` factory rather than in module scope.
@@ -1222,6 +1262,32 @@ tested) builds the entry through `relaunchEntries` and makes the refusals — a 
 deliberately does **not** carry relaunch-all's live-worker refusal: that exists because
 relaunch-all touches everything, and restarting a lead mid-team is the case this is for.
 `heldBy` is now the one spelling of "holding something" for both relaunches and `/exit`.
+
+**Hibernation** (`server/hibernate.js` decides, `server/hibernate-loop.js` acts,
+`server/index.js` wires; `web/asleep.js` and `web/m/asleep.js` draw) closes a session that
+has sat idle past `hibernateAfter` — **off by default**, one setting for the machine
+(`off`/`30m`/`1h`/`4h`/`12h`, spelled once in `web/hibernate-choices.js`), writable like
+`launchModel` and not an exposure key. By the maintainer's rulings of 2026-10-29 it is
+automatic only: no route or button puts a named session to sleep, and nothing ever wakes
+one by itself. It never sleeps a worker, a lead with a worker running, or anything busy,
+asking, holding a box, queued, running background work or a `/loop`, holding an unread
+reply, with something typed in its terminal, open in a browser, or set to keep awake —
+every rule in `sleepVerdict`, in words, and every doubt a no. **Sleepers ride beside the
+roster, never in it**: an `asleep` sibling on the frame, the `rooms`/`bots` precedent, so the
+inbox, notifications, the queue, pins, snapshot, relaunch, `/exit` and read state are never
+handed one. The rail draws each greyed in place; clicking opens the conversation read-only
+with **Wake**, which is `startEntries` — the restore half of `relaunchBench` — on `--resume`
+of the same conversation, under the same name and role, on the **launch model**, re-pinned
+where it was. **Messages wait**: `sendOrHold` holds anything sent to a sleeping name
+(nudges, triggers, merge presses, room copies, still `handed`) in the hibernation store and
+moves it into the new pane's queue on wake, so delivery is still `PaneLock` →
+`assertNotBlocked`. **Keep awake** is per session, by tmux name; **forget** (the bin on a
+sleeping row) drops the record and its held messages and leaves the transcript on disk.
+Everything is keyed by name in `STATE_DIR/hibernate.json`, which carries unknown keys through;
+launches reserve sleepers' names, a save includes them, a restore skips them. A panel restart
+resets every idle clock, by design. **One known gap is open**: after a restart a receipt-less
+sibling can be bound to a sleeper's transcript —
+[binding#a-sleepers-transcript-is-its-folders-freshest](docs/traps/binding.md#a-sleepers-transcript-is-its-folders-freshest).
 
 **The room reads as three tiers of loudness, not three shapes any more.** Tier 1
 (`system`, `conflict`) is a git-log row: a 2px gutter carries the colour a frame used to

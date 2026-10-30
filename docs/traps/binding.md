@@ -163,3 +163,35 @@ as a dash>`, which is named at launch and never rewritten — `sameWorkspace` in
 transcript that wandered *into* this pane's directory used to match on `cwd` and bind
 wrongly. The rail groups by the pane's launch folder for the same reason — a row must not
 hop headings, and out of the group you filed it under, mid-conversation.
+
+## A sleeper's transcript is its folder's freshest
+
+**A sleeper's `/exit` record makes its transcript the newest file in its folder, so after a
+panel restart a sibling pane with no hook receipt can be bound to it by inference — OPEN,
+found on the hibernation desktop bench; the fix is pending as its own task.** Written down
+here because hibernation ships off by default and this is the thing to know before turning
+it on.
+
+The shape. A session sleeps; another pane is still running in the same folder. The `/exit`
+record is timestamped (see
+[launch#exit-and---resume-leave-different-marks-so-the-idle-clock-has-four-inputs](launch.md#exit-and---resume-leave-different-marks-so-the-idle-clock-has-four-inputs)),
+so the sleeper's file was written *after* the sibling pane was created — it passes the
+freshness rule — and nothing live claims it, because a sleeper is not a roster row. Within one
+panel run the sibling keeps its own binding (`rememberedFor`). After a restart there is
+nothing to remember: the sibling is now the folder's only pane, and rule 3 hands a lone pane
+the newest fresh transcript, which is the sleeper's. A hook receipt overrules all of it and
+survives the restart, so a sibling that has posted one is safe; a pane-only row is not.
+
+What it costs: the sibling's row carries the sleeper's session id and history, so its pane
+shows one conversation over another session's terminal, and its composer types into the
+sibling. What already guards against part of it: the desktop's asleep pane goes back to a
+live row by session id only when that row wears the sleeper's own name (`wokenSession`,
+`web/asleep.js`), so an open asleep pane does not follow the id onto the stranger. **The
+phone has no such guard:** `wokenRow` (`web/m/asleep.js`) tries the name first and then falls
+back to the session id while the record still stands, so an open `#/asleep/<name>` screen
+would follow the id onto the sibling's live route.
+
+The proposed fix is in `binding.js`, not in either front end: treat every sleep record's
+`transcriptPath` as claimed, so no inference can hand it to anyone else. Until it lands,
+"a panel restart with sleepers on the rail and a receipt-less sibling in their folder" is the
+case to watch.

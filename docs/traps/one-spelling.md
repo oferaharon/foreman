@@ -2,11 +2,11 @@
 
 The evidence behind the **one spelling** line of [`CLAUDE.md`](../../CLAUDE.md)'s Traps
 index. This file is the exception in this directory: it holds no story of its own. Every
-one of the eight below was learned somewhere else and is written up in its own subsystem
+one of the instances below was learned somewhere else and is written up in its own subsystem
 file, where the reader who is editing that code will find it. What is here is the thing
 they have in common, said once — because it is the most-repeated lesson in `CLAUDE.md` and
 no single file owns it, which is how it came to be paid for eight times under eight
-different names.
+different names. The ninth was the first applied before anything had diverged.
 
 ## The lesson
 
@@ -86,3 +86,12 @@ edit; read them all only if you are about to add a second reader of something.
   the alternative and is strictly weaker when an import is available." It is a leaf module
   precisely because the obvious import was a cycle.
   [transcript#a-room-delivery-leaves-the-same-record-a-typed-message-leaves](transcript.md#a-room-delivery-leaves-the-same-record-a-typed-message-leaves)
+
+- **Applied before the fact: a settings list the browser and the server both read.**
+  `web/hibernate-choices.js` (`HIBERNATE_CHOICES`, with `hibernateMs` and the picker's labels
+  beside it) is a leaf under `web/` that the settings box loads as it is and that
+  `server/settings-file.js` and `server/hibernate.js` import — so the picker can never offer a
+  choice the validator refuses, nor the validator accept one nobody can pick. The plan named
+  the second literal as the thing to refuse before a line was written, which makes it the one
+  instance here that was not paid for first.
+  [launch#the-hibernation-choices-are-spelled-once](launch.md#the-hibernation-choices-are-spelled-once)

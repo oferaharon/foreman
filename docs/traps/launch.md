@@ -1,9 +1,9 @@
 # Launch and relaunch
 
 The evidence behind the **Launch and relaunch** block of [`CLAUDE.md`](../../CLAUDE.md)'s
-Traps index — starting a session, duplicating one, ending one, putting a whole bench back,
-the prefix every one of those names is built from, and the folder-trust gate a fresh launch
-lands on. Each section below is one trap, opening with the bold sentence its index line
+Traps index — starting a session, duplicating one, ending one, putting one to sleep and
+waking it, putting a whole bench back, the prefix every one of those names is built from, and
+the folder-trust gate a fresh launch lands on. Each section below is one trap, opening with the bold sentence its index line
 quotes.
 
 ## A duplicate inherits bypass
@@ -120,7 +120,9 @@ pins both halves.
 pane's `adopt` hands itself to some other session — so a restart that asks "which pane is
 showing this?" when the answer lands finds none. The bin's box notes those panes at the
 press instead; its backdrop covers the rail for the whole restart, so nothing else can have
-moved them.
+moved them. Hibernation is a third way a session leaves the roster, and there the pane
+does *not* let go: `followIntoSleep` (`web/asleep.js`) keeps it on the sleeper, read-only,
+and `wokenSession` takes it back to the live row after a Wake.
 
 ## A relaunch into a folder whose trust was never recorded
 
@@ -401,5 +403,114 @@ put the session back on its composer with the cron intact. That box is a last li
 defence, not a witness: a sleep that reaches it has already typed `/exit`, and must Escape
 it rather than wait out the name.
 
-Not measured here, because it needs a wake: whether a scratch panel rebinds a woken row.
-That is the sleep loop's bench.
+**And what the screen shows: nothing.** After `/loop 30m …` the mode line still read
+`⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents` — no shell, monitor or cron segment, and
+`← 2 agents` is the navigation hint with nothing running behind it (the agent-panel trap's
+`← 1 agent` in another number). `parseBackground` is an allow-list of shells and monitors, so
+the roster's `background` reads all zeros for a session with a live loop. That is why the
+witness above exists at all, rather than being a second opinion.
+
+Not measured here, because it needed a wake: whether a scratch panel rebinds a woken row. The
+sleep loop's bench (item 2) answered it — the woken session rebound to its own transcript and
+went back under its pin — and the next two sections are what that bench and the planner's
+measured on the way.
+
+## Hibernation is the third place the panel ends a session
+
+**Hibernation `/exit`s a session nobody pressed anything to close, so it is off by default,
+it has one caller of `/exit`, and that caller re-reads everything before it types.** The
+other two places — the bin on a rail row, and a task closed `done` — are both a person's
+press. This one runs on a timer, so it was built narrow, and every piece of that is a rule
+somebody will be tempted to relax:
+
+- **Off unless set.** `hibernateAfter` absent, `off` or anything not in
+  `HIBERNATE_CHOICES` reads as off (`hibernateMs` answers `null`), never as the shortest
+  wait. With it off, every pass ends on its first line.
+- **No route puts a named session to sleep.** Automatic only, by the maintainer's ruling of
+  2026-10-29. `Hibernator#hibernate` (`server/hibernate-loop.js`) is the only `/exit` the
+  feature adds, reached from the once-a-minute pass alone, at most one session per pass,
+  longest idle first.
+- **The relaunch loop's order.** Roster refreshed, pane re-read, `sleepVerdict` asked again
+  with the terminal's input line read too (`ghost.js`'s `composerEmpty`, because `sendText`
+  presses `C-u` and would wipe something half-typed in a Terminal window); the sleep record
+  written **and flushed** before `/exit`, so a crash between the two leaves a greyed row
+  rather than a session that vanished; `/exit` through `sendText`, which re-reads a third time
+  and refuses a box; then a wait for the *name* to leave tmux.
+- **A box after `/exit` is Escaped, never answered.** The cron box measured above offers
+  `Exit and stop tasks` and `Move to background and exit` — both end or orphan somebody's
+  loop. The loop presses `Escape` (which was measured to put the session back on its composer
+  with the cron intact), deletes the record, leaves the session awake and logs a line. A name
+  that has not freed after 20 s ends the same way. The verdict refuses any session with a
+  cron, so this is the backstop and should never be seen.
+- **Doubt refuses.** `background: null` (a box over the mode line), an unreadable input line,
+  a transcript the cron scan cannot read, an unknown keep-awake: each is a "no", in words. A
+  wrong "asleep" kills somebody's loop or half-typed message; a wrong "awake" costs a few
+  hundred MB.
+- **Nothing else moves the bench meanwhile.** The pass is skipped while a relaunch, restore
+  or wake holds the bench, and the loop holds its own `sleeping` flag from the re-read until
+  the name frees — relaunch all, restart one, restore, wake and forget all answer 409 while
+  it is up.
+
+## `/exit` and `--resume` leave different marks, so the idle clock has four inputs
+
+**`/exit` writes a timestamped record and `--resume` writes only an untimestamped one, so a
+freshly woken session's transcript says it has been idle since the moment it went to sleep
+— MEASURED on v2.1.296, in the sandbox.** An idle clock read off the transcript alone puts a
+woken session straight back to sleep on the next pass.
+
+**`/exit`.** It leaves a `type: 'user'` record, `<local-command-stdout>…</local-command-stdout>`,
+**with** a `timestamp`, so it moves both `lastTs` and the file's mtime. The farewell inside it
+is not fixed: the planner's capture read `See ya!`, the desktop bench's read `Goodbye!`, and
+the transcripts on this Mac hold four wordings in near-equal numbers — `Bye!`, `Catch you
+later!`, `See ya!`, `Goodbye!` — so it is picked at random, and nothing may key on it (nothing
+does). That record is also what makes a sleeper's transcript its folder's freshest, which is
+the open binding gap in
+[binding#a-sleepers-transcript-is-its-folders-freshest](binding.md#a-sleepers-transcript-is-its-folders-freshest).
+
+**`--resume`.** Same file, same id (the `--resume` trap above). About a second after launch it
+appended **267 bytes**: one `bridge-session` record with **no `timestamp`**. That is enough to
+put the mtime after the new pane's creation, so the freshness rule passes and the woken pane
+binds its own transcript again — but `lastTs` does not move. The pane then shows the tail of
+the old conversation, the `/exit` and its farewell included, over an empty composer: idle, no
+box, the footer on the `--model` it was given. No trust gate in a folder already trusted; a
+folder never trusted would show one (the trap above).
+
+**So `idleSince` is the latest of four times, never the transcript's alone**
+(`server/hibernate.js`): the transcript's `lastActivity`; `lastBusy`, the last poll on which
+the row was anything but `idle` (`IdleClock`, in memory, keyed by name); the pane's
+`createdMs`; and `wokeAt`, set by a successful wake. The last two are the woken-session case;
+`lastBusy` catches a session that worked without writing. `lastBusy` starts every name at
+the panel's boot, so **a panel restart restarts every idle clock** — accepted on purpose (the
+plan's Q9): the cost is one more idle period, and the alternative is trusting a timestamp a
+resume does not move. `test/hibernate.test.js` pins the woken case by name.
+
+## A sleeping name is a free name to tmux
+
+**A sleeper's name is free as far as tmux is concerned, so every launch passes the sleepers'
+names as `reserved` — except a wake, and `liveSessionNames()` itself must never learn about
+them.** `uniqueSessionName` and `launchLead`'s one-lead check both read `liveSessionNames()`,
+so without the reservation a `+ new` in that folder mints the sleeper's name and the sleeper
+can never come back under it — ruling 5 says it wakes under the *same* name. Hence:
+`createSession` unions `reserved` into what it treats as taken, at every standalone launch
+site; `launchLead` refuses outright when the folder's lead is asleep (*"This project's lead is
+asleep — wake it from its row."*); `restoreSessions` skips a saved entry whose name is asleep
+(`ASLEEP_SKIP`, *"asleep — wake it from its row"*); a save includes sleepers
+(`sleeperEntries`), and `drift` counts them present, so a sleep does not light the dot.
+
+The opposite mistake is as bad and looks like a tidy-up: teach `liveSessionNames()` about
+sleepers and `relaunchBench`'s wait-for-exit never sees a name free, and a wake reserves its
+own name against itself. A wake passes an empty `reserved`, and refuses instead when a live
+session already holds the name — a stranger took it, and coming back as `-2` is exactly what
+the reservation exists to prevent.
+
+## The hibernation choices are spelled once
+
+**`HIBERNATE_CHOICES` is spelled once, in `web/hibernate-choices.js`, and both the settings
+picker and the validator import it.** A leaf with no imports under `web/`, so the browser
+loads it as it is (the `group-hue.js` precedent). `server/settings-file.js` imports it for
+`validateConfigPatch` and builds its refusal message (`HIBERNATE_RULE`) from it,
+`server/hibernate.js` re-exports it to the loop, and the settings box in `web/app.js` draws
+its rows from it. The picker's labels (`30 min`, `1 h`, …) sit in the same file for the same
+reason. A second literal anywhere is a picker offering a choice the server answers 400 to, or
+a choice the server would take that nobody can pick — the
+[one-spelling](one-spelling.md) family.
