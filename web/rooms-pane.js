@@ -131,9 +131,10 @@ export function memberRow(member, sessions = []) {
 /**
  * What became of one post, as one quiet line.
  *
- * Three groups because the entry records three states, and each is said in its own words
+ * Four groups because the entry records four states, and each is said in its own words
  * rather than as a tally: `typed` is a copy that reached a terminal, `queued` is one
- * waiting for a pane to be free, and `unreachable` is one that found no pane at all. The
+ * waiting for a pane to be free, `held` is one waiting for a sleeping member to be woken,
+ * and `unreachable` is one that found no pane at all. The
  * verb for the first is **handed** and never *delivered* — see the header — and the other
  * two are not dressed as successes.
  *
@@ -149,16 +150,20 @@ export function handedText(entry) {
     marks.filter((m) => m?.state === state).map((m) => memberName(m)).filter(Boolean);
   const typed = named('typed');
   const queued = named('queued');
-  // Anything that is not one of the two known states is a miss, including a mark this
+  // `held` is a member that is asleep: its copy waits for a wake, so it is neither a reach
+  // nor a miss, and is said as what it is.
+  const held = named('held');
+  // Anything that is not one of the known states is a miss, including a mark this
   // version has never heard of: an unknown word must not read as a success.
   const missed = marks
-    .filter((m) => m?.state !== 'typed' && m?.state !== 'queued')
+    .filter((m) => m?.state !== 'typed' && m?.state !== 'queued' && m?.state !== 'held')
     .map((m) => memberName(m))
     .filter(Boolean);
 
   const parts = [];
   if (typed.length) parts.push(`handed to ${typed.join(', ')}`);
   if (queued.length) parts.push(`${queued.join(', ')} queued`);
+  if (held.length) parts.push(`${held.join(', ')} asleep — held until woken`);
   if (missed.length) parts.push(`${missed.join(', ')} not reached`);
   return parts.join(' · ');
 }

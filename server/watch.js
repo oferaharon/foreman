@@ -21,7 +21,7 @@ export const NUDGE_MARK = '[room]';
  * name is per repo (`human-name.js`, off `git config user.name`), and its answer is
  * cached there — a room line composed on every tick must not shell out on every tick.
  */
-export function createTeamWatch({ registry, tasks, room, queue, readTeam, human = humanName }) {
+export function createTeamWatch({ registry, tasks, room, queue, readTeam, human = humanName, asleep = null }) {
   const lastNudge = new Map(); // repo -> ts
   const seen = new Map(); // task id -> { status, since, notified }
   const streaks = new Map(); // task id -> { text, count, flagged }
@@ -32,21 +32,29 @@ export function createTeamWatch({ registry, tasks, room, queue, readTeam, human 
    * spends its day telling the lead it is busy. One queued marker at a time, floor 60s
    * per team.
    */
+  /*
+   * A **sleeping** lead is held for rather than skipped: anything sent to a sleeper waits
+   * until the maintainer wakes it (`asleep` is the hibernation store, `hold` its one door),
+   * and on wake the held items move into the pane queue in order. The coalescing has to
+   * follow it there — the 60 s floor alone would let one sleeping lead collect a nudge a
+   * minute all night, so the held list is checked for the marker exactly as the queue is.
+   * One sleeping lead holds one nudge.
+   */
   function nudgeLead(repo, { now = Date.now() } = {}) {
     const lead = registry.list().find((s) => s.isLead && s.paneCwd === repo);
-    if (!lead?.paneId) return; // no lead running — the room still has the line for later
+    const sleeper = lead?.paneId ? null : asleep?.leadFor(repo) ?? null;
+    if (!lead?.paneId && !sleeper) return; // no lead running — the room still has the line for later
     if ((now - (lastNudge.get(repo) || 0)) < 60_000) return;
-    if (queue.list(lead.paneId).some((item) => item.text.startsWith(NUDGE_MARK))) return;
+    const waiting = sleeper ? asleep.held(sleeper.name) : queue.list(lead.paneId);
+    if (waiting.some((item) => item.text.startsWith(NUDGE_MARK))) return;
     const { cursor } = room.read(repo, { since: 0, limit: 1 });
+    const text = `${NUDGE_MARK} New team events (cursor ${cursor}). Use room_read and team_status, act on what you can, and surface to ${human(repo)} only what needs them.`;
     try {
-      queue.add(
-        lead.paneId,
-        `${NUDGE_MARK} New team events (cursor ${cursor}). Use room_read and team_status, act on what you can, and surface to ${human(repo)} only what needs them.`,
-        { now },
-      );
+      if (sleeper) asleep.hold(sleeper.name, text, { now });
+      else queue.add(lead.paneId, text, { now });
       lastNudge.set(repo, now);
     } catch {
-      /* queue full — the lead already has plenty to read */
+      /* queue or held list full — the lead already has plenty to read */
     }
   }
 

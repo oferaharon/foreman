@@ -449,8 +449,11 @@ test('an unknown id still 404s on every reader route, and a sleeper’s name is 
 });
 
 test('a sleeper learns nothing about the routes that type or end', async () => {
+  // The send box is the one that answers by name rather than 404 (item 3): its composer is
+  // Wake, so the refusal says so — and it still types nothing and holds nothing.
   const send = await api('POST', `/api/sessions/${IDS.zeta}/send`, { text: 'hi' });
-  assert.equal(send.status, 404);
+  assert.equal(send.status, 409);
+  assert.equal(send.body.asleep, true);
   const files = await api('GET', `/api/sessions/${IDS.zeta}/files`);
   assert.equal(files.status, 404);
 });

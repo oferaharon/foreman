@@ -518,6 +518,21 @@ test('held messages: the queue’s cap, and never for a name that is not asleep'
   s.stop();
 });
 
+test('leadFor finds the one sleeping lead for a folder, and nothing else', () => {
+  const s = storeAt(tmpDir());
+  assert.equal(s.leadFor(ALPHA), null, 'nobody asleep');
+  s.put(sleepRecord(row()));
+  assert.equal(s.leadFor(ALPHA), null, 'an ordinary sleeper is not a lead');
+  s.put({ ...sleepRecord(row({ tmuxSession: `${P}alpha-lead` })), lead: true });
+  assert.equal(s.leadFor(ALPHA).name, `${P}alpha-lead`);
+  assert.equal(s.leadFor(`${ALPHA}/`).name, `${P}alpha-lead`, 'the folder is compared resolved');
+  assert.equal(s.leadFor('alpha'), null, 'a relative folder is never an answer');
+  assert.equal(s.leadFor(path.join(path.dirname(ALPHA), 'beta')), null, 'another folder’s lead is not this one’s');
+  s.put({ ...sleepRecord(row({ tmuxSession: `${P}alpha-lead-2` })), lead: true });
+  assert.equal(s.leadFor(ALPHA), null, 'two are a choice, and a message is never sent on a guess');
+  s.stop();
+});
+
 test('forget drops the record and what was held, and says how many', () => {
   const s = storeAt(tmpDir());
   s.put(sleepRecord(row()));
