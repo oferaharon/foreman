@@ -182,7 +182,8 @@ test('an unknown key is refused rather than written — this is not a general wr
   assert.equal(out.status, 400);
   assert.match(out.error, /triggerToken/);
   // `launchModel` joined on 2026-10-08; it is not exposure (see `test/launch-model.test.js`).
-  assert.deepEqual(WRITABLE_KEYS, ['bindHost', 'allowedOrigins', 'launchModel']);
+  // `hibernateAfter` joined on 2026-10-29, and is not exposure either (`test/hibernate-loop.test.js`).
+  assert.deepEqual(WRITABLE_KEYS, ['bindHost', 'allowedOrigins', 'launchModel', 'hibernateAfter']);
 });
 
 test('a body that is not an object is refused', () => {

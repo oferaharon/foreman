@@ -97,6 +97,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { DEFAULT_LAUNCH_MODEL, WORKER_MODELS, isKnownModel } from './worker-models.js';
+import { DEFAULT_HIBERNATE, HIBERNATE_CHOICES, isHibernateChoice } from '../web/hibernate-choices.js';
 
 /** What the panel binds when nothing says otherwise. Loopback: a stranger who installs
  *  this does not get a LAN-exposed panel without having asked for one. */
@@ -257,6 +258,19 @@ export function resolveLaunchModel({ config = {}, file = 'config.json' } = {}) {
   return { model: raw, source: 'config.json', error: null };
 }
 
+/** The sentence a refused `hibernateAfter` comes back with. */
+export const HIBERNATE_RULE = `hibernateAfter must be one of ${HIBERNATE_CHOICES.join(', ')}.`;
+
+/**
+ * The hibernation setting as the loop reads it at every pass: a choice, or `off`. Absent or
+ * unknown reads as `off`, never as the shortest wait — the cost of a wrong "asleep" is
+ * somebody's work.
+ */
+export function resolveHibernateAfter({ config = {} } = {}) {
+  const raw = config?.hibernateAfter;
+  return isHibernateChoice(raw) ? raw : DEFAULT_HIBERNATE;
+}
+
 /** The `allowedOrigins` array, or an empty one. Anything that isn't an array of strings is
  *  dropped here rather than in `origin.js`, which already refuses what it cannot parse. */
 export function allowedOriginsFrom(config = {}) {
@@ -327,8 +341,10 @@ export const EXPOSURE_KEYS = ['bindHost', 'allowedOrigins'];
  *  `PATCH /api/team/config` takes: this must never become a general "write anything into
  *  config.json" channel. `sessionPrefix` is deliberately absent — see `PREFIX_REFUSAL`.
  *  `launchModel` is here and *not* in `EXPOSURE_KEYS`: it decides what a session starts
- *  on, never who can reach the panel. */
-export const WRITABLE_KEYS = ['bindHost', 'allowedOrigins', 'launchModel'];
+ *  on, never who can reach the panel. `hibernateAfter` is the same, by the hibernation
+ *  plan's rule: a LAN peer can already `/exit` any session with the bin, and this setting
+ *  hands it strictly less — idle, eligible sessions only, every one of which can be woken. */
+export const WRITABLE_KEYS = ['bindHost', 'allowedOrigins', 'launchModel', 'hibernateAfter'];
 
 /** The writable keys the running panel reads only once, at boot — a change to one of these
  *  is what a restart notice is for. `launchModel` is not among them: it is read at launch. */
@@ -507,6 +523,15 @@ export function validateConfigPatch(body, { normalizeOrigin } = {}) {
       return { ok: false, status: 400, error: `launchModel ${shown} is not a model this panel knows. ${LAUNCH_MODEL_RULE}` };
     }
     patch.launchModel = raw;
+  }
+
+  if ('hibernateAfter' in body) {
+    const raw = typeof body.hibernateAfter === 'string' ? body.hibernateAfter.trim() : body.hibernateAfter;
+    if (!isHibernateChoice(raw)) {
+      const shown = typeof raw === 'string' ? JSON.stringify(raw) : typeof raw;
+      return { ok: false, status: 400, error: `hibernateAfter ${shown} is not a choice. ${HIBERNATE_RULE}` };
+    }
+    patch.hibernateAfter = raw;
   }
 
   return { ok: true, patch };

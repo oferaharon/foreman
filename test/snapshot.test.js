@@ -13,6 +13,8 @@ import {
   relaunchEntries,
   relaunchOne,
   restoreSessions,
+  sleeperEntries,
+  ASLEEP_SKIP,
 } from '../server/snapshot.js';
 import { parsePane } from '../server/tmux.js';
 import { WORKTREES_DIR } from '../server/worktree.js';
@@ -158,6 +160,27 @@ test('a saved session no longer running is missing', () => {
     extra: [],
   });
   s.stop();
+});
+
+test('a sleeper counts as present: dozing off is not the bench drifting', () => {
+  const s = new SnapshotStore(tmpStore());
+  s.save([entry('alpha'), entry('beta')], 1);
+  assert.deepEqual(s.drift(live(`${P}alpha-main`), { asleep: [`${P}beta-main`] }), { missing: [], extra: [] });
+  s.stop();
+});
+
+test('a save includes the sleepers, in the shape the bench saves', () => {
+  assert.deepEqual(
+    sleeperEntries([
+      { name: `${P}alpha-main`, folder: '/Users/x/Code/alpha', slug: 'main', bypass: true, pinned: true, sessionId: 'x' },
+      { name: `${P}beta-lead`, folder: '/Users/x/Code/beta', bypass: false },
+      { name: null, folder: '/Users/x/Code/gamma' },
+    ]),
+    [
+      { folder: '/Users/x/Code/alpha', slug: 'main', tmuxSession: `${P}alpha-main`, skipPermissions: true, pinned: true },
+      { folder: '/Users/x/Code/beta', slug: 'lead', tmuxSession: `${P}beta-lead`, skipPermissions: false, pinned: false },
+    ],
+  );
 });
 
 test('drift after a reboot is the whole snapshot', () => {
@@ -388,6 +411,25 @@ test('a lead already running is skipped, not launched again', async () => {
   );
   assert.deepEqual(l.calls.leads, []);
   assert.equal(results[0].state, 'skipped');
+});
+
+test('a restore skips a name that is asleep — it is never started, and never minted', async () => {
+  const l = launchers();
+  const results = await restoreSessions(
+    [entry('alpha'), entry('beta', { slug: 'lead', tmuxSession: `${P}beta-lead` }), entry('gamma')],
+    { liveNames: [], reserved: [`${P}alpha-main`, `${P}beta-lead`], ...l },
+  );
+  assert.deepEqual(l.calls.leads, []);
+  assert.deepEqual(l.calls.sessions.map((c) => c.folder), ['/Users/x/Code/gamma']);
+  assert.deepEqual(
+    results.map((r) => [r.name, r.state, r.reason ?? null]),
+    [
+      [`${P}alpha-main`, 'skipped', ASLEEP_SKIP],
+      [`${P}beta-lead`, 'skipped', ASLEEP_SKIP],
+      [`${P}gamma-main`, 'started', null],
+    ],
+  );
+  assert.equal(ASLEEP_SKIP, 'asleep — wake it from its row');
 });
 
 test('a lead that will not launch takes only itself down', async () => {

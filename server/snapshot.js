@@ -359,16 +359,20 @@ export const isLeadEntry = (entry) =>
  * @param {(o: object) => Promise<object>} deps.startSession  ordinary launch
  * @param {(folder: string, resume: string|null) => Promise<object>} deps.startLead  the lead launch
  * @param {(step: object, entry: object) => void} [deps.onStep] per-entry progress
+ * @param {Iterable<string>} [deps.reserved] sleepers' names: skipped, never started —
+ *        starting one would mint the name its sleeper is waiting to come back under. A wake
+ *        passes none, because the entry it is starting *is* the sleeper.
  */
 export async function restoreSessions(
   entries = [],
-  { liveNames = [], startSession, startLead, onStep = () => {} } = {},
+  { liveNames = [], startSession, startLead, onStep = () => {}, reserved = [] } = {},
 ) {
   // Names already up are skipped rather than started. Without this a second press would
   // find every name taken and `uniqueSessionName` would obligingly mint `-2`s; for a lead
   // it would instead hit the one-lead-per-project refusal, which reports as a failure when
   // the truth is "it is already there".
   const live = new Set(liveNames);
+  const asleep = new Set(reserved);
   const results = [];
 
   for (const entry of entries) {
@@ -385,6 +389,8 @@ export async function restoreSessions(
 
     if (entry.tmuxSession && live.has(entry.tmuxSession)) {
       done = { ...step, state: 'skipped' };
+    } else if (entry.tmuxSession && asleep.has(entry.tmuxSession)) {
+      done = { ...step, state: 'skipped', reason: ASLEEP_SKIP };
     } else {
       try {
         const made = lead
@@ -412,6 +418,32 @@ export async function restoreSessions(
   }
 
   return results;
+}
+
+/** Why a restore left a saved entry alone: its name belongs to a sleeper. */
+export const ASLEEP_SKIP = 'asleep — wake it from its row';
+
+/**
+ * Sleepers, as bench entries — so a save includes them (the plan's Q5: they are part of your
+ * bench, and after a reboot they are the only sessions that come back with their
+ * conversation). The same shape `benchEntries` writes. A restore then skips them while they
+ * sleep (`reserved` above), and `drift` counts them present.
+ *
+ * Not folded into `benchEntries`, which `relaunchEntries` also reads: a relaunch is about the
+ * sessions running now, and a sleeper is not one.
+ *
+ * @param {Array<object>} records `HibernateStore#asleep`
+ */
+export function sleeperEntries(records = []) {
+  return (records || [])
+    .filter((r) => r?.folder && r.name)
+    .map((r) => ({
+      folder: r.folder,
+      slug: r.slug ?? slugFor(r.name, r.folder),
+      tmuxSession: r.name,
+      skipPermissions: Boolean(r.bypass),
+      pinned: Boolean(r.pinned),
+    }));
 }
 
 export class SnapshotStore {
@@ -503,15 +535,21 @@ export class SnapshotStore {
    *
    * Nothing saved is not drift. There is no promise yet to have broken.
    *
+   * A sleeper counts as present (the plan's Q5): putting a session to sleep is not the
+   * bench wandering from what was saved, and the dot lighting every time one dozed off
+   * would turn it into noise.
+   *
    * @param {Array<{tmuxSession?: string|null}>} sessions the live roster
+   * @param {{asleep?: Iterable<string>}} [opts] the sleepers' names
    */
-  drift(sessions = []) {
+  drift(sessions = [], { asleep = [] } = {}) {
     if (!this.snap) return { missing: [], extra: [] };
     // Filtered the same way `benchEntries` filters, or every dispatched worker reads as
     // `extra` and the rail's drift dot stays lit for as long as a team is working — which
     // would turn "your snapshot has gone stale" into background noise exactly when the
     // panel is busiest.
     const live = new Set(sessions.filter(isBenchRow).map((s) => s.tmuxSession).filter(Boolean));
+    for (const name of asleep) if (name) live.add(name);
     const saved = new Set(this.snap.sessions.map((e) => e.tmuxSession).filter(Boolean));
     return {
       missing: [...saved].filter((name) => !live.has(name)),
