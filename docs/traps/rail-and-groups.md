@@ -140,6 +140,27 @@ group. And when you remove rows from a flat list, check the tint: it is tiled fr
 full-width siblings, so a group must go as a whole block or its edges come apart —
 benched with a lone group first, last and alone between two hidden ones.
 
+## A folder of sleepers keeps its heading
+
+**A folder whose only sessions are asleep still draws its heading, because sleepers are
+merged into the rail's rows *before* the folder map is built.** The "an empty heading isn't
+drawn" rule above measures what is about to be drawn, and a greyed row is drawn — so the
+sleepers have to be in the list when it counts, or the heading (and with it the group, which
+is built from its folders) vanishes the moment its last session sleeps, taking the greyed rows
+with it. `renderRail` does it in one place: unpinned sleepers go into `rest` through
+`mergeByActivity` (`web/asleep.js`), each one in front of the first live row older than its
+stored `lastActivity`, so it sits among its folder's rows where its last turn puts it and a
+folder of nothing but sleepers takes the place its newest sleeper earns. Pinned sleepers go
+back into the pinned group under the row they sat beneath (`placePinned`, `pinAfter`, the
+wake's own rule). A sleeper folds into its folder's single row exactly as a live row would, so
+a folder does not grow a heading the moment its only session sleeps either.
+
+Three things it must not do, all held by building a sleeper as an *item* off the frame's
+`asleep` sibling and never as a row in `state.sessions`. It never enters the inbox, which is
+built off `state.sessions` alone, before the merge. It never counts as unread. And the
+collapsed group's dot reads `awake(...)` — the same lists with sleepers filtered back out —
+because a sleeper is the one row that is certainly doing nothing.
+
 ## What a collapsed group hides
 
 **A collapsed group hides one thing for ordinary rows and two for workers.** For an
@@ -320,6 +341,12 @@ step between that line and the summary the moment wrapping was enabled, measured
 where 22 was asked for. `.shelf-summary`'s `row-gap: 0` sits beside the wrap for exactly that
 reason, and it is a trap worth remembering anywhere else in this stylesheet a `flex-wrap` is
 switched on after the fact.
+
+It bit a second time without anybody switching anything on: `.rail-stat` had carried
+`flex-wrap: wrap` all along with nothing that ever wrapped, until hibernation's `asleep N`
+became its fifth count and stopped fitting at the default rail width. The line wrapped, its
+`0.8rem` gap became the row gap, and the second line sat a whole beat down; `row-gap: 0.2rem`
+beside it is the fix. A wrap that has never fired is still a wrap.
 
 ## An automated Chrome window
 

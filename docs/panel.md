@@ -462,6 +462,82 @@ it never spends the bench you saved.
 
 For one session, the bin's box does the same thing — see *Restarting one* above.
 
+### Hibernation
+
+Every Claude Code session holds a few hundred MB of memory even when nobody has spoken to it
+for hours. Hibernation closes a session that has sat idle longer than a time you choose, and
+keeps its row on the rail, greyed, exactly where it was. Pressing **Wake** starts it again in
+the same folder, under the same name, continuing the same conversation.
+
+**It is off until you turn it on.** The setting is in the settings box, beside the launch
+model: *off*, *30 min*, *1 h*, *4 h* or *12 h* of idle time. Changing it needs no restart.
+Nothing is ever put to sleep by hand — there is no sleep button anywhere — and nothing ever
+wakes by itself.
+
+**Who may sleep.** A session sleeps only when every one of these holds, and when in doubt
+the answer is no:
+
+- it is not a worker, and not a team lead with a worker still running;
+- it is idle — not replying, no permission prompt, question or other box open, nothing in
+  its queue and no message waiting for it;
+- it has a conversation to resume, under a name the panel can give back;
+- nothing is running in the background — no background shell, monitor or subagent, and no
+  `/loop` or scheduled wake-up (sleeping would kill them, and a session that has ever run a
+  `/loop` stays awake until it is restarted);
+- it has no reply you haven't read, and nothing is half-typed in its terminal;
+- it is not open in any browser, and not set to keep awake;
+- and it has been idle for the time you chose.
+
+**Keep awake.** Each session's pane header has a *keep awake* toggle that holds it awake
+whatever the setting says. Its tooltip says, in words, whether the session would sleep and
+why not ("Won't sleep yet: a background shell is running").
+
+**The greyed row.** A sleeping session stays under its folder heading (and so inside its
+group), or in the pinned group under the row it sat beneath. It says how long it has been
+asleep, never enters the inbox, never counts as unread, and doesn't light a collapsed group's
+dot. A folder whose sessions are all asleep keeps its heading. The rail's stat line gains
+`asleep N` once hibernation is on or anything is asleep. A pinned sleeper can't be dragged
+until it is woken.
+
+**Opening one.** Clicking a sleeping row opens its conversation **read-only**, straight from
+disk, with **Wake** where the composer would be. Only Wake restarts it, through the same
+machinery as *restart one*: `claude --resume` of the same conversation, on the panel's
+**launch model**, with a Terminal window only if one was attached when it went to sleep, and
+back under its pin. A woken lead comes back as a lead, with today's brief and tools. If you
+were looking at a session when it went to sleep, the pane stays on it and turns read-only;
+after Wake it turns back into the live session. If Wake fails, the session stays asleep and
+the button says why.
+
+**Messages wait.** Anything sent to a sleeping session — a room post, a trigger, a merge
+press, the team's own nudges to a sleeping lead — waits rather than failing, and its row shows
+`waiting N`. On Wake they go into the session's queue in the order they arrived and are
+delivered as it goes idle, through the same guarded path as everything else the panel types.
+The pane's own composer is replaced by Wake, so you can't type to a sleeper directly. A lead
+going to sleep and waking is said in its team's room.
+
+**Forget.** The bin on a sleeping row means *forget*, behind a confirm: the row and any
+waiting messages go, and the confirm says how many messages that drops. The conversation stays
+on disk, where `claude --resume` can still reach it.
+
+**Names.** While a session sleeps, its name is kept for it: `+ new` in that folder won't
+mint it, a new lead won't start where the lead is asleep ("wake it from its row"), and
+restoring a snapshot skips it. A saved snapshot includes sleepers, and sleeping doesn't count
+as drift. After a Mac reboot, sleepers are the only sessions that come back with their
+conversation — by pressing Wake.
+
+**On the phone**, sleeping sessions are greyed in their usual list — an ordinary session on
+Standalones, a lead as its team's card on Leads. A tap opens the read-only conversation with
+Wake. There is no keep-awake toggle and no forget on the phone.
+
+**A panel restart resets every idle clock.** The panel keeps "last seen busy" in memory, so
+after a restart every session starts its idle time again from the restart. A woken session's
+clock also starts at the wake, not at its last message.
+
+**A known gap, open:** after a panel restart, a session with no hook receipt running in the
+same folder as a sleeper can be mistaken for the sleeper's conversation, because the sleeper's
+`/exit` makes its transcript the newest file there. A fix is pending; the trap is
+[binding#a-sleepers-transcript-is-its-folders-freshest](traps/binding.md#a-sleepers-transcript-is-its-folders-freshest).
+
 ### Briefs
 
 `briefs`, in the rail head between `snapshot` and the sort icon (`recent`), opens one
