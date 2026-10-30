@@ -108,8 +108,11 @@ const underWorktrees = (folder) => {
  * planner is a `kind: 'plan'` task, and `sessions.js` calls it a `worker` like any other);
  * the day one of them gets a role of its own, a "not a worker" test would start quietly
  * saving it, and the failure looks like a working snapshot until you restore.
+ *
+ * Exported for `hibernate.js`, whose "never a worker" rule is this test and not a second
+ * one written beside it — two filters for one rule are two filters that drift.
  */
-const isBenchRow = (s) => {
+export const isBenchRow = (s) => {
   if (!s) return false;
   const role = s.team?.role ?? null;
   return (role === null || role === 'lead') && !underWorktrees(s.paneCwd);
@@ -142,9 +145,10 @@ export const liveWorkers = (sessions = []) => (sessions || []).filter((s) => s &
  * `id` is two different things: the transcript's own `sessionId` for a bound row, and the
  * synthetic `pane-19` spelling for a pane the panel could not bind to a history. Handing
  * the second to `--resume` would start a session that fails at launch — and worse, fails
- * *after* the old one has already been exited.
+ * *after* the old one has already been exited. Exported for `hibernate.js`, whose sleep has
+ * the same need for a real id that this file's resume does.
  */
-const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * What a relaunch is about to end and start again.

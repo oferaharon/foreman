@@ -5,8 +5,9 @@ import { STATE_DIR } from './config.js';
 
 const FILE = path.join(STATE_DIR, 'queue.json');
 
-/** Enough to type ahead of a long tool run; small enough that a runaway is visible. */
-const MAX_PER_PANE = 20;
+/** Enough to type ahead of a long tool run; small enough that a runaway is visible. Also the
+ *  cap on what `hibernate.js` holds for a sleeper, since those land in this queue on wake. */
+export const MAX_PER_PANE = 20;
 
 /** Backoff after a failed delivery, so a stuck pane isn't retried every poll. */
 const RETRY_MS = [2_000, 5_000, 15_000, 30_000];

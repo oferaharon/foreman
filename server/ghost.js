@@ -157,6 +157,57 @@ const isBlank = (ch) => ch === ' ' || ch === NBSP || ch === '\t';
  * @returns {string|null}
  */
 export function parseGhost(text) {
+  const input = composerInput(text);
+  if (!input || input.lines !== 1) return null;
+  const { rest } = input;
+  if (!rest.some((c) => !isBlank(c.ch))) return null;
+  // Every character that is not blank has to be dim. One that is not is typed text — which
+  // is the whole of the "only when the input is empty" guard.
+  if (rest.some((c) => !isBlank(c.ch) && !c.dim)) return null;
+
+  const suggestion = rest
+    .map((c) => (c.ch === NBSP ? ' ' : c.ch))
+    .join('')
+    .trim();
+
+  if (!suggestion || suggestion.length > MAX_LEN) return null;
+  // Truncated by the terminal's own width — see the header. The panel cannot spell it in
+  // full, so it does not offer it at all.
+  if (suggestion.endsWith('…')) return null;
+  return suggestion;
+}
+
+/**
+ * Whether nothing is typed in this pane's composer: `true`, `false`, or `null` when the
+ * composer cannot be found at all.
+ *
+ * The hibernation sleep types `/exit` through `sendText`, which presses `C-u` first — so a
+ * half-written message in a Terminal window would be wiped without anybody seeing it go.
+ * The test is this module's own, for the reason the header gives: plain capture cannot tell
+ * a suggestion from typed text, and only the dim attribute can. So an input line that is
+ * blank, or whose every non-blank character is dim (a suggestion, which nobody typed), is
+ * empty; anything else is somebody's words. More than one line between the rules is a
+ * multi-line message being written, and is never empty.
+ *
+ * `null` is not `true`: a pane with a box over its composer answers no question here, and
+ * the caller treats unknown as "do not touch". A plain `-p` capture carries no dim at all,
+ * so a suggestion in one reads as typed — `false`, which is the safe direction.
+ *
+ * @param {string} text raw `capture-pane -pe` output
+ * @returns {boolean|null}
+ */
+export function composerEmpty(text) {
+  const input = composerInput(text);
+  if (!input) return null;
+  if (input.lines !== 1) return false;
+  return input.rest.every((c) => isBlank(c.ch) || c.dim);
+}
+
+/**
+ * The composer's input line, as cells after the caret, and how many lines sit between its
+ * rules — or `null` when there is no composer to read.
+ */
+function composerInput(text) {
   if (!text) return null;
   // Trailing blank rows first. A pane whose history is shorter than its height pads the
   // capture out with them — a fresh session came back with forty — and the search below is
@@ -186,32 +237,15 @@ export function parseGhost(text) {
   }
   if (top < 0) return null;
 
-  // Exactly one line between the rules. A suggestion never wraps — it is truncated with an
-  // ellipsis instead, measured at 34 columns — so more than one line in there is a
-  // multi-line message somebody is typing, and there is nothing to offer.
-  if (bottom - top !== 2) return null;
-
+  // Exactly one line between the rules is the only shape a suggestion has. A suggestion
+  // never wraps — it is truncated with an ellipsis instead, measured at 34 columns — so more
+  // than one line in there is a multi-line message somebody is typing.
   const row = cells(lines[top + 1]);
   const caret = row.findIndex((c) => c.ch === CARET);
   if (caret < 0) return null;
   if (row.slice(0, caret).some((c) => !isBlank(c.ch))) return null;
 
-  const rest = row.slice(caret + 1);
-  if (!rest.some((c) => !isBlank(c.ch))) return null;
-  // Every character that is not blank has to be dim. One that is not is typed text — which
-  // is the whole of the "only when the input is empty" guard.
-  if (rest.some((c) => !isBlank(c.ch) && !c.dim)) return null;
-
-  const suggestion = rest
-    .map((c) => (c.ch === NBSP ? ' ' : c.ch))
-    .join('')
-    .trim();
-
-  if (!suggestion || suggestion.length > MAX_LEN) return null;
-  // Truncated by the terminal's own width — see the header. The panel cannot spell it in
-  // full, so it does not offer it at all.
-  if (suggestion.endsWith('…')) return null;
-  return suggestion;
+  return { lines: bottom - top - 1, rest: row.slice(caret + 1) };
 }
 
 /**
