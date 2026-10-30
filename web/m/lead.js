@@ -208,7 +208,18 @@ export function mountLead(host, ctx) {
     ctx,
     // Lead only on the word `lead`: anything else gets the lesser screen, so a kind this
     // file has not heard of can never be handed a lead's tasks tab by falling through.
-    kind: ctx.kind === 'lead' ? 'lead' : ctx.kind === 'worker' ? 'worker' : 'session',
+    //
+    // `asleep` is the fourth: the read-only view of a session the panel hibernated (item 5).
+    // It is matched on the word too, so it can only be reached on purpose — and what it gets
+    // is *less* than a session screen, never more: see `build`.
+    kind:
+      ctx.kind === 'lead'
+        ? 'lead'
+        : ctx.kind === 'worker'
+          ? 'worker'
+          : ctx.kind === 'asleep'
+            ? 'asleep'
+            : 'session',
     id: ctx.sessionId,
     messages: [],
     /*
@@ -281,7 +292,9 @@ export function mountLead(host, ctx) {
   });
 
   watchConnection();
-  watchMergeQueue();
+  // A sleeper is nobody's lead for as long as it sleeps — there is no live row to key a
+  // merge queue on, and the block would have nowhere to sit.
+  if (view.kind !== 'asleep') watchMergeQueue();
 
   // Painted only now that `host` is in the document — the shell appends it before calling
   // this, and everything below measures something (`scrollHeight`, `clientHeight`). A
@@ -294,6 +307,7 @@ export function mountLead(host, ctx) {
 /* ------------------------------------------------------------- the frame --- */
 
 function build(host) {
+  if (view.kind === 'asleep') return buildAsleep(host);
   const el = {};
 
   /* --- header, row 1: out, who, and what it is running on --- */
@@ -519,6 +533,129 @@ function build(host) {
   return el;
 }
 
+/**
+ * The read-only view of a sleeping session: its header, its conversation, and **Wake** where
+ * the composer goes. The maintainer's ruling of 2026-10-29 for the phone.
+ *
+ * Built, not hidden: there is no textarea, no send button, no interrupt, no answer card, no
+ * merge block and no tasks tab in this DOM at all. A sleeper has no pane — there is nothing
+ * to type into and nothing to stop — so a composer merely left disabled would be a control
+ * whose only answer is no, and a tasks tab would key on a folder from a record. Wake is the
+ * one control, and it posts the desktop's own route through the shell (`ctx.wake`).
+ *
+ * The node names the shared code paths touch (`back`, `name`, `model`, `conn`, `stream`,
+ * `inner`) are the same as a live screen's, so the renderer, the scroll follow, "load
+ * earlier" and the connection mirror run unchanged. Everything that would type or answer
+ * is never reached: `updateLead` branches to `paintAsleep` before any of it.
+ */
+function buildAsleep(host) {
+  const el = {};
+
+  const head = document.createElement('header');
+  head.className = 'm-lead-head';
+  const top = document.createElement('div');
+  top.className = 'm-lead-top';
+
+  el.back = document.createElement('button');
+  el.back.type = 'button';
+  el.back.className = 'm-lead-back';
+  el.back.textContent = '‹';
+  el.back.setAttribute('aria-label', `Back to ${view.ctx?.homeLabel?.() || 'home'}`);
+  el.back.addEventListener('click', () => {
+    location.hash = view.ctx?.homeHash?.() || '#/';
+  });
+
+  el.name = document.createElement('div');
+  el.name.className = 'm-lead-name';
+
+  // Where a live screen shows the model, this says what the screen is — `asleep` — so the
+  // header alone tells a read-only conversation from a live one at a glance.
+  el.model = document.createElement('div');
+  el.model.className = 'm-lead-model';
+
+  el.conn = document.createElement('span');
+  el.conn.className = 'm-lead-conn';
+  el.conn.textContent = '●';
+
+  top.append(el.back, el.name, el.model, el.conn);
+  head.append(top);
+
+  const body = document.createElement('div');
+  body.className = 'm-lead-body';
+  el.stream = document.createElement('div');
+  el.stream.className = 'm-lead-stream';
+  el.stream.addEventListener('scroll', onScroll, { passive: true });
+  el.inner = document.createElement('div');
+  el.inner.className = 'm-lead-inner';
+  el.stream.append(el.inner);
+  body.append(el.stream);
+
+  const bar = document.createElement('div');
+  bar.className = 'm-wake';
+
+  el.wakeNote = document.createElement('div');
+  el.wakeNote.className = 'm-wake-note';
+
+  el.wakeErr = document.createElement('div');
+  el.wakeErr.className = 'm-wake-error';
+  el.wakeErr.hidden = true;
+
+  el.wake = document.createElement('button');
+  el.wake.type = 'button';
+  el.wake.className = 'm-wake-btn';
+  el.wake.textContent = 'Wake';
+  el.wake.addEventListener('click', () => view.ctx?.wake?.());
+
+  bar.append(el.wakeErr, el.wakeNote, el.wake);
+  host.append(head, body, bar);
+  return el;
+}
+
+/**
+ * The read-only view's repaint, on every roster frame and around a press.
+ *
+ * Total over a missing record: the shell keeps this screen up through the beat between a
+ * wake and the frame that carries the live row (and then leaves for that row's route), and
+ * through a reload before the first frame says who is asleep. The header keeps the last
+ * record it was given rather than blanking.
+ */
+function paintAsleep() {
+  const el = view.el;
+  const rec = view.ctx?.record?.() || null;
+  if (rec) view.last = rec;
+  const r = rec || view.last;
+
+  el.name.textContent = r ? (r.lead ? r.project || r.name : rowName(r) || r.name) : 'asleep';
+  el.model.textContent = 'asleep';
+
+  const waking = Boolean(view.ctx?.waking?.());
+  const n = Number(r?.waiting) || 0;
+  const since = Number.isFinite(r?.sleptAt) ? sleptLine(r.sleptAt) : '';
+  el.wakeNote.textContent = [
+    since || 'Asleep',
+    n > 0 ? `${n} ${n === 1 ? 'message' : 'messages'} waiting — delivered when it wakes` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  el.wake.disabled = waking || !rec;
+  el.wake.textContent = waking ? 'waking…' : 'Wake';
+
+  const err = view.ctx?.wakeError?.() || null;
+  el.wakeErr.textContent = err || '';
+  el.wakeErr.hidden = !err;
+}
+
+/** `Asleep since 14:02`, or `since Tue 14:02` past today — when it went, not how long ago,
+ *  because a number that only moves on a repaint reads as frozen on a screen left open. */
+function sleptLine(ms) {
+  const d = new Date(ms);
+  const hm = d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  return `Asleep since ${sameDay ? hm : `${d.toLocaleDateString('en-GB', { weekday: 'short' })} ${hm}`}`;
+}
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
@@ -607,6 +744,13 @@ function mountTasksOnce() {
 export function updateLead(session) {
   const el = view.el;
   if (!el || !view.host?.isConnected) return;
+
+  // The read-only view of a sleeper has none of what follows — no draft, no composer, no
+  // queue, no suggestion, no card — so it branches before any of it is touched.
+  if (view.kind === 'asleep') {
+    paintAsleep();
+    return;
+  }
 
   // A rebound moved the id under us. `ctx.sessionId` is a live getter and has already
   // followed it; the draft has to be carried across by hand.
@@ -1519,7 +1663,10 @@ function renderStream({ pin = false } = {}) {
   if (view.loaded && !view.messages.length && !view.error) {
     const empty = document.createElement('div');
     empty.className = 'm-lead-empty';
-    empty.textContent = 'Nothing said yet. Type below and it starts here.';
+    empty.textContent =
+      view.kind === 'asleep'
+        ? 'Nothing was said in this conversation.'
+        : 'Nothing said yet. Type below and it starts here.';
     frag.append(empty);
   }
 
@@ -1618,6 +1765,9 @@ function onScroll() {
  * rather than "the screen is open". Scrolling back through history is reading the past.
  */
 function markReadIfCaughtUp() {
+  // A sleeper keeps no read state: the panel's watermark store is pruned to live sessions on
+  // every poll, and a sleeper had nothing unread when it slept (the verdict's sixth rule).
+  if (view.kind === 'asleep') return;
   if (!isNearBottom()) return;
   const ts = latestTs();
   if (!ts || ts === view.lastMarked) return;

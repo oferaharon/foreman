@@ -939,6 +939,30 @@ select {
    one fact, one colour, whichever list it is read in. */
 .m-sess-state.is-blocked { color: var(--decision); }
 
+/*
+ * A sleeping session, in its usual list — hibernation item 5, the maintainer's ruling of
+ * 2026-10-29: greyed, in place. Only the name changes ink: the meta line is already
+ * `--ink-faint` on every row, and a whole-row `opacity` would also fade the `:active` press
+ * and the focus ring, which are what say the row still opens. Weight drops with the ink so
+ * the name reads as quieter rather than as a disabled control in the same font.
+ *
+ * `is-asleep` was grepped against all five phone sheets before it was written
+ * (rail-and-groups#the-phones-five-stylesheets): no other rule in any of them names it, so
+ * these two selectors are the whole of what it does.
+ */
+.m-sess.is-asleep .m-sess-name,
+.m-team.is-asleep .m-team-name {
+  color: var(--ink-faint);
+  font-weight: 500;
+}
+
+/* `waiting 2` on a sleeping row: messages held for it, delivered after it wakes. A fact,
+   never a summons — the meta line's own muted ink, one step up so it is findable. */
+.m-asleep-waiting {
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+
 /* ========================================================== start sheet === */
 
 /*
