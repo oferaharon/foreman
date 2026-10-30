@@ -6,7 +6,7 @@ import { parsePrompt } from './permission.js';
 import { parseQuestion } from './question.js';
 import { parsePlanPrompt } from './plan.js';
 import { FOOTER_MODEL_RE } from './model.js';
-import { parseGhost } from './ghost.js';
+import { composerEmpty, parseGhost } from './ghost.js';
 import { parseTrustGate, isTrustGate } from '../web/trust-gate.js';
 
 const run = promisify(execFile);
@@ -189,6 +189,22 @@ export async function readGhost(paneId, lines = 10) {
     return parseGhost(await tmux(['capture-pane', '-pe', '-t', paneId, '-S', `-${lines}`]));
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Whether this pane's composer is empty, off a `capture-pane -pe` read — `true`, `false`, or
+ * `null` when there is no composer to read or the capture failed. The test is `ghost.js`'s
+ * (`composerEmpty`): a suggestion is dim and nobody typed it. Hibernation asks it before an
+ * `/exit`, because `sendText` presses `C-u` and would wipe a half-typed message.
+ *
+ * @returns {Promise<boolean|null>}
+ */
+export async function readComposerEmpty(paneId, lines = 10) {
+  try {
+    return composerEmpty(await tmux(['capture-pane', '-pe', '-t', paneId, '-S', `-${lines}`]));
+  } catch {
+    return null;
   }
 }
 

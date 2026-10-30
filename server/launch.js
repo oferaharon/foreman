@@ -418,8 +418,16 @@ export function claudeCommand({ skipPermissions = false, resume = null, extraArg
  *   It **replays the history onto the screen**, so the pane a resumed session comes up in
  *   is one whose earlier turns are visible, not merely on disk.
  *
+ * `reserved` is names a launch must not mint although tmux would call them free: the
+ * sleepers' (`server/hibernate.js`). A sleeping session holds no tmux session, so without
+ * this a `+ new` in its folder mints its name and it can never come back under it. Every
+ * launch site passes it — except a **wake**, whose own name is the one it must be given.
+ * It is a separate set rather than a change to `liveSessionNames`, because that one is
+ * also what relaunch waits on to see a name go.
+ *
  * @param {{folder: string, label?: string, skipPermissions?: boolean, terminal?: boolean,
- *          nameComponent?: string|null, extraArgs?: string[], resume?: string|null}} opts
+ *          nameComponent?: string|null, extraArgs?: string[], resume?: string|null,
+ *          reserved?: Iterable<string>|null}} opts
  * @returns {Promise<{name: string, paneId: string|null, folder: string}>}
  */
 export async function createSession({
@@ -430,6 +438,7 @@ export async function createSession({
   nameComponent = null,
   extraArgs = [],
   resume = null,
+  reserved = null,
 }) {
   const dir = String(folder || '').trim();
   if (!dir) throw new Error('Which folder?');
@@ -444,7 +453,7 @@ export async function createSession({
   }
 
   const component = nameComponent || path.basename(dir);
-  const name = uniqueSessionName(component, label, new Set(await liveSessionNames()));
+  const name = uniqueSessionName(component, label, new Set([...(await liveSessionNames()), ...(reserved || [])]));
 
   // Load-bearing, every word of it:
   //   • `-ilc`, not `-lc`: only an *interactive* shell sources ~/.zshrc, and that's where

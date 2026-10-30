@@ -25,6 +25,7 @@ import {
   PaneBlockedError,
   MODES,
   confirmGateOption,
+  readComposerEmpty,
 } from './tmux.js';
 import { keyForOption } from './permission.js';
 // One of two imports in this directory that reach outside it, and deliberately (the other
@@ -53,6 +54,7 @@ import { GroupStore } from './groups.js';
 import {
   SnapshotStore,
   benchEntries,
+  sleeperEntries,
   restoreSessions,
   relaunchEntries,
   relaunchOne,
@@ -99,6 +101,8 @@ import {
   EXPOSURE_KEYS,
   BOOT_READ_KEYS,
   resolveLaunchModel,
+  resolveHibernateAfter,
+  HIBERNATE_RULE,
 } from './settings-file.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
@@ -126,6 +130,8 @@ import {
 } from './rooms-line.js';
 import { Observer, isPeerPrompt, participant } from './observe.js';
 import { readTail } from './transcript.js';
+import { HibernateStore, HIBERNATE_CHOICES } from './hibernate.js';
+import { Hibernator, wakePinOrder } from './hibernate-loop.js';
 import {
   attachTerminal,
   chooseFolder,
@@ -211,6 +217,70 @@ setInterval(async () => {
 }, 30_000).unref?.();
 
 const registry = new SessionRegistry(status, readState, queue, pins, tasks);
+
+/*
+ * Hibernation (`hibernate.js` decides, `hibernate-loop.js` acts, this file wires). Sleepers
+ * are **not** roster rows and never become ones: they ride the frame as a sibling `asleep`
+ * field, the `rooms`/`bots` precedent, so nothing that reads `sessions` — the inbox,
+ * notifications, the queue, pins, snapshot, relaunch, `/exit`, read state — is ever handed
+ * one. Everything is keyed by tmux session name, because pane ids reset.
+ */
+const hibernation = new HibernateStore();
+
+/** The sleepers' names — what every launch passes as `reserved`, except a wake. */
+const asleepNames = () => hibernation.names();
+
+/**
+ * `hibernateAfter`, cached: read off `config.json` at each pass (a minute apart) and on every
+ * settings write, never per roster frame — a file read in the frame is a file read forever.
+ */
+let hibernateAfter = resolveHibernateAfter({ config: readConfigFile(CONFIG_FILE).config });
+const readHibernateAfter = () => {
+  hibernateAfter = resolveHibernateAfter({ config: readConfigFile(CONFIG_FILE).config });
+  return hibernateAfter;
+};
+
+/** Session ids open in any connected browser pane — those stay awake (the plan's Q2). */
+function watchedSessionIds() {
+  const ids = new Set();
+  for (const ws of wss.clients) for (const sub of subs.get(ws)?.values() || []) if (sub?.sessionId) ids.add(sub.sessionId);
+  return ids;
+}
+
+const hibernator = new Hibernator({
+  store: hibernation,
+  deps: {
+    sessions: () => registry.list(),
+    refresh: () => registry.refresh(),
+    listPanes,
+    readPaneState,
+    composerEmpty: readComposerEmpty,
+    sendText,
+    sendKeys,
+    liveSessionNames,
+    setting: readHibernateAfter,
+    busy: () => relaunching || restoring,
+    watched: watchedSessionIds,
+    pinnedNames,
+    log: (line) => console.log(line),
+    onSlept: (record) => {
+      // A lead's sleep is said in its team's room — through `room.post`, never
+      // `watch.postSystem`, which would queue a `[room]` nudge for the lead that just slept.
+      if (record.lead && record.folder) {
+        const idle = Math.max(1, Math.round((record.sleptAt - (record.idleSince ?? record.sleptAt)) / 60_000));
+        room.post(record.folder, {
+          from: 'panel',
+          to: 'lead',
+          kind: 'system',
+          event: 'asleep',
+          text: `The lead was put to sleep after ${idle} min idle. Wake it from its row; anything sent to it waits.`,
+        });
+      }
+      registry.refresh().catch(() => {});
+    },
+  },
+});
+hibernation.on('changed', () => broadcastRoster());
 
 /*
  * The collector. After the registry, because it reads the roster and nothing else — the
@@ -1067,8 +1137,13 @@ app.post('/api/launch/folder', async (req, res) => {
  *
  * Note what still is *not* plumbed: `skipPermissions`. A bypass lead is not a thing, and
  * the shape of this signature is what keeps it from becoming one.
+ *
+ * `reserved` is the sleepers' names, defaulting to them rather than to nothing: a lead whose
+ * name is asleep is refused ("wake it from its row"), because a second lead minted under
+ * that name would leave the sleeper nothing to come back as. Only a wake passes an empty set,
+ * since the name it is starting is the sleeper's own.
  */
-async function launchLead(folder, { terminal, resume = null }) {
+async function launchLead(folder, { terminal, resume = null, reserved = asleepNames() }) {
   // A lead without git is a lead whose every dispatch fails — workers branch from main.
   // Found by the maintainer's first real launch attempt (a folder not yet in git), so the
   // tick refuses up front with the fix in the message rather than letting the lead discover
@@ -1095,6 +1170,11 @@ async function launchLead(folder, { terminal, resume = null }) {
   const leadName = uniqueSessionName(path.basename(folder), 'lead', new Set());
   if ((await liveSessionNames()).includes(leadName)) {
     const err = new Error('This project already has a team lead.');
+    err.status = 409;
+    throw err;
+  }
+  if (reserved.has(leadName)) {
+    const err = new Error('This project’s lead is asleep — wake it from its row.');
     err.status = 409;
     throw err;
   }
@@ -1167,6 +1247,7 @@ async function launchLead(folder, { terminal, resume = null }) {
     label: 'lead',
     terminal,
     resume,
+    reserved,
     // skipPermissions deliberately not plumbed — a bypass lead is not a thing.
     extraArgs: [
       '--append-system-prompt-file', briefFile,
@@ -1224,6 +1305,8 @@ app.post('/api/launch', async (req, res) => {
       // Absent means yes, the same shape `/api/snapshot/restore` uses — a client that
       // predates the checkbox keeps getting a window, which is what it was built expecting.
       terminal: req.body?.terminal !== false,
+      // A sleeper's name is not free, although tmux says it is.
+      reserved: asleepNames(),
       extraArgs: await standaloneArgs(),
     });
     // The pane exists now; the roster is up to two seconds behind it.
@@ -1522,6 +1605,7 @@ app.post('/api/sessions/:id/duplicate', async (req, res) => {
       folder: session.paneCwd,
       label: slugFor(session.tmuxSession, session.paneCwd),
       skipPermissions: Boolean(session.bypass),
+      reserved: asleepNames(),
       // A copy that behaved differently from its original would be worse than no button —
       // which is the reasoning above about bypass, and it holds for the rooms brief too.
       extraArgs: await standaloneArgs(),
@@ -4448,12 +4532,17 @@ app.get('/api/config', (req, res) => {
     defaults: { bindHost: DEFAULT_BIND_HOST, sessionPrefix: DEFAULT_SESSION_PREFIX, launchModel: DEFAULT_LAUNCH_MODEL },
     // What this panel is actually running on, and which rung answered for the host.
     // `launchModel` is `null` when the stored id is one no launch would accept.
-    live: { host: HOST, hostSource: HOST_SOURCE, sessionPrefix: SESSION_PREFIX, launchModel: launch.model },
+    live: { host: HOST, hostSource: HOST_SOURCE, sessionPrefix: SESSION_PREFIX, launchModel: launch.model, hibernateAfter },
     // The picker's rows, from the one list a worker's dispatch also validates against, and
     // their names — with the stored id named too, so a hand-edited value still draws.
     launchModels: WORKER_MODELS,
     launchModelNames: workerModelNames(typeof config.launchModel === 'string' ? config.launchModel : null),
     launchModelError: launch.error,
+    // Hibernation: what the file holds (`null` when absent), what the loop is using, and the
+    // picker's rows from the one list (`web/hibernate-choices.js`).
+    hibernateAfter: config.hibernateAfter === undefined ? null : config.hibernateAfter,
+    hibernateChoices: HIBERNATE_CHOICES,
+    hibernateRule: HIBERNATE_RULE,
     // Whether *this* request could have written the exposure keys. The modal disables its
     // controls on it; the PATCH re-decides it server-side, so a disabled control that
     // somebody re-enables by hand still gets the 403.
@@ -4497,7 +4586,7 @@ app.patch('/api/config', (req, res) => {
   const check = validateConfigPatch(body, { normalizeOrigin });
   if (!check.ok) return res.status(check.status).json({ error: check.error });
   if (!Object.keys(check.patch).length) {
-    return res.status(400).json({ error: 'Nothing to change — send bindHost, allowedOrigins or launchModel.' });
+    return res.status(400).json({ error: 'Nothing to change — send bindHost, allowedOrigins, launchModel or hibernateAfter.' });
   }
 
   const written = writeConfigFile(CONFIG_FILE, check.patch);
@@ -4519,6 +4608,11 @@ app.patch('/api/config', (req, res) => {
   // (`launchModelArgs`), so the next session started picks it up, and a session already
   // running keeps the model it has.
   const restartRequired = written.changed.some((key) => BOOT_READ_KEYS.includes(key));
+  // `hibernateAfter` is read at every pass; this makes the frame say it at once.
+  if (written.changed.includes('hibernateAfter')) {
+    hibernateAfter = resolveHibernateAfter({ config: written.config });
+    broadcastRoster();
+  }
   const reasons = [];
   if (written.changed.includes('bindHost')) reasons.push('the bind host is read when the panel starts');
   if (written.changed.includes('allowedOrigins')) reasons.push('the origin allowlist is read when the panel starts');
@@ -4535,7 +4629,9 @@ app.patch('/api/config', (req, res) => {
       hostSource: HOST_SOURCE,
       sessionPrefix: SESSION_PREFIX,
       launchModel: resolveLaunchModel({ config: written.config, file: CONFIG_FILE }).model,
+      hibernateAfter: resolveHibernateAfter({ config: written.config }),
     },
+    hibernateAfter: written.config.hibernateAfter === undefined ? null : written.config.hibernateAfter,
     changed: written.changed,
     restartRequired,
     restartReason: reasons.join('; '),
@@ -4617,7 +4713,7 @@ const snapshotSummary = (sessions = registry.list()) => {
   return {
     savedAt: snap?.savedAt ?? null,
     count: snap?.sessions.length ?? 0,
-    drift: snapshot.drift(sessions),
+    drift: snapshot.drift(sessions, { asleep: asleepNames() }),
   };
 };
 
@@ -4627,7 +4723,7 @@ app.get('/api/snapshot', (_req, res) => {
     savedAt: snap?.savedAt ?? null,
     sessions: snap?.sessions ?? [],
     live: registry.list().map((s) => s.tmuxSession).filter(Boolean),
-    drift: snapshot.drift(registry.list()),
+    drift: snapshot.drift(registry.list(), { asleep: asleepNames() }),
   });
 });
 
@@ -4640,7 +4736,8 @@ app.get('/api/snapshot', (_req, res) => {
  */
 app.post('/api/snapshot', (_req, res) => {
   try {
-    const saved = snapshot.save(benchEntries(registry.list()));
+    // Sleepers are part of the bench (the plan's Q5); a restore skips them while they sleep.
+    const saved = snapshot.save([...benchEntries(registry.list()), ...sleeperEntries(hibernation.asleep())]);
     broadcastRoster();
     res.json({ ok: true, savedAt: saved.savedAt, sessions: saved.sessions });
   } catch (err) {
@@ -4668,6 +4765,7 @@ app.post('/api/snapshot/restore', async (req, res) => {
   if (!snap?.sessions.length) return res.status(400).json({ error: 'Nothing saved yet.' });
   // `relaunching` too: a restore landing mid-relaunch would start fresh the very sessions
   // the relaunch had just exited to resume, and the relaunch would then skip them as live.
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (restoring || relaunching) {
     return res.status(409).json({ error: 'A relaunch or restore is already running.' });
   }
@@ -4682,12 +4780,16 @@ app.post('/api/snapshot/restore', async (req, res) => {
   const startedAs = new Map(); // pane started here -> the name its entry was saved under
 
   try {
+    const reserved = asleepNames();
     results = await restoreSessions(snap.sessions, {
       liveNames: await liveSessionNames(),
+      // A saved entry whose name is asleep is skipped — "wake it from its row" — and nothing
+      // else here may mint one either (the plan's Q5).
+      reserved,
       // The same flags `/api/launch` gives a session opened by hand, for the same reason a
       // lead goes through `launchLead` below: a restored session must be *this* panel's
       // session, not a replay of what one looked like before the feature existed.
-      startSession: async (opts) => createSession({ ...opts, terminal, extraArgs: await standaloneArgs() }),
+      startSession: async (opts) => createSession({ ...opts, terminal, reserved, extraArgs: await standaloneArgs() }),
       // A lead is not `createSession` with a different label. The brief, the `foreman` tools
       // and the permission stance are launch flags and files under `teams/`, so a saved
       // lead started the ordinary way comes back as an ordinary session that happens to be
@@ -4699,7 +4801,7 @@ app.post('/api/snapshot/restore', async (req, res) => {
       // not an accident of reuse — a restored lead should be *this* lead, not a replay of
       // the one that was running before the reboot. It is also where the git check and the
       // one-lead-per-project refusal live, which is why neither is repeated here.
-      startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume })).created,
+      startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume, reserved })).created,
       onStep: (done, entry) => {
         // Pins: the lead is pinned from birth by `launchLead`, whatever the snapshot
         // says, so only the ordinary rows need replaying here.
@@ -4774,6 +4876,48 @@ async function carryPins(wanted, startedAs) {
 }
 
 /**
+ * Start these entries and put their pins back — the restore half of a relaunch, and the
+ * whole of a **wake**. A refactor, not a launcher: `restoreSessions` with the same two
+ * launchers every restart uses, so a lead goes through `launchLead` (today's brief, MCP
+ * config and settings) and an ordinary session through `createSession` with
+ * `standaloneArgs()`, both on `--model <launchModel>`.
+ *
+ * `reserved` is the sleepers' names, which nothing here may start or mint. A relaunch passes
+ * them; a wake passes an empty set, because the entry it starts *is* the sleeper.
+ *
+ * @param {Array<object>} entries
+ * @param {{terminal: boolean, pinOrder: Array<string|null>, reserved: Set<string>,
+ *          onStep?: (done: object, entry: object) => void}} opts
+ */
+async function startEntries(entries, { terminal, pinOrder, reserved, onStep = () => {} }) {
+  const toPin = [];
+  const startedAs = new Map(); // pane started here -> the name its entry carried
+  const results = await restoreSessions(entries, {
+    liveNames: await liveSessionNames(),
+    reserved,
+    // A relaunch is the control for "I updated Claude Code" or "I changed a setting", so
+    // it is also the control that hands a session today's brief — the flags are regenerated
+    // here, not replayed from whatever the session was launched with an hour ago.
+    startSession: async (opts) => createSession({ ...opts, terminal, reserved, extraArgs: await standaloneArgs() }),
+    startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume, reserved })).created,
+    onStep: (done, entry) => {
+      if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
+      if (done.state === 'started' && done.paneId) startedAs.set(done.paneId, entry.tmuxSession || null);
+      onStep(done, entry);
+    },
+  });
+
+  // Pins are pane-keyed and carry the tmux birthday, so they need the panes that exist now.
+  // The lead is pinned from birth by `launchLead`, so only the ordinary rows are replayed.
+  if (toPin.length) {
+    const created = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.createdMs]));
+    for (const paneId of toPin) pins.set(paneId, true, { paneCreatedMs: created.get(paneId) ?? null });
+  }
+  await carryPins(pinOrder, startedAs);
+  return results;
+}
+
+/**
  * Close these bench entries, wait for their names to free, and put them back — the one
  * relaunch loop, shared by **relaunch all** and the bin's **restart one**.
  *
@@ -4812,11 +4956,9 @@ async function carryPins(wanted, startedAs) {
  */
 async function relaunchBench(entries, { terminal, emit = () => {} }) {
   const skipped = new Map(); // tmux session name -> why it was left alone
-  const toPin = [];
   // The pinned group by name, read before anything exits: the panes holding these pins are
   // about to go, and with them the only thing the store knows them by.
   const pinOrder = await pinnedNames();
-  const startedAs = new Map(); // pane started here -> the name it was relaunched from
 
   /* ---- exit: every entry that isn't holding something ---- */
   const exiting = [];
@@ -4864,31 +5006,16 @@ async function relaunchBench(entries, { terminal, emit = () => {} }) {
   }
 
   /* ---- restore, the same loop the snapshot uses ---- */
-  const results = await restoreSessions(entries, {
-    liveNames: await liveSessionNames(),
-    // A relaunch is the control for "I updated Claude Code" or "I changed a setting", so
-    // it is also the control that hands a session today's brief — the flags are regenerated
-    // here, not replayed from whatever the session was launched with an hour ago.
-    startSession: async (opts) => createSession({ ...opts, terminal, extraArgs: await standaloneArgs() }),
-    startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume })).created,
-    onStep: (done, entry) => {
-      if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
-      if (done.state === 'started' && done.paneId) startedAs.set(done.paneId, entry.tmuxSession || null);
-      emit({ ...done, phase: 'start', reason: skipped.get(done.name) ?? null });
-    },
+  const results = await startEntries(entries, {
+    terminal,
+    pinOrder,
+    reserved: asleepNames(),
+    onStep: (done) => emit({ ...done, phase: 'start', reason: skipped.get(done.name) ?? done.reason ?? null }),
   });
-
-  // Pins are pane-keyed and carry the tmux birthday, so they need the panes that exist now.
-  // The lead is pinned from birth by `launchLead`, so only the ordinary rows are replayed.
-  if (toPin.length) {
-    const created = new Map((await listPanes().catch(() => [])).map((p) => [p.paneId, p.createdMs]));
-    for (const paneId of toPin) pins.set(paneId, true, { paneCreatedMs: created.get(paneId) ?? null });
-  }
-  await carryPins(pinOrder, startedAs);
 
   // A skipped row was never exited, so `restoreSessions` reporting it as "already running"
   // is true but not the useful half; the reason it was left alone is.
-  return results.map((r) => ({ ...r, reason: skipped.get(r.name) ?? null }));
+  return results.map((r) => ({ ...r, reason: skipped.get(r.name) ?? r.reason ?? null }));
 }
 
 /**
@@ -4934,6 +5061,7 @@ app.post('/api/relaunch', async (req, res) => {
   if (mode !== 'fresh' && mode !== 'resume') {
     return res.status(400).json({ error: 'Pick a mode: "fresh" or "resume".' });
   }
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch or restore is already running.' });
   }
@@ -5046,6 +5174,7 @@ app.get('/api/sessions/:id/relaunch', (req, res) => {
  */
 app.post('/api/sessions/:id/relaunch', async (req, res) => {
   const mode = req.body?.mode;
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch or restore is already running — try again when it finishes.' });
   }
@@ -5109,6 +5238,170 @@ app.post('/api/sessions/:id/relaunch', async (req, res) => {
       'Start it again from + new.',
     name,
   });
+});
+
+/* ------------------------------------------------------------ hibernation --- */
+
+/*
+ * The sleepers' routes. There is **no route that puts a session to sleep**: hibernation is
+ * automatic only, by the maintainer's ruling of 2026-10-29, and the loop (`hibernator`) is
+ * the one sleeper. What a person can do is wake one, forget one, and keep one awake — every
+ * one of them keyed by **tmux session name**, because a sleeper has no pane and pane ids
+ * reset anyway.
+ */
+
+/** Every sleeper, as the frame carries them — for anything that would rather not hold a socket. */
+app.get('/api/asleep', (_req, res) => {
+  res.json({
+    asleep: hibernation.asleep().map((r) => ({ ...r, waiting: hibernation.heldCount(r.name) })),
+    hibernation: { after: hibernateAfter, keepAwake: hibernation.keepAwake() },
+  });
+});
+
+/**
+ * Whether this live session would be put to sleep, and if not why — in words, for the pane
+ * header's tooltip. Read fresh off the pane at the moment it is asked, which is why it is a
+ * route asked on hover and never a field on the frame: a reason per row per poll would be a
+ * tmux capture per row every two seconds.
+ */
+app.get('/api/sessions/:id/sleep', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Unknown session.' });
+  const verdict = await hibernator.verdict(session);
+  res.json({
+    name: session.tmuxSession ?? null,
+    after: hibernateAfter,
+    keepAwake: session.tmuxSession ? hibernation.isKeepAwake(session.tmuxSession) : false,
+    ok: verdict.ok,
+    rule: verdict.ok ? null : verdict.rule,
+    why: verdict.ok ? null : verdict.why,
+  });
+});
+
+/**
+ * Wake a sleeper: start it again in the same folder, under the same name and role, on
+ * `--resume` of the same conversation, on the panel's launch model — the restore half of a
+ * relaunch (`startEntries`), not a new launcher.
+ *
+ * It holds the `relaunching` flag, so a relaunch, a restore and the sleep loop all stand
+ * aside while it runs, and it refuses while one of them holds it. It refuses a name
+ * something else is now running under — a stranger took it, and a wake would come back as
+ * `-2`, which is exactly what reserving the name exists to prevent. It passes **no**
+ * reserved names: its own is the one it must be given.
+ *
+ * On success: the pin goes back under the row it sat beneath (`wakePinOrder` →
+ * `carryPinOrder`), the idle clock starts now (a resume does not move `lastActivity` —
+ * measured), everything held for it moves into the new pane's queue **in order** (so it is
+ * delivered by the ordinary flusher, through `PaneLock` → `assertNotBlocked`, as the session
+ * goes idle), the record goes, and a lead's room says so. On failure the record **stays** —
+ * the conversation is still on disk and Wake can be pressed again — and the error goes back
+ * to the button.
+ */
+app.post('/api/asleep/:name/wake', async (req, res) => {
+  const name = req.params.name;
+  const record = hibernation.get(name);
+  if (!record) return res.status(404).json({ error: 'That session is not asleep.' });
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
+  if (relaunching || restoring) {
+    return res.status(409).json({ error: 'A relaunch, restore or wake is already running — try again when it finishes.' });
+  }
+  relaunching = true;
+
+  let result;
+  try {
+    if ((await liveSessionNames()).includes(name)) {
+      return res.status(409).json({
+        error: `Something else is running under ${name} now, so it can’t wake under its own name. Close that session first.`,
+      });
+    }
+    const entry = {
+      folder: record.folder,
+      slug: record.slug,
+      tmuxSession: name,
+      skipPermissions: Boolean(record.bypass),
+      pinned: Boolean(record.pinned),
+      resume: record.sessionId,
+    };
+    const pinOrder = wakePinOrder(await pinnedNames(), record);
+    // A Terminal window only if one was attached when it slept — restart-one's rule.
+    [result] = await startEntries([entry], { terminal: Boolean(record.attached), pinOrder, reserved: new Set() });
+  } catch (err) {
+    result = { state: 'failed', error: err.message };
+  } finally {
+    relaunching = false;
+  }
+
+  if (result?.state !== 'started') {
+    broadcastRoster();
+    const why = result?.error || (result?.state === 'skipped' ? 'its name was taken' : 'it did not start');
+    return res.status(500).json({ error: `${name} did not wake: ${why}. It is still asleep — try Wake again.`, name });
+  }
+
+  hibernator.woke(result.name);
+  const paneCreatedMs = result.paneId
+    ? ((await listPanes().catch(() => [])).find((p) => p.paneId === result.paneId)?.createdMs ?? null)
+    : null;
+  const held = hibernation.takeHeld(name);
+  let delivered = 0;
+  for (const item of held) {
+    if (!result.paneId) break;
+    try {
+      queue.add(result.paneId, item.text, { paneCreatedMs });
+      delivered += 1;
+    } catch (err) {
+      console.warn(`hibernate: a message held for ${name} could not be queued — ${err.message}`);
+    }
+  }
+  hibernation.remove(name);
+  if (result.name !== name) console.warn(`hibernate: ${name} woke as ${result.name}`);
+  if (record.lead) {
+    room.post(record.folder, { from: 'panel', to: 'lead', kind: 'system', event: 'awake', text: 'The lead was woken.' });
+  }
+  console.log(`hibernate: ${name} woke${delivered ? `, ${delivered} held message${delivered === 1 ? '' : 's'} queued` : ''}`);
+
+  await registry.refresh().catch(() => {});
+  broadcastRoster();
+  const made = result.paneId ? registry.byPane(result.paneId) : null;
+  res.json({
+    ok: true,
+    name: result.name,
+    paneId: result.paneId ?? null,
+    lead: Boolean(result.lead),
+    resumed: Boolean(result.resumed),
+    sessionId: made?.id ?? null,
+    queued: delivered,
+  });
+});
+
+/**
+ * Forget a sleeper — the bin on a sleeping row (the plan's Q4). The row and anything held for
+ * it go; the conversation stays on disk, where `claude --resume` can still reach it. Not a
+ * sleep control, so ruling 1 is untouched.
+ */
+app.delete('/api/asleep/:name', (req, res) => {
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
+  if (relaunching || restoring) {
+    return res.status(409).json({ error: 'A relaunch, restore or wake is running — try again when it finishes.' });
+  }
+  const gone = hibernation.forget(req.params.name);
+  if (!gone?.record) return res.status(404).json({ error: 'That session is not asleep.' });
+  res.json({ ok: true, name: req.params.name, dropped: gone.dropped, transcriptPath: gone.record.transcriptPath ?? null });
+});
+
+/**
+ * Keep a session awake, or let it sleep again — ruling 3, per session, by **name**. Accepted
+ * for a live session or a sleeper, refused for a name the panel knows nothing about, because
+ * a keep-awake for nobody is a setting that would quietly catch whoever is named that next.
+ */
+app.post('/api/asleep/keep-awake', (req, res) => {
+  const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+  const on = req.body?.on;
+  if (!name) return res.status(400).json({ error: 'Which session? Send its tmux session name as `name`.' });
+  if (typeof on !== 'boolean') return res.status(400).json({ error: '`on` must be true or false.' });
+  const known = hibernation.has(name) || hibernation.isKeepAwake(name) || registry.list().some((s) => s.tmuxSession === name);
+  if (!known) return res.status(404).json({ error: `No session is running or asleep under ${name}.` });
+  hibernation.setKeepAwake(name, on);
+  res.json({ ok: true, name, keepAwake: on });
 });
 
 /* -------------------------------------------------------- completion --- */
@@ -5663,6 +5956,16 @@ function rosterFrame(sessions = registry.list()) {
      * empty array is the ordinary answer.
      */
     bots: bots.list(),
+    /*
+     * Hibernation's two siblings, the `rooms`/`bots` precedent. A sleeper is **never** a row
+     * in `sessions` — it has no pane, and everything that reads that list (the inbox,
+     * notifications, the queue, pins, snapshot, relaunch, `/exit`, read state) must never be
+     * handed one, which keeps "only sessions with a live pane make the roster" literally
+     * true. From memory only. The client tests `'asleep' in msg`; an empty array is the
+     * ordinary answer, and with the setting off it is the only one.
+     */
+    asleep: hibernation.asleep().map((r) => ({ ...r, waiting: hibernation.heldCount(r.name) })),
+    hibernation: { after: hibernateAfter, keepAwake: hibernation.keepAwake() },
   };
 }
 
@@ -5863,7 +6166,7 @@ process.on('SIGTERM', () => {
   // sweep firing into a process that is on its way out would read transcripts nobody is
   // going to be told about.
   clearInterval(sharedSweep);
-  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, rooms, bots]) {
+  for (const store of [queue, tasks, pins, rateLimits, groups, readState, snapshot, rooms, bots, hibernation]) {
     try {
       store.flush();
     } catch {
@@ -5877,6 +6180,13 @@ const tmuxOk = await isAvailable();
 if (!tmuxOk) {
   console.warn('tmux not found — sessions will be read-only.');
 }
+
+// The sleep loop's heartbeat. Every tick teaches the idle clock who was busy; a pass runs at
+// most once a minute, and not at all until `hibernator.start()` below — after the
+// single-instance probe, so a panel that is standing down never `/exit`s anything.
+registry.on('tick', (sessions) => {
+  hibernator.tick(sessions)?.catch((err) => console.warn(`hibernate: pass failed — ${err.message}`));
+});
 
 registry.start();
 
@@ -5900,6 +6210,9 @@ pruneImages(Date.now()).catch(() => {});
 // thing `start()` does is delete copies older than 90 days and print a line saying so —
 // neither of which a panel that is about to stand down may do to the one already running.
 bots.start();
+// Hibernation's loop, past the probe for the bots' reason: its first act could be an `/exit`.
+// With `hibernateAfter` off — the default — every pass ends at its first line.
+hibernator.start();
 // Worktree housekeeping, boot-only by design: prune stale bookkeeping everywhere the
 // task store knows, then sweep failed worktrees old enough to stop being evidence —
 // each with a room line first, so nothing disappears unannounced.
