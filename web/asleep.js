@@ -174,11 +174,16 @@ export function wokenSession(view, sessions, asleep) {
   const name = str(view?.name);
   const id = str(view?.sessionId);
   const rows = Array.isArray(sessions) ? sessions : [];
-  if (id) {
-    const byId = rows.find((s) => s?.id === id);
-    if (byId) return byId;
-  }
   const stillAsleep = (Array.isArray(asleep) ? asleep : []).some((r) => str(r?.name) === name);
+  if (id) {
+    // While the record still stands, the id alone is not enough: a cold-started panel with no
+    // hook receipt can infer a sibling pane in the same folder onto the sleeper's transcript
+    // (its `/exit` record makes it the folder's freshest — MEASURED on the bench), and a pane
+    // that followed the id there would show one session's conversation over another's
+    // terminal. So by id only under the sleeper's own name, or once the record has gone.
+    const byId = rows.find((s) => s?.id === id);
+    if (byId && (!stillAsleep || byId.tmuxSession === name)) return byId;
+  }
   if (!name || stillAsleep) return null;
   return rows.find((s) => s?.tmuxSession === name) || null;
 }

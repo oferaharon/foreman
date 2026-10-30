@@ -143,6 +143,16 @@ test('woken: the same conversation id comes back first', () => {
   assert.equal(wokenSession({ name: 'alpha-a', sessionId: 'id-1' }, [back], [rec('alpha-a')]), back);
 });
 
+test('woken: a stranger inferred onto the sleeper’s transcript is not it, while the sleeper stands', () => {
+  // Measured on the bench: after a panel restart with no hook receipt, a sibling pane in the
+  // same folder was bound to the sleeper's conversation id.
+  const stranger = { id: 'id-1', tmuxSession: 'alpha-b' };
+  assert.equal(wokenSession({ name: 'alpha-a', sessionId: 'id-1' }, [stranger], [rec('alpha-a')]), null);
+  // Its own name back under that id is the wake, record or not.
+  const own = { id: 'id-1', tmuxSession: 'alpha-a' };
+  assert.equal(wokenSession({ name: 'alpha-a', sessionId: 'id-1' }, [stranger, own].slice(1), [rec('alpha-a')]), own);
+});
+
 test('woken: by name only once the record is gone — a live row under a sleeper’s name is a stranger', () => {
   const stranger = { id: 'pane-7', tmuxSession: 'alpha-a' };
   assert.equal(wokenSession({ name: 'alpha-a', sessionId: 'id-1' }, [stranger], [rec('alpha-a')]), null);
