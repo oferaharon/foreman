@@ -397,6 +397,26 @@ test('the verdict for the tooltip says why, in words', async () => {
   assert.equal((await b.hib.verdict(r)).why, 'hibernation is off');
 });
 
+test('the tooltip can ask past "open in a browser" — and a pass never can', async () => {
+  // The header that asks is on screen, so `watched` is always true there; the reason behind
+  // it is the one worth reading. The pass itself must still see the browser.
+  const dir = tmp();
+  const r = row(dir, { background: { agents: 0, shells: 1, monitors: 0 } });
+  const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+  later(b, HOUR);
+  b.watched = new Set([r.id]);
+  assert.equal((await b.hib.verdict(r)).why, 'it is open in a browser');
+  assert.equal((await b.hib.verdict(r, { besideWatched: true })).why, 'a background shell is running');
+  const clean = row(dir, { id: '11111111-2222-4333-8444-555555555555', tmuxSession: r.tmuxSession });
+  const c = bench({ rows: [clean], storeFile: path.join(dir, 'h2.json') });
+  later(c, HOUR);
+  c.watched = new Set([clean.id]);
+  assert.equal((await c.hib.pass()).slept, null, 'a watched session is never put to sleep');
+  // …and the same row, unwatched, would have been — so the refusal above is the browser's.
+  c.watched = new Set();
+  assert.ok((await c.hib.pass()).slept, 'unwatched, it sleeps');
+});
+
 /* ---------------------------------------------------------------------- the pure bits --- */
 
 test('pidTree walks the pane process and everything under it', () => {

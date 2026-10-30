@@ -973,6 +973,10 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-faint);
   display: flex;
   gap: 0.8rem;
+  /* `asleep N` is the fifth count and does not fit beside the other four at the default rail
+     width, so this line now actually wraps — and `flex-wrap` hands `gap` to the row gap too
+     (rail-and-groups#turning-flex-wrap-on), which drew the second line a whole beat down. */
+  row-gap: 0.2rem;
   flex-wrap: wrap;
   margin-top: 0.15rem;
 }
@@ -8280,13 +8284,18 @@ body.pin-reordering * { cursor: grabbing !important; }
 /* Where the composer goes: one line saying what Wake does, and Wake. */
 .asleep-foot {
   flex: none;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.85rem 1.6rem 0.95rem;
+}
+
+.asleep-foot-inner {
+  max-width: 52rem;
+  margin: 0 auto;
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
   gap: 0.4rem 1.2rem;
-  border-top: 1px solid var(--rule);
-  background: var(--surface);
-  padding: 0.85rem 1.6rem 0.95rem;
 }
 .app.split .asleep-foot { padding-left: 1rem; padding-right: 1rem; }
 
@@ -8314,7 +8323,7 @@ body.pin-reordering * { cursor: grabbing !important; }
 .wake-btn:disabled { cursor: default; opacity: 0.6; }
 .wake-btn.is-busy { background: transparent; color: var(--accent); }
 
-/* `display: grid` on the foot does not reach this, but the rule is the files views' all the
-   same: a `display` an author sets beats `[hidden]`, so the hidden state is spelled out. */
+/* The files views' rule: a `display` an author sets beats `[hidden]`, so the hidden state is
+   spelled out rather than left to the UA default. */
 .asleep-err { grid-column: 1 / -1; font-size: 0.78rem; color: var(--decision); }
 .asleep-err[hidden] { display: none; }

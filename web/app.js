@@ -5866,10 +5866,13 @@ function confirmForget(s) {
   where.textContent = [s.folder || '', s.name].filter(Boolean).join('  ·  ');
   const said = document.createElement('p');
   said.className = 'field-hint';
-  said.textContent =
-    'Its row leaves the rail and it can no longer be woken from here. The conversation stays on disk.' +
-    (s.waiting ? ` ${s.waiting} held message${s.waiting === 1 ? '' : 's'} for it will be dropped.` : '');
-  if (s.waiting) said.style.color = 'var(--decision)';
+  said.textContent = 'Its row leaves the rail and it can no longer be woken from here. The conversation stays on disk.';
+  // The one thing in the box that cannot be had back, in the colour the bin's box uses for that.
+  const dropped = document.createElement('p');
+  dropped.className = 'field-hint';
+  dropped.style.color = 'var(--decision)';
+  dropped.textContent = s.waiting ? `${s.waiting} held message${s.waiting === 1 ? '' : 's'} for it will be dropped.` : '';
+  dropped.hidden = !s.waiting;
   const note = document.createElement('p');
   note.className = 'modal-note';
 
@@ -5882,7 +5885,7 @@ function confirmForget(s) {
   go.className = 'ghost-btn danger';
   go.textContent = 'forget it';
   row.append(cancel, go);
-  box.append(h, what, where, said, note, row);
+  box.append(h, what, where, said, dropped, note, row);
 
   const close = () => {
     back.remove();
@@ -10944,7 +10947,12 @@ function createPane(slot, host) {
     const err = document.createElement('div');
     err.className = 'asleep-err';
     err.setAttribute('role', 'status');
-    foot.append(say, wake, err);
+    // The composer's own two boxes — an outer band and a 52rem column — so Wake lines up
+    // with the conversation above it the way the textarea does.
+    const footInner = document.createElement('div');
+    footInner.className = 'asleep-foot-inner';
+    footInner.append(say, wake, err);
+    foot.append(footInner);
 
     host.append(head, stream, foot);
     view.asleepEls = { head, dot, h1, stat, stream, inner, say, wake, err };
