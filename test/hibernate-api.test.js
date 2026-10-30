@@ -425,7 +425,7 @@ test('a sleeper answers the images and outputs lists from its own transcript', a
   assert.deepEqual(imgs.body.images.map((i) => [i.uuid, i.index]), [['img1', 0]]);
   const outs = await api('GET', `/api/sessions/${IDS.zeta}/outputs`);
   assert.equal(outs.status, 200);
-  assert.deepEqual(outs.body.outputs.map((o) => [o.source, o.name ?? path.basename(o.path ?? '')]), [['write', 'notes.md']]);
+  assert.deepEqual(outs.body.outputs.map((o) => [o.source, o.name ?? path.basename(o.path ?? '')]), [['image', ''], ['write', 'notes.md']]);
 });
 
 test('a sleeper’s image and output bytes carry the live headers', async () => {
