@@ -96,14 +96,31 @@ test('lookups by name and by session id', () => {
   assert.equal(sleeperFor(asleep, [], null), null);
 });
 
-test('a woken sleeper is found by name first, its session id second', () => {
+test('a woken sleeper is the desktop’s rule: by id under its own name, or anything once the record has gone', () => {
+  const asleep = [rec()];
+  const own = { id: rec().sessionId, tmuxSession: 'fm-alpha-1', isLead: false };
+  assert.equal(wokenRow([own], { name: 'fm-alpha-1', sessionId: own.id }, asleep), own);
+  // Record gone: by id first (a wake is `--resume` of the same id), by name second.
   const sessions = [
     { id: 'by-id', tmuxSession: 'other' },
     { id: 'by-name', tmuxSession: 'fm-alpha-1', isLead: false },
   ];
-  assert.equal(wokenRow(sessions, { name: 'fm-alpha-1', sessionId: 'by-id' })?.id, 'by-name');
-  assert.equal(wokenRow(sessions, { name: 'gone', sessionId: 'by-id' })?.id, 'by-id');
-  assert.equal(wokenRow(sessions, { name: 'gone', sessionId: 'gone' }), null);
+  assert.equal(wokenRow(sessions, { name: 'fm-alpha-1', sessionId: 'by-id' }, [])?.id, 'by-id');
+  assert.equal(wokenRow(sessions, { name: 'fm-alpha-1', sessionId: 'gone' }, [])?.id, 'by-name');
+  assert.equal(wokenRow(sessions, { name: 'gone', sessionId: 'gone' }, []), null);
+});
+
+test('a sibling inferred onto a sleeper’s transcript is not followed while the record stands', () => {
+  // MEASURED on the bench before the binding fix: after a panel restart with no hook receipt,
+  // the live sibling `fm-alpha-2` carried the sleeper's id, and `#/asleep/fm-alpha-1` followed
+  // it to `#/session/<that id>` — the sleeper's conversation over the sibling's composer.
+  const asleep = [rec()];
+  const stranger = { id: rec().sessionId, tmuxSession: 'fm-alpha-2', isLead: false };
+  assert.equal(wokenRow([stranger], { name: 'fm-alpha-1', sessionId: rec().sessionId }, asleep), null);
+  // …nor a row under the sleeper's name with another id while the record stands: that is a
+  // stranger that took the name, which the wake itself refuses.
+  const squatter = { id: 'pane-7', tmuxSession: 'fm-alpha-1', isLead: false };
+  assert.equal(wokenRow([squatter], { name: 'fm-alpha-1', sessionId: rec().sessionId }, asleep), null);
 });
 
 test('a woken row opens on its own route, asked of the live row', () => {

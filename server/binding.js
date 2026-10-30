@@ -26,6 +26,16 @@
  *   Ownership — a titled transcript already declares whose it is. If the pane has a
  *   label and the names differ, that file belongs to another session, running or not.
  *   An exited session leaves its transcript behind; a sibling must not inherit it.
+ *
+ * And one exclusion on top of all three, for the one exited session the panel still owns:
+ *
+ *   Sleepers — a hibernated session's transcript is *claimed* by its sleep record. Its
+ *   `/exit` record makes that file the newest in its folder, so it passes freshness, and
+ *   after a panel restart a receipt-less sibling left alone there was handed it by rule 3
+ *   (MEASURED, see docs/traps/binding.md). So no rule but a fresh hook receipt gives a
+ *   sleeper's transcript to a pane, except to the pane wearing the sleeper's own tmux name —
+ *   which is the wake, in the window before its record is deleted. The claim is the
+ *   record's: wake and forget delete it, and the claim goes with it.
  */
 
 const lower = (s) => (s ? String(s).toLowerCase() : null);
@@ -78,13 +88,15 @@ function looksBranchDerived(meta, pane) {
  * @param {Array}    args.metas             {sessionId, cwd, title, mtime}
  * @param {Function} args.hookBindingFor    paneId -> sessionId | null
  * @param {Function} args.rememberedFor      paneId -> sessionId | {sessionId, confidence} | null
+ * @param {Array}    args.sleeping          sleep records {name, sessionId, transcriptPath, sleptAt}
  * @returns {{bound: Map<string, {pane: object, confidence: string}>, unbound: Array}}
  */
-export function bindPanes({ panes, metas, hookBindingFor = () => null, rememberedFor = () => null }) {
+export function bindPanes({ panes, metas, hookBindingFor = () => null, rememberedFor = () => null, sleeping = [] }) {
   const bound = new Map(); // sessionId -> { pane, confidence }
   const claimed = new Set();
   const takenPanes = new Set();
   const bySession = new Map(metas.map((m) => [m.sessionId, m]));
+  const heldBySleeper = sleeperClaim(sleeping);
 
   const claim = (sessionId, pane, confidence) => {
     bound.set(sessionId, { pane, confidence });
@@ -95,10 +107,16 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
   const remaining = () =>
     panes.filter((p) => !takenPanes.has(p.paneId)).sort((a, b) => a.paneId.localeCompare(b.paneId));
 
-  // 1. Hooks are authoritative.
+  // 1. Hooks are authoritative — a sleeper's transcript included, provided the receipt was
+  // written by a pane that exists now and after the sleep (`hookOpensClaim`).
   for (const pane of remaining()) {
-    const sid = hookBindingFor(pane.paneId);
-    if (sid && bySession.has(sid) && !claimed.has(sid)) claim(sid, pane, 'hook');
+    const receipt = hookBindingFor(pane.paneId);
+    const sid = typeof receipt === 'string' ? receipt : receipt?.sessionId;
+    const meta = sid ? bySession.get(sid) : null;
+    if (!meta || claimed.has(sid)) continue;
+    const sleeper = heldBySleeper(pane, meta);
+    if (sleeper && !hookOpensClaim(receipt, sleeper, pane)) continue;
+    claim(sid, pane, 'hook');
   }
 
   // 1b. Whatever this pane was bound to a moment ago, provided it still holds up: same
@@ -109,6 +127,9 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
     const sid = typeof prev === 'string' ? prev : prev?.sessionId;
     const meta = sid && !claimed.has(sid) ? bySession.get(sid) : null;
     if (!meta) continue;
+    // Replay is no way round the claim: a pane bound to a sleeper's file before the claim
+    // existed (or by a panel build without it) does not get to keep it.
+    if (heldBySleeper(pane, meta)) continue;
     if (!sameWorkspace(pane, meta)) continue;
     if (pane.createdMs && meta.mtime < pane.createdMs) continue;
     // Keep the confidence it was earned with — a label match does not decay to a guess
@@ -137,6 +158,7 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
         (m) =>
           sameWorkspace(pane, m) &&
           !claimed.has(m.sessionId) &&
+          !heldBySleeper(pane, m) &&
           lower(m.title) === lower(pane.label) &&
           (!pane.createdMs || m.mtime >= pane.createdMs) &&
           // Where siblings compete, a title that is merely the repo-branch default
@@ -167,6 +189,7 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
     const candidates = metas
       .filter((m) => {
         if (!sameWorkspace(pane, m) || claimed.has(m.sessionId)) return false;
+        if (heldBySleeper(pane, m)) return false;
         if (pane.createdMs && m.mtime < pane.createdMs) return false;
         // Still never take a file that names a different live pane.
         const t = lower(m.title);
@@ -192,6 +215,54 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
   return { bound, unbound: remaining() };
 }
 
+/**
+ * `(pane, meta) -> record | null`: the sleep record that claims this transcript from this
+ * pane, or `null` when nothing does.
+ *
+ * A record claims by session id and by path, either one — a wake is `--resume` of the same
+ * file under the same id, so the two agree, and matching both means a probe that carried
+ * only one of them still finds its sleeper. It claims from every pane **except** the one
+ * wearing the sleeper's own tmux name: that pane is the wake, in the beat between the new
+ * pane appearing and the record being deleted, and refusing it there would leave the woken
+ * session unbound for a poll it has every right to. A stranger cannot be wearing that name —
+ * launches reserve it, and the wake refuses while anything else holds it — and one that
+ * somehow took it after the `/exit` would still fail freshness against the sleeper's file.
+ */
+export function sleeperClaim(sleeping = []) {
+  const byId = new Map();
+  const byPath = new Map();
+  for (const rec of Array.isArray(sleeping) ? sleeping : []) {
+    if (!rec || typeof rec !== 'object') continue;
+    if (rec.sessionId) byId.set(rec.sessionId, rec);
+    if (rec.transcriptPath) byPath.set(rec.transcriptPath, rec);
+  }
+  return (pane, meta) => {
+    const rec = byId.get(meta?.sessionId) || (meta?.path ? byPath.get(meta.path) : null) || null;
+    if (!rec) return null;
+    if (rec.name && pane?.tmuxSession === rec.name) return null;
+    return rec;
+  };
+}
+
+/**
+ * Does this hook receipt open a sleeper's claim for this pane?
+ *
+ * A receipt is still the authoritative rule, and the woken session's own receipt must bind
+ * it — but receipts are persisted per pane id and outlive both the pane and a panel restart,
+ * and pane ids restart at `%0` with the tmux server. So a receipt naming a sleeper is believed
+ * only if it was written **after the sleep and after this pane was created**: a woken
+ * session's `SessionStart` is both, and a leftover from the sleeper's own dead pane, replayed
+ * onto whatever pane now holds that number, is neither. A receipt with no time on it is a
+ * doubt, and a doubt is a no.
+ */
+function hookOpensClaim(receipt, sleeper, pane) {
+  const ts = typeof receipt === 'object' && receipt ? Number(receipt.ts) : NaN;
+  if (!Number.isFinite(ts)) return false;
+  if (Number.isFinite(sleeper.sleptAt) && ts < sleeper.sleptAt) return false;
+  if (pane.createdMs && ts < pane.createdMs) return false;
+  return true;
+}
+
 /** When a transcript was first and last written, in ms. */
 const spanOf = (m) => ({
   start: Date.parse(m.firstTs || '') || 0,
@@ -212,14 +283,16 @@ function liveOnly(metas) {
  * "new" means it hasn't spoken yet; "ambiguous" means we found candidates and refused
  * to pick between them.
  */
-export function unboundReason(pane, metas) {
+export function unboundReason(pane, metas, sleeping = []) {
   // Deliberately only two answers. A finer split would mean predicting whether this
   // pane will name itself on its next reply, which depends on whether it launched
   // before or after the shell wrapper started stamping the label — and a running pane
   // gives no way to tell. Better to say what's true than to promise a fix that won't
   // arrive.
+  // A sleeper's transcript is no candidate either: it is not this pane's to be unsure about.
+  const heldBySleeper = sleeperClaim(sleeping);
   const hasCandidate = metas.some(
-    (m) => sameWorkspace(pane, m) && (!pane.createdMs || m.mtime >= pane.createdMs),
+    (m) => sameWorkspace(pane, m) && !heldBySleeper(pane, m) && (!pane.createdMs || m.mtime >= pane.createdMs),
   );
   return hasCandidate ? 'ambiguous' : 'new';
 }

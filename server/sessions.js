@@ -178,6 +178,9 @@ export class SessionRegistry extends EventEmitter {
     this.replyLog = new Map(); // sessionId -> sorted reply timestamps
     this.sessions = new Map(); // sessionId -> session
     this.lastBinding = new Map(); // paneId -> {sessionId, confidence}, so a binding survives a sibling
+    // The hibernation store's records, set by `index.js` once the store exists. Every sleeper's
+    // transcript is claimed from inference (`binding.js`); nothing asleep is ever a roster row.
+    this.sleepers = () => [];
     // paneId -> whether permission prompts are off. Remembered rather than recomputed
     // because the mode line it is read from is not on screen while a permission box or a
     // dialog owns the footer, and a session must not stop looking dangerous for the
@@ -441,11 +444,13 @@ export class SessionRegistry extends EventEmitter {
       forgesFor(panes.map((p) => p.cwd)),
     ]);
 
+    const sleeping = this.sleepers() || [];
     const { bound: paneOf, unbound: unboundPanes } = bindPanes({
       panes,
       metas: [...bySession.values()],
-      hookBindingFor: (paneId) => this.status.paneBinding(paneId),
+      hookBindingFor: (paneId) => this.status.paneReceipt(paneId),
       rememberedFor: (paneId) => this.lastBinding.get(paneId) || null,
+      sleeping,
     });
 
     this.lastBinding = new Map(
@@ -624,7 +629,7 @@ export class SessionRegistry extends EventEmitter {
       const id = `pane-${pane.paneId.replace('%', '')}`;
       const project = pane.cwd ? path.basename(pane.cwd) : 'unknown';
       const scrape = await readPaneState(pane.paneId);
-      const reason = unboundReason(pane, [...bySession.values()]);
+      const reason = unboundReason(pane, [...bySession.values()], sleeping);
       const footer = rememberFooter(this.footers, pane.paneId, scrape);
       const ghostEligible = scrape.state === 'idle';
       const ghost = rememberGhost(this.ghosts, pane.paneId, {

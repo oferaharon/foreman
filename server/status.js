@@ -158,6 +158,13 @@ export class StatusEngine extends EventEmitter {
     return this.bindings.get(paneId)?.sessionId || null;
   }
 
+  /** The receipt behind `paneBinding`, `{sessionId, ts}` — the time is what lets `binding.js`
+   *  tell a woken sleeper's own receipt from one left over by the pane it slept in. */
+  paneReceipt(paneId) {
+    const rec = this.bindings.get(paneId);
+    return rec?.sessionId ? { sessionId: rec.sessionId, ts: rec.ts ?? null } : null;
+  }
+
   paneFor(sessionId) {
     for (const [paneId, rec] of this.bindings) if (rec.sessionId === sessionId) return paneId;
     return null;

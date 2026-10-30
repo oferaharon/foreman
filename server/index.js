@@ -227,6 +227,9 @@ const registry = new SessionRegistry(status, readState, queue, pins, tasks);
  * one. Everything is keyed by tmux session name, because pane ids reset.
  */
 const hibernation = new HibernateStore();
+// Every sleeper's transcript is claimed from inference — a receipt-less sibling was handed one
+// after a restart (binding.md). Read per poll, so wake and forget release it at once.
+registry.sleepers = () => hibernation.asleep();
 
 /** The sleepers' names — what every launch passes as `reserved`, except a wake. */
 const asleepNames = () => hibernation.names();
