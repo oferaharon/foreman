@@ -336,3 +336,70 @@ chain for the same reason the card's own branch does.
 The gate is still one reason the launcher opens a Terminal window, though it is no longer
 the only way past it. The `+ new` box's tick for it is **off** by default — recoverable via
 the pane header's attach button, but only if you notice.
+
+## A `/loop` outlives `/clear`, and only the transcript and one lock file know it exists
+
+**A cron or a `/loop` wake-up draws nothing the roster reads, survives `/clear` into a
+transcript that never mentions it, and the folder's lock file names only one of the
+sessions using the scheduler — MEASURED on v2.1.296, in the sandbox's `alpha`, two
+sessions side by side.** Hibernation must never `/exit` a session that has one, because
+both kinds are session-only: the `CronCreate` result says *"Session-only (not written to
+disk, dies when Claude exits)"*. So `server/hibernate.js` reads its own witness out of the
+transcript (`CronWitness`) and out of `<folder>/.claude/scheduled_tasks.lock`, and each of
+the measurements below decided something about how. The excerpts are committed:
+`test/fixtures/cron-recurring.jsonl`, `cron-after-clear.jsonl`,
+`cron-delete-and-wakeup.jsonl` and `cron-wakeup-fire.jsonl`, cut down to the records a scan
+reads, with the home directory rewritten.
+
+**What the records are.** A `CronCreate` result is a `type: 'user'` record whose
+`toolUseResult` is `{id, humanSchedule, recurring, durable}`; a `CronDelete` result's is
+`{id}`; a `CronList` result's is `{jobs: [{id, cron, humanSchedule, prompt, recurring,
+durable}]}`, the exact list at that moment. A `ScheduleWakeup` result's is `{scheduledFor
+/* ms */, clampedDelaySeconds, wasClamped}`, and a `stop: true` call answers `{…, stopped:
+true, cancelledWakeups: N}`. None of those shapes names its tool — `{id}` alone could be
+anything — so the scan learns each `tool_use` id's name from the assistant record first and
+reads a result only through that. An errored call is real and was hit (`noop` missing): its
+`tool_result` carries `is_error: true` and its `toolUseResult` is a string, and it schedules
+nothing.
+
+**1. A recurring cron survives `/clear`.** After `/clear`, `CronList` in the new
+conversation still listed the job, the new transcript held no `CronCreate` for it, and the
+lock file still named the *old* session id under the *same* pid. So a scan keyed on the
+transcript path alone answers "nothing scheduled" for a session with a live loop. The
+witness follows the **pane process** across the rotation — keyed by pane id and the pane's
+creation time — and the lock is matched by **pid, never by `sessionId`**.
+
+**2. A one-shot cron fires and is gone, and leaves no `CronDelete`.** The fire is a
+`type: 'system'`, `subtype: 'scheduled_task_fire'` record carrying `taskId` (the cron's id)
+and `cron`, followed by the prompt as an `isMeta` user record with `turnOrigin:
+'scheduled'`; `CronList` afterwards no longer had it. So a `recurring: false` id is retired
+by its own fire record, and a recurring one is not.
+
+**3. Two sessions in one folder share one lock, and it names only the first.** With crons
+live in both, `scheduled_tasks.lock` held the first session's `{sessionId, pid, procStart,
+acquiredAt}` and nothing about the second. When the first exited, the second took it over
+under its own pid and its *current* session id. So the lock is a witness for one session per
+folder at a time, and the transcript scan is the only witness for every other one — "either
+alone blocks" is the rule because neither alone sees everything. The lock also goes when the
+holder is killed (`kill-server` left `.claude/` empty), so a stale one naming a dead pid
+blocks nothing.
+
+**4. A `/loop` wake-up also survives `/clear`, fires early, and says so.** Armed with
+`ScheduleWakeup` and then `/clear`ed, it fired into the *new* transcript as a
+`scheduled_task_fire` record with `taskKind: 'loop'` and an internal `taskId` that matches
+nothing in the old one — and it fired **49 seconds before** its own `scheduledFor`. So a
+pending wake-up is the latest successful arm on this pane process with no later `stopped`
+and no later loop fire; `scheduledFor` only bounds how long the witness believes an arm
+whose fire it never saw.
+
+**And one the next item needs: `/exit` asks first.** With a cron live, `/exit` does not exit:
+it draws *"The following will stop when you exit: scheduled task · Every 30 minutes · …"*
+over `1. Exit and stop tasks`, `2. Move to background and exit`, `3. Stay`, `Enter to
+confirm · Esc to cancel`. `parsePane` reads it as `needs-decision` with a prompt, so
+`heldBy` calls it *"a permission prompt"* — it blocks, under the wrong words — and `Esc`
+put the session back on its composer with the cron intact. That box is a last line of
+defence, not a witness: a sleep that reaches it has already typed `/exit`, and must Escape
+it rather than wait out the name.
+
+Not measured here, because it needs a wake: whether a scratch panel rebinds a woken row.
+That is the sleep loop's bench.
