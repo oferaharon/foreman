@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parseGhost, rememberGhost } from '../server/ghost.js';
+import { composerEmpty, parseGhost, rememberGhost } from '../server/ghost.js';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const fixture = (name) => fs.readFileSync(path.join(dir, 'fixtures', name), 'utf8');
@@ -132,4 +132,37 @@ test('…and a read that came back empty clears it too', () => {
   rememberGhost(store, '%1', { eligible: true, ghost: 'run the tests' });
   assert.equal(rememberGhost(store, '%1', { eligible: true, ghost: null }), null);
   assert.equal(store.has('%1'), false);
+});
+
+/*
+ * `composerEmpty` — the hibernation sleep's question before it types `/exit`, whose `C-u`
+ * would wipe a half-written message in a Terminal window. Same box walk, same dim rule: a
+ * suggestion is not somebody's words, typed text is, and no composer is not an answer.
+ */
+test('an empty input line, or one holding only a suggestion, is empty', () => {
+  assert.equal(composerEmpty(fixture('ghost-wide.txt')), true);
+  assert.equal(composerEmpty(fixture('ghost-narrow.txt')), true);
+  assert.equal(composerEmpty(fixture('ghost-truncated.txt')), true, 'a truncated suggestion is still not typed');
+  assert.equal(composerEmpty(fixture('ghost-working.txt')), true);
+  assert.equal(composerEmpty(fixture('pane-idle.txt')), true);
+});
+
+test('typed text is not empty — and neither is a suggestion read without its dim', () => {
+  assert.equal(composerEmpty(fixture('ghost-typed.txt')), false);
+  const stripped = fixture('ghost-wide.txt').replace(/\u001b\[[0-9;:?]*[ -/]*[@-~]/g, '');
+  assert.equal(composerEmpty(stripped), false, 'without -e a suggestion reads as typed, the safe way');
+});
+
+test('a multi-line message being written is not empty', () => {
+  // The suggestion capture with a second input line under it — on its own the first line
+  // reads as empty, so only the line count can make this answer `false`.
+  const lines = fixture('ghost-wide.txt').split('\n');
+  const at = lines.findLastIndex((l) => l.includes('❯'));
+  lines.splice(at + 1, 0, '  and a second line');
+  assert.equal(composerEmpty(lines.join('\n')), false);
+});
+
+test('no composer on screen is not an answer', () => {
+  assert.equal(composerEmpty(fixture('prompt-bash.txt')), null);
+  assert.equal(composerEmpty(''), null);
 });

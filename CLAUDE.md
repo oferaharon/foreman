@@ -496,6 +496,12 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   real gates at 220 and 70 columns: the Yes arms, the second click trusts the folder and the
   pane lands on the composer, and `No, exit` ends the session on one click.
   [launch#demonstrated-not-asserted](docs/traps/launch.md#demonstrated-not-asserted)
+- `server/hibernate.js` (`CronWitness`, `lockBlocks`) · `test/fixtures/cron-*.jsonl` — **A
+  `/loop` draws nothing the roster reads, survives `/clear` into a transcript that never
+  mentions it, and the folder's lock names one session only — MEASURED on v2.1.296.** The
+  witness follows the pane process, not the path; the lock is matched by pid, never by
+  session id; and `/exit` with a cron live raises a box rather than exiting.
+  [launch#a-loop-outlives-clear-and-only-the-transcript-and-one-lock-file-know-it-exists](docs/traps/launch.md#a-loop-outlives-clear-and-only-the-transcript-and-one-lock-file-know-it-exists)
 
 ### Sending and claiming
 
