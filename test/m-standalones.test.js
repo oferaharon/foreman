@@ -248,7 +248,11 @@ test('the three hashes are three claims, and a rebound keeps the one it was open
   // Each list links its own kind, and only its own: the card its lead, the Standalones row
   // its session, and a worker line its worker.
   assert.match(app, /location\.hash = `#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`;/);
-  assert.match(app, /location\.hash = `#\/session\/\$\{encodeURIComponent\(row\.id\)\}`;/);
+  // The Standalones row's link is its `href`, built where the row is: `#/session/` for a live
+  // row, and — since hibernation item 5 — `#/asleep/<name>` for a sleeper drawn in the same
+  // list. The node follows whichever the row carries.
+  assert.match(app, /href: `#\/session\/\$\{encodeURIComponent\(s\.id\)\}`,/);
+  assert.match(app, /location\.hash = row\.href;/);
   assert.match(app, /location\.hash = `#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`;/);
   assert.equal(app.match(/location\.hash = `#\/worker\//g).length, 1, 'one link to a worker, on its line');
   // Subscribe, teardown and the gone timer are all kind-agnostic — one screen, three routes.
@@ -328,9 +332,11 @@ test('the kind is read where it branches and nowhere else', () => {
   assert.equal(lead.match(/view\.kind === '(lead|session|worker)'/g).length, 4);
   // `lead` only on the word `lead`: a kind this file has not heard of falls to the lesser
   // screen, never to the one with a tasks tab. It used to be the other way round.
+  // Hibernation item 5 added a fourth word, `asleep` — matched on the word too, so it can
+  // only be reached on purpose, and still falling through to `session` for anything else.
   assert.match(
     lead,
-    /kind: ctx\.kind === 'lead' \? 'lead' : ctx\.kind === 'worker' \? 'worker' : 'session',/,
+    /kind:\s*ctx\.kind === 'lead'\s*\? 'lead'\s*: ctx\.kind === 'worker'\s*\? 'worker'\s*: ctx\.kind === 'asleep'\s*\? 'asleep'\s*: 'session',/,
   );
   // The noun for the three sentences that need one, spelled once — and it is the kind.
   assert.match(lead, /function kindWord\(\) \{\s*return view\.kind;\s*\}/);
@@ -386,9 +392,11 @@ test('the worker count is a lead’s own team, never the folder’s', () => {
 /* ───────────────────────────────────────────────────────────── the row draws ─── */
 
 test('the row joins the home signature as rendered strings', () => {
+  // `waiting` joined it with hibernation item 5 — a sleeper's held-message count, drawn on
+  // its row as a rendered string.
   assert.match(
     app,
-    /JSON\.stringify\(rows\.map\(\(r\) => \[r\.id, r\.name, r\.folder, r\.word, r\.dot, r\.need, r\.working\]\)\)/,
+    /JSON\.stringify\(\s*rows\.map\(\(r\) => \[r\.id, r\.name, r\.folder, r\.word, r\.dot, r\.need, r\.working, r\.waiting\]\),\s*\)/,
   );
   // A raw stamp in there would differ on almost every roster frame and retire the guard.
   const view = app.slice(app.indexOf('function standalonesView('), app.indexOf('function roomsView('));
@@ -403,7 +411,7 @@ test('the row joins the home signature as rendered strings', () => {
    * places spell a different string. A stamp advancing without moving a row spells the same
    * one, which is correct — nothing a reader could see has changed.
    */
-  assert.match(view, /JSON\.stringify\(rows\.map\(\(r\) => \[r\.id,/);
+  assert.match(view, /JSON\.stringify\(\s*rows\.map\(\(r\) => \[r\.id,/);
   // The nodes are a thunk, so nothing is built for a paint the guard turns away.
   assert.match(view, /nodes: \(\) => rows\.map\(sessionNode\)/);
 });
@@ -415,7 +423,11 @@ test('every class the row writes has a rule, and the gutter is the shared one', 
   // The dot vocabulary is not restated: a dot's position is learned once and must be found
   // in the same place on every tab.
   assert.match(app, /gutter\.className = 'm-dots';/);
-  assert.equal(app.match(/gutter\.className = 'm-dots';/g).length, 2, 'the team row and this one');
+  assert.equal(
+    app.match(/gutter\.className = 'm-dots';/g).length,
+    3,
+    'the team row, this one, and a sleeping lead’s card (hibernation item 5)',
+  );
   assert.match(app, /slotDot\('m-dot-wait', row\.dot, waitTitleFor\(row\.need\)\)/);
   assert.equal(app.match(/waitTitleFor\(/g).length, 3, 'the definition and its two callers');
 });

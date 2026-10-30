@@ -82,6 +82,17 @@ import { mountRoom, renderCreateSheet, roomsListView, updateRoom } from './rooms
    what a worker is called. Pure and in its own module so the security check is a function a
    test runs rather than a shape a test reads; see that file's header. */
 import { routeRefusal, standalonesIn, workerName } from './roles.js';
+// Sleeping sessions — hibernation item 5. Pure, for `roles.js`'s reason: this file cannot be
+// loaded in `node --test`, and a rule that can only be read out of the source is never run.
+import {
+  liveRouteFor,
+  sleeperFor,
+  sleeperNamed,
+  sleepingLeadFor,
+  standaloneSleepers,
+  waitingWord,
+  wokenRow,
+} from './asleep.js';
 
 /* ------------------------------------------------------------- state --- */
 
@@ -122,6 +133,19 @@ const state = {
    * the socket lands, carries sessions and groups and not this.
    */
   rooms: null,
+  /**
+   * The sessions the panel has hibernated, as the roster frame's sibling `asleep` hands them
+   * — `[record + {waiting}]`, keyed by tmux session name — or null until a frame carries
+   * the key.
+   *
+   * Never rows of `sessions`, and never made into ones here: a sleeper has no pane, so
+   * nothing may be typed into it, and every reader of `sessions` (the tab marks, `needsKind`,
+   * the route claims) is safe precisely because it is never handed one. Null is "not told
+   * yet", for `rooms`' reason one field up — and `GET /api/sessions` does not carry it, so a
+   * phone that painted from that first answer has sessions and no sleepers until the socket
+   * speaks.
+   */
+  asleep: null,
   connected: false,
 };
 
@@ -181,7 +205,7 @@ function connect() {
      * bug in this project's history; it has been re-introduced once already, by a refactor
      * that re-subscribed a variable that no longer existed.
      */
-    if (isConversation(route.kind) && route.sessionId) {
+    if ((isConversation(route.kind) || route.kind === 'asleep') && route.sessionId) {
       send({ type: 'subscribe', sessionId: route.sessionId, slot: SLOT });
     }
     /*
@@ -232,6 +256,9 @@ function handle(msg) {
     // `'rooms' in msg`, never `msg.rooms &&`: an empty array is a real answer and the most
     // common one. See the field's own note in `state`.
     if ('rooms' in msg) state.rooms = msg.rooms || [];
+    // By presence, for the same reason: an empty list is the ordinary answer — hibernation
+    // is off by default — and an older panel sends no key at all.
+    if ('asleep' in msg) state.asleep = msg.asleep || [];
     onRoster();
   } else if (msg.type === 'rebound') {
     onRebound(msg);
@@ -264,7 +291,7 @@ function handle(msg) {
  * answers `leads` for it, and back from a worker is Leads even after a reload or a bookmark
  * that landed straight on it.
  */
-const route = { kind: 'home', tab: 'leads', sessionId: null, roomId: null };
+const route = { kind: 'home', tab: 'leads', sessionId: null, roomId: null, name: null };
 
 /** The three tabs, in the order they are drawn. The keys are `web/prefs.js`'s — that file
  *  has to check a stored value against them, so it owns the vocabulary and this owns only
@@ -333,16 +360,25 @@ function parseHash() {
   // draws as "there is no room with that id" instead of an empty log.
   const room = /^#\/room\/(.+)$/.exec(hash);
   if (room) return { kind: 'room', sessionId: null, roomId: decodeURIComponent(room[1]), tab: null };
+  // A sleeper is addressed by its **tmux session name**, the key the sleep record is stored
+  // under and the one Wake is posted to — names are the contract and pane ids reset. Its
+  // session id is looked up off the record once it is known (`enterAsleep`), never carried in
+  // the hash, so a link cannot pair one sleeper's name with another conversation. `tab: null`
+  // keeps the list it was opened from, the way a session route does.
+  const asleep = /^#\/asleep\/(.+)$/.exec(hash);
+  if (asleep) {
+    return { kind: 'asleep', sessionId: null, roomId: null, name: decodeURIComponent(asleep[1]), tab: null };
+  }
   const seg = /^#\/([a-z]+)\/?$/.exec(hash);
   const tab = seg && TAB_LABELS[seg[1]] ? seg[1] : 'leads';
-  return { kind: 'home', sessionId: null, roomId: null, tab };
+  return { kind: 'home', sessionId: null, roomId: null, name: null, tab };
 }
 
 function navigate() {
   const next = parseHash();
   if (
     next.kind === route.kind &&
-    next.sessionId === route.sessionId &&
+    (next.kind === 'asleep' ? next.name === route.name : next.sessionId === route.sessionId) &&
     next.roomId === route.roomId &&
     (next.tab === null || next.tab === route.tab)
   ) {
@@ -353,6 +389,7 @@ function navigate() {
   route.kind = next.kind;
   route.sessionId = next.sessionId;
   route.roomId = next.roomId;
+  route.name = next.name ?? null;
   if (next.tab) {
     route.tab = next.tab;
     // Remembered here rather than in the tab's click handler, so a tab reached by a typed
@@ -361,6 +398,7 @@ function navigate() {
   }
 
   if (isConversation(route.kind)) enterConversation();
+  else if (route.kind === 'asleep') enterAsleep();
   else if (route.kind === 'room') enterRoom();
   else enterHome();
 }
@@ -371,7 +409,9 @@ function leaveRoute() {
   // was up (Escape never pressed, no outside tap) would otherwise come back to `home` still
   // open. Unconditional and cheap: `closeHeadMenu` is a no-op when there is nothing open.
   closeHeadMenu();
-  if (isConversation(route.kind)) {
+  // The read-only view of a sleeper holds a transcript subscription exactly as a live
+  // conversation does, so it gives it back the same way.
+  if (isConversation(route.kind) || route.kind === 'asleep') {
     send({ type: 'unsubscribe', slot: SLOT });
     leadCtx?._dispose();
     leadCtx = null;
@@ -926,6 +966,14 @@ function homeRow(team) {
     return {
       team,
       lead: null,
+      /*
+       * The team's lead, asleep — or null. A team whose lead the panel hibernated is not a
+       * team with no lead: it stays on the Leads list, greyed, where it was (the ruling of
+       * 2026-10-29), and it is **not** offered by the start sheet — the server refuses a
+       * second lead under a sleeping one's name ("wake it from its row"), so a `start` there
+       * would be a button whose only answer is no.
+       */
+      asleep: sleepingLeadFor(state.asleep, state.sessions, team.repo),
       dot: false,
       working: false,
       unread: 0,
@@ -961,6 +1009,7 @@ function homeRow(team) {
   return {
     team,
     lead,
+    asleep: null,
     blocked,
     need,
     // The whole rule, and only this rule.
@@ -1072,8 +1121,11 @@ function liveStateWord(s, blocked) {
 function partitionTeams() {
   const rows = (state.teams || []).map(homeRow);
   return {
-    live: rows.filter((r) => r.lead),
-    startable: rows.filter((r) => !r.lead),
+    // A sleeping lead's card is drawn in the list, in its name order, greyed — and is never
+    // startable. `live` keeps its name because every reader of it means "drawn on Leads";
+    // the tab mark below reads `dot`, which a sleeper never lights.
+    live: rows.filter((r) => r.lead || r.asleep),
+    startable: rows.filter((r) => !r.lead && !r.asleep),
   };
 }
 
@@ -1122,6 +1174,26 @@ function standaloneSorted() {
 }
 
 /**
+ * What the Standalones tab draws: the live rows and the sleeping ones, **in one recency
+ * order** — a sleeper stays where its last activity puts it, greyed, rather than being
+ * moved to a list of its own (the maintainer's ruling of 2026-10-29).
+ *
+ * Membership is untouched: `standaloneRows` still answers for the live list and the tab's
+ * mark, and the route claim for `#/session/` never sees a sleeper, so nothing about this
+ * can widen who may be typed into. A sleeper's stamp is its record's `lastActivity`, the
+ * transcript's last timestamp at the moment it slept — the same field the live rows sort on.
+ */
+function standaloneDrawn() {
+  const live = standaloneRows().map((s) => ({ id: s.id, lastActivity: s.lastActivity, row: () => sessionRow(s) }));
+  const asleep = standaloneSleepers(state.asleep, state.sessions).map((r) => ({
+    id: `asleep:${r.name}`,
+    lastActivity: r.lastActivity,
+    row: () => sleeperRow(r),
+  }));
+  return [...live, ...asleep].sort(byRecent('lastActivity')).map((x) => x.row());
+}
+
+/**
  * One ordinary session's worth of facts.
  *
  * Rendered strings and booleans only — this goes into the home signature, and a raw
@@ -1141,6 +1213,34 @@ function sessionRow(s) {
     dot: need != null,
     working: isWorking(s),
     word: liveStateWord(s, need != null),
+    href: `#/session/${encodeURIComponent(s.id)}`,
+    asleep: false,
+    waiting: '',
+  };
+}
+
+/**
+ * One sleeping ordinary session, in `sessionRow`'s shape, so the Standalones list draws it
+ * in its usual place — greyed — rather than in a list of its own (the maintainer's ruling of
+ * 2026-10-29 for the phone).
+ *
+ * No dot and no working mark, ever: a sleeper asks for nothing, and what is held for it is
+ * delivered after it wakes, so `waiting N` is a muted fact on the row and never a summons.
+ * The id is the *name*, prefixed so it can never equal a live session id in the signature;
+ * the tap opens `#/asleep/<name>`, the read-only view with Wake.
+ */
+function sleeperRow(r) {
+  return {
+    id: `asleep:${r.name}`,
+    name: rowName(r) || r.name,
+    folder: r.project && r.project !== (rowName(r) || r.name) ? r.project : '',
+    need: null,
+    dot: false,
+    working: false,
+    word: 'asleep',
+    href: `#/asleep/${encodeURIComponent(r.name)}`,
+    asleep: true,
+    waiting: waitingWord(r),
   };
 }
 
@@ -1296,35 +1396,45 @@ function leadsView(teams) {
   const sig =
     `${startable.length}::` +
     JSON.stringify(
-      live.map((r) => [
-        r.team.repo,
-        r.lead.id,
-        stateWord(r),
-        // The rendered string, not `lastActivity` — see the field's own note in `homeRow`.
-        r.age,
-        r.dot,
-        // What the dot *says* when it is touched, which the trust gate changes on its own.
-        r.need,
-        r.working,
-        r.ctx,
-        r.unread,
-        r.workers,
-        r.review,
-        // The worker lines exactly as they are drawn — names and state words, in order.
-        // Without them a worker appearing, changing state or going away leaves this string
-        // untouched and the list under the card never repaints; a silent failure, which is
-        // why it is the list itself in here and not its length.
-        r.workerList,
-        // The forge link, exactly as `leadForgeLink` reads it. Only `loadTeams` (page load
-        // or a manual refresh) ever changes this, but without it here a repo whose remote
-        // changed would keep the stale link — or none — until something else in the row
-        // moved too.
-        r.team.forge?.webUrl || '',
-        r.team.forge?.reading || '',
-      ]),
+      live.map((r) =>
+        r.asleep
+          ? // A sleeping lead's card, as drawn: its name, that it is asleep, how long since it
+            // last spoke (the bucketed string, never the stamp), and what is held for it.
+            [r.team.repo, 'asleep', r.asleep.name, relativeTime(r.asleep.lastActivity), waitingWord(r.asleep)]
+          : [
+              r.team.repo,
+              r.lead.id,
+              stateWord(r),
+              // The rendered string, not `lastActivity` — see the field's own note in `homeRow`.
+              r.age,
+              r.dot,
+              // What the dot *says* when it is touched, which the trust gate changes on its own.
+              r.need,
+              r.working,
+              r.ctx,
+              r.unread,
+              r.workers,
+              r.review,
+              // The worker lines exactly as they are drawn — names and state words, in order.
+              // Without them a worker appearing, changing state or going away leaves this string
+              // untouched and the list under the card never repaints; a silent failure, which is
+              // why it is the list itself in here and not its length.
+              r.workerList,
+              // The forge link, exactly as `leadForgeLink` reads it. Only `loadTeams` (page load
+              // or a manual refresh) ever changes this, but without it here a repo whose remote
+              // changed would keep the stale link — or none — until something else in the row
+              // moved too.
+              r.team.forge?.webUrl || '',
+              r.team.forge?.reading || '',
+            ],
+      ),
     );
 
-  return { sig, startable: startable.length, nodes: () => live.map(teamNode) };
+  return {
+    sig,
+    startable: startable.length,
+    nodes: () => live.map((r) => (r.asleep ? sleepingTeamNode(r) : teamNode(r))),
+  };
 }
 
 /**
@@ -1345,7 +1455,7 @@ function standalonesView() {
     return { sig: 'sa:loading', startable: 0, nodes: () => [note('Loading sessions…')] };
   }
 
-  const rows = standaloneSorted().map(sessionRow);
+  const rows = standaloneDrawn();
   if (!rows.length) {
     return {
       sig: 'sa:empty',
@@ -1370,7 +1480,9 @@ function standalonesView() {
   // silently stop the list ever reordering again.
   const sig =
     'sa::' +
-    JSON.stringify(rows.map((r) => [r.id, r.name, r.folder, r.word, r.dot, r.need, r.working]));
+    JSON.stringify(
+      rows.map((r) => [r.id, r.name, r.folder, r.word, r.dot, r.need, r.working, r.waiting]),
+    );
   return { sig, startable: 0, nodes: () => rows.map(sessionNode) };
 }
 
@@ -1703,6 +1815,72 @@ function teamNode(row) {
   return wrap;
 }
 
+/**
+ * A team whose lead the panel hibernated: its card, in its usual place on Leads, greyed.
+ *
+ * The same grid as `teamNode` — both dot slots reserved and both unlit, so the name sits
+ * exactly where a live card's does and the list keeps its rhythm — and deliberately less on
+ * it: no unread badge, no context percentage, no worker lines. A lead sleeps only with no
+ * worker running (the verdict's second rule) and only with nothing unread (its sixth), so
+ * each of those would only ever draw a zero. What is left is the one line a reader needs:
+ * `asleep · 2h`, and `waiting N` when something is held for it.
+ *
+ * The tap opens `#/asleep/<name>` — the read-only conversation with Wake — never the live
+ * lead route, which has nothing to show for a session with no pane.
+ */
+function sleepingTeamNode(row) {
+  const rec = row.asleep;
+  const wrap = document.createElement('div');
+  wrap.className = 'm-team is-asleep';
+
+  const body = document.createElement('button');
+  body.className = 'm-team-body';
+  body.type = 'button';
+  body.addEventListener('click', () => {
+    location.hash = `#/asleep/${encodeURIComponent(rec.name)}`;
+  });
+
+  const gutter = document.createElement('span');
+  gutter.className = 'm-dots';
+  gutter.append(slotDot('m-dot-wait', false, ''), slotDot('m-dot-work', false, ''));
+  body.appendChild(gutter);
+
+  const title = document.createElement('span');
+  title.className = 'm-team-title';
+  const name = document.createElement('span');
+  name.className = 'm-team-name';
+  name.textContent = row.team.name;
+  title.appendChild(name);
+  body.appendChild(title);
+
+  const meta = document.createElement('span');
+  meta.className = 'm-team-meta';
+  const word = document.createElement('span');
+  word.className = 'm-team-state';
+  word.textContent = 'asleep';
+  meta.appendChild(word);
+  const age = relativeTime(rec.lastActivity);
+  if (age) {
+    const a = document.createElement('span');
+    a.className = 'm-team-age';
+    a.textContent = ` · ${age}`;
+    a.title = 'since it last spoke';
+    meta.appendChild(a);
+  }
+  const held = waitingWord(rec);
+  if (held) {
+    const h = document.createElement('span');
+    h.className = 'm-asleep-waiting';
+    h.textContent = ` · ${held}`;
+    h.title = 'messages held for it — they are delivered after it wakes';
+    meta.appendChild(h);
+  }
+  body.appendChild(meta);
+
+  wrap.appendChild(body);
+  return wrap;
+}
+
 /** The block of worker lines under one card. Built only when there is at least one. */
 function workerList(row) {
   const list = document.createElement('div');
@@ -1795,13 +1973,13 @@ function workerDotTitle(word) {
  */
 function sessionNode(row) {
   const wrap = document.createElement('div');
-  wrap.className = 'm-sess';
+  wrap.className = `m-sess${row.asleep ? ' is-asleep' : ''}`;
 
   const body = document.createElement('button');
   body.className = 'm-sess-body';
   body.type = 'button';
   body.addEventListener('click', () => {
-    location.hash = `#/session/${encodeURIComponent(row.id)}`;
+    location.hash = row.href;
   });
 
   const gutter = document.createElement('span');
@@ -1823,6 +2001,13 @@ function sessionNode(row) {
   word.className = `m-sess-state${row.dot ? ' is-blocked' : ''}`;
   word.textContent = row.word;
   meta.append(word);
+  if (row.waiting) {
+    const held = document.createElement('span');
+    held.className = 'm-asleep-waiting';
+    held.textContent = ` · ${row.waiting}`;
+    held.title = 'messages held for it — they are delivered after it wakes';
+    meta.append(held);
+  }
   if (row.folder) {
     const where = document.createElement('span');
     where.textContent = ` · ${row.folder}`;
@@ -2156,6 +2341,120 @@ function enterConversation() {
   send({ type: 'subscribe', sessionId: route.sessionId, slot: SLOT });
 }
 
+/* ------------------------------------------------------------- asleep --- */
+
+/*
+ * Wakes in flight and their refusals, by tmux session name — module scope for `launching`'s
+ * reason: the screen is repainted on every roster frame, so a disabled button would be
+ * re-enabled long before the wake returned, and two taps would post two wakes. The server
+ * refuses the second anyway (it holds `relaunching`), but a refusal on screen for a press
+ * that is working is a lie.
+ */
+const waking = new Set();
+const wakeErrors = new Map();
+
+/**
+ * `#/asleep/<name>`: the conversation of a session the panel has hibernated, read-only, with
+ * Wake where the composer goes. The maintainer's ruling of 2026-10-29 for the phone: no
+ * keep-awake toggle and no forget here — those are the desktop's.
+ *
+ * It mounts the **same** screen module the three live routes do (`lead.js`, in its `asleep`
+ * kind), so the transcript is rendered by the one renderer and a fix reaches every route; the
+ * module builds no composer, no card slot, no interrupt and no tasks tab for this kind.
+ *
+ * The transcript comes over the same `subscribe` frame, by the record's session id. A
+ * sleeper is not in the registry, so it is the server's sleep-record fallback in `subscribe`
+ * that finds the file — a path from the panel's own record, never from this client.
+ */
+function enterAsleep() {
+  el.head.hidden = true;
+  app.classList.add('no-head');
+
+  const host = document.createElement('div');
+  host.className = 'm-host';
+  el.screen.appendChild(host);
+
+  leadCtx = makeCtx();
+  leadEverSeen = false;
+  claimHeld = false;
+  route.sessionId = null;
+
+  mountLead(host, leadCtx);
+  onAsleepRoster();
+}
+
+/**
+ * The asleep route's answer to a roster frame. Three outcomes, in this order:
+ *
+ *   1. **It is awake.** A live row carries its name (or, for one beat, its session id): leave
+ *      for that row's own route. `location.replace`, so back from the live session is the
+ *      list and not this read-only page of something no longer asleep.
+ *   2. **It is asleep.** Subscribe once its session id is known, and repaint.
+ *   3. **Neither.** Before the first frame that carries `asleep` that is simply "not told
+ *      yet". After it, a wake in flight is still on its way; otherwise it was forgotten or
+ *      woken somewhere the roster has not caught up with, and only if that lasts is it gone —
+ *      the same 4 s grace a live route gives a row that vanished.
+ */
+function onAsleepRoster() {
+  const record = sleeperNamed(state.asleep, state.sessions, route.name);
+  const live = wokenRow(state.sessions, { name: route.name, sessionId: record?.sessionId ?? route.sessionId });
+  if (live) {
+    const hash = liveRouteFor(live);
+    if (hash) {
+      location.replace(hash);
+      return;
+    }
+  }
+
+  if (record) {
+    leadEverSeen = true;
+    clearTimeout(goneTimer);
+    goneTimer = null;
+    if (record.sessionId && route.sessionId !== record.sessionId) {
+      route.sessionId = record.sessionId;
+      send({ type: 'subscribe', sessionId: route.sessionId, slot: SLOT });
+    }
+    updateLead(null);
+    return;
+  }
+
+  updateLead(null);
+  if (state.asleep === null || waking.has(route.name) || goneTimer) return;
+  goneTimer = setTimeout(() => {
+    goneTimer = null;
+    if (route.kind !== 'asleep') return;
+    if (sleeperNamed(state.asleep, state.sessions, route.name)) return;
+    if (wokenRow(state.sessions, { name: route.name, sessionId: route.sessionId })) return onAsleepRoster();
+    showGone('not-asleep');
+  }, leadEverSeen ? 4000 : 0);
+}
+
+/**
+ * Press Wake: the desktop's own route, `POST /api/asleep/:name/wake`, and nothing else.
+ *
+ * A wake is a launch — the server starts the session again under its own name, on `--resume`
+ * of the same conversation, and moves whatever was held for it into its queue — so this
+ * does not navigate on its own answer: the roster frame the server broadcasts carries the
+ * live row, and `onAsleepRoster` follows it there. The answer is asked again here only so a
+ * phone whose frame arrived first is not left waiting for the next one.
+ */
+async function wakeSleeper(name) {
+  if (!name || waking.has(name)) return;
+  waking.add(name);
+  wakeErrors.delete(name);
+  if (route.kind === 'asleep' && route.name === name) updateLead(null);
+  try {
+    const res = await fetch(`/api/asleep/${encodeURIComponent(name)}/wake`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `Wake failed (${res.status}).`);
+  } catch (err) {
+    wakeErrors.set(name, err.message || String(err));
+  } finally {
+    waking.delete(name);
+  }
+  if (route.kind === 'asleep' && route.name === name) onAsleepRoster();
+}
+
 /**
  * The screen's window onto the shell. These names are the contract the conversation screen
  * is written against; nothing else here is public. Three of them landed with the Standalones
@@ -2175,7 +2474,21 @@ function makeCtx() {
     get sessionId() {
       return route.sessionId;
     },
-    session: () => sessionOf(route.sessionId),
+    /*
+     * Null, always, on the read-only view of a sleeper: there is no live row behind it, and a
+     * row that turned up under the same id would be the session *after* it woke — which the
+     * shell answers by leaving this route for the live one (`onAsleepRoster`), never by
+     * handing the read-only screen something it could type into.
+     */
+    session: () => (route.kind === 'asleep' ? null : sessionOf(route.sessionId)),
+    /* The sleep record on screen, or null — the read-only view's header and Wake bar draw
+       from it. A thunk for `session`'s reason: it is repainted on the roster beat. */
+    record: () => (route.kind === 'asleep' ? sleeperNamed(state.asleep, state.sessions, route.name) : null),
+    /* Wake, and whether one is in flight — both owned here, in module scope, because the
+       screen is repainted on every roster frame and a flag on a node would not survive it. */
+    wake: () => wakeSleeper(route.name),
+    waking: () => waking.has(route.name),
+    wakeError: () => wakeErrors.get(route.name) || null,
     /*
      * Which of the three conversation routes mounted this screen.
      *
@@ -2355,6 +2668,11 @@ function onRoster() {
     return;
   }
 
+  if (route.kind === 'asleep') {
+    onAsleepRoster();
+    return;
+  }
+
   const session = sessionOf(route.sessionId);
   if (session) {
     /*
@@ -2373,6 +2691,18 @@ function onRoster() {
     clearTimeout(goneTimer);
     goneTimer = null;
     updateLead(session);
+    return;
+  }
+
+  /*
+   * Gone from the roster because the panel put it to sleep: the conversation the reader was
+   * looking at is still there to read, so the screen turns into its read-only view rather
+   * than into "no longer running". `replace`, so back is the list and not a dead route. A
+   * resume keeps the session id, which is the key this follows (plan item 2, measured).
+   */
+  const sleeper = sleeperFor(state.asleep, state.sessions, route.sessionId);
+  if (sleeper) {
+    location.replace(`#/asleep/${encodeURIComponent(sleeper.name)}`);
     return;
   }
 
@@ -2451,6 +2781,9 @@ function goneText(reason) {
       : 'That session is not one of a team’s workers. Workers open from under their lead on the Leads tab.';
   }
   if (reason === 'unknown-route') return 'This link does not name anything the phone opens.';
+  if (reason === 'not-asleep') {
+    return 'This session is not asleep any more — it was woken or forgotten at the Mac.';
+  }
   if (route.kind === 'lead') return 'This lead is no longer running. It was closed or it exited.';
   if (route.kind === 'worker') {
     return 'This worker is no longer running. Its task was closed or it exited.';

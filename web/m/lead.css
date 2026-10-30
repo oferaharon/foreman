@@ -41,6 +41,7 @@
 .m-lead-stream[hidden],
 .m-lead-tasks[hidden],
 .m-composer[hidden],
+.m-wake-error[hidden],
 .m-card-slot[hidden],
 .m-mq[hidden],
 .m-queue[hidden],
@@ -819,6 +820,67 @@
   /* With `viewport-fit=cover` the home indicator sits over the last few millimetres of the
      screen, which is precisely where the send button is. */
   padding-bottom: calc(0.55rem + env(safe-area-inset-bottom));
+}
+
+/* ---- Wake, where the composer goes on a sleeping session's read-only view ---- */
+
+/*
+ * Hibernation item 5. The bar takes the composer's slot and the composer's padding — safe
+ * areas included, since the home indicator sits exactly where the button is — so the
+ * conversation above ends at the same line on a live screen and a sleeping one. One control
+ * and one sentence: there is nothing to type into a session with no pane.
+ *
+ * Every `.m-wake*` name was grepped against all five phone sheets before it was written
+ * (rail-and-groups#the-phones-five-stylesheets); none of them names any.
+ */
+.m-wake {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.55rem 0.7rem;
+  padding-left: calc(0.7rem + env(safe-area-inset-left));
+  padding-right: calc(0.7rem + env(safe-area-inset-right));
+  padding-bottom: calc(0.55rem + env(safe-area-inset-bottom));
+}
+
+.m-wake-note {
+  flex: 1 1 10rem;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+.m-wake-btn {
+  flex: none;
+  min-width: 6.5rem;
+  min-height: 48px;
+  padding: 0 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+
+.m-wake-btn:active { background: var(--surface-sunk); }
+.m-wake-btn:disabled { color: var(--ink-faint); }
+
+/* The server's own refusal, on a line of its own above the note — a wake that failed leaves
+   the session asleep, so the button stays and the sentence says why. */
+.m-wake-error {
+  flex: 1 0 100%;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--decision);
 }
 
 .m-composer-row {
