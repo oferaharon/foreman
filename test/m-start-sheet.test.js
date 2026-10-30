@@ -62,7 +62,10 @@ const css = text('web/m/m.css');
 test('the partition is one pass over homeRow, and homeRow’s own `lead` is the whole test', () => {
   assert.match(
     app,
-    /function partitionTeams\(\) \{\s*const rows = \(state\.teams \|\| \[\]\)\.map\(homeRow\);\s*return \{\s*live: rows\.filter\(\(r\) => r\.lead\),\s*startable: rows\.filter\(\(r\) => !r\.lead\),\s*\};\s*\}/,
+    // Hibernation item 5: a team whose lead is asleep (`homeRow`'s `asleep`) is drawn on the
+    // list, greyed, and is never startable — the server refuses a second lead under a
+    // sleeping one's name. Still one pass, still `homeRow`'s own fields and nothing else.
+    /function partitionTeams\(\) \{\s*const rows = \(state\.teams \|\| \[\]\)\.map\(homeRow\);\s*return \{[\s\S]*?live: rows\.filter\(\(r\) => r\.lead \|\| r\.asleep\),\s*startable: rows\.filter\(\(r\) => !r\.lead && !r\.asleep\),\s*\};\s*\}/,
   );
 
   // `leadFor` is what fills that field, and it stays a function with exactly one caller —
@@ -85,7 +88,8 @@ test('the home list is built from the live half and nothing else', () => {
 
   // The nodes are a thunk so nothing is built for a paint the guard turns away, and what
   // the Leads tab builds is still `live` and nothing else.
-  assert.match(app, /nodes: \(\) => live\.map\(teamNode\)/);
+  // (A sleeping lead's card is built by its own node function, in the same pass.)
+  assert.match(app, /nodes: \(\) => live\.map\(\(r\) => \(r\.asleep \? sleepingTeamNode\(r\) : teamNode\(r\)\)\)/);
   assert.match(app, /homeList\.replaceChildren\(\.\.\.view\.nodes\(\)\);/);
   assert.ok(
     !/homeList\.replaceChildren\(\.\.\.rows\.map/.test(app),
@@ -136,7 +140,10 @@ test('the count of startable teams is in the home signature, because the button 
   // signature below — so the `+` cannot survive the last lead-less team gaining a lead.
   assert.match(app, /const sig = \[\s*quota,\s*route\.tab,[\s\S]{0,200}?view\.sig,\s*\]\.join\('::'\);/);
   assert.match(app, /`\$\{startable\.length\}::` \+/);
-  assert.match(app, /return \{ sig, startable: startable\.length, nodes: \(\) => live\.map\(teamNode\) \};/);
+  assert.match(
+    app,
+    /return \{\s*sig,\s*startable: startable\.length,\s*nodes: \(\) => live\.map\(\(r\) => \(r\.asleep \? sleepingTeamNode\(r\) : teamNode\(r\)\)\),\s*\};/,
+  );
 
   // One painter, reading the body's answer. The other two tabs answer `0` — "start a lead
   // in a team that has none" is not an offer a list of ordinary sessions or rooms can make.
@@ -173,7 +180,10 @@ test('the sheet keeps the home list’s order and does not sort for itself', () 
    * re-sorts for itself, which is what this test is about: the roster's own order is
    * urgency-first and would move a row under a thumb the moment something else blocked.
    */
-  assert.equal(app.match(/\.sort\(/g).length, 2, 'loadTeams, and the standalone order');
+  // The third is `standaloneDrawn` (hibernation item 5), which folds the sleepers into the
+  // same recency order through the same comparator — the Standalones list, not a new one.
+  assert.equal(app.match(/\.sort\(/g).length, 3, 'loadTeams, the standalone order, and its sleepers');
+  assert.match(app, /\]\.sort\(byRecent\('lastActivity'\)\)/);
   assert.match(app, /state\.teams = \(data\.teams \|\| \[\]\)\s*\.slice\(\)\s*\.sort\(/);
   assert.match(app, /function standaloneSorted\(\) \{\s*return standaloneRows\(\)\s*\.slice\(\)\s*\.sort\(/);
 });

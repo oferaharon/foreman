@@ -42,11 +42,15 @@ let tmuxDir;
 let bench = false;
 let argsFile;
 
+const PNG =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 const IDS = {
   alpha: '0a1fa000-0000-4000-8000-00000000a1fa',
   beta: '0be7a000-0000-4000-8000-00000000be7a',
   gamma: '0ca33a00-0000-4000-8000-0000000ca33a',
   delta: '0de17a00-0000-4000-8000-0000000de17a',
+  zeta: '0ce7a000-0000-4000-8000-00000000ce7a',
 };
 
 function stop(proc) {
@@ -176,11 +180,30 @@ test.before(async () => {
   tmuxDir = await fsp.mkdtemp('/tmp/foreman-hb-');
   port = await freePort();
 
-  const dirs = Object.fromEntries(['alpha', 'beta', 'gamma', 'delta'].map((d) => [d, path.join(stateDir, d)]));
+  const dirs = Object.fromEntries(['alpha', 'beta', 'gamma', 'delta', 'zeta'].map((d) => [d, path.join(stateDir, d)]));
   for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true });
   // The lead-refusal case needs a git repo: `launchLead` checks for one before anything else.
   execFileSync('git', ['init', '-q', dirs.delta]);
   for (const id of Object.values(IDS)) fs.writeFileSync(path.join(stateDir, `${id}.jsonl`), '');
+  // zeta's sleeper (untouched by the wake tests) has a conversation with a pasted image and a `Write`, for the read-only routes.
+  fs.writeFileSync(
+    path.join(stateDir, `${IDS.zeta}.jsonl`),
+    [
+      {
+        type: 'user',
+        uuid: 'img1',
+        timestamp: '2026-10-29T10:00:00.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } }] },
+      },
+      {
+        type: 'user',
+        uuid: 'wr1',
+        timestamp: '2026-10-29T10:01:00.000Z',
+        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't_wr1', content: 'ok' }] },
+        toolUseResult: { type: 'create', filePath: path.join(dirs.zeta, 'notes.md'), content: '# notes\n', structuredPatch: [], originalFile: null, userModified: false },
+      },
+    ].map((r) => JSON.stringify(r)).join('\n') + '\n',
+  );
 
   await fsp.writeFile(
     path.join(stateDir, 'hibernate.json'),
@@ -189,6 +212,7 @@ test.before(async () => {
         [`${PREFIX}alpha-main`]: record(`${PREFIX}alpha-main`, dirs.alpha, IDS.alpha),
         [`${PREFIX}beta-main`]: record(`${PREFIX}beta-main`, dirs.beta, IDS.beta),
         [`${PREFIX}gamma-master`]: record(`${PREFIX}gamma-master`, dirs.gamma, IDS.gamma),
+        [`${PREFIX}zeta-main`]: record(`${PREFIX}zeta-main`, dirs.zeta, IDS.zeta),
         [`${PREFIX}delta-lead`]: record(`${PREFIX}delta-lead`, dirs.delta, IDS.delta, { lead: true }),
       },
       keepAwake: [],
@@ -391,4 +415,45 @@ test('Wake starts it again under its own name, on --resume and the launch model,
     (onScreen > screen.indexOf('first for alpha')) || (rest.length === 1 && rest[0] === 'second for alpha'),
     `the second follows the first: queued ${JSON.stringify(rest)}`,
   );
+});
+
+/* ------------------------------------------------------- read-only routes for a sleeper --- */
+
+test('a sleeper answers the images and outputs lists from its own transcript', async () => {
+  const imgs = await api('GET', `/api/sessions/${IDS.zeta}/images`);
+  assert.equal(imgs.status, 200);
+  assert.deepEqual(imgs.body.images.map((i) => [i.uuid, i.index]), [['img1', 0]]);
+  const outs = await api('GET', `/api/sessions/${IDS.zeta}/outputs`);
+  assert.equal(outs.status, 200);
+  assert.deepEqual(outs.body.outputs.map((o) => [o.source, o.name ?? path.basename(o.path ?? '')]), [['image', ''], ['write', 'notes.md']]);
+});
+
+test('a sleeper’s image and output bytes carry the live headers', async () => {
+  const image = await fetch(`http://127.0.0.1:${port}/api/sessions/${IDS.zeta}/image/img1/0`);
+  assert.equal(image.status, 200);
+  assert.equal(image.headers.get('content-type'), 'image/png');
+  assert.match(image.headers.get('cache-control'), /immutable/);
+  assert.equal((await image.arrayBuffer()).byteLength, Buffer.from(PNG, 'base64').length);
+  const out = await fetch(`http://127.0.0.1:${port}/api/sessions/${IDS.zeta}/output/wr1/0`);
+  assert.equal(out.status, 200);
+  assert.match(await out.text(), /# notes/);
+});
+
+test('an unknown id still 404s on every reader route, and a sleeper’s name is not an id', async () => {
+  for (const id of ['00000000-0000-4000-8000-000000000000', `${PREFIX}zeta-main`]) {
+    for (const route of ['images', 'outputs', 'image/img1/0', 'output/wr1/0']) {
+      const res = await fetch(`http://127.0.0.1:${port}/api/sessions/${id}/${route}`);
+      assert.equal(res.status, 404, `${id} ${route}`);
+    }
+  }
+});
+
+test('a sleeper learns nothing about the routes that type or end', async () => {
+  // The send box is the one that answers by name rather than 404 (item 3): its composer is
+  // Wake, so the refusal says so — and it still types nothing and holds nothing.
+  const send = await api('POST', `/api/sessions/${IDS.zeta}/send`, { text: 'hi' });
+  assert.equal(send.status, 409);
+  assert.equal(send.body.asleep, true);
+  const files = await api('GET', `/api/sessions/${IDS.zeta}/files`);
+  assert.equal(files.status, 404);
 });

@@ -369,7 +369,11 @@ test('back from a worker is Leads, even from a reload that landed on one', () =>
 test('the worker screen is the standalone screen: no tasks tab, its own name', () => {
   const lead = text('web/m/lead.js');
   // `lead` only on the word `lead`, so a worker never gets a lead's tasks tab.
-  assert.match(lead, /kind: ctx\.kind === 'lead' \? 'lead' : ctx\.kind === 'worker' \? 'worker' : 'session',/);
+  // (Hibernation item 5 added `asleep`, also matched on its word.)
+  assert.match(
+    lead,
+    /kind:\s*ctx\.kind === 'lead'\s*\? 'lead'\s*: ctx\.kind === 'worker'\s*\? 'worker'\s*: ctx\.kind === 'asleep'\s*\? 'asleep'\s*: 'session',/,
+  );
   // The header names it as the line did — one function for both.
   assert.match(lead, /import \{ workerName \} from '\.\/roles\.js';/);
   assert.match(lead, /if \(view\.kind === 'worker'\) return workerName\(s\);/);

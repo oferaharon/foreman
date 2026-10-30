@@ -625,6 +625,21 @@ export class HibernateStore extends EventEmitter {
     return null;
   }
 
+  /**
+   * The sleeping lead for a folder, or nothing — what a nudge, a trigger or a merge press
+   * finds when `findLead` finds no live one. Exactly one or none, `findLead`'s own rule: two
+   * sleeping leads in one folder would be a choice, and a message is never sent on a guess.
+   * `lead` is the record's `isLeadName` at sleep, and `folder` its `paneCwd`.
+   */
+  leadFor(folder) {
+    if (typeof folder !== 'string' || !path.isAbsolute(folder)) return null;
+    const want = path.resolve(folder);
+    const leads = [...this.asleepBy.values()].filter(
+      (r) => r.lead === true && typeof r.folder === 'string' && path.isAbsolute(r.folder) && path.resolve(r.folder) === want,
+    );
+    return leads.length === 1 ? { ...leads[0] } : null;
+  }
+
   /** Record a sleeper — written *before* its `/exit`, so a crash mid-sleep leaves the row. */
   put(record) {
     if (!record?.name) throw new Error('A sleep record needs the session’s name.');

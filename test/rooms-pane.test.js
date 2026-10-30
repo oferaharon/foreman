@@ -314,6 +314,17 @@ test('an unreachable member is named as not reached, never as handed', () => {
   assert.ok(handedWaiting(e));
 });
 
+test('a sleeping member is said as held, never as reached and never as missed', () => {
+  const e = entry({
+    handed: [
+      { name: 'alpha-main', state: 'typed' },
+      { name: 'beta-lead', state: 'held', reason: 'asleep' },
+    ],
+  });
+  assert.equal(handedText(e), 'handed to alpha-main · beta-lead asleep — held until woken');
+  assert.ok(handedWaiting(e), 'a held copy is still waiting');
+});
+
 test('a state this version has never heard of reads as a miss, never as a success', () => {
   const e = entry({ handed: [{ name: 'alpha-main', state: 'teleported' }] });
   assert.equal(handedText(e), 'alpha-main not reached');
