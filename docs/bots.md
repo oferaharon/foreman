@@ -77,21 +77,21 @@ no real deployment uses.
 
 ### What the contract does not say, and a deployment should know
 
-- **Copy the helper from the release tag, and v0.5.0 is the first one that carries it.**
-  The commands name v0.5.0; use the tag your panel runs, which the rail's footer shows.
+- **Copy the helper from the release tag; every tag since v0.5.0 carries it.**
+  The commands name v0.6.0; use the tag your panel runs, which the rail's footer shows.
   From a clone of this repository:
 
   ```
-  git show v0.5.0:helper/foreman-helper.mjs > foreman-helper.mjs
+  git show v0.6.0:helper/foreman-helper.mjs > foreman-helper.mjs
   ```
 
   or, without one (a Homebrew install has no git history):
 
   ```
-  curl -fsSL https://raw.githubusercontent.com/oferaharon/foreman/v0.5.0/helper/foreman-helper.mjs -o foreman-helper.mjs
+  curl -fsSL https://raw.githubusercontent.com/oferaharon/foreman/v0.6.0/helper/foreman-helper.mjs -o foreman-helper.mjs
   ```
 
-  `node foreman-helper.mjs --version` then prints `foreman-helper 0.5.0 (protocol v1)`: its
+  `node foreman-helper.mjs --version` then prints `foreman-helper 0.6.0 (protocol v1)`: its
   version string follows `package.json`, and a test holds the two equal. A helper copied
   from `main` before the tag existed reports `0.4.0` and is otherwise the same file — the
   version string is the only line in it that has changed since it was merged.
@@ -160,7 +160,7 @@ Run it where the helper runs, with the same environment:
 
 ```
 $ node foreman-helper.mjs --check
-foreman-helper 0.5.0 --check (protocol v1)
+foreman-helper 0.6.0 --check (protocol v1)
 panel        http://host.docker.internal:48770  reachable
 token        accepted for bot alpha-bot
 roots        main  /home/node/.claude/projects  2 files
