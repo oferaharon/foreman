@@ -4305,6 +4305,21 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 .attach-remove:hover { color: var(--decision); }
 
+/* The text box's own box, which exists to hang its grip off the textarea's top edge. A flex
+   column so the textarea is a flex item rather than an inline-block on a line box — which
+   would put a descender's worth of gap under it and move the row below. */
+.composer-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The two grips. The composer's straddles its `border-top`; the text box's straddles the
+   textarea's own top border. `.pane-grip` is absolute, so neither takes a pixel of layout,
+   and both hairlines land on the rule they move (3px into a 7px strip, from -3px). */
+.composer-grip { top: -3px; }
+.composer-ta-grip { top: -3px; }
+
 .composer textarea {
   font-family: var(--mono);
   font-size: 0.82rem;
@@ -4316,9 +4331,24 @@ body.pin-reordering * { cursor: grabbing !important; }
   padding: 0.7rem 0.85rem;
   resize: none;
   width: 100%;
-  min-height: 3rem;
-  max-height: 14rem;
+  /* A dragged text box height is a floor; `autoGrow` still grows the box past it with what
+     you type, up to whichever is larger of the old cap and the floor. */
+  min-height: var(--composer-ta-h, 3rem);
+  max-height: max(14rem, var(--composer-ta-h, 0rem));
 }
+
+/* A dragged composer height is a floor under the whole section, and the text box takes the
+   slack. Only in this mode is the composer a flex column — unsized, it is exactly the block
+   it always was. `width: 100%` because an auto-margined flex item is otherwise sized to its
+   content rather than stretched. */
+:root.composer-sized .composer {
+  min-height: var(--composer-h);
+  display: flex;
+  flex-direction: column;
+}
+:root.composer-sized .composer-inner { flex: 1 1 auto; width: 100%; }
+:root.composer-sized .composer-box { flex: 1 1 auto; }
+:root.composer-sized .composer textarea { flex: 1 1 auto; max-height: none; }
 
 .composer { position: relative; }
 
@@ -4424,6 +4454,16 @@ body.pin-reordering * { cursor: grabbing !important; }
 }
 
 .composer-above > .ghost-btn > .ghost-btn-label { grid-area: 1 / 1; }
+
+/* Clear, left of interrupt, on interrupt's terms: its word changes three ways — `clear`,
+   `preparing…`, `clear now` — so the widest is held in the box and nothing beside it ever
+   moves. `preparing…` is the widest in this face; the `::before` is the measurement. */
+.composer-above > .ghost-btn.clear-btn::before { content: 'preparing…'; }
+
+/* Open-a-Terminal, right of interrupt: the header's icon button, one word wide of nothing,
+   so it opts out of the held-word grid and keeps `.icon-btn`'s centring. */
+.composer-above > .ghost-btn.term-btn { display: inline-flex; }
+.composer-above > .ghost-btn.term-btn::before { content: none; }
 
 /* ---- the ghost-text suggestion ---- */
 

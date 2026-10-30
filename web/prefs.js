@@ -23,6 +23,8 @@
  * be the same failure as two spellings of the key, one level down, so they travel together.
  */
 
+import { DEFAULT_CLEAR_PREP } from './clear-phase.js';
+
 /**
  * One stored on/off flag, read once at import and remembered for the visit.
  *
@@ -114,6 +116,46 @@ function choice(key, allowed, fallback) {
   };
 }
 
+/**
+ * One stored line of free text, read once at import and remembered for the visit.
+ *
+ * The third sibling, with `flag`'s guard for `flag`'s reason. Blank — or nothing stored, or
+ * a store that throws — reads back as the fallback, so a caller never has to ask whether
+ * the box was ever filled in: the answer is always something it can use.
+ */
+function text(key, fallback) {
+  const clean = (v) => (typeof v === 'string' && v.trim() ? v.trim() : fallback);
+  const read = () => {
+    try {
+      return clean(localStorage.getItem(key));
+    } catch {
+      /* private mode, or site data blocked — the fallback is a perfectly good answer */
+      return fallback;
+    }
+  };
+  let value = read();
+  return {
+    get value() {
+      return value;
+    },
+    /** Set it and remember it. Blank is the fallback, and clears what was stored. */
+    set(next) {
+      value = clean(next);
+      try {
+        if (value === fallback) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+      } catch {
+        /* storage blocked — this window still behaves, the answer just won't survive a reload */
+      }
+      return value;
+    },
+    reload() {
+      value = read();
+      return value;
+    },
+  };
+}
+
 /** The keys. Named once, exported so a test can name the same ones. */
 export const GHOST_SEND_KEY = 'foreman.ghostSend';
 export const HIDE_FINISHED_KEY = 'foreman.hideFinished';
@@ -122,6 +164,7 @@ export const ROOM_FOLDED_KEY = 'foreman.roomFolded';
 export const PHONE_TAB_KEY = 'foreman.m.tab';
 export const FILES_VIEW_KEY = 'foreman.filesView';
 export const BOTS_FOLDED_KEY = 'foreman.botsFolded';
+export const CLEAR_PREP_KEY = 'foreman.clearPrep';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -193,6 +236,14 @@ export const roomFolded = flag(ROOM_FOLDED_KEY);
  * One answer for the whole browser, because there is one rail.
  */
 export const botsFolded = flag(BOTS_FOLDED_KEY);
+
+/**
+ * What the composer's Clear button sends on its first press — the message that asks a
+ * session to get ready for `/clear`. Set in the settings box; blank means the default.
+ * Per browser, like `ghostSend` beside it in that box: it decides what a press in *this*
+ * window sends, and needs no server, no restart and no say over who can reach the panel.
+ */
+export const clearPrep = text(CLEAR_PREP_KEY, DEFAULT_CLEAR_PREP);
 
 /**
  * The three tabs of the phone's home screen, in the order they are drawn.
