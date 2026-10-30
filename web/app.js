@@ -92,6 +92,11 @@ import { eligibleFolders, matchesFilter } from './group-folders.js';
 // this". Both are rules that render perfectly when re-derived wrongly — a menu that forgets
 // to exclude the group's own folders offers a pick that does nothing.
 import { foldsInto, splitTitle } from './rail-fold.js';
+// Sleepers on the rail — where each greyed row goes, and what a pane showing one follows.
+// A leaf, so `test/asleep-rail.test.js` runs it in node.
+import { asleepItems, followIntoSleep, mergeByActivity, placePinned, sleepTooltip, waitingText, wokenSession } from './asleep.js';
+// The idle times the settings picker offers — the one spelling, shared with the validator.
+import { DEFAULT_HIBERNATE, HIBERNATE_CHOICES, hibernateLabel } from './hibernate-choices.js';
 // ^ when a folder heading is furniture, and how the row's title splits into the path it
 // sits on and the leaf that names it. The eleventh pure module under `web/`, and both
 // rules are in it rather than inline because the wrong re-derivation of either renders
@@ -265,6 +270,20 @@ const state = {
   //
   // An empty array is the ordinary answer, `rooms`' reason — hence `'bots' in msg`.
   bots: [],
+  // Every sleeping session — one the panel closed after it sat idle past `hibernateAfter`
+  // and will start again, in the same folder under the same name, only when Wake is pressed —
+  // exactly as the frame carries them: the sleep record plus `waiting`, the count of messages
+  // held for it. A sibling of `sessions`, the bots' precedent, and **never a row in
+  // `sessions`**: nothing that walks the session list — the inbox, the notifications, unread,
+  // pins, `adopt`'s pick — can ever be handed one. `renderRail` draws each greyed where its
+  // row was (`web/asleep.js`); a click opens it read-only.
+  //
+  // An empty array is the ordinary answer — hibernation is off by default — hence
+  // `'asleep' in msg`.
+  asleep: [],
+  // `{after, keepAwake}`: the setting the loop is using (`'off'` by default) and the names
+  // kept awake by hand. Read by the pane header's keep-awake toggle.
+  hibernation: { after: null, keepAwake: [] },
   // Whether the band's `archived (N)` fold is shut. This browser's, not the server's, and
   // deliberately: a group's collapse is a fact about your filing and should follow you
   // between windows, while this is a fact about the window you are looking at — the same
@@ -397,6 +416,17 @@ function rememberOpenGroup(slot, roomId, autoSplit = false) {
  * nothing about it takes the panel back to one pane. An entry an older build wrote with the
  * flag is read without it — `adopt` never takes `threadSplit` from a bot.
  */
+/**
+ * The seventh shape: one sleeping session, by name — the key a wake comes back under — and
+ * its conversation id, which `adopt`'s ordinary pick also reads, so a reload after the
+ * session woke while the tab was closed lands on the woken session.
+ */
+function rememberOpenAsleep(slot, name, sessionId = null) {
+  if (name) state.opened[slot] = { kind: 'asleep', name, id: sessionId || null };
+  else delete state.opened[slot];
+  persistOpen();
+}
+
 function rememberOpenBot(slot, botId, cid = null) {
   if (botId) state.opened[slot] = { kind: 'bot', bot: botId, cid: cid || null };
   else delete state.opened[slot];
@@ -1258,6 +1288,14 @@ function handle(msg) {
     // on a machine that has registered none, and a truth test would pin the last band drawn.
     // Set before `adopt`, which is what puts a remembered bot pane back after a reload.
     if ('bots' in msg) state.bots = Array.isArray(msg.bots) ? msg.bots : [];
+    // `in`, not a truth test, for `rooms`' reason: nobody asleep is the ordinary answer, and
+    // most of the time hibernation is off. Set before `adopt`, which is what keeps a pane on
+    // a session that has just gone to sleep instead of handing it to another one.
+    if ('asleep' in msg) state.asleep = Array.isArray(msg.asleep) ? msg.asleep : [];
+    if ('hibernation' in msg) {
+      const h = msg.hibernation && typeof msg.hibernation === 'object' ? msg.hibernation : {};
+      state.hibernation = { after: h.after ?? null, keepAwake: Array.isArray(h.keepAwake) ? h.keepAwake : [] };
+    }
     // Before the render, so a notification is never held up behind a rail repaint — and
     // before `adopt`, which can change what is on screen but never what happened.
     notifyRoster(msg.sessions);
@@ -2277,6 +2315,48 @@ async function openSettings() {
   lmSec.append(lmCap, lmRow, lmHint);
   body.append(lmSec);
 
+  /*
+   * Hibernation: how long a session may sit idle before the panel closes it to free its
+   * memory. Off by default, by the maintainer's ruling of 2026-10-29, and labelled in his
+   * words. Rows from the one list (`web/hibernate-choices.js`) the server validates against.
+   * Not exposure — a LAN browser can already close any session with the bin, and this only
+   * ever closes an idle, eligible one that can be woken — so it is not locked, like the
+   * launch model above it. Read by the loop at every pass, so it takes no restart.
+   */
+  const haSec = document.createElement('section');
+  haSec.className = 'settings-sec';
+  const haCap = document.createElement('h3');
+  haCap.textContent = 'Hibernation';
+  const haRow = document.createElement('label');
+  haRow.className = 'settings-model';
+  const haText = document.createElement('span');
+  haText.textContent = 'close idle sessions after';
+  const haPick = document.createElement('select');
+  let haStored = typeof cfg.hibernateAfter === 'string' ? cfg.hibernateAfter : null;
+  for (const id of HIBERNATE_CHOICES) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = hibernateLabel(id);
+    haPick.append(opt);
+  }
+  // A stored value the list does not carry reads as off, which is what the loop does with it.
+  let haShown = HIBERNATE_CHOICES.includes(haStored) ? haStored : DEFAULT_HIBERNATE;
+  haPick.value = haShown;
+  const haWrap = document.createElement('span');
+  haWrap.className = 'team-select';
+  haWrap.append(haPick);
+  haRow.append(haText, haWrap);
+  const haHint = document.createElement('p');
+  haHint.className = 'settings-flag';
+  haHint.textContent =
+    'Closes idle sessions; they wake only when you press Wake. A sleeping session keeps its place ' +
+    'on the rail, greyed, and opens read-only; anything sent to it waits. Never a worker, a lead ' +
+    'with workers running, or a session that is working, asking, running something in the ' +
+    'background, holding a reply you haven’t read, or open in a browser — and a session’s own ' +
+    '“keep awake” holds it whatever this says.';
+  haSec.append(haCap, haRow, haHint);
+  body.append(haSec);
+
   /* ────────────────────────────────────────────────────────────── notifications ── */
 
   /*
@@ -2496,8 +2576,9 @@ async function openSettings() {
     // the one the picker fell back to showing.
     const lmFixes = Boolean(cfg.launchModelError) && (cfg.launchModels || []).includes(lmPick.value);
     if (lmPick.value && (lmPick.value !== lmShown || lmFixes)) patch.launchModel = lmPick.value;
+    if (haPick.value && haPick.value !== haShown) patch.hibernateAfter = haPick.value;
     if (!Object.keys(patch).length) {
-      say('Nothing to save from here — only the launch model can be changed from this browser.');
+      say('Nothing to save from here — only the launch model and hibernation can be changed from this browser.');
       return;
     }
     saving = true;
@@ -2516,16 +2597,28 @@ async function openSettings() {
       lmShown = lmStored ?? cfg.defaults?.launchModel ?? '';
       if (out.live?.launchModel) cfg.launchModelError = null;
       paintLaunchModel();
+      haStored = typeof out.hibernateAfter === 'string' ? out.hibernateAfter : null;
+      haShown = HIBERNATE_CHOICES.includes(haStored) ? haStored : DEFAULT_HIBERNATE;
+      haPick.value = haShown;
       saving = false;
       save.disabled = false;
       const modelMoved = out.changed?.includes('launchModel');
+      const sleepMoved = out.changed?.includes('hibernateAfter');
+      const sleepSaid = sleepMoved
+        ? haShown === 'off'
+          ? ' Hibernation is off; nothing more will be put to sleep.'
+          : ` Idle sessions now sleep after ${hibernateLabel(haShown)}.`
+        : '';
       say(
         out.restartRequired
           ? `Saved. Takes effect at the next restart (npm run restart-panel) — ${out.restartReason}.` +
-              (modelMoved ? ' The launch model applies from the next launch.' : '')
+              (modelMoved ? ' The launch model applies from the next launch.' : '') +
+              sleepSaid
           : modelMoved
-            ? 'Saved. The next session the panel starts uses it.'
-            : 'Saved. Nothing changed.',
+            ? `Saved. The next session the panel starts uses it.${sleepSaid}`
+            : sleepMoved
+              ? `Saved.${sleepSaid}`
+              : 'Saved. Nothing changed.',
       );
     } catch (err) {
       saving = false;
@@ -3785,6 +3878,20 @@ function openGroupAddMenu(anchor, g) {
   openMenu(anchor, items);
 }
 
+/** Whether this session is kept awake by hand — the frame's `hibernation.keepAwake`, by name. */
+function keptAwake(s) {
+  return Boolean(s?.tmuxSession) && state.hibernation.keepAwake.includes(s.tmuxSession);
+}
+
+/** The header's keep-awake toggle: a word and a pressed state, like `thinking` beside it. */
+function paintKeepAwake(btn, s) {
+  if (!btn || !s) return;
+  const on = keptAwake(s);
+  btn.textContent = on ? 'kept awake' : 'keep awake';
+  btn.setAttribute('aria-pressed', String(on));
+  if (!btn.title) btn.title = sleepTooltip(null);
+}
+
 /** The header's pin, which is a label rather than a glyph — there's room for words there. */
 function paintPinBtn(btn, s) {
   if (!btn) return;
@@ -4310,6 +4417,22 @@ function openBotPane(id) {
 }
 
 /**
+ * Put one sleeping session on screen, read-only with Wake where the composer goes — routed
+ * exactly as `openSession` / `openBotPane` route, because it *is* that session's
+ * conversation. A pane already showing it is focused rather than a second one opened.
+ */
+function openAsleepPane(name) {
+  if (!name) return;
+  const already = panes.find((p) => p.asleepName() === name);
+  if (already) return setFocus(already.slot);
+  const pane = sessionPane();
+  if (!pane) return;
+  if (!holdsMain(pane)) threadSplit = false;
+  setFocus(pane.slot);
+  pane.openAsleep(name);
+}
+
+/**
  * Put one group room on screen — `openSharedRoom`'s shape, and deliberately so.
  *
  * Where it lands, and why it is never the pane you are in: **one pane open** → split, and
@@ -4694,6 +4817,10 @@ function renderRail() {
   // Both kinds of "stopped, wants a word from you": a permission box, and a question.
   const waiting = state.sessions.filter((s) => s.status === 'needs-decision' || s.question).length;
   const unread = state.sessions.filter((s) => s.unread > 0).length;
+  // Sleepers, as rail items. Never part of the four counts above, which are all about
+  // sessions that are running — a sleeper is not live, cannot be busy, and by the sleep rule
+  // had nothing unread and was asking nothing.
+  const sleepers = asleepItems(state.asleep);
 
   // A snapshot saved once goes stale silently, so the button wears a dot the moment the
   // bench stops matching it. The count is in the dialog; the dot is the reminder to look.
@@ -4709,6 +4836,11 @@ function renderRail() {
     ['busy', busy, busy ? 'stat-busy' : ''],
     ['waiting', waiting, waiting ? 'stat-waiting' : ''],
     ['unread', unread, unread ? 'stat-unread' : ''],
+    // Only once hibernation is in use — on, or something still asleep from when it was —
+    // so a panel that never turned it on keeps the line it always had.
+    ...(sleepers.length || (state.hibernation.after && state.hibernation.after !== 'off')
+      ? [['asleep', sleepers.length, sleepers.length ? 'stat-asleep' : '']]
+      : []),
   ]) {
     const span = document.createElement('span');
     if (cls) span.className = cls;
@@ -4726,7 +4858,10 @@ function renderRail() {
   //
   // In the order the maintainer put them in — the server keeps it (`PinStore`), and the grip
   // on each pinned row rearranges it.
-  const pinned = pinnedSessions();
+  // A pinned sleeper goes back under the pinned row it sat beneath (`placePinned`), so the
+  // group reads as it did before it slept; its grip is inert, because the order route may
+  // only rearrange pins that exist and a sleeper's pin is the record's, not the store's.
+  const pinned = placePinned(pinnedSessions(), sleepers.filter((s) => s.pinned));
   // A worker row comes out of the *inbox* on a related principle: a worker's permission
   // prompt is its *lead's* to answer and its finished report is its lead's to read — that
   // is what `worker_read` and the guarded answer endpoint exist for. So the lead gets first
@@ -4786,10 +4921,20 @@ function renderRail() {
   // the answer must not depend on how many times a lead's row happens to be built.
   for (const [leadId, workers] of nestedWorkers) nestedWorkers.set(leadId, orderWorkers(workers));
 
+  // Sleepers that are not pinned go back among the rows they slept beside, by their stored
+  // last activity — so under their own folder heading, and with it inside their group — and
+  // never into the inbox above, which was built off `state.sessions` alone. Merged *before*
+  // the folder map is built, so a folder whose only sessions are asleep is still a folder:
+  // the "an empty heading isn't drawn" rule measures what is drawn, and a greyed row is.
+  rest = mergeByActivity(rest, sleepers.filter((s) => !s.pinned));
+  /** Only the rows that are running — what the collapsed group's dot may be lit by. */
+  const awake = (list) => list.filter((s) => !s.asleep);
+
   /** A row plus, when it is a lead, its nested workers — always used in its place. `fold`
    *  rides through to the top-level row only, and is `null` everywhere a folder kept its
    *  heading; a lead never folds, so a row that has workers never carries one. */
   const rowsFor = (s, fold = null) => {
+    if (s.asleep) return [asleepRow(s, fold)];
     const rows = [sessionRow(s, fold)];
     for (const w of nestedWorkers.get(s.id) || []) {
       const row = sessionRow(w);
@@ -4839,6 +4984,14 @@ function renderRail() {
   if (pinned.length) {
     frag.append(plainLabel(`pinned · ${pinned.length}`, 'pinned-label'));
     for (const s of pinned) {
+      if (s.asleep) {
+        // No `pinBlock`: the drag reads its blocks off that attribute, and a sleeper is not
+        // one it can move. The grip is drawn so the column does not jump, and does nothing.
+        const row = asleepRow(s);
+        row.prepend(inertGrip(s));
+        frag.append(row);
+        continue;
+      }
       // A block is the row and whatever nests under it — a pinned lead's workers move with
       // it — and the grip goes on the row itself, the only one the pin is about.
       const rows = rowsFor(s);
@@ -4920,8 +5073,11 @@ function renderRail() {
      * later — a measured hole, closed here on the maintainer's own ruling, at the accepted
      * cost of a collapsed team group that pulses when only a worker is busy.
      */
+    // Sleepers are left out of it: the dot means something in here is working, and a
+    // sleeper is the one thing that certainly is not. They still count in the heading's
+    // `· N`, which is about rows, and a sleeper is drawn as one.
     const summary = g.collapsed
-      ? groupSummary(expand(mine.flatMap((f) => folders.get(f))), Date.now())
+      ? groupSummary(expand(awake(mine.flatMap((f) => folders.get(f)))), Date.now())
       : null;
 
     frag.append(wear(groupHeader(g, count, summary)));
@@ -5539,6 +5695,237 @@ function sessionRow(s, fold = null) {
 }
 
 /**
+ * A sleeping session's row: the same two lines in the same columns as the row it was, so it
+ * sits exactly where that row sat — greyed, with nothing on it that acts on a session.
+ *
+ * Built apart from `sessionRow` rather than as a flag through it, because nearly everything
+ * there reads live state a sleeper does not have — a status, a pane, unread, a queue, the
+ * pin store's own pin, `⧉`, the bin's `/exit` — and a row that drew any of it would be
+ * claiming a terminal that is not there. What it does carry: its name (folded the same way,
+ * so the folder does not grow a heading the moment its only session sleeps), how long it has
+ * been asleep, `waiting N` when messages are held for it, and the bin, which here means
+ * **forget** — behind a confirm, by the plan's Q4. A click opens it read-only, and only the
+ * Wake button in that pane starts it again. There is no control anywhere that puts a session
+ * to sleep, by ruling.
+ */
+function asleepRow(s, fold = null) {
+  const row = document.createElement('div');
+  row.className = `session-row is-asleep${s.pinned ? ' is-pinned' : ''}${s.lead ? ' is-lead' : ''}`;
+
+  // `div role="button"` for `sessionRow`'s reason: a folded `▾` can ride the title.
+  const btn = document.createElement('div');
+  btn.className = 'session';
+  btn.setAttribute('role', 'button');
+  btn.tabIndex = 0;
+  if (panes.some((p) => p.asleepName() === s.name)) {
+    btn.setAttribute('aria-current', 'true');
+    row.classList.add('is-open');
+  }
+  btn.onclick = () => openAsleepPane(s.name);
+  btn.onkeydown = (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    e.preventDefault();
+    openAsleepPane(s.name);
+  };
+  btn.title = `${s.title} is asleep — open it to read the conversation, and press Wake to start it again`;
+
+  const dot = document.createElement('span');
+  dot.className = 'dot asleep';
+  btn.append(dot);
+  btn.append(fold ? foldedTitle(s, fold) : plainTitle(s));
+
+  const meta = document.createElement('span');
+  meta.className = 'session-meta';
+  if (s.bypass) {
+    const bypass = document.createElement('span');
+    bypass.className = 'bypass-badge';
+    bypass.textContent = 'bypass';
+    bypass.title = 'It will wake with permission prompts off, as it slept';
+    meta.append(bypass);
+  }
+  const wait = waitingText(s.waiting);
+  if (wait) {
+    const w = document.createElement('span');
+    w.className = 'waiting-badge';
+    w.textContent = wait;
+    w.title = `${s.waiting} message${s.waiting === 1 ? ' is' : 's are'} held for it — delivered once it is woken and idle`;
+    meta.append(w);
+  }
+  const when = document.createElement('span');
+  when.className = 'asleep-word';
+  const since = relativeTime(s.sleptAt);
+  when.textContent = since && since !== 'now' ? `asleep ${since}` : 'asleep';
+  if (s.sleptAt) when.title = `Put to sleep ${new Date(s.sleptAt).toLocaleString()}`;
+  meta.append(when);
+  if (s.model) {
+    const model = document.createElement('span');
+    model.textContent = shortModel(s.model);
+    model.title = `${s.model} when it slept — a wake starts on the panel’s launch model`;
+    meta.append(model);
+  }
+  btn.append(meta);
+
+  // A sleeping lead keeps its third line, so the row is the height it was.
+  if (s.lead) {
+    const line = document.createElement('span');
+    line.className = 'session-team';
+    const chip = document.createElement('span');
+    chip.className = 'role-chip is-lead';
+    chip.textContent = 'lead';
+    const fact = document.createElement('span');
+    fact.className = 'team-fact';
+    fact.textContent = 'asleep';
+    line.append(chip, fact);
+    line.title = 'Team lead, asleep — anything sent to it waits until it is woken';
+    btn.append(line);
+  }
+  row.append(btn);
+
+  // The same reserved column as a live row, so the title is the same width. The star is a
+  // mark here, not a button — a sleeper's pin lives on its record and comes back with it.
+  const actions = document.createElement('div');
+  actions.className = 'row-actions';
+  const pin = document.createElement('span');
+  pin.className = 'pin-btn is-inert';
+  pin.textContent = s.pinned ? '★' : '';
+  if (s.pinned) pin.title = 'Pinned — it comes back to this place when it wakes';
+  actions.append(pin, forgetBtn(s));
+  row.append(actions);
+  return row;
+}
+
+/** The pinned sleeper's grip: drawn, so the column holds still, and inert. */
+function inertGrip(s) {
+  const grip = document.createElement('span');
+  grip.className = 'pin-grip is-inert';
+  grip.title = `${s.title} is asleep — wake it to move it`;
+  grip.setAttribute('aria-hidden', 'true');
+  return grip;
+}
+
+/** The bin's three shapes — `closeBtn`'s drawing, shared with `forgetBtn`. */
+function binIcon() {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('width', '12');
+  svg.setAttribute('height', '12');
+  svg.setAttribute('aria-hidden', 'true');
+  // The lid, drawn as one stroke across with the handle sitting on top of it.
+  const lid = document.createElementNS(SVG_NS, 'path');
+  lid.setAttribute('d', 'M1.9 3.1 H10.1 M4.6 3.1 V2.2 a0.7 0.7 0 0 1 0.7-0.7 h1.4 a0.7 0.7 0 0 1 0.7 0.7 V3.1');
+  lid.setAttribute('fill', 'none');
+  lid.setAttribute('stroke', 'currentColor');
+  lid.setAttribute('stroke-width', '1.1');
+  lid.setAttribute('stroke-linecap', 'round');
+  // The body tapers, which is what stops it reading as a plain rectangle at this size.
+  const body = document.createElementNS(SVG_NS, 'path');
+  body.setAttribute('d', 'M3 4.3 L3.5 10.1 a0.6 0.6 0 0 0 0.6 0.55 h3.8 a0.6 0.6 0 0 0 0.6-0.55 L9 4.3 Z');
+  body.setAttribute('fill', 'none');
+  body.setAttribute('stroke', 'currentColor');
+  body.setAttribute('stroke-width', '1.1');
+  body.setAttribute('stroke-linejoin', 'round');
+  svg.append(lid, body);
+  return svg;
+}
+
+/** The bin on a sleeping row: forget it, behind a confirm. */
+function forgetBtn(s) {
+  const btn = document.createElement('button');
+  btn.className = 'close-btn';
+  btn.title = `Forget ${s.title}`;
+  btn.setAttribute('aria-label', `Forget ${s.title}`);
+  btn.append(binIcon());
+  btn.onclick = (e) => {
+    e.stopPropagation();
+    confirmForget(s);
+  };
+  return btn;
+}
+
+/**
+ * Forget a sleeper: its row goes, and anything held for it is dropped. The conversation
+ * stays on disk — `claude --resume` can still reach it — and the box says so, along with how
+ * many held messages go with it, because those are the one thing here that cannot be had
+ * back.
+ */
+function confirmForget(s) {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  const box = document.createElement('div');
+  box.className = 'modal';
+
+  const h = document.createElement('h2');
+  h.textContent = 'Forget this sleeping session?';
+  const what = document.createElement('p');
+  what.className = 'field-hint';
+  what.style.fontSize = '0.8rem';
+  what.style.color = 'var(--ink)';
+  what.textContent = s.title;
+  const where = document.createElement('p');
+  where.className = 'field-hint';
+  where.textContent = [s.folder || '', s.name].filter(Boolean).join('  ·  ');
+  const said = document.createElement('p');
+  said.className = 'field-hint';
+  said.textContent = 'Its row leaves the rail and it can no longer be woken from here. The conversation stays on disk.';
+  // The one thing in the box that cannot be had back, in the colour the bin's box uses for that.
+  const dropped = document.createElement('p');
+  dropped.className = 'field-hint';
+  dropped.style.color = 'var(--decision)';
+  dropped.textContent = s.waiting ? `${s.waiting} held message${s.waiting === 1 ? '' : 's'} for it will be dropped.` : '';
+  dropped.hidden = !s.waiting;
+  const note = document.createElement('p');
+  note.className = 'modal-note';
+
+  const row = document.createElement('div');
+  row.className = 'modal-row';
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost-btn';
+  cancel.textContent = 'cancel';
+  const go = document.createElement('button');
+  go.className = 'ghost-btn danger';
+  go.textContent = 'forget it';
+  row.append(cancel, go);
+  box.append(h, what, where, said, dropped, note, row);
+
+  const close = () => {
+    back.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+  document.addEventListener('keydown', onKey, true);
+  cancel.onclick = close;
+  back.onmousedown = (e) => {
+    if (e.target === back) close();
+  };
+  go.onclick = async () => {
+    go.disabled = true;
+    cancel.disabled = true;
+    note.className = 'modal-note';
+    note.textContent = 'Forgetting…';
+    try {
+      const res = await fetch(`/api/asleep/${encodeURIComponent(s.name)}`, { method: 'DELETE' });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || `The panel refused (${res.status}).`);
+      // A pane reading it lets go now rather than at the next roster frame.
+      for (const p of panes) if (p.asleepName() === s.name) p.letGoAsleep();
+      close();
+      toast(`${s.title} forgotten${out.dropped ? ` — ${out.dropped} held message${out.dropped === 1 ? '' : 's'} dropped` : ''}.`);
+    } catch (err) {
+      note.className = 'modal-note err';
+      note.textContent = err.message;
+      go.disabled = false;
+      cancel.disabled = false;
+    }
+  };
+
+  back.append(box);
+  document.body.append(back);
+  go.focus();
+}
+
+/**
  * The role line: what part this row plays on a team, and the one fact worth the width.
  *
  * Only team sessions get it. A lead is one per project and a worker belongs to an *open*
@@ -5675,31 +6062,7 @@ function closeBtn(s) {
     btn.title = `Restarting ${s.title}…`;
   }
 
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 12 12');
-  svg.setAttribute('width', '12');
-  svg.setAttribute('height', '12');
-  svg.setAttribute('aria-hidden', 'true');
-
-  // The lid, drawn as one stroke across with the handle sitting on top of it.
-  const lid = document.createElementNS(SVG_NS, 'path');
-  lid.setAttribute('d', 'M1.9 3.1 H10.1 M4.6 3.1 V2.2 a0.7 0.7 0 0 1 0.7-0.7 h1.4 a0.7 0.7 0 0 1 0.7 0.7 V3.1');
-  lid.setAttribute('fill', 'none');
-  lid.setAttribute('stroke', 'currentColor');
-  lid.setAttribute('stroke-width', '1.1');
-  lid.setAttribute('stroke-linecap', 'round');
-  svg.append(lid);
-
-  // The body tapers, which is what stops it reading as a plain rectangle at this size.
-  const body = document.createElementNS(SVG_NS, 'path');
-  body.setAttribute('d', 'M3 4.3 L3.5 10.1 a0.6 0.6 0 0 0 0.6 0.55 h3.8 a0.6 0.6 0 0 0 0.6-0.55 L9 4.3 Z');
-  body.setAttribute('fill', 'none');
-  body.setAttribute('stroke', 'currentColor');
-  body.setAttribute('stroke-width', '1.1');
-  body.setAttribute('stroke-linejoin', 'round');
-  svg.append(body);
-
-  btn.append(svg);
+  btn.append(binIcon());
   btn.onclick = (e) => {
     e.stopPropagation();
     confirmClose(s);
@@ -7538,6 +7901,28 @@ function createPane(slot, host) {
     botLoaded: false, // a `bot` frame has arrived since the pane opened or a pick was made
     botError: null,
     botEls: null, // the nodes `renderBotPane` built: head parts, the list, the stream
+
+    /* ---------------------------------------------------- one sleeper --- */
+
+    /*
+     * `kind === 'asleep'` is the seventh thing a pane can hold: a session hibernation closed,
+     * read back off disk. **Main content** (`holdsMain`) — it is that session's own
+     * conversation, opened where the session was — and **read-only**: Wake sits where the
+     * composer goes, and `buildComposer` is never called, so `composerSig` never sees one.
+     * `view.selected` stays `null` the whole time, which keeps every session guard — read
+     * marks, the files dot, `markReadIfCaughtUp` — from firing for a session that is not
+     * running. The transcript comes over the ordinary `subscribe`, which falls back to the
+     * sleep record's own path on the server.
+     *
+     * The pane follows the session rather than the row: `adopt` moves a pane into this view
+     * when the session it shows goes to sleep, and back to the session view when it wakes.
+     */
+    asleep: null, // {name, sessionId} — the live record is `state.asleep`, looked up on every paint
+    asleepEls: null, // the nodes `renderAsleepPane` built
+    asleepLoaded: false, // a `transcript` frame has arrived since the pane opened it
+    wakeBusy: false, // a Wake is in flight from this pane
+    wakeError: null, // the server's sentence for a wake that did not happen
+    asleepGoneAt: null, // when the record left the frame with no woken session in sight yet
   };
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
@@ -7722,6 +8107,7 @@ function createPane(slot, host) {
     leaveShared(); // …and the room's subscription, if that is what this pane was holding
     leaveGroup(); // …or a group room's, which is the server's to stop for the same reason
     leaveBot(); // …or a bot's, on its own subscription map, for the same reason again
+    leaveAsleep(); // …or a sleeper's, whose `subscribe` this one replaces anyway
     // Coming back from a room: the pane stops being one before anything else, or the guards
     // below would keep refusing on its behalf.
     view.kind = 'session';
@@ -7773,6 +8159,7 @@ function createPane(slot, host) {
     saveDraft();
     leaveGroup(); // …or a group room, whose subscription is the server's to stop
     leaveBot(); // …or a bot, whose subscription is on a map of its own
+    leaveAsleep();
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'shared';
@@ -8400,6 +8787,7 @@ function createPane(slot, host) {
     leaveShared(); // …or the shared room, whose subscription is the server's to stop
     leaveGroup(); // …or another room, whose subscription is one per socket and supersedes
     leaveBot(); // …or a bot, whose subscription is on a map of its own
+    leaveAsleep();
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     view.kind = 'group-room';
@@ -9955,6 +10343,7 @@ function createPane(slot, host) {
     saveDraft();
     leaveShared();
     leaveGroup();
+    leaveAsleep();
     send({ type: 'unsubscribe', slot });
     syncRoom(null);
     clearBot();
@@ -10395,6 +10784,302 @@ function createPane(slot, host) {
 
   /* -------------------------------------------------------------- main --- */
 
+  /* ------------------------------------------------------------ asleep --- */
+
+  /** The sleeper this pane shows, as the frame carries it now — or null once it has gone. */
+  function asleepLive() {
+    const name = view.asleep?.name;
+    return name ? state.asleep.find((r) => r?.name === name) || null : null;
+  }
+
+  /**
+   * Put one sleeping session in this pane, read-only. `openAsleepPane` decides *which* pane;
+   * `adopt` calls this directly when the session on screen goes to sleep, and to put a reload
+   * back.
+   */
+  function openAsleep(name) {
+    const record = state.asleep.find((r) => r?.name === name);
+    if (!record) return;
+    if (view.kind === 'asleep' && view.asleep?.name === name) return;
+    saveDraft();
+    leaveShared();
+    leaveGroup();
+    leaveBot();
+    syncRoom(null);
+    view.kind = 'asleep';
+    view.selected = null;
+    view.asleep = { name, sessionId: record.sessionId || null };
+    view.asleepLoaded = false;
+    view.wakeBusy = false;
+    view.wakeError = null;
+    view.asleepGoneAt = null;
+    view.messages = [];
+    view.hasEarlier = false;
+    view.error = null;
+    view.lastMarked = null;
+    view.filesNew = false;
+    view.outputs = [];
+    view.outputsSeq += 1;
+    chipNodes.clear();
+    rememberOpenAsleep(slot, name, view.asleep.sessionId);
+    // The ordinary subscription, on the conversation's own id: the server reads the path off
+    // the sleep record when the roster has no row for it. Nothing to read without an id.
+    if (view.asleep.sessionId) send({ type: 'subscribe', sessionId: view.asleep.sessionId, slot });
+    else send({ type: 'unsubscribe', slot });
+    renderRail();
+    renderMain();
+    paintFolds();
+  }
+
+  /** Stop being a sleeper's pane. A no-op for a pane holding anything else; whoever calls it
+   *  is about to replace the subscription, so it sends nothing itself. */
+  function leaveAsleep() {
+    if (view.kind !== 'asleep') return;
+    view.asleep = null;
+    view.asleepEls = null;
+    view.asleepLoaded = false;
+    view.wakeBusy = false;
+    view.wakeError = null;
+    view.asleepGoneAt = null;
+    view.kind = 'session';
+  }
+
+  /**
+   * The sleeper was forgotten: let go of it the way a pane lets go of a session that closed —
+   * `adopt` picks the next one. Called by the forget box, and by `adopt` once the record has
+   * been gone long enough that no wake is coming back into this pane.
+   */
+  function letGoAsleep() {
+    if (view.kind !== 'asleep') return;
+    send({ type: 'unsubscribe', slot });
+    leaveAsleep();
+    view.selected = null;
+    rememberOpen(slot, null);
+    adopt();
+    if (!view.selected && view.kind === 'session') renderMain();
+  }
+
+  /**
+   * Wake it: the server starts it again in the same folder, under the same name, on
+   * `--resume` of this conversation — and this pane goes with it. The roster frame that
+   * carries the woken row is what moves the pane (`adopt`, by conversation id); the answer's
+   * own `sessionId` is the fallback for a frame that landed before the response did.
+   *
+   * `wakeBusy` holds the pane in place meanwhile: the record leaves the frame a beat before
+   * the woken row joins it, and a pane that read that gap as "forgotten" would hand itself
+   * to another session — the exact jump this view exists to prevent.
+   */
+  async function wakeAsleep() {
+    const name = view.asleep?.name;
+    if (!name || view.wakeBusy) return;
+    view.wakeBusy = true;
+    view.wakeError = null;
+    renderAsleepFoot();
+    try {
+      const out = await postJSON(`/api/asleep/${encodeURIComponent(name)}/wake`, {});
+      if (view.kind !== 'asleep' || view.asleep?.name !== name) return;
+      if (out.sessionId && !view.asleep.sessionId) view.asleep.sessionId = out.sessionId;
+      view.wakeBusy = false;
+      const back = wokenSession(view.asleep, state.sessions, state.asleep) ||
+        (out.sessionId ? state.sessions.find((s) => s.id === out.sessionId) : null);
+      if (back) return open(back.id);
+      // Not in this browser's roster yet — the next frame brings it, and `adopt` follows; it
+      // also starts the grace clock, so a wake that never shows up is not waited on forever.
+      adopt();
+    } catch (err) {
+      if (view.kind !== 'asleep' || view.asleep?.name !== name) return;
+      view.wakeBusy = false;
+      view.wakeError = err.message;
+      renderAsleepFoot();
+    }
+  }
+
+  /** How long the pane waits on a record that left without a woken row in sight. */
+  const ASLEEP_GONE_GRACE_MS = 20_000;
+
+  function renderAsleepPane() {
+    host.replaceChildren();
+
+    const head = document.createElement('div');
+    head.className = 'main-head is-asleep';
+    const dot = document.createElement('span');
+    dot.className = 'dot asleep';
+    const h1 = document.createElement('h1');
+    const meta = document.createElement('div');
+    meta.className = 'head-meta';
+    const stat = document.createElement('span');
+    stat.className = 'head-status';
+    const think = document.createElement('button');
+    think.className = 'ghost-btn';
+    think.textContent = 'thinking';
+    think.setAttribute('aria-pressed', String(state.showThinking));
+    think.onclick = () => {
+      state.showThinking = !state.showThinking;
+      think.setAttribute('aria-pressed', String(state.showThinking));
+      renderAllStreams();
+    };
+    // The session head's own split control, by `syncSplitBtn` itself — `current()` is null
+    // here, so its lead branch never fires.
+    const split = document.createElement('button');
+    split.type = 'button';
+    split.className = 'ghost-btn split-toggle';
+    syncSplitBtn(split);
+    meta.append(stat, think, split);
+    head.append(dot, h1, meta);
+
+    const stream = document.createElement('div');
+    stream.className = 'stream';
+    const inner = document.createElement('div');
+    inner.className = 'stream-inner';
+    stream.append(inner);
+
+    // Where the composer goes: Wake, and the one sentence about what it does. A line and a
+    // button rather than a disabled box — a box that takes no typing is a control that lies
+    // about itself (the archived room's rule, and the bot pane's).
+    const foot = document.createElement('div');
+    foot.className = 'asleep-foot';
+    const say = document.createElement('div');
+    say.className = 'asleep-say';
+    const wake = document.createElement('button');
+    wake.type = 'button';
+    wake.className = 'wake-btn';
+    wake.onclick = wakeAsleep;
+    const err = document.createElement('div');
+    err.className = 'asleep-err';
+    err.setAttribute('role', 'status');
+    // The composer's own two boxes — an outer band and a 52rem column — so Wake lines up
+    // with the conversation above it the way the textarea does.
+    const footInner = document.createElement('div');
+    footInner.className = 'asleep-foot-inner';
+    footInner.append(say, wake, err);
+    foot.append(footInner);
+
+    host.append(head, stream, foot);
+    view.asleepEls = { head, dot, h1, stat, stream, inner, say, wake, err };
+    renderAsleepHead();
+    renderAsleepStream();
+    renderAsleepFoot();
+    pinAsleepStream();
+  }
+
+  /** The head's facts, patched in place on the roster beat. */
+  function renderAsleepHead() {
+    const els = view.asleepEls;
+    if (!els) return;
+    const r = asleepLive();
+    const title = r?.title || view.asleep?.name || '';
+    els.h1.textContent = title;
+    els.h1.title = r?.folder ? `${title} — ${r.folder}` : title;
+    const bits = [];
+    if (r) {
+      const since = relativeTime(r.sleptAt);
+      bits.push(since && since !== 'now' ? `asleep ${since}` : 'asleep');
+      if (r.lead) bits.push('team lead');
+      if (r.waiting > 0) bits.push(waitingText(r.waiting));
+    } else {
+      bits.push(view.wakeBusy || view.asleepGoneAt ? 'waking…' : 'no longer asleep');
+    }
+    els.stat.textContent = bits.join(' · ');
+    els.stat.title = r?.sleptAt ? `Put to sleep ${new Date(r.sleptAt).toLocaleString()}, after it sat idle` : '';
+    syncSplitBtn(host.querySelector('.split-toggle'));
+  }
+
+  /** Wake's own line: what it does, or that it is running, or why it did not. */
+  function renderAsleepFoot() {
+    const els = view.asleepEls;
+    if (!els) return;
+    const r = asleepLive();
+    const pending = view.wakeBusy || (!r && view.asleepGoneAt);
+    els.wake.textContent = pending ? 'waking…' : 'Wake';
+    els.wake.disabled = Boolean(pending) || !r;
+    els.wake.classList.toggle('is-busy', Boolean(pending));
+    const held = r?.waiting > 0 ? ` ${r.waiting} held message${r.waiting === 1 ? '' : 's'} will be delivered once it is idle.` : '';
+    els.say.textContent = r
+      ? `Asleep — closed after it sat idle, to free its memory. Read-only until you wake it: Wake starts it again here, in the same folder, under the same name, continuing this conversation.${held}`
+      : pending
+        ? 'Starting it again — this pane follows it back.'
+        : 'This session is no longer asleep.';
+    els.err.textContent = view.wakeError || '';
+    els.err.hidden = !view.wakeError;
+    renderAsleepHead();
+  }
+
+  function renderAsleepStream() {
+    const els = view.asleepEls;
+    if (!els?.inner.isConnected) return;
+    chipNodes.clear();
+    const frag = document.createDocumentFragment();
+    if (view.error) {
+      const p = document.createElement('div');
+      p.className = 'composer-hint err';
+      p.textContent = view.error;
+      frag.append(p);
+    }
+    if (!view.asleepLoaded && !view.error) {
+      const p = document.createElement('div');
+      p.className = 'bot-loading';
+      p.textContent = view.asleep?.sessionId ? 'loading…' : 'No conversation was recorded for it.';
+      frag.append(p);
+    } else {
+      if (view.hasEarlier) {
+        const btn = document.createElement('button');
+        btn.className = 'load-earlier';
+        btn.textContent = 'load earlier';
+        btn.onclick = () => {
+          btn.textContent = 'loading…';
+          send({ type: 'loadEarlier', slot });
+        };
+        frag.append(btn);
+      }
+      for (const m of groupMessages(view.messages)) frag.append(renderMessage(m));
+      if (!view.messages.length && !view.error) {
+        frag.append(emptyState('Nothing yet', 'This transcript has no messages in the loaded window.'));
+      }
+    }
+    els.inner.replaceChildren(frag);
+  }
+
+  /** Newest line on screen. Set directly, not in a frame callback — see `pinBotStream`. */
+  function pinAsleepStream() {
+    const stream = view.asleepEls?.stream;
+    if (stream?.isConnected) stream.scrollTop = stream.scrollHeight;
+  }
+
+  /**
+   * The session frames, for a sleeper. Checked against this pane still holding **this**
+   * conversation, as every other kind's are. A sleeper's transcript barely moves — the
+   * `/exit` record, at most — so a live append simply redraws the stream.
+   */
+  function receiveAsleep(msg) {
+    // `if`s rather than a `switch`: the session's own `case 'transcript':` and friends are
+    // found by their spelling (`test/scroll-hold.test.js`, `test/aside-fold.test.js`), and a
+    // second set of the same cases further up would be found first.
+    const id = view.asleep?.sessionId;
+    const mine = Boolean(id) && msg.sessionId === id;
+    if (msg.type === 'transcript' && mine) {
+      view.messages = msg.messages || [];
+      view.hasEarlier = Boolean(msg.hasEarlier);
+      view.error = null;
+      view.asleepLoaded = true;
+      renderAsleepStream();
+      pinAsleepStream();
+    } else if (msg.type === 'messages' && mine) {
+      const stream = view.asleepEls?.stream;
+      const stick = !stream || stream.scrollHeight - stream.scrollTop - stream.clientHeight < 120;
+      view.messages.push(...(msg.messages || []));
+      renderAsleepStream();
+      if (stick) pinAsleepStream();
+    } else if (msg.type === 'earlier' && mine) {
+      view.messages = (msg.messages || []).concat(view.messages);
+      view.hasEarlier = Boolean(msg.hasEarlier);
+      if (view.asleepEls?.stream) holdFromBottom(view.asleepEls.stream, renderAsleepStream);
+    } else if (msg.type === 'error') {
+      view.error = msg.message;
+      view.asleepLoaded = true;
+      renderAsleepStream();
+    }
+  }
+
   function renderMain() {
     // The machine-wide room has no session and nothing below this line applies to it: no
     // head to patch, no room to follow, no stream, and — the one that has already cost this
@@ -10410,6 +11095,8 @@ function createPane(slot, host) {
     // …and a bot, the third pane with no session behind it and the first with nothing to
     // type into at all. Before `current()` for the same reason the two above are.
     if (view.kind === 'bot') return renderBotPane();
+    // …and a sleeper, which has a conversation and nothing to type into until it is woken.
+    if (view.kind === 'asleep') return renderAsleepPane();
 
     const s = current();
     host.replaceChildren();
@@ -12904,6 +13591,12 @@ function createPane(slot, host) {
     };
     meta.append(pin);
 
+    // Keep awake: this one session is never put to sleep, whatever the setting says
+    // (ruling 3). Keyed by tmux session name, because that is what a sleep and a wake are
+    // keyed by. Not drawn for a worker, which never sleeps anyway — a toggle that cannot do
+    // anything is not a control — nor for a row with no name to key it on.
+    if (s.tmuxSession && s.team?.role !== 'worker') meta.append(keepAwakeBtn());
+
     const think = document.createElement('button');
     think.className = 'ghost-btn';
     think.textContent = 'thinking';
@@ -12983,6 +13676,55 @@ function createPane(slot, host) {
     // waited on the team config this draws on the first pass — see `syncForgeLink`.
     syncForgeLink(head, s);
     return head;
+  }
+
+  /**
+   * The header's keep-awake toggle. Its tooltip is the server's own verdict in words
+   * (`GET /api/sessions/:id/sleep`), asked on hover and never put on the frame — a reason
+   * per row per poll would be a tmux capture per row every two seconds. Asked `beside`
+   * watched, because the session is on screen here and "it is open in a browser" would be
+   * the answer every time; the sentence says that half too.
+   */
+  function keepAwakeBtn() {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ghost-btn keep-awake';
+    paintKeepAwake(btn, current());
+    let asked = 0;
+    const ask = async () => {
+      const live = current();
+      if (!live || Date.now() - asked < 4000) return;
+      asked = Date.now();
+      try {
+        const res = await fetch(`/api/sessions/${encodeURIComponent(live.id)}/sleep?beside=watched`);
+        const out = await res.json().catch(() => ({}));
+        btn.title = sleepTooltip(res.ok ? out : { error: out.error || `the panel answered ${res.status}` });
+      } catch (err) {
+        btn.title = sleepTooltip({ error: err.message });
+      }
+    };
+    btn.addEventListener('pointerenter', ask);
+    btn.addEventListener('focus', ask);
+    btn.onclick = async () => {
+      const live = current();
+      if (!live?.tmuxSession || btn.classList.contains('is-busy')) return;
+      const on = !keptAwake(live);
+      btn.classList.add('is-busy');
+      try {
+        await postJSON('/api/asleep/keep-awake', { name: live.tmuxSession, on });
+        const names = new Set(state.hibernation.keepAwake);
+        if (on) names.add(live.tmuxSession);
+        else names.delete(live.tmuxSession);
+        state.hibernation = { ...state.hibernation, keepAwake: [...names] };
+        asked = 0;
+      } catch (err) {
+        toast(err.message);
+      } finally {
+        btn.classList.remove('is-busy');
+        paintKeepAwake(btn, current());
+      }
+    };
+    return btn;
   }
 
   /**
@@ -13386,6 +14128,12 @@ function createPane(slot, host) {
       syncSplitBtn(host.querySelector('.split-toggle'));
       return;
     }
+    // A sleeper's head and its Wake line move on this beat — `waiting` and the record itself
+    // ride the frame — and nothing about it reaches `composerSig` below.
+    if (view.kind === 'asleep') {
+      renderAsleepFoot();
+      return;
+    }
 
     const s = current();
     if (!s || !host.firstChild) return;
@@ -13396,6 +14144,7 @@ function createPane(slot, host) {
       head.querySelector('h1').textContent = s.title;
       renderHeadStatus(head.querySelector('.head-status'), s);
       paintPinBtn(head.querySelector('.pin-toggle'), s);
+      paintKeepAwake(head.querySelector('.keep-awake'), s);
       // The two controls here that appear and disappear on their own, so they are the
       // only ones this patch-in-place path has to add or remove rather than just repaint.
       syncAttach(head.querySelector('.head-meta'), s);
@@ -13777,6 +14526,7 @@ function createPane(slot, host) {
     // A bot pane is the one non-session pane that *does* hold a transcript, so the thinking
     // toggle redraws it through its own stream function.
     if (view.kind === 'bot') return renderBotStream();
+    if (view.kind === 'asleep') return renderAsleepStream();
     if (view.kind !== 'session') return;
     if (!streamEl) return;
     chipNodes.clear();
@@ -14150,7 +14900,8 @@ function createPane(slot, host) {
    * width has to stay inside that or the whole conversation starts scrolling horizontally.
    */
   function imageStrip(images, how = null) {
-    const sessionId = view.selected;
+    // A sleeper's images are its conversation's, addressed by its id like a live session's.
+    const sessionId = view.selected ?? (view.kind === 'asleep' ? view.asleep?.sessionId ?? null : null);
     // A bot's images live under the bot's own route; the session builder addresses
     // `/api/sessions/:id/…`, which answers 404 for a conversation id (trap 8).
     const srcOf = how ? (ref) => how.imageSrc(ref) : (ref) => imageSrc(sessionId, ref);
@@ -16728,6 +17479,10 @@ function createPane(slot, host) {
       return;
     }
 
+    // A sleeper's conversation arrives on the session frames, and the pane is entitled to
+    // them; `receiveAsleep` checks the id.
+    if (view.kind === 'asleep') return receiveAsleep(msg);
+
     if (msg.type === 'shared') {
       if (view.kind !== 'shared') return;
       view.shared = msg.entries || [];
@@ -16870,9 +17625,47 @@ function createPane(slot, host) {
      * maintainer opened on purpose and it stays until it is closed (the locked ruling), so
      * the answer is not a better pick: it is not picking at all.
      */
+    /*
+     * A sleeper on screen. It goes back to the session view the moment the woken session is
+     * in the roster — same pane, same place. While the record is still there it stays put.
+     * Once the record has gone with no woken row in sight, it waits a grace period (a wake
+     * pressed in another window lands the two halves on different frames), then lets go the
+     * way a pane lets go of a closed session.
+     */
+    if (view.kind === 'asleep') {
+      const back = wokenSession(view.asleep, state.sessions, state.asleep);
+      if (back) return open(back.id);
+      if (asleepLive()) {
+        view.asleepGoneAt = null;
+        return;
+      }
+      if (view.wakeBusy) return;
+      const now = Date.now();
+      if (view.asleepGoneAt === null) {
+        view.asleepGoneAt = now;
+        setTimeout(() => {
+          if (view.kind === 'asleep') adopt();
+        }, ASLEEP_GONE_GRACE_MS + 50);
+      }
+      if (now - view.asleepGoneAt < ASLEEP_GONE_GRACE_MS) return renderAsleepFoot();
+      send({ type: 'unsubscribe', slot });
+      leaveAsleep();
+      view.selected = null;
+      rememberOpen(slot, null);
+    }
+
     if (view.kind !== 'session') return;
 
     if (view.selected && state.sessions.some((s) => s.id === view.selected)) return;
+    /*
+     * The session on screen has just gone to sleep: follow it, read-only, rather than hand
+     * the pane to another session — "the pane that was showing it lets go" is exactly what
+     * this stops. Before `taken` and the pick, which are the letting go.
+     */
+    // `opened` as well, for a reload: the pane is empty then, and the session it remembers may
+    // have gone to sleep while the window was shut.
+    const sleeping = followIntoSleep(view.selected || state.opened[slot]?.id, state.sessions, state.asleep);
+    if (sleeping) return openAsleep(sleeping.asleep);
     const taken = panes.filter((p) => p !== api).map((p) => p.selected());
     const free = (s) => !taken.includes(s.id);
     const last = state.opened[slot];
@@ -16916,6 +17709,17 @@ function createPane(slot, host) {
     if (last?.kind === 'bot') {
       if (state.bots.some((b) => b?.id === last.bot)) return openBot(last.bot, last.cid ?? null);
       rememberOpenBot(slot, null);
+    }
+
+    /*
+     * A reload of a window that had a sleeper open. Back onto it while it sleeps; onto the
+     * woken session if it woke while the window was closed (the stored `id` is its
+     * conversation, which the pick below also reads); otherwise the pick decides.
+     */
+    if (last?.kind === 'asleep') {
+      if (state.asleep.some((r) => r?.name === last.name)) return openAsleep(last.name);
+      const back = wokenSession({ name: last.name, sessionId: last.id }, state.sessions, state.asleep);
+      if (back && free(back)) return open(back.id);
     }
 
     const pick =
@@ -16981,6 +17785,12 @@ function createPane(slot, host) {
      */
     if (view.kind === 'bot' && view.bot?.id) {
       return void send({ type: 'subscribe-bot', botId: view.bot.id, cid: view.botCid, slot });
+    }
+
+    // …and a sleeper's, which is an ordinary transcript subscription on its conversation id.
+    if (view.kind === 'asleep') {
+      if (view.asleep?.sessionId) send({ type: 'subscribe', sessionId: view.asleep.sessionId, slot });
+      return;
     }
 
     if (view.selected) send({ type: 'subscribe', sessionId: view.selected, slot });
@@ -17064,6 +17874,13 @@ function createPane(slot, host) {
     /** The bot this pane is holding, or null — what the band reads to mark a row open, and
      *  what `openBotPane` asks so a second press opens nothing twice. */
     botId: () => (view.kind === 'bot' ? view.bot?.id ?? null : null),
+    /** Put one sleeper in this pane. `openAsleepPane` is the caller that decides which pane. */
+    openAsleep,
+    /** The sleeper this pane is holding, by name, or null — what its rail row reads to mark
+     *  itself open, and what `openAsleepPane` asks so a second press opens nothing twice. */
+    asleepName: () => (view.kind === 'asleep' ? view.asleep?.name ?? null : null),
+    /** Let go of a forgotten sleeper now, rather than at the next roster frame. */
+    letGoAsleep,
     /** Re-age this pane's conversation rows; a no-op for anything but a bot. The band's one
      *  timer calls it on every pane, which is why it is unconditional. */
     relightBot,
@@ -17156,7 +17973,9 @@ function sessionPane() {
  */
 function holdsMain(pane) {
   const kind = pane.kind();
-  return kind === 'session' || kind === 'bot';
+  // A sleeping session is a session's conversation, read-only — it opens where that session
+  // did, and a rail click replaces it the same way (hibernation, 2026-10-29).
+  return kind === 'session' || kind === 'bot' || kind === 'asleep';
 }
 
 /**

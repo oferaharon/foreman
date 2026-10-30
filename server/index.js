@@ -1380,7 +1380,8 @@ app.get('/api/sessions/:id/tail', async (req, res) => {
 
 /**
  * The session behind a read-only GET: the live row, or else the sleeper with that session id.
- * Only the four reader routes below go through it (images, image, outputs, output) — they
+ * Only readers go through it — the four routes below (images, image, outputs, output) and
+ * the transcript `subscribe` a sleeper's pane is opened with, desktop and phone alike; they
  * need a transcript path and nothing else. The path is the one the panel itself wrote into
  * the sleep record, never anything the client sent. Nothing that types, sends, ends or
  * relaunches may use this: a sleeper has no pane.
@@ -5342,11 +5343,16 @@ app.get('/api/asleep', (_req, res) => {
 app.get('/api/sessions/:id/sleep', async (req, res) => {
   const session = registry.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
-  const verdict = await hibernator.verdict(session);
+  // `?beside=watched` is the header's own ask: it is on screen, so "open in a browser" is
+  // always true there, and the reason worth reading is the one behind it. `watched` still
+  // says that half, so nothing is hidden — it is just not the whole answer.
+  const besideWatched = req.query.beside === 'watched';
+  const verdict = await hibernator.verdict(session, { besideWatched });
   res.json({
     name: session.tmuxSession ?? null,
     after: hibernateAfter,
     keepAwake: session.tmuxSession ? hibernation.isKeepAwake(session.tmuxSession) : false,
+    watched: watchedSessionIds().has(session.id),
     ok: verdict.ok,
     rule: verdict.ok ? null : verdict.rule,
     why: verdict.ok ? null : verdict.why,
@@ -5554,7 +5560,13 @@ async function subscribe(ws, sessionId, slot = 'a') {
   unsubscribe(ws, slot);
   // A slot shows a session or a bot, never both — see `botSubs` below.
   botSubs.unsubscribe(ws, slot);
-  const session = registry.get(sessionId);
+  // A sleeper is not in the roster, but its conversation is opened read-only — on the desktop
+  // and on the phone — so a miss falls back to the sleep record by its `sessionId`
+  // (`readableSession`, item 6's one lookup), and the path read is the one the panel wrote
+  // down when it put the session to sleep, never one a client sent. A record carries no
+  // `paneId`, which keeps the rebind loop below from following a pane the sleeper no longer
+  // has. Every frame below still carries the `sessionId` that was asked for, and the slot.
+  const session = readableSession(sessionId);
   if (!session) return send(ws, 'error', { message: 'Unknown session.', slot });
 
   const slots = slotsOf(ws);

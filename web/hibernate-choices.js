@@ -19,6 +19,12 @@ const MINUTE = 60_000;
 
 const MS = Object.freeze({ '30m': 30 * MINUTE, '1h': 60 * MINUTE, '4h': 240 * MINUTE, '12h': 720 * MINUTE });
 
+/** How the settings picker words each choice — beside the list, so the two cannot drift. */
+const LABELS = Object.freeze({ off: 'off', '30m': '30 min', '1h': '1 h', '4h': '4 h', '12h': '12 h' });
+
+/** A choice as the picker draws it; anything that is not a choice is drawn as itself. */
+export const hibernateLabel = (choice) => (isHibernateChoice(choice) ? LABELS[choice] : String(choice ?? ''));
+
 /** Whether a value is one of the choices, spelled exactly. */
 export const isHibernateChoice = (choice) => typeof choice === 'string' && HIBERNATE_CHOICES.includes(choice);
 

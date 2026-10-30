@@ -216,7 +216,7 @@ test('a pane that can hold a session is asked by kind, not by `linkId`', () => {
   // "Can this pane hold a session" became "does it hold main content" when a bot joined the
   // session there (the ruling of 2026-10-13) — and it is an allow-list, so a new kind is not
   // main content until somebody says so.
-  assert.match(app.match(/function holdsMain\(pane\) \{[\s\S]*?\n\}/)[0], /return kind === 'session' \|\| kind === 'bot';/);
+  assert.match(app.match(/function holdsMain\(pane\) \{[\s\S]*?\n\}/)[0], /return kind === 'session' \|\| kind === 'bot' \|\| kind === 'asleep';/);
   // Opening the shared room or a group room replaces a pane holding either of them, never a
   // session or a bot — **one room pane at a time**, which is also what guarantees
   // `sessionPane` always has somewhere to send a rail click. Two openers — the shared room
