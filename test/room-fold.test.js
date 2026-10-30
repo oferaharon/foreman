@@ -283,7 +283,7 @@ test('the strip’s facts are `roomStripFacts`’ answer, not a second derivatio
   // module is the cheap half of that trade; collapsing them is a one-line change.
   assert.match(app, /import \{ foldTracks, roomStripFacts \} from '\.\/panel-fold\.js';/);
   assert.match(app, /import \{ asideStripFacts \} from '\.\/panel-fold\.js';/);
-  assert.match(fn('renderGroupFoldStrip'), /roomStripFacts\(room, state\.sessions\)/);
+  assert.match(fn('renderGroupFoldStrip'), /roomStripFacts\(room, state\.sessions, state\.asleep\)/);
   // One call site. `memberRow`'s rung order is mirrored from the server's own resolution and
   // a second walk of it here is the `isLeadName` lesson in one more costume.
   const calls = app.split('\n').filter((l) => /roomStripFacts\(/.test(l) && !/^\s*(\*|\/\/)/.test(l));

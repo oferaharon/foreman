@@ -6216,6 +6216,35 @@ body.pin-reordering * { cursor: grabbing !important; }
    silently. */
 .group-chip.is-gone { opacity: 0.55; border-style: dashed; }
 
+/* A member that is asleep: greyed like its rail row, solid rather than dashed, because it is
+   not missing — its copies are held and the pane knows exactly where it went. The dot is the
+   rail's own `.dot.asleep`. */
+.group-chip.is-asleep { color: var(--ink-faint); border-color: var(--rule); }
+
+/* `wake N asleep`, at the strip's far end so it never sits between two members, and drawn
+   only while one is asleep. `margin-left: auto` pushes it right on whichever wrapped line it
+   lands on. */
+.group-wake { margin-left: auto; flex: none; font-size: 0.64rem; }
+.group-wake[hidden] { display: none; }
+
+/* What the last wake did, per member. Muted for the woken; each failure is the server's own
+   sentence in the refusal colour. */
+.group-wake-note {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.9rem;
+  padding: 0.3rem 1.1rem 0.4rem;
+  border-bottom: 1px solid var(--rule);
+  background: var(--surface);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+  overflow-wrap: anywhere;
+}
+.group-wake-note[hidden] { display: none; }
+.group-wake-failed { color: var(--decision); }
+
 /* A hollow ring rather than a colour, because "no pane" is not a status the session is in —
    it is the absence of one. `.dot.dialog` uses the same shape for the same kind of reason. */
 .dot.gone { background: transparent; border: 1px solid var(--rule-strong); }

@@ -478,7 +478,7 @@ test('the strip rebuilds only when the membership changes, and patches the dots'
   assert.ok(!/status/.test(strip_.slice(strip_.indexOf('const sig'), strip_.indexOf('groupStripSig ='))));
   // The dots are written after the guard, on every call.
   const after = strip_.slice(strip_.indexOf('for (const m of members)', strip_.indexOf('groupStripSig =')));
-  assert.match(after, /dot\.className = `dot \$\{row \? row\.status : 'gone'\}`/);
+  assert.match(after, /dot\.className = `dot \$\{row \? row\.status : asleep \? 'asleep' : 'gone'\}`/);
 });
 
 test('the strip’s signature is joined with real punctuation', () => {
@@ -498,7 +498,9 @@ test('the strip’s signature is joined with real punctuation', () => {
 
 test('a member the panel cannot find is faded, never dropped', () => {
   const strip_ = fn('renderGroupStrip');
-  assert.match(strip_, /chip\.classList\.toggle\('is-gone', !row\)/);
+  // Faded as gone — or, when its name is asleep, greyed as asleep: never dropped either way.
+  assert.match(strip_, /chip\.classList\.toggle\('is-gone', !row && !asleep\)/);
+  assert.match(strip_, /chip\.classList\.toggle\('is-asleep', asleep\)/);
   assert.match(styles, /\.group-chip\.is-gone \{/);
   // A chip that vanished would leave the panel disagreeing with the store about who is in
   // the room, silently — and the store is what the fan-out reads.

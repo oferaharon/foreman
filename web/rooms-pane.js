@@ -128,6 +128,68 @@ export function memberRow(member, sessions = []) {
   return null;
 }
 
+/* -------------------------------------------------------------------------- */
+/* Asleep members, and the one press that wakes them.                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The members of this room that are asleep, as their tmux session names, in the room's own
+ * order and once each.
+ *
+ * `roomSleepers` in `server/index.js` is the authority — it is the post fan-out's own rule
+ * for whose copy is **held**, and it is what the press actually wakes. This mirror decides
+ * only what is *drawn*: which chips are greyed and whether `wake N asleep` is shown. Same
+ * two conditions: the member resolves to no live row (`memberRow`, the server's rung order),
+ * and its stored tmux session name has a sleep record. A sleeper is keyed by name because it
+ * has no pane — exactly the id a member is resolved by first.
+ *
+ * @param {object} room
+ * @param {Array<object>} sessions the roster
+ * @param {Array<{name: string}>} asleep the frame's `asleep` sibling
+ * @returns {string[]}
+ */
+export function asleepMembers(room, sessions = [], asleep = []) {
+  const sleeping = new Set((Array.isArray(asleep) ? asleep : []).map((r) => str(r?.name)).filter(Boolean));
+  const out = [];
+  for (const m of Array.isArray(room?.members) ? room.members : []) {
+    const name = str(m?.tmuxSession);
+    if (!name || !sleeping.has(name) || out.includes(name)) continue;
+    if (memberRow(m, sessions)) continue; // a live row wears the name: it is waking, not asleep
+    out.push(name);
+  }
+  return out;
+}
+
+/**
+ * The button's word, or `null` when it must not be drawn — **only when at least one member is
+ * asleep**, the maintainer's ruling of 2026-10-29. A press in flight says so instead of
+ * counting, because the count falls as each one wakes and a number going down under a
+ * disabled button reads as something going wrong.
+ */
+export function wakeLabel(count, busy = false) {
+  if (busy) return 'waking…';
+  const n = Number(count) || 0;
+  return n > 0 ? `wake ${n} asleep` : null;
+}
+
+/**
+ * What one run did, per member, in words — `woke a, b` and then each failure as the
+ * server's own sentence, which already names the member and the reason. Never a tally:
+ * "2 of 3" tells a reader that something failed and not what, which is the half they need.
+ *
+ * @param {Array<{name: string, state: string, error?: string}>} results
+ * @param {(name: string) => string} [label] how a tmux name is shown — the chip's name
+ * @returns {{woke: string|null, failed: string[]}}
+ */
+export function wakeResultText(results = [], label = (n) => n) {
+  const list = Array.isArray(results) ? results : [];
+  const woken = list.filter((r) => r?.state === 'woken').map((r) => label(str(r?.name)));
+  const failed = list
+    .filter((r) => r?.state !== 'woken')
+    .map((r) => str(r?.error) || `${label(str(r?.name))} did not wake.`);
+  return { woke: woken.length ? `woke ${woken.join(', ')}` : null, failed };
+}
+
 /**
  * What became of one post, as one quiet line.
  *

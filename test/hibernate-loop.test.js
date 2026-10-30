@@ -447,6 +447,8 @@ test('one function sends this feature’s /exit, and no route puts a session to 
     'get /api/asleep',
     'post /api/asleep/:name/wake',
     'post /api/asleep/keep-awake',
+    // A room's `wake N asleep` — a wake, through `wakeSleeper`, never a sleep.
+    'post /api/rooms/:id/wake-asleep',
   ]);
   assert.ok(!/hibernator\.hibernate\(/.test(index), 'index.js never calls hibernate() itself — only the loop does');
 });

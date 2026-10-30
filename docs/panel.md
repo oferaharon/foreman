@@ -515,6 +515,17 @@ delivered as it goes idle, through the same guarded path as everything else the 
 The pane's own composer is replaced by Wake, so you can't type to a sleeper directly. A lead
 going to sleep and waking is said in its team's room.
 
+**Waking a room.** In a group room's pane, members that are asleep are greyed in the member
+strip (a dashed dot, and the hover says their posts are held), and a **wake N asleep** button
+appears at the strip's end while at least one is. Pressing it wakes that room's sleepers one
+after another through the same wake as the row's own Wake — same name, same conversation, the
+launch model, and everything held for each one, this room's posts included, queued in order —
+and then says per member who woke and, for any that did not, the reason in words. One failure
+stops nothing after it. The whole run holds the same flag a relaunch, a restore and a single
+Wake hold, so a second press, a relaunch or a sleep cannot land between two of its wakes; it
+is refused with the reason instead. It only ever happens on a press: nothing wakes a room's
+members when a post arrives. Group rooms only — not the team room, not the phone.
+
 **Forget.** The bin on a sleeping row means *forget*, behind a confirm: the row and any
 waiting messages go, and the confirm says how many messages that drops. The conversation stays
 on disk, where `claude --resume` can still reach it.

@@ -182,6 +182,7 @@ import {
   addableSessions,
   addReason,
   addressedText,
+  asleepMembers,
   entryKey,
   handedText,
   handedWaiting,
@@ -192,6 +193,8 @@ import {
   mentionMatches,
   mentionQuery,
   roomOrdered,
+  wakeLabel,
+  wakeResultText,
 } from './rooms-pane.js';
 // Context pressure — the three bands and the node that paints them — lifted into a leaf when
 // the bots band needed it, because a bot's `ctx` has to look exactly like a dev session's and
@@ -7962,6 +7965,12 @@ function createPane(slot, host) {
      * see why their press did nothing.
      */
     groupHeadError: null,
+    // `wake N asleep`: a run in flight, and what the last run did per member. Held in view
+    // state for `groupHeadError`'s reason — the strip repaints on every roster beat, and a
+    // run's own frames are exactly the beats that would wipe a result painted onto a node.
+    groupWakeBusy: false,
+    groupWakeNote: null, // {woke: string|null, failed: string[]} from `wakeResultText`
+    groupWakeEl: null,
     // The composer's standing refusal, for the same reason again and kept apart from the
     // header's: one is about the message, the other about the room, and one line saying both
     // would be a line that contradicts itself.
@@ -8988,6 +8997,9 @@ function createPane(slot, host) {
     view.groupError = null;
     view.groupBusy = false;
     view.groupHeadBusy = false;
+    view.groupWakeBusy = false;
+    view.groupWakeNote = null;
+    view.groupWakeEl = null;
     groupComposerEl = null;
     groupStripSig = '';
   }
@@ -9275,6 +9287,15 @@ function createPane(slot, host) {
     view.groupStripEl = strip;
     box.append(strip);
 
+    // What the last `wake N asleep` did, per member — its own line rather than the refusal
+    // line below it, because "woke alpha-main" is not an error and must not be painted as one.
+    const wakeNote = document.createElement('div');
+    wakeNote.className = 'group-wake-note';
+    wakeNote.setAttribute('role', 'status');
+    wakeNote.hidden = true;
+    view.groupWakeEl = wakeNote;
+    box.append(wakeNote);
+
     // The header's own refusals, painted from view state and never onto the node that was
     // pressed — the strip repaints on the roster beat, so a sentence written onto a chip's ✕
     // would be in a detached tree within two seconds.
@@ -9499,22 +9520,52 @@ function createPane(slot, host) {
       } else {
         view.groupAddPopEl = null;
       }
+
+      // `wake N asleep`, built with the strip and **patched on every beat** below, because
+      // who is asleep moves without the membership moving — the signature above deliberately
+      // does not know about it, or a sleep would take an armed `remove` question away.
+      const wake = document.createElement('button');
+      wake.type = 'button';
+      wake.className = 'ghost-btn group-wake';
+      wake.dataset.wake = '1';
+      wake.hidden = true;
+      wake.onclick = wakeGroupSleepers;
+      strip.append(wake);
     }
 
     // The dots, every beat, patched onto the chips that are already there. A member that
-    // resolves to no row gets the `gone` shape and says so on hover.
+    // resolves to no row gets the `gone` shape and says so on hover — unless its name is
+    // asleep, which is not gone: its copies are held, and the greyed chip says that instead.
+    const sleepers = asleepMembers(room, state.sessions, state.asleep);
     for (const m of members) {
       const chip = [...strip.children].find((c) => c.dataset?.member === memberKey(m));
       if (!chip) continue;
       const row = memberRow(m, state.sessions);
+      const asleep = !row && sleepers.includes(String(m?.tmuxSession ?? '').trim());
       const dot = chip.firstChild;
-      if (dot) dot.className = `dot ${row ? row.status : 'gone'}`;
+      if (dot) dot.className = `dot ${row ? row.status : asleep ? 'asleep' : 'gone'}`;
       chip.title = row
         ? `${memberName(m)}${row.project ? ` · ${row.project}` : ''}\n${row.status}`
-        : `${memberName(m)} — not in the panel right now. Anything said here is recorded as ` +
-          'not reached until it is back.';
-      chip.classList.toggle('is-gone', !row);
+        : asleep
+          ? `${memberName(m)} — asleep. Anything said here is held for it and handed over when it is woken.`
+          : `${memberName(m)} — not in the panel right now. Anything said here is recorded as ` +
+            'not reached until it is back.';
+      chip.classList.toggle('is-gone', !row && !asleep);
+      chip.classList.toggle('is-asleep', asleep);
     }
+
+    const wake = [...strip.children].find((c) => c.dataset?.wake);
+    if (wake) {
+      const word = wakeLabel(sleepers.length, view.groupWakeBusy);
+      wake.hidden = !word;
+      wake.textContent = word || '';
+      wake.disabled = view.groupWakeBusy;
+      wake.title = view.groupWakeBusy
+        ? 'Waking this room’s sleeping members, one after another.'
+        : `Wake ${sleepers.length === 1 ? 'the member' : `the ${sleepers.length} members`} of this room ` +
+          'that are asleep, one after another — each on its own conversation, with what was held for it.';
+    }
+    renderGroupWakeNote();
 
     if (view.groupAddOpen) renderGroupAdd();
     renderGroupHeadError();
@@ -9589,6 +9640,64 @@ function createPane(slot, host) {
         patchGroup({ add: s.id }, item);
       };
       pop.append(item);
+    }
+  }
+
+  /** What the last `wake N asleep` did, drawn from view state. Woken names in the line's own
+   *  muted ink; each failure as the server's sentence, in the refusal colour. */
+  function renderGroupWakeNote() {
+    const el = view.groupWakeEl;
+    if (!el) return;
+    const note = view.groupWakeNote;
+    el.hidden = !note || (!note.woke && !note.failed.length);
+    if (el.hidden) return el.replaceChildren();
+    const parts = [];
+    if (note.woke) {
+      const ok = document.createElement('span');
+      ok.textContent = note.woke;
+      parts.push(ok);
+    }
+    for (const f of note.failed) {
+      const bad = document.createElement('span');
+      bad.className = 'group-wake-failed';
+      bad.textContent = f;
+      parts.push(bad);
+    }
+    el.replaceChildren(...parts);
+  }
+
+  /**
+   * `wake N asleep`: one POST, and the server wakes the room's sleepers one after another
+   * through the same function the sleeper pane's Wake calls (`wakeSleeper`). The server holds
+   * the flag for the whole run, so a second press — here or anywhere — is its 409, shown as
+   * its own sentence; `groupWakeBusy` only stops this pane sending one.
+   *
+   * Nothing is drawn from the answer but the note: the woken rows arrive on the roster frame,
+   * and the chips stop being grey off that.
+   */
+  async function wakeGroupSleepers() {
+    const room = groupLive();
+    const id = room?.id;
+    if (!id || view.groupWakeBusy) return;
+    view.groupWakeBusy = true;
+    view.groupWakeNote = null;
+    view.groupHeadError = null;
+    renderGroupStrip();
+    // The chip's name for a tmux name, so the note reads the way the strip does.
+    const label = (name) => {
+      const m = (room.members || []).find((x) => String(x?.tmuxSession ?? '').trim() === name);
+      return m ? memberName(m) : name;
+    };
+    try {
+      const out = await postJSON(`/api/rooms/${encodeURIComponent(id)}/wake-asleep`, {});
+      if (view.kind === 'group-room' && view.groupRoom?.id === id) view.groupWakeNote = wakeResultText(out.results, label);
+    } catch (err) {
+      if (view.kind === 'group-room' && view.groupRoom?.id === id) view.groupHeadError = err.message;
+    } finally {
+      if (view.kind === 'group-room' && view.groupRoom?.id === id) {
+        view.groupWakeBusy = false;
+        renderGroupStrip();
+      }
     }
   }
 
@@ -9827,7 +9936,7 @@ function createPane(slot, host) {
     const els = view.groupFoldEls;
     if (!els) return;
     const room = groupLive();
-    const facts = roomStripFacts(room, state.sessions);
+    const facts = roomStripFacts(room, state.sessions, state.asleep);
 
     els.label.textContent = facts.name;
     els.label.title = facts.name;
