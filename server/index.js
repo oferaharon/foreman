@@ -127,6 +127,7 @@ import {
   roomHumanLine,
   roomPeerLine,
   rowName,
+  UNKNOWN,
 } from './rooms-line.js';
 import { Observer, isPeerPrompt, participant } from './observe.js';
 import { readTail } from './transcript.js';
@@ -298,7 +299,7 @@ const observer = new Observer({ store: sharedRoom, roster: () => registry.list()
 let sharedSweep = null;
 
 // Transitions + nudge live in watch.js so they can be tested; index.js owns the timer.
-const watch = createTeamWatch({ registry, tasks, room, queue, readTeam });
+const watch = createTeamWatch({ registry, tasks, room, queue, readTeam, asleep: hibernation });
 // The one edge that has to be tied after the fact: the watcher takes the registry, so the
 // registry cannot take the watcher. `stuck` on a worker's `team` object is what tells the
 // rail a worker has been waiting long enough to be the maintainer's problem rather than its
@@ -655,8 +656,49 @@ async function sendOrQueue(session, text) {
   }
 }
 
+/**
+ * `sendOrQueue`, or hold it for a sleeper — the one door every "send to this session" path
+ * goes through once hibernation can have closed the session it means.
+ *
+ * `target` is a live roster row or a sleep record (`hibernation.get`), and which one it is
+ * is read off the pane: a row has one, a record never does. A **name that is asleep is held
+ * even when a live row carries it**, and that is the order rule rather than an accident: the
+ * only way a live row can wear an asleep name is a wake in progress — launches reserve
+ * sleepers' names and a wake refuses a name a stranger holds — and the wake drains the held
+ * list into the new pane's queue in one synchronous step with the record's removal, so a
+ * message arriving mid-wake lands behind the ones that waited rather than jumping them.
+ *
+ * Held items keep the queue's item shape and reach the pane only through that queue after a
+ * wake, so delivery is still `PaneLock` → `assertNotBlocked`, and nothing held ever fires on
+ * its own — a merge press included. A full held list is the queue's own 409.
+ */
+async function sendOrHold(target, text) {
+  const name = target?.paneId ? target.tmuxSession : target?.name;
+  if (name && hibernation.has(name)) {
+    try {
+      const item = hibernation.hold(name, text);
+      return { queued: false, held: true, item };
+    } catch (err) {
+      err.status = 409;
+      throw err;
+    }
+  }
+  if (!target?.paneId) {
+    const err = new Error('That session has no pane and is not asleep.');
+    err.status = 409;
+    throw err;
+  }
+  return { held: false, ...(await sendOrQueue(target, text)) };
+}
+
 app.post('/api/sessions/:id/send', async (req, res) => {
   const session = registry.get(req.params.id);
+  // A sleeper's composer is replaced by Wake, so nothing should type here — and nothing is
+  // held either: whoever sent this is looking at the Wake button, and a message they meant
+  // for now must not quietly become one for later.
+  if (!session && hibernation.bySessionId(req.params.id)) {
+    return res.status(409).json({ error: 'This session is asleep — wake it.', asleep: true });
+  }
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
   if (!session.paneId) {
     return res.status(409).json({ error: 'This session is read-only — it has no tmux pane.' });
@@ -2763,7 +2805,8 @@ app.post('/api/team/tasks/:id/close', async (req, res) => {
  *   409  the identical phrase already went through inside the dedupe window
  *   409  no lead is running for that folder — and nothing is launched to fix that
  *   503  the lead's queue is full (MAX_PER_PANE): try later, something is looping
- *   200  typed, or queued for when the lead can hear it
+ *   200  typed, or queued for when the lead can hear it, or — the lead is asleep — held
+ *        for it until the maintainer wakes it (`held: true`; nothing is woken by this)
  *
  * Two things it deliberately does not do. It does not decide for itself whether the lead
  * can hear it: `sendOrQueue` claims the pane and re-reads it live, because the roster is
@@ -2883,7 +2926,10 @@ app.post('/api/trigger', async (req, res) => {
   triggerSeen.set(key, now);
 
   const lead = findLead(registry.list(), repo);
-  if (!lead) {
+  // A sleeping lead is not "no lead": the phrase is held for it and waits for a wake, which
+  // is the maintainer's press and never this endpoint's — a trigger still launches nothing.
+  const sleeper = lead ? null : hibernation.leadFor(repo);
+  if (!lead && !sleeper) {
     room.post(repo, {
       from: 'panel', to: 'lead', kind: 'system', event: 'trigger', alert: true,
       text: `Trigger "${id}" from ${ip} could not be delivered: no lead is running in ${repo}. Nothing was launched.`,
@@ -2904,12 +2950,12 @@ app.post('/api/trigger', async (req, res) => {
   // three endings: typed, queued for hours, or refused by the line below.
   room.post(repo, {
     from: 'panel', to: 'lead', kind: 'system', event: 'trigger',
-    text: `Trigger "${id}" from ${ip}: "${forRoom(phrase)}" — handed to the lead.`,
+    text: `Trigger "${id}" from ${ip}: "${forRoom(phrase)}" — handed to the lead${sleeper ? ', which is asleep' : ''}.`,
   });
 
   try {
-    const { queued } = await sendOrQueue(lead, phrase);
-    res.json({ ok: true, trigger: id, sessionId: lead.id, delivered: !queued, queued });
+    const { queued, held } = await sendOrHold(lead || sleeper, phrase);
+    res.json({ ok: true, trigger: id, sessionId: lead?.id ?? sleeper.sessionId, delivered: !queued && !held, queued, held });
   } catch (err) {
     // A full queue is `sendOrQueue`'s 409, which is right for the panel's own send box —
     // whoever pressed the button can see the twenty messages waiting. A webhook cannot,
@@ -2961,7 +3007,8 @@ app.post('/api/trigger', async (req, res) => {
  *   409  the same task again inside the window, or one that already merged
  *   409  no lead is running — and nothing is launched to fix that
  *   503  the lead's queue is full
- *   200  typed, or queued for when the lead can hear it
+ *   200  typed, or queued for when the lead can hear it, or — the lead is asleep — held
+ *        for it until the maintainer wakes it (`held: true`; nothing is woken by this)
  */
 
 /**
@@ -3148,7 +3195,10 @@ app.post('/api/team/merge', async (req, res) => {
   }
 
   const lead = findLead(registry.list(), repo);
-  if (!lead) {
+  // A sleeping lead is held for, the trigger's rule: the line waits for the maintainer's Wake
+  // and is typed only after it, through the pane queue — a held press never merges by itself.
+  const sleeper = lead ? null : hibernation.leadFor(repo);
+  if (!lead && !sleeper) {
     room.post(repo, {
       from: 'panel', to: 'lead', kind: 'system', event: 'merge', alert: true,
       about: rows.map((r) => r.id).join('+'), tasks: rows.map((r) => r.id),
@@ -3159,18 +3209,19 @@ app.post('/api/team/merge', async (req, res) => {
 
   const line = mergeLine(rows, humanName(repo));
   try {
-    const { queued } = await sendOrQueue(lead, line);
-    // Stamped on success only — see `mergeSeen`.
+    const { queued, held } = await sendOrHold(lead || sleeper, line);
+    // Stamped on success only — see `mergeSeen`. A held line is a success: it is waiting
+    // for the lead, and a second press would hold a second copy behind it.
     for (const row of rows) mergeSeen.set(`${teamKey(repo)} ${row.id}`, now);
     // `event: 'merge'`, never a matched sentence: the text is a message to a human and
     // will be reworded, and a string-matched colour turns off silently the day it is.
     room.post(repo, {
       from: 'panel', to: 'lead', kind: 'system', event: 'merge',
       about: rows.map((r) => r.id).join('+'), tasks: rows.map((r) => r.id),
-      text: `${humanName(repo)} pressed merge in the panel for ${rows.map((r) => prName(r)).join(', ')} (${rows.map((r) => r.id).join(', ')}) — ${queued ? 'queued for' : 'handed to'} the lead.`,
+      text: `${humanName(repo)} pressed merge in the panel for ${rows.map((r) => prName(r)).join(', ')} (${rows.map((r) => r.id).join(', ')}) — ${held ? 'handed to the lead, which is asleep' : `${queued ? 'queued for' : 'handed to'} the lead`}.`,
     });
     broadcastRoster();
-    res.json({ ok: true, line, queued, delivered: !queued, tasks: rows.map((r) => r.id), sessionId: lead.id });
+    res.json({ ok: true, line, queued, held, delivered: !queued && !held, tasks: rows.map((r) => r.id), sessionId: lead?.id ?? sleeper.sessionId });
   } catch (err) {
     room.post(repo, {
       from: 'panel', to: 'lead', kind: 'system', event: 'merge', alert: true,
@@ -3397,6 +3448,10 @@ function roomTurn(id, work) {
  *  Tokens rather than sentences: these ride on an append-only log entry that a card reads,
  *  and a sentence written into history is a sentence that cannot be reworded. */
 const NO_PANE = 'no-pane';
+/** The member's tmux session name is asleep: its copy is held (`state: 'held'`) and moves to
+ *  the woken pane's queue on wake. Beside `NO_PANE` because both are "no pane"; only this one
+ *  has somewhere for the copy to wait. */
+const ASLEEP = 'asleep';
 const QUEUE_FULL = 'queue-full';
 const SEND_FAILED = 'send-failed';
 const BAD_ENVELOPE = 'bad-envelope';
@@ -3636,7 +3691,9 @@ app.get('/api/rooms/:id', (req, res) => {
  * A member that **cannot be reached is not a refusal of the post.** The post happened; the
  * entry says who missed it. And the word on the entry is `handed`, never *delivered*: a
  * queued copy may sit for hours and `queue.prune` may drop it silently, so the log records
- * a handoff and nothing about it is a promise that anybody read anything.
+ * a handoff and nothing about it is a promise that anybody read anything. A member whose
+ * name is **asleep** is handed one too — `state: 'held'`, reason `asleep` — and its copy
+ * waits in the hibernation store until the maintainer wakes it; the word stays `handed`.
  *
  * **`@name` is parsed here and changes nothing about who gets a copy.** `mentionsIn` reads
  * the body against the room's own membership and the two envelope functions say something
@@ -3749,8 +3806,17 @@ app.post('/api/rooms/:id/post', async (req, res) => {
         };
         handed.push(mark);
 
-        if (!entry.row) continue; // `unknown` or `not-a-participant` — `resolveMember`'s own word
-        if (!entry.row.paneId) {
+        /*
+         * A member that resolved to no row because its name is asleep. Only `unknown` is
+         * asked about: `not-a-participant` resolved to a live row and is refused on role,
+         * which no sleep changes. The record stands in for the row in exactly two places —
+         * the folder the maintainer's name is resolved for, and the name the copy is held
+         * under — and the copy is composed by the same two functions as everybody's.
+         */
+        const sleeper =
+          !entry.row && entry.reason === UNKNOWN && mark.tmuxSession ? hibernation.get(mark.tmuxSession) : null;
+        if (!entry.row && !sleeper) continue; // `unknown` or `not-a-participant` — `resolveMember`'s own word
+        if (entry.row && !entry.row.paneId) {
           mark.reason = NO_PANE;
           continue;
         }
@@ -3762,7 +3828,7 @@ app.post('/api/rooms/:id/post', async (req, res) => {
          */
         let line;
         try {
-          const human = humanName(entry.row.paneCwd || entry.row.cwd || null);
+          const human = humanName(sleeper ? sleeper.folder : entry.row.paneCwd || entry.row.cwd || null);
           /*
            * `memberLabel` and never `memberName` — the second prefers the *live* row's name
            * and this test has to agree with the parse, which read the stored membership.
@@ -3782,9 +3848,9 @@ app.post('/api/rooms/:id/post', async (req, res) => {
         }
 
         try {
-          const { queued } = await sendOrQueue(entry.row, line);
-          mark.state = queued ? 'queued' : 'typed';
-          mark.reason = null;
+          const { queued, held } = await sendOrHold(sleeper || entry.row, line);
+          mark.state = held ? 'held' : queued ? 'queued' : 'typed';
+          mark.reason = held ? ASLEEP : null;
         } catch (err) {
           // A full queue (409) or a pane that threw. Not a refusal of the post: the entry
           // records the miss and everybody else still heard it.

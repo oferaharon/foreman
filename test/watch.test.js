@@ -10,6 +10,7 @@ const { RoomStore } = await import('../server/room.js');
 const { TaskStore } = await import('../server/tasks.js');
 const { MessageQueue } = await import('../server/queue.js');
 const { createTeamWatch, NUDGE_MARK } = await import('../server/watch.js');
+const { HibernateStore } = await import('../server/hibernate.js');
 
 test.after(() => {
   fs.rmSync(process.env.FOREMAN_STATE_DIR, { recursive: true, force: true });
@@ -23,9 +24,10 @@ let n = 0;
  * A harness per test: real stores on scratch files, a stub registry (it fronts tmux —
  * the one genuine stub), and a distinct repo so rooms never bleed between tests.
  */
-function harness({ team = null, human = null } = {}) {
+function harness({ team = null, human = null, asleep = null } = {}) {
   n += 1;
   const repo = `/scratch/watch-${n}`;
+  if (typeof asleep === 'function') asleep = asleep(repo);
   const dir = path.join(process.env.FOREMAN_STATE_DIR, `files-${n}`);
   fs.mkdirSync(dir, { recursive: true });
   const tasks = new TaskStore(path.join(dir, 'tasks.json'));
@@ -45,6 +47,7 @@ function harness({ team = null, human = null } = {}) {
     // default is the real reader, and `/scratch/watch-N` does not exist, so it answers
     // the fallback — which is also what a repo with no `user.name` gets.
     ...(human ? { human: () => human } : {}),
+    ...(asleep ? { asleep } : {}),
   });
   const worker = (id, state, live, kind = 'build') => {
     tasks.create({ id, repo, kind }, { now: T0 });
@@ -159,6 +162,50 @@ test('no lead in the roster means no nudge, but the room line lands', () => {
   h.rows.length = 0; // the lead is gone
   h.watch.postSystem(h.repo, 't1', 'orphan line', { now: T0 });
   assert.deepEqual(h.roomTexts(), ['orphan line']);
+});
+
+/* ------------------------------------------------------ a sleeping lead --- */
+
+/** The hibernation store on a scratch file, holding one sleeping lead for `repo`. */
+function sleepingLead(repo) {
+  const store = new HibernateStore(path.join(process.env.FOREMAN_STATE_DIR, `hibernate-${n}.json`));
+  store.put({ name: `voice-sleep-${n}-lead`, folder: repo, slug: 'lead', lead: true, sessionId: 'x', sleptAt: T0 });
+  return store;
+}
+
+test('a sleeping lead holds one nudge, not one per event, however long it sleeps', () => {
+  let store;
+  const h = harness({ asleep: (repo) => (store = sleepingLead(repo)) });
+  h.rows.length = 0; // the lead went to sleep — no live row
+  // Twenty events an hour apart: far past the 60 s floor every time, so only the held
+  // list's marker check can coalesce them.
+  for (let i = 0; i < 20; i += 1) h.watch.postSystem(h.repo, 't1', `event ${i}`, { now: T0 + i * 60 * MIN });
+  assert.equal(h.roomTexts().length, 20, 'the room keeps every line');
+  const held = store.held(store.leadFor(h.repo).name);
+  assert.equal(held.length, 1, 'one nudge held, not twenty');
+  assert.ok(held[0].text.startsWith(NUDGE_MARK));
+  assert.deepEqual(h.nudges(), [], 'nothing reached a pane queue');
+  store.stop();
+});
+
+test('a held nudge leaves room for the next one once the wake has taken it', () => {
+  let store;
+  const h = harness({ asleep: (repo) => (store = sleepingLead(repo)) });
+  h.rows.length = 0;
+  h.watch.nudgeLead(h.repo, { now: T0 });
+  const { name } = store.leadFor(h.repo);
+  assert.equal(store.takeHeld(name).length, 1, 'the wake drains it');
+  h.watch.nudgeLead(h.repo, { now: T0 + 2 * MIN });
+  assert.equal(store.heldCount(name), 1, 'and the next event holds a fresh one');
+  store.stop();
+});
+
+test('a live lead is nudged through its queue even with a sleeper store wired in', () => {
+  const store = new HibernateStore(path.join(process.env.FOREMAN_STATE_DIR, `hibernate-live-${n}.json`));
+  const h = harness({ asleep: store });
+  h.watch.postSystem(h.repo, 't1', 'one', { now: T0 });
+  assert.equal(h.nudges().length, 1);
+  store.stop();
 });
 
 /* ------------------------------------------------------------------ stuck --- */
