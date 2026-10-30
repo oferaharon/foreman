@@ -34,6 +34,7 @@ function fakeStore(initial = {}) {
   return {
     getItem: (k) => (map.has(k) ? map.get(k) : null),
     setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
     map,
   };
 }
@@ -367,5 +368,43 @@ test('a store that throws, or none at all, leaves the bots band open and the pag
   await withStorage(undefined, ({ botsFolded }) => {
     assert.equal(botsFolded.on, false);
     assert.doesNotThrow(() => botsFolded.set(true));
+  });
+});
+
+/*
+ * The Clear button's prep message — the one free-text preference. Blank, unset and a store
+ * that throws all read as the default, so the button always has something to send.
+ */
+
+test('the Clear prep message is the default with nothing stored, under its own key', async () => {
+  const store = fakeStore();
+  await withStorage(store, ({ clearPrep, CLEAR_PREP_KEY }) => {
+    assert.equal(CLEAR_PREP_KEY, 'foreman.clearPrep');
+    assert.equal(clearPrep.value, 'prepare to clear the session');
+    assert.equal(clearPrep.set('  wrap up, then I will clear  '), 'wrap up, then I will clear');
+    assert.equal(store.map.get(CLEAR_PREP_KEY), 'wrap up, then I will clear');
+    // Blank puts the default back and forgets what was stored.
+    assert.equal(clearPrep.set('   '), 'prepare to clear the session');
+    assert.equal(store.map.has(CLEAR_PREP_KEY), false);
+  });
+});
+
+test('a browser told a prep message comes back with it; a blank one stored is the default', async () => {
+  await withStorage(fakeStore({ 'foreman.clearPrep': 'summarise and stop' }), ({ clearPrep }) => {
+    assert.equal(clearPrep.value, 'summarise and stop');
+  });
+  await withStorage(fakeStore({ 'foreman.clearPrep': '  ' }), ({ clearPrep }) => {
+    assert.equal(clearPrep.value, 'prepare to clear the session');
+  });
+});
+
+test('a store that throws, or none at all, still gives the Clear button its default', async () => {
+  await withStorage(deniedStore, ({ clearPrep }) => {
+    assert.equal(clearPrep.value, 'prepare to clear the session');
+    assert.equal(clearPrep.set('x'), 'x', 'this visit still behaves');
+  });
+  await withStorage(undefined, ({ clearPrep }) => {
+    assert.equal(clearPrep.value, 'prepare to clear the session');
+    assert.doesNotThrow(() => clearPrep.set('y'));
   });
 });

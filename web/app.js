@@ -55,6 +55,10 @@ import { roomFolded } from './prefs.js';
 import { filesView } from './prefs.js';
 // Whether the rail's bots band is folded to its head — a browser preference, `prefs.js`'s.
 import { botsFolded } from './prefs.js';
+// What the composer's Clear button sends first — a browser preference, set in the settings box.
+import { clearPrep } from './prefs.js';
+// The two-step Clear button's rule: which word it wears and when its second press is allowed.
+import { CLEAR_COMMAND, clearView, DEFAULT_CLEAR_PREP, startClear, stepClear } from './clear-phase.js';
 // What a session still has running behind its composer, in Claude Code's own words. Two
 // readers — the rail row's second dot and the line above the composer — and one answer.
 import { backgroundWords } from './background.js';
@@ -660,6 +664,74 @@ function paneGrip(axis, label, title) {
   grip.setAttribute('aria-label', label);
   grip.title = title;
   return grip;
+}
+
+/* ------------------------------------------------------- the composer --- */
+
+/*
+ * The composer's two sizes, each dragged from its own grip and remembered in this browser
+ * through the same `resizer` the rail and the aside use.
+ *
+ * - **The section** (`--composer-h`), from the composer's top edge: a floor under the whole
+ *   composer, with the text box taking the slack. A floor rather than a height, so a
+ *   question card or a merge block is never clipped — it grows the composer the way it
+ *   always did, and a composer already taller than its content takes the card out of the
+ *   text box's share instead of moving the transcript.
+ * - **The text box** (`--composer-ta-h`), from the box's own top edge: a floor under the
+ *   textarea, which still grows with what you type past it.
+ *
+ * **One owner at a time**, and that is what keeps two grips from fighting. With both set,
+ * the section's slack goes to the text box, so dragging the box's own edge would move
+ * nothing until the slack was used up. So taking either grip hands it the size: the other
+ * preference is dropped at `pointerdown`, after the grip being taken is set to what is on
+ * screen — nothing jumps, and the grip you are holding is the one that answers.
+ *
+ * Both are root custom properties, which is what makes them survive a `buildComposer`
+ * rebuild without being in `composerSig`: the rebuilt composer reads the same variables.
+ * One number for the browser, `--aside`'s shape, so split view's two composers agree.
+ * Nothing stored is the stylesheet's own layout, byte for byte.
+ */
+const COMPOSER_H_KEY = 'foreman.composerHeight';
+const COMPOSER_TA_H_KEY = 'foreman.composerTextHeight';
+/** rem. What a stored value has to look like to be believed; the live ceilings are below. */
+const COMPOSER_MIN = 4;
+const COMPOSER_MAX = 80;
+const COMPOSER_TA_MIN = 3;
+const COMPOSER_TA_MAX = 70;
+/** rem. What the transcript above keeps, whichever grip is asking. */
+const STREAM_MIN = 8;
+
+function applyComposerHeight(rem) {
+  setRootVar('--composer-h', rem);
+  // CSS cannot ask whether a custom property is set, and the sized layout is a flex column
+  // the unsized one is not — so the mode is a class, `.rooms-band-sized`'s shape.
+  document.documentElement.classList.toggle('composer-sized', rem != null);
+}
+
+function applyComposerTextHeight(rem) {
+  setRootVar('--composer-ta-h', rem);
+}
+
+const COMPOSER_SIZES = {
+  section: { key: COMPOSER_H_KEY, min: COMPOSER_MIN, max: COMPOSER_MAX, apply: applyComposerHeight },
+  text: { key: COMPOSER_TA_H_KEY, min: COMPOSER_TA_MIN, max: COMPOSER_TA_MAX, apply: applyComposerTextHeight },
+};
+
+/**
+ * Hand the size to one grip at `pointerdown`: set it to `rem` — what is on screen — and drop
+ * the other one's preference, so the two never fight. Does nothing while the other is unset,
+ * which is the common case and leaves the grip's own drag to do all the work.
+ */
+function takeComposerSize(which, rem) {
+  const mine = COMPOSER_SIZES[which];
+  const other = COMPOSER_SIZES[which === 'section' ? 'text' : 'section'];
+  if (readPref(other.key, other.min, other.max) == null) return;
+  prefs.set(mine.key, Math.min(Math.max(rem, mine.min), mine.max));
+  persistPref(mine.key);
+  mine.apply(prefs.get(mine.key));
+  prefs.set(other.key, null);
+  persistPref(other.key);
+  other.apply(null);
 }
 
 /* ------------------------------------------------------------ the rail --- */
@@ -2517,6 +2589,42 @@ async function openSettings() {
   };
 
   body.append(gsSec);
+
+  /* ─────────────────────────────────────────────────────────── clear button ── */
+
+  /*
+   * What the composer's Clear button sends on its first press. Browser-local beside the
+   * ghost-text flag, for that one's reason, and applied as it changes like that one: Save
+   * does not touch it. Blank puts the default back.
+   */
+  const cpSec = document.createElement('section');
+  cpSec.className = 'settings-sec';
+  const cpCap = document.createElement('h3');
+  cpCap.textContent = 'Clear button';
+  cpSec.append(cpCap);
+
+  const cpRow = document.createElement('div');
+  cpRow.className = 'settings-add';
+  const cpInput = document.createElement('input');
+  cpInput.type = 'text';
+  cpInput.value = clearPrep.value;
+  cpInput.placeholder = DEFAULT_CLEAR_PREP;
+  cpInput.setAttribute('aria-label', 'Message the Clear button sends first');
+  cpRow.append(cpInput);
+  cpSec.append(cpRow);
+
+  const cpFlag = document.createElement('p');
+  cpFlag.className = 'settings-flag';
+  cpFlag.textContent =
+    'The first press sends this to the session; once it has answered and gone idle, the ' +
+    'button reads “clear now” and a second press sends /clear. Remembered in this browser only.';
+  cpSec.append(cpFlag);
+
+  cpInput.onchange = () => {
+    cpInput.value = clearPrep.set(cpInput.value);
+  };
+
+  body.append(cpSec);
 
   /* ──────────────────────────────────────────────────────────────────── bots ── */
 
@@ -11161,6 +11269,8 @@ function createPane(slot, host) {
 
     renderStream();
     mount.append(buildComposer(s));
+    // The composer's two sizes, now that its grips can measure (`mountComposerGrips`).
+    applyResizers();
     // Sizing needs the textarea in the document — scrollHeight is 0 before that, so a
     // restored multi-line draft would sit crammed in a two-row box.
     composerEl.autoGrow();
@@ -14186,11 +14296,16 @@ function createPane(slot, host) {
       // Stash before tearing down; the rebuilt composer restores from the same place.
       saveDraft(s.id);
       old.replaceWith(buildComposer(s));
+      // The new composer's grips were registered detached; this applies them now that they
+      // can measure, and prunes the old pair.
+      applyResizers();
       composerEl.autoGrow();
     } else {
       renderQueue();
       renderBackgroundLine();
       renderGhostLine();
+      paintClearButton();
+      paintTermButton();
       updateComposerHint();
     }
     lastComposerSig = sig;
@@ -15379,7 +15494,26 @@ function createPane(slot, host) {
 
     let stop = null;
     let stopLabel = null;
+    let clearBtn = null;
+    let clearLabel = null;
+    let termBtn = null;
     if (s.interactive) {
+      /*
+       * Clear, immediately left of interrupt: two presses, the prep message and then
+       * `/clear`, with the session's answer between them. Its word changes three ways and
+       * the row is right-aligned, so it takes interrupt's never-moves treatment — the widest
+       * word is always in the box (`.clear-btn::before`) and the live one sits on top. The
+       * phase lives in `clearRecs`, outside this rebuilt tree and outside `composerSig`;
+       * `paintClearButton` is the one place it is drawn.
+       */
+      clearBtn = document.createElement('button');
+      clearBtn.className = 'ghost-btn clear-btn';
+      clearLabel = document.createElement('span');
+      clearLabel.className = 'ghost-btn-label';
+      clearBtn.append(clearLabel);
+      clearBtn.onclick = pressClear;
+      above.append(clearBtn);
+
       stop = document.createElement('button');
       stop.className = 'ghost-btn';
       /*
@@ -15399,6 +15533,17 @@ function createPane(slot, host) {
       stop.title = INTERRUPT_TITLE;
       stop.onclick = () => sendKey('interrupt');
       above.append(stop);
+
+      /*
+       * Open a Terminal, immediately right of interrupt — the header's button, built by the
+       * same function and calling the same route. The header's copy comes and goes with
+       * `attached`; this one cannot, because anything appearing at the right end of a
+       * right-aligned row would walk interrupt sideways. So it is always here, and disabled
+       * while a window is already attached (`paintTermButton`).
+       */
+      termBtn = attachBtn(s);
+      termBtn.classList.add('term-btn');
+      above.append(termBtn);
     }
 
     const row = document.createElement('div');
@@ -15424,10 +15569,25 @@ function createPane(slot, host) {
     btn.onclick = submit;
 
     row.append(hint, activity, model, effort, mode, btn);
-    inner.append(queue, strip, above, ta, row);
+
+    // The text box sits in a box of its own so its grip can hang off the top edge.
+    const box = document.createElement('div');
+    box.className = 'composer-box';
+    const taGrip = paneGrip('y', 'Text box height', 'Drag to resize the text box · double-click to reset');
+    taGrip.classList.add('composer-ta-grip');
+    box.append(taGrip, ta);
+    inner.append(queue, strip, above, box, row);
+
+    const grip = paneGrip('y', 'Composer height', 'Drag to resize the composer · double-click to reset');
+    grip.classList.add('composer-grip');
+    wrap.append(grip);
+    mountComposerGrips(wrap, grip, ta, taGrip);
 
     closeCompletion();
-    composerEl = { wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, bgLine, stop, stopLabel, autoGrow };
+    composerEl = {
+      wrap, ta, hint, activity, model, effort, btn, strip, queue, above, merge, ghost, bgLine, stop, stopLabel,
+      clearBtn, clearLabel, termBtn, autoGrow,
+    };
     lastComposerSig = composerSig(s);
     renderAttachments();
     renderQueue();
@@ -15439,8 +15599,149 @@ function createPane(slot, host) {
     renderBackgroundLine();
     renderMergeQueue();
     renderGhostLine();
+    paintClearButton();
+    paintTermButton();
     updateComposerHint();
     return wrap;
+  }
+
+  /**
+   * The composer's two grips (see `COMPOSER_SIZES`). Built with every composer, because the
+   * grips are inside the tree `buildComposer` rebuilds; the sizes themselves are root
+   * variables and were never in it. The tree is detached here, so nothing is applied until
+   * the caller has mounted it and called `applyResizers`.
+   */
+  function mountComposerGrips(wrap, grip, ta, taGrip) {
+    const rem = () => remPx();
+    // What the transcript above can still give up, plus what the thing being sized has now.
+    const room = (node) => {
+      const stream = wrap.previousElementSibling;
+      if (!stream || !node.isConnected) return Infinity;
+      return (stream.getBoundingClientRect().height + node.getBoundingClientRect().height) / rem() - STREAM_MIN;
+    };
+
+    // Before `resizer`'s own listener, so the hand-over has happened by the time it starts.
+    grip.addEventListener('pointerdown', (e) => {
+      if (e.button === 0) takeComposerSize('section', wrap.getBoundingClientRect().height / rem());
+    });
+    taGrip.addEventListener('pointerdown', (e) => {
+      if (e.button === 0) takeComposerSize('text', ta.getBoundingClientRect().height / rem());
+    });
+
+    resizer({
+      handle: grip,
+      axis: 'y',
+      storageKey: COMPOSER_H_KEY,
+      min: COMPOSER_MIN,
+      max: COMPOSER_MAX,
+      ceiling: () => room(wrap),
+      // The composer is anchored to the pane's bottom, so its bottom edge stays put while
+      // it grows and the distance from there to the pointer is the height being asked for.
+      measure: (e) => wrap.getBoundingClientRect().bottom - e.clientY,
+      apply: applyComposerHeight,
+      onMove: autoGrowNow,
+    });
+    resizer({
+      handle: taGrip,
+      axis: 'y',
+      storageKey: COMPOSER_TA_H_KEY,
+      min: COMPOSER_TA_MIN,
+      max: COMPOSER_TA_MAX,
+      ceiling: () => room(ta),
+      // Same anchor, one level in: the box's bottom edge does not move while it grows.
+      measure: (e) => ta.getBoundingClientRect().bottom - e.clientY,
+      apply: applyComposerTextHeight,
+      onMove: autoGrowNow,
+    });
+  }
+
+  function autoGrowNow() {
+    composerEl?.autoGrow();
+  }
+
+  /* ---------------------------------------------------------- clear --- */
+
+  /*
+   * The Clear button's phase, per tmux pane and per `createPane` — outside the composer's
+   * rebuilt tree and never in `composerSig`, so a rebuild keeps it and a phase change never
+   * tears the textarea down. Keyed by pane because `/clear` mints a new session id in the
+   * same pane; the record remembers the id it was started under, and `stepClear` ends it
+   * when that id is gone. In memory only: a reload is a fresh `clear`.
+   */
+  const clearRecs = new Map();
+
+  /** Fold the latest roster row and transcript into this pane's record, and paint. */
+  function paintClearButton() {
+    const btn = composerEl?.clearBtn;
+    if (!btn) return;
+    const s = current();
+    const key = s?.paneId;
+    let rec = key ? clearRecs.get(key) || null : null;
+    if (rec && !rec.pending) {
+      rec = stepClear(rec, s, view.messages);
+      if (rec) clearRecs.set(key, rec);
+      else clearRecs.delete(key);
+    }
+    const v = clearView(rec, s);
+    // A press whose request is still out is never pressable twice.
+    if (rec?.pending) v.disabled = true;
+    if (btn.dataset.phase !== v.phase) {
+      btn.dataset.phase = v.phase;
+      composerEl.clearLabel.textContent = v.word;
+    }
+    btn.disabled = v.disabled;
+    btn.title = v.title;
+  }
+
+  async function pressClear() {
+    const s = current();
+    if (!s?.interactive || !s.paneId) return;
+    const key = s.paneId;
+    const rec = clearRecs.get(key) || null;
+    const v = clearView(rec, s);
+    if (v.phase === 'idle') {
+      // Recorded before the send, so the button reads `preparing…` and refuses a second
+      // press while the request is out; taken back if the send fails.
+      const text = clearPrep.value;
+      clearRecs.set(key, { ...startClear(s, text, Date.now()), pending: true });
+      paintClearButton();
+      const ok = await deliver(s.id, text);
+      const now = clearRecs.get(key);
+      if (now?.pending) {
+        if (ok) clearRecs.set(key, { ...now, pending: false });
+        else clearRecs.delete(key);
+      }
+      paintClearButton();
+      return;
+    }
+    if (v.phase === 'ready') {
+      // The human's press, and the only thing anywhere that sends `/clear`. Through the
+      // same guarded send as anything typed: the session is idle and nothing is queued, so
+      // it is typed, never held.
+      clearRecs.set(key, { ...rec, pending: true });
+      paintClearButton();
+      const ok = await deliver(s.id, CLEAR_COMMAND);
+      if (ok) clearRecs.delete(key);
+      else clearRecs.set(key, rec);
+      paintClearButton();
+    }
+  }
+
+  /** The composer's Terminal button: always there, usable only while nothing is attached. */
+  function paintTermButton() {
+    const btn = composerEl?.termBtn;
+    if (!btn) return;
+    const s = current();
+    const busy = Boolean(s && attaching.has(s.id));
+    btn.classList.toggle('is-busy', busy);
+    btn.disabled = !s?.tmuxSession || Boolean(s.attached) || busy;
+    if (s?.attached) btn.classList.remove('is-error');
+    // A failed attempt keeps its error as the title until a window does get attached.
+    if (btn.classList.contains('is-error')) return;
+    const name = s?.label || s?.tmuxSession || 'this session';
+    btn.title = s?.attached
+      ? `A Terminal is already attached to ${name}`
+      : `Open a Terminal on ${name} — the pane resizes to fit the window`;
   }
 
   /**
@@ -15588,7 +15889,9 @@ function createPane(slot, host) {
     // There is no `has-ghost` class any more and that is the point: the line shares the row
     // rather than changing its shape, so nothing above needed telling. The merge block still
     // carries its own, because it is still the one thing here that takes a whole line.
-    if (stop && stop.parentNode === above) above.insertBefore(ghost, stop);
+    // Clear now stands left of interrupt, so the line goes in front of Clear.
+    const first = composerEl.clearBtn || stop;
+    if (first && first.parentNode === above) above.insertBefore(ghost, first);
     else above.append(ghost);
   }
 
@@ -17522,6 +17825,8 @@ function createPane(slot, host) {
       case 'messages':
         if (msg.sessionId !== view.selected) return;
         appendMessages(msg.messages);
+        // A reply to the prep message is one of the Clear button's two witnesses.
+        paintClearButton();
         return;
       case 'earlier':
         if (msg.sessionId !== view.selected) return;

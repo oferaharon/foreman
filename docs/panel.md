@@ -794,6 +794,35 @@ with a session when it earns its real id, and are restored to full height rather
 crammed into a two-row box. A send that fails puts the text back rather than swallowing
 it.
 
+### Resizing the composer
+
+Two grips, both dragged and both remembered per browser (`localStorage`, double-click to
+forget). The composer's **top edge** sets a floor under the whole section, and the text box
+takes the slack — a question card or merge block arriving still grows the composer rather
+than being clipped, but out of the text box's share first. The **text box's own top edge**
+sets a floor under the box, which still grows with what you type past it. Only one of the
+two holds a size at a time: taking either grip hands it the size that is on screen and
+drops the other's, because with both set the section's slack would make the box's grip move
+nothing. Both are root CSS variables, so a composer rebuild — a box appearing, a mode
+changing — keeps them, and split view's two composers share them. The transcript always
+keeps 8rem.
+
+### Clearing a session
+
+The row above the box reads **clear · interrupt · open a Terminal**. **Clear** is the
+maintainer's two-step ritual as one button. The first press sends the prep message —
+*prepare to clear the session* by default, editable under *Clear button* in the panel's
+settings, per browser — through the normal send path, so a busy session queues it. The
+button then reads **preparing…** and refuses presses until the session has **answered and
+is idle again**: a reply to that message in the transcript (or having been seen working
+with nothing of ours queued), and then no question, permission or plan box and nothing
+queued. A question mid-prep keeps it waiting until it is answered. Only then does it read
+**clear now**, and the second press — always a human's; nothing sends `/clear` on its own —
+types `/clear` through the same guarded path. There is no cancel. The new conversation's id
+ends the phase, so the pane follows the rotation and the button reads **clear** again; a
+reload also resets it, since the phase is held in the page only. The button keeps
+`preparing…` in its box at all times, like interrupt keeps `interrupt`, so neither moves.
+
 ### Suggested prompts
 
 An idle session offers a guess at your next prompt as dim ghost text inside its own
@@ -1206,6 +1235,11 @@ the pane to the window**. A session launched at 220×50 and attached from a defa
 becomes 80×23 — measured, not estimated — and every parser in `server/` reads a pane by its
 wrapped lines. Nothing breaks; the fixtures cover narrow captures. But the panel is looking
 at a different shape of screen afterwards, and the button's tooltip says so.
+
+The same button also sits right of interrupt above the composer. That copy never comes and
+goes — anything appearing at the right end of that right-aligned row would walk interrupt
+sideways — so it is always there and **disabled while a window is attached**. Both copies
+repaint the moment `attached` changes; the roster's diff carries it for exactly that.
 
 ### Opening the folder
 

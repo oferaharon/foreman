@@ -745,6 +745,10 @@ export class SessionRegistry extends EventEmitter {
         // never reach a browser. `resolveForge` caches for a minute, so this is what the
         // poll after that minute is for.
         JSON.stringify(prev.forge) !== JSON.stringify(s.forge) ||
+        // A Terminal window opened or closed changes this and nothing else on the row — and
+        // the header's open-a-Terminal button and the composer's copy beside interrupt are
+        // both drawn from it, so without this neither noticed until something else moved.
+        prev.attached !== s.attached ||
         prev.transcriptPath !== s.transcriptPath
       ) {
         return true;

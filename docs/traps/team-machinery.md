@@ -266,6 +266,16 @@ byte-identical to before the feature existed — checked by SHA-256 on the cropp
 screenshot region, not by eye, because "looks the same" is not evidence a selector still
 fires.
 
+The row now holds three buttons — **clear · interrupt · open a Terminal** — and each keeps
+interrupt's promise. Clear's word changes three ways, so `.clear-btn::before` holds
+`preparing…`, its widest, in the same grid cell as the live word; the Terminal copy is
+always present and only ever disabled, because a button appearing at the right end of a
+right-aligned row would push interrupt left. Measured on a scratch panel: interrupt's rect
+was identical to the subpixel across `clear` → `preparing…` → `clear now` → `clear`, with
+and without a suggestion line, and with a Terminal attached and detached. Clear's phase is
+held per pane in `clearRecs`, outside the rebuilt composer and outside `composerSig` —
+`composerSig`'s rule below, for the same reason.
+
 ## Cache a three-dot diff on both shas
 
 **Cache a three-dot diff on both shas, not the branch tip alone.** `base...branch`
