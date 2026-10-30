@@ -35,7 +35,7 @@
  * `99+` cap would be two answers to one question about one room.
  */
 
-import { memberRow } from './rooms-pane.js';
+import { asleepMembers, memberRow } from './rooms-pane.js';
 import { unseenText } from './rooms-band.js';
 
 /** A trimmed string, or `''`. The shape every comparison and every label below wants —
@@ -111,13 +111,18 @@ export function asideStripFacts(team) {
  *
  * @param {{name?: string, members?: Array, unseen?: number}|null} room a room off the roster
  * @param {Array} sessions the live roster rows
+ * @param {Array<{name: string}>} [asleep] the frame's sleepers, so a sleeping member's dot
+ *   reads `asleep` rather than `gone`
  * @returns {{name: string, dots: string[], unseen: string}}
  */
-export function roomStripFacts(room, sessions = []) {
+export function roomStripFacts(room, sessions = [], asleep = []) {
   const members = Array.isArray(room?.members) ? room.members : [];
+  // A member with no row whose name is asleep is `asleep`, not `gone` — the open pane's chip
+  // says the same, through the same `asleepMembers`.
+  const sleeping = asleepMembers(room, sessions, asleep);
   const dots = members.map((m) => {
     const row = memberRow(m, sessions);
-    if (!row) return 'gone';
+    if (!row) return sleeping.includes(str(m?.tmuxSession)) ? 'asleep' : 'gone';
     return str(row.status) || 'unknown';
   });
   // `'room'` is `roomTitle`'s own fallback one file over, for the same reason: a strip with

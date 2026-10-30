@@ -5373,6 +5373,8 @@ app.get('/api/sessions/:id/sleep', async (req, res) => {
  * `-2`, which is exactly what reserving the name exists to prevent. It passes **no**
  * reserved names: its own is the one it must be given.
  *
+ * The body is `wakeSleeper`, below, which a group room's `wake N asleep` calls too.
+ *
  * On success: the pin goes back under the row it sat beneath (`wakePinOrder` →
  * `carryPinOrder`), the idle clock starts now (a resume does not move `lastActivity` —
  * measured), everything held for it moves into the new pane's queue **in order** (so it is
@@ -5383,20 +5385,68 @@ app.get('/api/sessions/:id/sleep', async (req, res) => {
  */
 app.post('/api/asleep/:name/wake', async (req, res) => {
   const name = req.params.name;
-  const record = hibernation.get(name);
-  if (!record) return res.status(404).json({ error: 'That session is not asleep.' });
-  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
-  if (relaunching || restoring) {
-    return res.status(409).json({ error: 'A relaunch, restore or wake is already running — try again when it finishes.' });
-  }
+  if (!hibernation.get(name)) return res.status(404).json({ error: 'That session is not asleep.' });
+  const busy = wakeRefusal();
+  if (busy) return res.status(409).json({ error: busy });
   relaunching = true;
+  let out;
+  try {
+    out = await wakeSleeper(name);
+  } finally {
+    relaunching = false;
+  }
+  await finishWakes();
+  if (!out.ok) return res.status(out.status).json({ error: out.error, name });
+  const made = out.paneId ? registry.byPane(out.paneId) : null;
+  res.json({
+    ok: true,
+    name: out.name,
+    paneId: out.paneId,
+    lead: out.lead,
+    resumed: out.resumed,
+    sessionId: made?.id ?? null,
+    queued: out.queued,
+  });
+});
+
+/** Why no wake may start right now, in words, or `null`. Asked once per press — a room's
+ *  wake asks it once for the whole run and then holds the flag, so nothing can slip in
+ *  between two of its wakes. */
+function wakeRefusal() {
+  if (hibernator.sleeping) return 'A session is being put to sleep right now — try again in a few seconds.';
+  if (relaunching || restoring) return 'A relaunch, restore or wake is already running — try again when it finishes.';
+  return null;
+}
+
+/** After one or more wakes: the roster read once and sent once, so the browser's next frame
+ *  carries every woken row rather than the first of them. */
+async function finishWakes() {
+  await registry.refresh().catch(() => {});
+  broadcastRoster();
+}
+
+/**
+ * Wake one sleeper — **the** wake, the one function both the sleeper pane's Wake and a
+ * room's `wake N asleep` call, so there is no second launcher. The caller has made the
+ * refusals (`wakeRefusal`) and **holds `relaunching`** for as long as it is waking; this
+ * neither takes nor releases it, and neither refreshes nor broadcasts the roster
+ * (`finishWakes`, once, afterwards).
+ *
+ * @returns {Promise<{ok: true, name: string, paneId: string|null, lead: boolean,
+ *   resumed: boolean, queued: number} | {ok: false, status: number, error: string}>}
+ */
+async function wakeSleeper(name) {
+  const record = hibernation.get(name);
+  if (!record) return { ok: false, status: 404, error: `${name} is not asleep any more.` };
 
   let result;
   try {
     if ((await liveSessionNames()).includes(name)) {
-      return res.status(409).json({
+      return {
+        ok: false,
+        status: 409,
         error: `Something else is running under ${name} now, so it can’t wake under its own name. Close that session first.`,
-      });
+      };
     }
     const entry = {
       folder: record.folder,
@@ -5411,14 +5461,11 @@ app.post('/api/asleep/:name/wake', async (req, res) => {
     [result] = await startEntries([entry], { terminal: Boolean(record.attached), pinOrder, reserved: new Set() });
   } catch (err) {
     result = { state: 'failed', error: err.message };
-  } finally {
-    relaunching = false;
   }
 
   if (result?.state !== 'started') {
-    broadcastRoster();
     const why = result?.error || (result?.state === 'skipped' ? 'its name was taken' : 'it did not start');
-    return res.status(500).json({ error: `${name} did not wake: ${why}. It is still asleep — try Wake again.`, name });
+    return { ok: false, status: 500, error: `${name} did not wake: ${why}. It is still asleep — try Wake again.` };
   }
 
   hibernator.woke(result.name);
@@ -5442,19 +5489,88 @@ app.post('/api/asleep/:name/wake', async (req, res) => {
     room.post(record.folder, { from: 'panel', to: 'lead', kind: 'system', event: 'awake', text: 'The lead was woken.' });
   }
   console.log(`hibernate: ${name} woke${delivered ? `, ${delivered} held message${delivered === 1 ? '' : 's'} queued` : ''}`);
-
-  await registry.refresh().catch(() => {});
-  broadcastRoster();
-  const made = result.paneId ? registry.byPane(result.paneId) : null;
-  res.json({
+  return {
     ok: true,
     name: result.name,
     paneId: result.paneId ?? null,
     lead: Boolean(result.lead),
     resumed: Boolean(result.resumed),
-    sessionId: made?.id ?? null,
     queued: delivered,
-  });
+  };
+}
+
+/**
+ * The members of a group room that are asleep, by tmux session name, in the room's own order
+ * — decided exactly as the post fan-out decides whose copy is **held**: the member resolved
+ * to no live row (`unknown`, never `not-a-participant`), and its stored tmux session name has
+ * a sleep record. One question, one answer, so the button cannot wake somebody a post would
+ * not have held for, nor miss somebody it would.
+ */
+function roomSleepers(room, sessions) {
+  const names = [];
+  for (const entry of resolveMembers(room?.members, sessions)) {
+    const name = typeof entry.member?.tmuxSession === 'string' ? entry.member.tmuxSession.trim() : '';
+    if (entry.row || entry.reason !== UNKNOWN || !name) continue;
+    if (hibernation.has(name) && !names.includes(name)) names.push(name);
+  }
+  return names;
+}
+
+/**
+ * `wake N asleep` in a group room's pane: wake every member of that room that is asleep,
+ * **one after another**, each through `wakeSleeper` — the same function the sleeper pane's
+ * Wake calls, so a room's wake is N ordinary wakes and never a second launcher. Each comes
+ * back under its own name on `--resume` of its own conversation, on the launch model, with
+ * everything held for it — this room's posts among them — moved into its new pane's queue in
+ * order.
+ *
+ * A server route rather than N presses from the browser, for three reasons. **The flag is
+ * held for the whole run**: `relaunching` is taken once and kept across every wake, so a
+ * relaunch, a restore, the sleep loop or a second press cannot land *between* two of them —
+ * a second press while one runs is a 409 here, not a browser-side courtesy. **Who is asleep is
+ * the server's answer** (`roomSleepers`, the fan-out's own rule), not the browser's mirror of
+ * it, which only decides whether the button is drawn. And **the run finishes if the tab
+ * closes**, with one answer naming every member.
+ *
+ * One member failing does not stop the rest: every member gets a line, `woken` or `failed`
+ * with the reason in words, and the answer is a 200 whenever the run itself ran. A human
+ * press only — nothing calls this on a post, a timer or a member's arrival, and no `foreman`
+ * tool reaches it.
+ *
+ *   404  no such room
+ *   409  a wake, relaunch, restore or sleep is running; or nobody in the room is asleep
+ */
+app.post('/api/rooms/:id/wake-asleep', async (req, res) => {
+  const room = rooms.get(req.params.id);
+  if (!room) return res.status(404).json({ error: `There is no room ${req.params.id}.`, code: 'no-room' });
+  const busy = wakeRefusal();
+  if (busy) return res.status(409).json({ error: busy });
+  const names = roomSleepers(room, registry.list());
+  if (!names.length) return res.status(409).json({ error: `Nobody in “${room.name}” is asleep.` });
+
+  relaunching = true;
+  const results = [];
+  try {
+    for (const name of names) {
+      let out;
+      try {
+        out = await wakeSleeper(name);
+      } catch (err) {
+        out = { ok: false, error: `${name} did not wake: ${err.message}. It is still asleep.` };
+      }
+      results.push(
+        out.ok
+          ? { name, state: 'woken', paneId: out.paneId, queued: out.queued }
+          : { name, state: 'failed', error: out.error },
+      );
+    }
+  } finally {
+    relaunching = false;
+  }
+  await finishWakes();
+  const woken = results.filter((r) => r.state === 'woken').length;
+  console.log(`hibernate: room ${room.id} woke ${woken} of ${results.length}`);
+  res.json({ ok: true, room: room.id, results });
 });
 
 /**
