@@ -5267,11 +5267,16 @@ app.get('/api/asleep', (_req, res) => {
 app.get('/api/sessions/:id/sleep', async (req, res) => {
   const session = registry.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
-  const verdict = await hibernator.verdict(session);
+  // `?beside=watched` is the header's own ask: it is on screen, so "open in a browser" is
+  // always true there, and the reason worth reading is the one behind it. `watched` still
+  // says that half, so nothing is hidden — it is just not the whole answer.
+  const besideWatched = req.query.beside === 'watched';
+  const verdict = await hibernator.verdict(session, { besideWatched });
   res.json({
     name: session.tmuxSession ?? null,
     after: hibernateAfter,
     keepAwake: session.tmuxSession ? hibernation.isKeepAwake(session.tmuxSession) : false,
+    watched: watchedSessionIds().has(session.id),
     ok: verdict.ok,
     rule: verdict.ok ? null : verdict.rule,
     why: verdict.ok ? null : verdict.why,
@@ -5479,7 +5484,11 @@ async function subscribe(ws, sessionId, slot = 'a') {
   unsubscribe(ws, slot);
   // A slot shows a session or a bot, never both — see `botSubs` below.
   botSubs.unsubscribe(ws, slot);
-  const session = registry.get(sessionId);
+  // A sleeper is not in the roster, but its pane is opened read-only — so a miss falls back
+  // to the sleep record, and the path read is the one the panel wrote down when it put the
+  // session to sleep, never one a client sent. `paneId: null` keeps the rebind loop below
+  // from following a pane the sleeper no longer has.
+  const session = registry.get(sessionId) ?? asleepSession(sessionId);
   if (!session) return send(ws, 'error', { message: 'Unknown session.', slot });
 
   const slots = slotsOf(ws);
@@ -5524,6 +5533,25 @@ async function subscribe(ws, sessionId, slot = 'a') {
     slots.delete(slot);
     send(ws, 'error', { message: `Could not read transcript: ${err.message}`, slot });
   }
+}
+
+/**
+ * A sleeper's conversation, shaped as far as `subscribe` reads a session: its id, the
+ * transcript path off the panel's own record, and no pane. `null` when nothing asleep holds
+ * that id.
+ */
+function asleepSession(sessionId) {
+  const record = hibernation.bySessionId(sessionId);
+  if (!record?.transcriptPath) return null;
+  return {
+    id: record.sessionId,
+    transcriptPath: record.transcriptPath,
+    paneId: null,
+    tmuxSession: record.name,
+    title: record.title ?? record.name,
+    project: record.project ?? null,
+    asleep: true,
+  };
 }
 
 /** Drop one slot, or every slot when the socket goes. */

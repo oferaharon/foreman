@@ -8237,3 +8237,84 @@ body.pin-reordering * { cursor: grabbing !important; }
      catch a thumb on. `--rail` is overridden by the `1fr` above either way. */
   .rail-grip { display: none; }
 }
+
+/* ---------------------------------------------------------- hibernation --- */
+
+/* A sleeping session's row: in place, greyed. Greyed by *colour* rather than by opacity on
+   the whole row, so the one thing on it that asks for attention — `waiting N`, a message
+   held for it — can still be read at full strength. The row keeps every column of a live
+   row (dot, title, meta, the reserved action column), so it sits exactly where the live row
+   sat and nothing around it moves. */
+.session-row.is-asleep .session-title,
+.session-row.is-asleep .session-meta,
+.session-row.is-asleep .session-team .team-fact { color: var(--ink-faint); }
+.session-row.is-asleep.is-open .session-title { color: var(--ink-muted); }
+.session-row.is-asleep .bypass-badge,
+.session-row.is-asleep .role-chip { opacity: 0.55; }
+
+/* Hollow and dashed: not idle (green), not stopped on a box (the solid outline a dialog
+   draws), but not running at all. */
+.dot.asleep { background: transparent; border: 1px dashed var(--ink-faint); }
+
+.waiting-badge {
+  color: var(--accent);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  padding: 0 0.24rem;
+  font-size: 0.9em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The star on a pinned sleeper is a mark, not a control, and the grip beside it moves
+   nothing — the order route may only rearrange pins that exist. */
+.pin-btn.is-inert { cursor: default; }
+.pin-btn.is-inert:hover { color: var(--accent); }
+.pin-grip.is-inert { cursor: default; color: var(--rule-strong); }
+.session-row.is-pinned.is-asleep:hover .pin-grip.is-inert { color: var(--rule-strong); }
+
+.stat-asleep { color: var(--ink-muted); }
+
+/* The asleep pane: the head as a session's, greyed the same way its row is. */
+.main-head.is-asleep h1 { color: var(--ink-muted); }
+
+/* Where the composer goes: one line saying what Wake does, and Wake. */
+.asleep-foot {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.4rem 1.2rem;
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 0.85rem 1.6rem 0.95rem;
+}
+.app.split .asleep-foot { padding-left: 1rem; padding-right: 1rem; }
+
+.asleep-say {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+  max-width: 62ch;
+}
+
+.wake-btn {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--surface);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0.5rem 1.4rem;
+  cursor: pointer;
+}
+.wake-btn:hover { background: color-mix(in srgb, var(--accent) 85%, var(--ink)); }
+.wake-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wake-btn:disabled { cursor: default; opacity: 0.6; }
+.wake-btn.is-busy { background: transparent; color: var(--accent); }
+
+/* `display: grid` on the foot does not reach this, but the rule is the files views' all the
+   same: a `display` an author sets beats `[hidden]`, so the hidden state is spelled out. */
+.asleep-err { grid-column: 1 / -1; font-size: 0.78rem; color: var(--decision); }
+.asleep-err[hidden] { display: none; }

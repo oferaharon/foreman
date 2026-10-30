@@ -228,7 +228,7 @@ test('the summary is taken over the worker-inclusive set', () => {
   // One spelling of the expansion, used by the fold rule and by the summary — the answer
   // must not depend on which caller asked.
   assert.match(rail, /const expand = \(list\) =>\s*list\.flatMap\(\(s\) => \[s, \.\.\.\(nestedWorkers\.get\(s\.id\) \|\| \[\]\)\]\);/);
-  assert.match(rail, /groupSummary\(expand\(mine\.flatMap\(\(f\) => folders\.get\(f\)\)\), Date\.now\(\)\)/);
+  assert.match(rail, /groupSummary\(expand\(awake\(mine\.flatMap\(\(f\) => folders\.get\(f\)\)\)\), Date\.now\(\)\)/);
 });
 
 test("the header's own `· N` arithmetic is untouched — top-level rows only", () => {

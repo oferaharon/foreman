@@ -848,8 +848,8 @@ test('a bot opens where a session does — `openSession`’s routing, line for l
   assert.match(open, /pane\.openBot\(id\);/);
   assert.doesNotMatch(open, /openSplit|threadSplit = true|p\.botId\(\)/);
 
-  // What "a pane the rail drives" means now: a session or a bot, said as an allow-list.
-  assert.match(top('holdsMain'), /return kind === 'session' \|\| kind === 'bot';/);
+  // What "a pane the rail drives" means now: a session, a bot or a sleeper, said as an allow-list.
+  assert.match(top('holdsMain'), /return kind === 'session' \|\| kind === 'bot' \|\| kind === 'asleep';/);
   const pane = top('sessionPane');
   assert.match(pane, /if \(here && holdsMain\(here\)\) return here;/);
   assert.match(pane, /return panes\.find\(holdsMain\) \|\| here;/);

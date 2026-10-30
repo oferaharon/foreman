@@ -193,8 +193,13 @@ export class Hibernator {
   /**
    * Whether this row would be put to sleep now, and why not — read fresh off the pane, for
    * the pane header's tooltip. Everything a pass would ask, including the composer.
+   *
+   * `besideWatched` answers as though no browser had it open. The tooltip is asked from the
+   * session's own header, so "it is open in a browser" would be the answer every time and
+   * would hide the reason that matters once the pane is closed; the route says the watched
+   * half separately.
    */
-  async verdict(row) {
+  async verdict(row, { besideWatched = false } = {}) {
     // Off answers before anything is read — the cron scan's first read of a transcript is
     // the whole file, and nobody needs it to be told hibernation is off.
     if (!row || this.afterMs() == null) return sleepVerdict(row, { afterMs: this.afterMs() });
@@ -202,7 +207,7 @@ export class Hibernator {
     const [panes, ps] = await Promise.all([this.deps.listPanes().catch(() => []), this.deps.processTable()]);
     const pane = panes.find((p) => p.paneId === row.paneId) || null;
     const live = row.paneId ? await this.deps.readPaneState(row.paneId).catch(() => null) : null;
-    const ctx = await this.context(row, { sessions, pane, ps, live, composer: true, watched: this.deps.watched() });
+    const ctx = await this.context(row, { sessions, pane, ps, live, composer: true, watched: besideWatched ? new Set() : this.deps.watched() });
     return sleepVerdict(row, ctx);
   }
 
