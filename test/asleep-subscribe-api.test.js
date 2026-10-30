@@ -137,6 +137,13 @@ test('a sleeper is not in the roster, and its conversation is still readable by 
   const text = JSON.stringify(frame.messages);
   assert.match(text, /hello from alpha/);
   assert.match(text, /hi back from alpha/);
+
+  // Slot-aware exactly like the live path: another slot asking gets its own frame, under the
+  // id it asked for — the phone filters on that id.
+  const b = await ask({ type: 'subscribe', sessionId: ID, slot: 'm' }, (m) => m.type === 'transcript' || m.type === 'error');
+  assert.equal(b?.type, 'transcript');
+  assert.equal(b.sessionId, ID);
+  assert.equal(b.slot, 'm');
 });
 
 test('the path is the record’s: a client cannot name one, and an id nobody holds is refused', async () => {
