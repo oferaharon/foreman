@@ -1379,6 +1379,15 @@ app.get('/api/sessions/:id/tail', async (req, res) => {
 });
 
 /**
+ * The session behind a read-only GET: the live row, or else the sleeper with that session id.
+ * Only the four reader routes below go through it (images, image, outputs, output) — they
+ * need a transcript path and nothing else. The path is the one the panel itself wrote into
+ * the sleep record, never anything the client sent. Nothing that types, sends, ends or
+ * relaunches may use this: a sleeper has no pane.
+ */
+const readableSession = (id) => registry.get(id) ?? hibernation.bySessionId(id);
+
+/**
  * Every image this session has produced, oldest first — the whole transcript, not the
  * window on screen.
  *
@@ -1393,7 +1402,7 @@ app.get('/api/sessions/:id/tail', async (req, res) => {
  * Refs only. The bytes are the route below.
  */
 app.get('/api/sessions/:id/images', async (req, res) => {
-  const session = registry.get(req.params.id);
+  const session = readableSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
   if (!session.transcriptPath) {
     return res.json({ images: [], note: 'No transcript yet — the session has not spoken.' });
@@ -1421,7 +1430,7 @@ app.get('/api/sessions/:id/images', async (req, res) => {
  * the check here belt to its braces.
  */
 app.get('/api/sessions/:id/image/:uuid/:index', async (req, res) => {
-  const session = registry.get(req.params.id);
+  const session = readableSession(req.params.id);
   if (!session?.transcriptPath) return res.status(404).end();
   try {
     const found = await readImage(session.transcriptPath, req.params.uuid, Number(req.params.index));
@@ -1460,7 +1469,7 @@ app.get('/api/sessions/:id/image/:uuid/:index', async (req, res) => {
  * bytes with the file.
  */
 app.get('/api/sessions/:id/outputs', async (req, res) => {
-  const session = registry.get(req.params.id);
+  const session = readableSession(req.params.id);
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
   if (!session.transcriptPath) {
     return res.json({ outputs: [], links: [], note: 'No transcript yet — the session has not spoken.' });
@@ -1512,7 +1521,7 @@ app.get('/api/sessions/:id/outputs', async (req, res) => {
  * would, on the panel's own origin.
  */
 app.get('/api/sessions/:id/output/:uuid/:index?', async (req, res) => {
-  const session = registry.get(req.params.id);
+  const session = readableSession(req.params.id);
   if (!session?.transcriptPath) return res.status(404).end();
   const index = req.params.index === undefined ? 0 : Number(req.params.index);
   try {
