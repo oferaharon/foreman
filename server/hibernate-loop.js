@@ -131,6 +131,8 @@ export class Hibernator {
     this.lastPass = -Infinity;
     this.running = false;
     this.started = false;
+    /** True from the re-read to the name freeing — relaunch, restore, wake and forget refuse meanwhile. */
+    this.sleeping = false;
   }
 
   /** From here on, ticks may run passes. Called after the single-instance probe. */
@@ -267,6 +269,16 @@ export class Hibernator {
    * @returns {Promise<{slept: object|null, tried?: boolean, why?: string}>}
    */
   async hibernate(candidate) {
+    if (this.sleeping) return { slept: null, why: 'a sleep is already running' };
+    this.sleeping = true;
+    try {
+      return await this.#hibernate(candidate);
+    } finally {
+      this.sleeping = false;
+    }
+  }
+
+  async #hibernate(candidate) {
     const name = candidate?.tmuxSession;
     if (!name) return { slept: null, why: 'no name' };
 
@@ -280,6 +292,8 @@ export class Hibernator {
     const ctx = await this.context(row, { sessions, pane, ps, live, composer: true, watched: this.deps.watched() });
     const v = sleepVerdict(row, ctx);
     if (!v.ok) return { slept: null, why: v.why };
+    // A relaunch, restore or wake that began while this was re-reading has the bench now.
+    if (this.deps.busy()) return { slept: null, why: 'busy' };
 
     const pinnedNames = await this.deps.pinnedNames().catch(() => []);
     const record = sleepRecord(row, {

@@ -4765,6 +4765,7 @@ app.post('/api/snapshot/restore', async (req, res) => {
   if (!snap?.sessions.length) return res.status(400).json({ error: 'Nothing saved yet.' });
   // `relaunching` too: a restore landing mid-relaunch would start fresh the very sessions
   // the relaunch had just exited to resume, and the relaunch would then skip them as live.
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (restoring || relaunching) {
     return res.status(409).json({ error: 'A relaunch or restore is already running.' });
   }
@@ -5060,6 +5061,7 @@ app.post('/api/relaunch', async (req, res) => {
   if (mode !== 'fresh' && mode !== 'resume') {
     return res.status(400).json({ error: 'Pick a mode: "fresh" or "resume".' });
   }
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch or restore is already running.' });
   }
@@ -5172,6 +5174,7 @@ app.get('/api/sessions/:id/relaunch', (req, res) => {
  */
 app.post('/api/sessions/:id/relaunch', async (req, res) => {
   const mode = req.body?.mode;
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch or restore is already running — try again when it finishes.' });
   }
@@ -5298,6 +5301,7 @@ app.post('/api/asleep/:name/wake', async (req, res) => {
   const name = req.params.name;
   const record = hibernation.get(name);
   if (!record) return res.status(404).json({ error: 'That session is not asleep.' });
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch, restore or wake is already running — try again when it finishes.' });
   }
@@ -5375,6 +5379,7 @@ app.post('/api/asleep/:name/wake', async (req, res) => {
  * sleep control, so ruling 1 is untouched.
  */
 app.delete('/api/asleep/:name', (req, res) => {
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch, restore or wake is running — try again when it finishes.' });
   }

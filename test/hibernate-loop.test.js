@@ -242,6 +242,22 @@ test('skipped whole while a relaunch, restore or wake runs', async () => {
   assert.equal(b.exits.length, 0);
 });
 
+test('a relaunch that starts while the pane is being re-read wins, and nothing is exited', async () => {
+  const dir = tmp();
+  const r = row(dir);
+  const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+  later(b, HOUR);
+  const read = b.hib.deps.readPaneState;
+  b.hib.deps.readPaneState = async (id) => {
+    b.busy = true;
+    return read(id);
+  };
+  assert.equal((await b.hib.pass()).slept, null);
+  assert.equal(b.exits.length, 0);
+  assert.equal(b.store.has(r.tmuxSession), false);
+  assert.equal(b.hib.sleeping, false, 'the flag the endpoints refuse on is down again');
+});
+
 test('the pane is re-read before the /exit: a turn that started since the roster poll wins', async () => {
   const dir = tmp();
   const r = row(dir);
