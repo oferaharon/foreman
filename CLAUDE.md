@@ -798,10 +798,12 @@ in front of the composer may and may not depend on. Evidence:
   data.** Task state must never join that signature — it would tear the whole textarea down
   under a reader's cursor every time a worker reported done.
   [team-machinery#composersig-does-not-know-about-tasks](docs/traps/team-machinery.md#composersig-does-not-know-about-tasks)
-- `web/app.js` (`renderMergeQueue`) · `web/styles.css` (`.composer-above`) — **The interrupt
-  row's design is that it never moves, and the merge block is the first thing ever placed above
-  it.** The block is appended and removed rather than hidden, so `.composer-above:empty` still
-  fires — checked by SHA-256 on the cropped region, not by eye.
+- `web/app.js` (`renderMergeQueue`, `paintClearButton`) · `web/styles.css` (`.composer-above`,
+  `.clear-btn`) — **The interrupt row's design is that it never moves, and the merge block is
+  the first thing ever placed above it.** The block is appended and removed rather than hidden,
+  so `.composer-above:empty` still fires — checked by SHA-256 on the cropped region, not by eye.
+  Clear holds its widest word the way interrupt does, and the Terminal copy is never removed,
+  only disabled.
   [team-machinery#the-interrupt-row-never-moves](docs/traps/team-machinery.md#the-interrupt-row-never-moves)
 - `server/merge-queue.js` (`mergePaths`, `shaOf`) — **Cache a three-dot diff on both shas, not
   the branch tip alone.** `base...branch` changes its answer when *main* moves even though the

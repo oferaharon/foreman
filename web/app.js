@@ -17846,11 +17846,6 @@ function createPane(slot, host) {
           delete state.drafts[msg.from];
           persistDrafts();
         }
-        // A Clear in progress on a pane-only id follows it to the real one. Only that: an id
-        // rotating away from a real conversation is a `/clear`, and ends it (`stepClear`).
-        if (String(msg.from).startsWith('pane-')) {
-          for (const [key, rec] of clearRecs) if (rec.sessionId === msg.from) clearRecs.set(key, { ...rec, sessionId: msg.to });
-        }
         if (view.selected === msg.from) {
           view.selected = msg.to;
           view.lastMarked = null;

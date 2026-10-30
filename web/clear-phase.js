@@ -33,7 +33,9 @@
  *
  * **A new session id ends it.** `/clear` mints a new id and transcript, and so does one
  * typed in the terminal; either way the conversation this prep was for is gone, and the
- * button is `clear` again. The record is keyed by pane by the caller, so the pane keeps
+ * button is `clear` again. The one exception is a pane-only `pane-N` id earning its first
+ * real one — measured on the bench: the prep message is what wrote that session's first
+ * transcript, and the client follows the pane before the `rebound` frame arrives. The record is keyed by pane by the caller, so the pane keeps
  * following and the record notices the rotation by the id it was started under.
  */
 
@@ -51,6 +53,9 @@ export const CLEAR_WORDS = { idle: 'clear', preparing: 'preparing…', ready: 'c
  *  sent — the browser's clock and the transcript's are the same Mac's, but not the same
  *  read. */
 const TS_SLACK_MS = 5000;
+
+/** The roster's id for a pane with no transcript yet (`server/sessions.js`). */
+export const isPaneOnlyId = (id) => /^pane-\d+$/.test(String(id ?? ''));
 
 const same = (a, b) => String(a ?? '').replace(/\s+/g, ' ').trim() === String(b ?? '').replace(/\s+/g, ' ').trim();
 
@@ -101,9 +106,15 @@ export function repliedTo(messages, text, sentAt) {
  * @param {Array} [messages] what the pane holds of its transcript
  */
 export function stepClear(rec, session, messages) {
-  if (!rec) return null;
-  if (!session || session.id !== rec.sessionId) return null;
+  if (!rec || !session) return null;
   let next = rec;
+  if (session.id !== rec.sessionId) {
+    // A session nobody has spoken to yet has a synthetic `pane-N` id, and the prep message
+    // is often what writes its first transcript — so its real id arriving is the same
+    // conversation being born, not one ending. Any other change of id is a `/clear`.
+    if (!isPaneOnlyId(rec.sessionId)) return null;
+    next = { ...next, sessionId: session.id };
+  }
   if (!rec.sawBusy && session.status === 'working' && !session.queued?.length) next = { ...next, sawBusy: true };
   if (!next.replied && repliedTo(messages, rec.text, rec.sentAt)) next = { ...next, replied: true };
   return next;

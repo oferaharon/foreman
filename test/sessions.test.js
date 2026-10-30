@@ -317,6 +317,20 @@ test('a row takes its forge from the pane it runs in, never from the transcript'
 });
 
 /*
+ * The open-a-Terminal buttons — the header's and the composer's beside interrupt — are
+ * drawn from `attached`, read live off tmux each poll. The roster is broadcast on a diff,
+ * so a window opening or closing reaches a browser only if `#diff` asks about it. Measured
+ * missing on a scratch panel: tmux said attached, the roster said `attached: true`, and the
+ * page went on offering to open one.
+ */
+test('a Terminal attaching or detaching is a roster change on its own', async () => {
+  const src = await fsp.readFile(new URL('../server/sessions.js', import.meta.url), 'utf8');
+  const start = src.indexOf('#diff(next) {');
+  const diff = src.slice(start, src.indexOf('return false;', start));
+  assert.match(diff, /prev\.attached !== s\.attached/);
+});
+
+/*
  * The pinned group is in the order the maintainer arranged it (`PinStore`, the rail's
  * grip), not pin time — and above everything else, whatever else is going on.
  */

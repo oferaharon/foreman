@@ -163,6 +163,17 @@ test('a new session id in the pane ends it: /clear, from here or typed in the te
   assert.equal(stepClear(rec, null, []), null);
 });
 
+test('a pane-only id earning its real one is the same conversation, and the prep carries on', () => {
+  const fresh = row({ id: 'pane-0' });
+  let rec = startClear(fresh, PREP, T0);
+  rec = stepClear(rec, row({ id: 'real-1', status: 'working' }), []);
+  assert.equal(rec.sessionId, 'real-1');
+  assert.equal(rec.sawBusy, true);
+  assert.equal(phase(rec, row({ id: 'real-1' })), 'ready');
+  // …and from there, the next change of id is a /clear like any other.
+  assert.equal(stepClear(rec, row({ id: 'real-2' }), []), null);
+});
+
 test('stepClear never mutates the record it was handed', () => {
   const rec = Object.freeze(startClear(row(), PREP, T0));
   const next = stepClear(rec, row({ status: 'working' }), []);
