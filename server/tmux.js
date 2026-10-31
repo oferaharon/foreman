@@ -154,10 +154,15 @@ export async function listPanes() {
     });
 }
 
+/** Whether a pane's foreground command is the Claude Code CLI — the one spelling of that test. */
+export function runsClaude(command) {
+  return /(^|\/)claude(\.exe)?$/i.test(command || '');
+}
+
 /** Panes whose foreground process looks like the Claude Code CLI. */
 export async function listClaudePanes() {
   const panes = await listPanes();
-  return panes.filter((p) => /(^|\/)claude(\.exe)?$/i.test(p.command || ''));
+  return panes.filter((p) => runsClaude(p.command));
 }
 
 /** Scrape the visible pane contents — the status fallback for unbound sessions. */
@@ -651,7 +656,7 @@ async function assertClaudePane(paneId) {
   const panes = await listPanes();
   const pane = panes.find((p) => p.paneId === paneId);
   if (!pane) throw new Error('That pane no longer exists.');
-  if (!/(^|\/)claude(\.exe)?$/i.test(pane.command || '')) {
+  if (!runsClaude(pane.command)) {
     throw new Error(
       `Refusing to send: pane ${paneId} is running "${pane.command}", not Claude. ` +
         'The session may have exited.',

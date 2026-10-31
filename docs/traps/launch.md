@@ -439,9 +439,50 @@ somebody will be tempted to relax:
 - **A box after `/exit` is Escaped, never answered.** The cron box measured above offers
   `Exit and stop tasks` and `Move to background and exit` — both end or orphan somebody's
   loop. The loop presses `Escape` (which was measured to put the session back on its composer
-  with the cron intact), deletes the record, leaves the session awake and logs a line. A name
-  that has not freed after 20 s ends the same way. The verdict refuses any session with a
-  cron, so this is the backstop and should never be seen.
+  with the cron intact). The verdict refuses any session with a cron, so this is the backstop
+  and should never be seen.
+- **…and the record is deleted only for a session proven still awake.** Found live on
+  2026-10-31, one sleep in 32: a pass typed `/exit`, a poll read *"a box is open in its
+  terminal"*, the loop pressed Escape and deleted the record — and the transcript showed the
+  `/exit` had landed (`<command-name>/exit</command-name>` and its farewell), the tmux session
+  was gone, and the session had vanished from the rail with nothing to wake it from. So every
+  give-up after `/exit` went out now asks again (`#exitOutcome`): after the Escape it settles
+  for `EXIT_SETTLE_MS` (5 s), and the name leaving tmux, the pane leaving the server, or
+  something other than Claude holding the pane (a pane that outlived Claude is a shell, and
+  the conversation is as resumable) is **asleep** — record kept, `is asleep … but it exited`
+  logged, `onSlept` called. The record goes only when, at the end of the window, the name is
+  live, Claude is the pane's command and the pane is at its composer (`idle` or `working`,
+  which `parsePane` reads only with the composer drawn). Anything else — a box that survived
+  the Escape, a tmux read that failed — **keeps the record** and logs `kept asleep`, without
+  `onSlept`. A name not freed after 20 s is asked the same question, once. Only `/exit`
+  refused by `sendText` before anything was typed deletes the record outright. "Every doubt a
+  no" still holds for *sleeping*; for *deleting a record*, doubt means keep it.
+
+  What a kept record costs a session that turns out to be awake, read off the code rather
+  than guessed: the rail draws it twice (the live row and a greyed sleeper — `mergeByActivity`
+  does not dedupe by name), `sendOrHold` holds anything sent to the name instead of typing it,
+  Wake refuses because a live session holds the name, and the loop never considers it again.
+  The binding claim does not bite — the pane wearing the sleeper's own name is exempt — and
+  `reserved` reserves a name that is already taken. All of it is visible and undone by
+  **forget** on the sleeping row (which drops the held messages with it). A deleted record for
+  a session that exited costs the conversation's place on the rail, with no row to wake it
+  from. That trade is the rule.
+
+  **What the box was: a teardown frame, inferred, not caught.** `heldBy`'s words name the
+  shape — no composer in `parsePane`'s last 14 lines, no parsed prompt, no dialog title, so
+  `dialog: 'dialog'`; the cron box would have read *"a permission prompt"*. Six sandbox exits
+  in `alpha` (v2.1.296, 220×50, `claude` and the panel's own `/bin/zsh -ilc claude`, fresh
+  and after one turn), captured as fast as tmux would answer — 42 to 60 frames each, about
+  0.9 s from `Enter` to the name freeing — read `idle` on every frame that captured, with
+  `claude.exe` the pane's command throughout; the last frame drew the composer with
+  `Resume this session with: claude --resume <id>` printed below it, and the only frame
+  that read as a box was a capture that *failed* as the session went (which `readPaneState`
+  answers as `unknown`, not a box). So the live frame came from a slower exit than the
+  sandbox produces — a larger session's teardown — and `heldBy` was deliberately **not**
+  widened: what it reads is true of a frame with no composer, and the fix is to stop
+  trusting one read about an outcome the name answers. Note too that the composer stays on
+  screen to within a frame of the end: one composer read mid-exit proves nothing either,
+  which is why "awake" waits out the settle.
 - **Doubt refuses.** `background: null` (a box over the mode line), an unreadable input line,
   a transcript the cron scan cannot read, an unknown keep-awake: each is a "no", in words. A
   wrong "asleep" kills somebody's loop or half-typed message; a wrong "awake" costs a few
