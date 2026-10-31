@@ -75,8 +75,8 @@ export function asleepItems(records) {
 /**
  * The pinned group with its sleepers back in place: each one directly under the row it sat
  * beneath (`pinAfter`, a session name), at the top when it had nothing above it, and at the
- * bottom when the row it sat under is no longer pinned — `wakePinOrder`'s rule
- * (`server/hibernate-loop.js`), so a woken row lands where its sleeping row was drawn.
+ * bottom when the row it sat under is no longer pinned. The server reads the same answer
+ * (`drawnPinnedNames`) at a sleep and a wake, so a woken row lands where it was drawn.
  *
  * A sleeper's anchor can itself be asleep — two pins in a row slept one after the other —
  * so placement repeats until nothing more can be anchored. Sleepers sharing one anchor go in

@@ -1208,7 +1208,14 @@ maintainer's**: a new pin goes to the bottom, a grip on each pinned row's left e
 (a pinned lead with its nested workers, as one block), `POST /api/pins/order` writes it and
 may only rearrange the pins that exist, and relaunch-all, restart-one and snapshot restore
 put each pin back where its session *name* was (`carryPinOrder`) — pane ids reset, names
-are the contract. Desktop only; the phone reads nothing about pins.
+are the contract. **A sleeper's pin is live too** (the maintainer's ruling of 2026-10-31): its
+star (`POST /api/asleep/:name/pin`) and grip work, and one order spans both stores — a live pin
+stays pane-keyed in `PinStore`, a sleeper's stays on its record as `pinAfter`, the name of the
+row **drawn directly above it**, live or asleep, so `placePinned` draws the order back exactly.
+The order route takes sleepers as `{asleep: <name>}` and must name every pin of both kinds
+(`splitPinOrder`); sleep, wake, unpin and forget all read the group as drawn
+(`drawnPinnedNames`, `web/asleep.js`, imported by the server) — never `PinStore` alone, or a
+sleeper under a sleeper wakes at the bottom. Desktop only; the phone reads nothing about pins.
 
 **Groups** (`server/groups.js`) file folder headings under names you choose and fold them
 away. Four things are load-bearing. A group holds **folders**, not sessions — sessions rotate
@@ -1281,7 +1288,8 @@ inbox, notifications, the queue, pins, snapshot, relaunch, `/exit` and read stat
 handed one. The rail draws each greyed in place; clicking opens the conversation read-only
 with **Wake**, which is `wakeSleeper` → `startEntries` — the restore half of `relaunchBench` — on `--resume`
 of the same conversation, under the same name and role, on the **launch model**, re-pinned
-where it was. **Messages wait**: `sendOrHold` holds anything sent to a sleeping name
+where it is drawn. A sleeper can be pinned, unpinned and dragged like any row (*Pinning*
+above). **Messages wait**: `sendOrHold` holds anything sent to a sleeping name
 (nudges, triggers, merge presses, room copies, still `handed`) in the hibernation store and
 moves it into the new pane's queue on wake, so delivery is still `PaneLock` →
 `assertNotBlocked`. A group room's pane greys its sleeping members and offers **wake N asleep**

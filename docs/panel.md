@@ -174,7 +174,8 @@ everything back as it was. With the grip focused, `↑` / `↓` move the row one
 does not repaint while you are holding a row, so a session changing state mid-drag never
 pulls it out from under the cursor; it catches up the moment you let go. And if the pinned
 set changed while you were dragging — something pinned or unpinned from another window —
-nothing is reordered and a toast says so.
+nothing is reordered and a toast says so. A pinned sleeper is part of the group and moves the
+same way (see *Hibernation*).
 
 Pinned rows still carry their own badges — unread counts, `asking`, queued messages — so a
 pinned session that wants you says so where you already are, rather than jumping to a
@@ -496,8 +497,19 @@ why not ("Won't sleep yet: a background shell is running").
 group), or in the pinned group under the row it sat beneath. It says how long it has been
 asleep, never enters the inbox, never counts as unread, and doesn't light a collapsed group's
 dot. A folder whose sessions are all asleep keeps its heading. The rail's stat line gains
-`asleep N` once hibernation is on or anything is asleep. A pinned sleeper can't be dragged
-until it is woken.
+`asleep N` once hibernation is on or anything is asleep.
+
+**A sleeper's pin is live.** Its star pins and unpins it like any row's — a pin goes to the
+bottom of the pinned group, an unpin sends it back among its folder's rows — and a pinned
+sleeper has the same grip as a live one: drag it, or `↑` / `↓` on the focused grip, to any
+place in the group, among live rows and other sleepers alike. There is one order across both.
+Pressing Wake brings it back exactly where it is drawn, and a session going to sleep keeps
+its place. A live pin stays keyed by pane in `pins.json`; a sleeper's stays on its record in
+`hibernate.json` as the name of the row drawn directly above it (`pinAfter`), because a
+sleeper has no pane. So `POST /api/pins/order` takes the group as drawn — live rows by pane id,
+sleepers as `{asleep: <name>}` — and still only rearranges: leave out a pinned sleeper, or
+name one that isn't pinned, and nothing moves (409). The sleeper's star is
+`POST /api/asleep/:name/pin`. Desktop only.
 
 **Opening one.** Clicking a sleeping row opens its conversation **read-only**, straight from
 disk, with **Wake** where the composer would be. Only Wake restarts it, through the same
