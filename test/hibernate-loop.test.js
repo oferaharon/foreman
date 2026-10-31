@@ -6,7 +6,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { HibernateStore } from '../server/hibernate.js';
-import { Hibernator, PASS_EVERY_MS, SLEEP_EXIT_TIMEOUT_MS, pidTree, pinAfterOf, wakePinOrder } from '../server/hibernate-loop.js';
+import { EXIT_SETTLE_MS, Hibernator, PASS_EVERY_MS, SLEEP_EXIT_TIMEOUT_MS, pidTree, pinAfterOf, wakePinOrder } from '../server/hibernate-loop.js';
 import { EXPOSURE_KEYS, WRITABLE_KEYS, resolveHibernateAfter, validateConfigPatch } from '../server/settings-file.js';
 import { SESSION_PREFIX } from '../server/config.js';
 
@@ -89,10 +89,14 @@ function bench({ rows = [], setting = '30m', storeFile, now = T0 } = {}) {
     busy: false,
     watched: new Set(),
     paneState: new Map(), // paneId -> what readPaneState answers
-    afterExit: new Map(), // paneId -> 'close' | 'box' | 'stay'
+    afterExit: new Map(), // paneId -> 'close' | 'box' | 'box-stuck' | 'teardown' | 'shell' | 'stay' | 'refuse'
+    leaveAt: new Map(), // name -> the clock time its tmux session goes
+    command: new Map(), // paneId -> the pane's foreground command, when not Claude
+    unreadable: false, // every tmux read fails from here on
     composer: new Map(), // paneId -> true | false | null
     pinned: [],
   };
+  const liveName = (name) => b.live.has(name) && !(b.leaveAt.has(name) && b.now >= b.leaveAt.get(name));
   b.store = new HibernateStore(storeFile, { flushMs: 60_000 });
   b.hib = new Hibernator({
     store: b.store,
@@ -100,10 +104,18 @@ function bench({ rows = [], setting = '30m', storeFile, now = T0 } = {}) {
     deps: {
       sessions: () => b.sessions,
       refresh: async () => {},
-      listPanes: async () => b.sessions.map((r, i) => ({ paneId: r.paneId, tmuxSession: r.tmuxSession, pid: 5000 + i, createdMs: T0 - 4 * HOUR })),
+      listPanes: async () => {
+        if (b.unreadable) throw new Error('tmux: no server');
+        return b.sessions
+          .filter((r) => liveName(r.tmuxSession))
+          .map((r, i) => ({ paneId: r.paneId, tmuxSession: r.tmuxSession, command: b.command.get(r.paneId) || 'claude', pid: 5000 + i, createdMs: T0 - 4 * HOUR }));
+      },
       processTable: async () => b.sessions.map((_, i) => `${5000 + i} 1\n${6000 + i} ${5000 + i}`).join('\n'),
       readLock: () => null,
-      readPaneState: async (paneId) => b.paneState.get(paneId) || { state: 'idle' },
+      readPaneState: async (paneId) => {
+        if (b.unreadable) throw new Error('tmux: no server');
+        return b.paneState.get(paneId) || { state: 'idle' };
+      },
       composerEmpty: async (paneId) => (b.composer.has(paneId) ? b.composer.get(paneId) : true),
       sendText: async (paneId, text) => {
         const r = b.sessions.find((s) => s.paneId === paneId);
@@ -115,14 +127,31 @@ function bench({ rows = [], setting = '30m', storeFile, now = T0 } = {}) {
           b.live.delete(r.tmuxSession);
           b.sessions = b.sessions.filter((s) => s !== r);
         }
-        if (after === 'box') {
+        if (after === 'box' || after === 'box-stuck') {
           b.paneState.set(paneId, { state: 'needs-decision', prompt: { title: 'The following will stop when you exit' } });
+        }
+        // The live case: the `/exit` landed, and a frame on its way out read as a box with no
+        // title — no composer, no prompt — before the name went a moment later.
+        if (after === 'teardown') {
+          b.paneState.set(paneId, { state: 'dialog', dialog: 'dialog' });
+          b.leaveAt.set(r.tmuxSession, b.now + 700);
+        }
+        // Claude exited and the pane outlived it: a shell prompt, which reads as a box too.
+        if (after === 'shell') {
+          b.paneState.set(paneId, { state: 'dialog', dialog: 'dialog' });
+          b.command.set(paneId, 'zsh');
         }
       },
       sendKeys: async (paneId, ...keys) => {
         b.keys.push({ paneId, keys });
+        // Escape cancels the cron box and puts the composer back — measured; `box-stuck` is
+        // the box that did not go.
+        if (keys.includes('Escape') && b.afterExit.get(paneId) === 'box') b.paneState.delete(paneId);
       },
-      liveSessionNames: async () => [...b.live],
+      liveSessionNames: async () => {
+        if (b.unreadable) throw new Error('tmux: no server');
+        return [...b.live].filter(liveName);
+      },
       setting: () => b.setting,
       busy: () => b.busy,
       watched: () => b.watched,
@@ -334,8 +363,104 @@ test('a box after the /exit is escaped — never answered — and the session is
   assert.deepEqual(b.keys, [{ paneId: r.paneId, keys: ['Escape'] }], 'Escape, and nothing else — never 1 or 2');
   assert.equal(b.store.has(r.tmuxSession), false, 'the record is deleted');
   assert.match(b.lines.join('\n'), /left awake/);
-  // And it did not wait the name out: one poll, not twenty seconds.
+  // It settled before believing the composer — and did not wait the whole timeout out.
+  assert.ok(b.now - T0 - HOUR >= EXIT_SETTLE_MS);
   assert.ok(b.now - T0 - HOUR < SLEEP_EXIT_TIMEOUT_MS);
+});
+
+test('a frame on the way out that reads as a box: the /exit landed, so it is asleep and the record stays', async () => {
+  // Found live: `heldBy` read a title-less, composer-less frame mid-exit as "a box is open
+  // in its terminal", the record was deleted, and the session vanished unwakeable.
+  const dir = tmp();
+  const r = row(dir);
+  const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+  b.afterExit.set(r.paneId, 'teardown');
+  later(b, HOUR);
+  const out = await b.hib.pass();
+  assert.equal(out.slept?.name, r.tmuxSession);
+  assert.equal(b.store.has(r.tmuxSession), true, 'the record is kept');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'h.json'), 'utf8')).asleep?.[r.tmuxSession]?.name, r.tmuxSession, 'and on disk');
+  assert.equal(b.slept.length, 1, 'reported slept');
+  assert.match(b.lines.join('\n'), /is asleep .*but it exited/);
+  assert.doesNotMatch(b.lines.join('\n'), /left awake/);
+});
+
+test('a pane that outlives Claude as a shell is asleep, not awake — the conversation is as resumable', async () => {
+  const dir = tmp();
+  const r = row(dir);
+  const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+  b.afterExit.set(r.paneId, 'shell');
+  later(b, HOUR);
+  const out = await b.hib.pass();
+  assert.equal(out.slept?.name, r.tmuxSession);
+  assert.equal(b.store.has(r.tmuxSession), true);
+});
+
+test('the timeout, then it turns out to have exited: asleep, and the record stays', async () => {
+  // tmux's session list could not be read for the whole wait, so the loop never saw the name
+  // go — and the pane list at the end says the pane is gone.
+  const dir = tmp();
+  const r = row(dir);
+  const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+  b.afterExit.set(r.paneId, 'stay');
+  later(b, HOUR);
+  const realNames = b.hib.deps.liveSessionNames;
+  b.hib.deps.liveSessionNames = async () => {
+    if (b.exits.length) throw new Error('tmux: timed out');
+    return realNames();
+  };
+  b.hib.deps.sleep = async (ms) => {
+    b.now += ms;
+    if (b.now - T0 - HOUR > SLEEP_EXIT_TIMEOUT_MS) b.live.delete(r.tmuxSession);
+  };
+  const out = await b.hib.pass();
+  assert.equal(out.slept?.name, r.tmuxSession);
+  assert.equal(b.store.has(r.tmuxSession), true);
+  assert.equal(b.slept.length, 1);
+});
+
+test('a box that survives the Escape, or reads that fail: the record stays, and nothing says asleep', async () => {
+  for (const shape of ['box-stuck', 'unreadable']) {
+    const dir = tmp();
+    const r = row(dir);
+    const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+    b.afterExit.set(r.paneId, shape === 'box-stuck' ? 'box-stuck' : 'box');
+    if (shape === 'unreadable') {
+      const send = b.hib.deps.sendKeys;
+      b.hib.deps.sendKeys = async (...a) => {
+        await send(...a);
+        b.unreadable = true;
+      };
+    }
+    later(b, HOUR);
+    const out = await b.hib.pass();
+    assert.equal(out.slept, null, shape);
+    assert.equal(out.tried, true, shape);
+    assert.equal(out.kept?.name, r.tmuxSession, shape);
+    assert.equal(b.store.has(r.tmuxSession), true, `${shape}: a doubt keeps the record`);
+    assert.equal(b.slept.length, 0, `${shape}: no "put to sleep" line for a session that may be awake`);
+    assert.match(b.lines.join('\n'), /kept asleep/, shape);
+    assert.deepEqual(b.keys.map((k) => k.keys), [['Escape']], `${shape}: Escape once, never an answer`);
+  }
+});
+
+test('the outcome is not believed off one composer read: a session still drawing its composer mid-exit is asleep once the name goes', async () => {
+  // The sandbox's exits drew the composer to within a frame of the name freeing, so a box
+  // read followed by a composer read must not be taken as "still awake" until it settles.
+  const dir = tmp();
+  const r = row(dir);
+  const b = bench({ rows: [r], storeFile: path.join(dir, 'h.json') });
+  b.afterExit.set(r.paneId, 'teardown');
+  const send = b.hib.deps.sendKeys;
+  b.hib.deps.sendKeys = async (paneId, ...keys) => {
+    await send(paneId, ...keys);
+    b.paneState.delete(paneId); // the composer is back on screen…
+    b.leaveAt.set(r.tmuxSession, b.now + 2_000); // …and the name goes two seconds later
+  };
+  later(b, HOUR);
+  const out = await b.hib.pass();
+  assert.equal(out.slept?.name, r.tmuxSession);
+  assert.equal(b.store.has(r.tmuxSession), true);
 });
 
 test('a name that never frees: the record is deleted after the timeout and the session stays', async () => {

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { CronWitness, IdleClock, hibernateMs, idleSince, readSchedulerLock, sleepRecord, sleepVerdict } from './hibernate.js';
 import { heldBy } from './snapshot.js';
+import { runsClaude } from './tmux.js';
 
 /*
  * The sleep loop: the part of hibernation that acts. `hibernate.js` decides; this asks it,
@@ -25,6 +26,14 @@ export const PASS_EVERY_MS = 60_000;
  * normal, and the ceiling only costs waiting.
  */
 export const SLEEP_EXIT_TIMEOUT_MS = 20_000;
+
+/**
+ * How long a sleep that has given up waits before deciding the session is still there. An
+ * `/exit` that has landed takes about a second to free its name in the sandbox, and a frame
+ * from the middle of it can read as a box (`docs/traps/launch.md`), so "it is awake" is only
+ * believed of a session still at its composer once this has passed.
+ */
+export const EXIT_SETTLE_MS = 5_000;
 
 const POLL_MS = 300;
 
@@ -258,15 +267,22 @@ export class Hibernator {
    * session that vanished; and `/exit` goes through `sendText`, which re-reads the pane a
    * third time and refuses a box.
    *
-   * Then it waits for the *name* to leave tmux. Two ways that does not happen, and both end
-   * the same way — the record deleted, the session left awake, a line in the log:
+   * Then it waits for the *name* to leave tmux. Two ways that does not happen:
    *
    *   • **A box comes up instead.** `/exit` with a cron live raises "The following will stop
    *     when you exit" (measured on v2.1.296; `docs/traps/launch.md`). The verdict refuses a
    *     session with a cron, so this should never be seen — but if it is, the answer is
    *     **Escape**, which cancels, and never `1` or `2`: both end or orphan somebody's loop.
-   *     It does not wait the name out either; nothing is going to close.
+   *     It does not wait the full timeout out; it settles for `EXIT_SETTLE_MS` and asks.
    *   • **The name never frees** within `SLEEP_EXIT_TIMEOUT_MS`.
+   *
+   * Either way the record is **not** deleted on the strength of that read: a session whose
+   * `/exit` landed read as a box on its way out, the record went, and the session vanished
+   * unwakeable. So `#exitOutcome` asks again — name gone, or Claude no longer in the pane,
+   * is asleep; the record is deleted only for a session confirmed still at its composer; and
+   * anything it cannot tell keeps the record. For *deleting a record*, doubt means keep it:
+   * a stale record for a live session is a greyed row somebody can forget, a missing one is
+   * a conversation nobody can wake.
    *
    * `tried` on the result means a sleep was attempted on this pass, so the pass stops there:
    * at most one `/exit` per pass, whether it worked or not.
@@ -316,7 +332,21 @@ export class Hibernator {
       this.deps.log(`hibernate: ${name} left awake — ${why}`);
       return { slept: null, tried: true, why };
     };
+    const asleep = (how = '') => {
+      this.deps.log(`hibernate: ${name} is asleep (idle since ${new Date(record.idleSince).toISOString()})${how}`);
+      this.deps.onSlept(record);
+      return { slept: record, tried: true };
+    };
+    // After the `/exit` went: asleep if it went, awake only if it is provably still at its
+    // composer, and otherwise the record stays — never `giveUp` on a read alone.
+    const settle = (outcome, why) => {
+      if (outcome === 'gone') return asleep(` — ${why}, but it exited`);
+      if (outcome === 'alive') return giveUp(why);
+      this.deps.log(`hibernate: ${name} kept asleep — ${why}, and whether it exited could not be told; the record stays so it can be woken or forgotten`);
+      return { slept: null, kept: record, tried: true, why };
+    };
 
+    // Refused before anything was typed: the session cannot have exited.
     try {
       await this.deps.sendText(row.paneId, '/exit');
     } catch (err) {
@@ -332,14 +362,41 @@ export class Hibernator {
       const held = heldBy(after);
       if (held) {
         await this.deps.sendKeys(row.paneId, 'Escape').catch(() => {});
-        return giveUp(`/exit raised a box (${held}); pressed Escape`);
+        return settle(await this.#exitOutcome(row.paneId, name, EXIT_SETTLE_MS), `/exit raised a box (${held}); pressed Escape`);
       }
-      if (this.now() > deadline) return giveUp(`it had not closed ${SLEEP_EXIT_TIMEOUT_MS / 1000} s after /exit`);
+      if (this.now() > deadline) return settle(await this.#exitOutcome(row.paneId, name, 0), `it had not closed ${SLEEP_EXIT_TIMEOUT_MS / 1000} s after /exit`);
     }
 
-    this.deps.log(`hibernate: ${name} is asleep (idle since ${new Date(record.idleSince).toISOString()})`);
-    this.deps.onSlept(record);
-    return { slept: record, tried: true };
+    return asleep();
+  }
+
+  /**
+   * Whether a session sent `/exit` went: `'gone'`, `'alive'`, or `null` for cannot tell.
+   *
+   * Polled for `settleMs` first, and `'gone'` the moment the name leaves tmux, the pane
+   * leaves the server or something other than Claude holds it — a pane that outlives
+   * Claude's exit is a shell, and the conversation is as resumable as if the name had gone.
+   * `'alive'` is decided only at the end of the window and only on all three: the name still
+   * live, Claude still the pane's command, and the pane at its composer (`idle` or `working`
+   * — `parsePane` reads either only with the composer drawn). A box still up, a read that
+   * fails, a name list that cannot be read: `null`.
+   */
+  async #exitOutcome(paneId, name, settleMs) {
+    const until = this.now() + settleMs;
+    for (;;) {
+      const names = await this.deps.liveSessionNames().catch(() => null);
+      if (Array.isArray(names) && !names.includes(name)) return 'gone';
+      const panes = await this.deps.listPanes().catch(() => null);
+      const pane = Array.isArray(panes) ? panes.find((p) => p.paneId === paneId) : null;
+      if (Array.isArray(panes) && !pane) return 'gone';
+      if (pane && typeof pane.command === 'string' && !runsClaude(pane.command)) return 'gone';
+      if (this.now() >= until) {
+        if (!Array.isArray(names) || !pane || typeof pane.command !== 'string') return null;
+        const after = await this.deps.readPaneState(paneId).catch(() => null);
+        return after && !heldBy(after) && (after.state === 'idle' || after.state === 'working') ? 'alive' : null;
+      }
+      await this.deps.sleep(POLL_MS);
+    }
   }
 
   /** A wake succeeded: start this name's idle clock now (measurement 5 — `lastActivity` does not move on a resume). */
