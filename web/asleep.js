@@ -75,8 +75,8 @@ export function asleepItems(records) {
 /**
  * The pinned group with its sleepers back in place: each one directly under the row it sat
  * beneath (`pinAfter`, a session name), at the top when it had nothing above it, and at the
- * bottom when the row it sat under is no longer pinned — `wakePinOrder`'s rule
- * (`server/hibernate-loop.js`), so a woken row lands where its sleeping row was drawn.
+ * bottom when the row it sat under is no longer pinned. The server reads the same answer
+ * (`drawnPinnedNames`) at a sleep and a wake, so a woken row lands where it was drawn.
  *
  * A sleeper's anchor can itself be asleep — two pins in a row slept one after the other —
  * so placement repeats until nothing more can be anchored. Sleepers sharing one anchor go in
@@ -212,3 +212,41 @@ export const asleepStat = (items) => (Array.isArray(items) ? items.length : 0);
 
 /** The row's `waiting N` badge text, or `''` when nothing is held. */
 export const waitingText = (n) => (Number.isInteger(n) && n > 0 ? `waiting ${n}` : '');
+
+/**
+ * The pinned group as the rail draws it, by session name, top first: the live pins in the
+ * store's order with every pinned sleeper put back by `placePinned`. The one answer to "where
+ * is this row drawn", asked by the rail and by the server alike — a sleep records the name
+ * above it from this, a wake puts its pin back by it, and an unpin or a forget re-anchors the
+ * sleepers below from it — so the server and the rail can never disagree about where a row is.
+ *
+ * @param {Array<string|null>} liveNames the live pins' session names, store order
+ * @param {Array<ReturnType<typeof asleepItem>>} sleepers pinned sleepers, any order
+ */
+export function drawnPinnedNames(liveNames, sleepers) {
+  const live = (Array.isArray(liveNames) ? liveNames : []).map((n) => ({ tmuxSession: n ?? null }));
+  return placePinned(live, sleepers).map((x) => x.tmuxSession ?? null);
+}
+
+/**
+ * Every sleeper's `pinAfter` for this order: the nearest *named* row above it, live or
+ * asleep, or `null` at the top. Anchored to the row directly above rather than to the nearest
+ * live one, so no two sleepers share an anchor and `placePinned` draws exactly this order
+ * back — including two sleepers next to each other, in either order, whatever their sleep
+ * times. What a drop writes, and what an unpin or a forget rewrites from the order with that
+ * row taken out, so nothing on screen moves but the row the human moved.
+ *
+ * @param {Array<string|null>} names the pinned group by name, top first
+ * @param {Set<string>|string[]} asleep which of those names are sleepers
+ * @returns {Map<string, string|null>} sleeper name -> pinAfter
+ */
+export function sleeperAnchors(names, asleep) {
+  const sleeping = asleep instanceof Set ? asleep : new Set(asleep || []);
+  const out = new Map();
+  let above = null;
+  for (const name of Array.isArray(names) ? names : []) {
+    if (name && sleeping.has(name)) out.set(name, above);
+    if (name) above = name;
+  }
+  return out;
+}

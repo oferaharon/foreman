@@ -8350,13 +8350,6 @@ body.pin-reordering * { cursor: grabbing !important; }
 .waiting-drop:focus-visible { opacity: 1; }
 .waiting-drop:disabled { cursor: default; opacity: 0.3; }
 
-/* The star on a pinned sleeper is a mark, not a control, and the grip beside it moves
-   nothing — the order route may only rearrange pins that exist. */
-.pin-btn.is-inert { cursor: default; }
-.pin-btn.is-inert:hover { color: var(--accent); }
-.pin-grip.is-inert { cursor: default; color: var(--rule-strong); }
-.session-row.is-pinned.is-asleep:hover .pin-grip.is-inert { color: var(--rule-strong); }
-
 .stat-asleep { color: var(--ink-muted); }
 
 /* The asleep pane: the head as a session's, greyed the same way its row is. */
