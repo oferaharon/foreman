@@ -5814,7 +5814,8 @@ function sessionRow(s, fold = null) {
  * pin store's own pin, `⧉`, the bin's `/exit` — and a row that drew any of it would be
  * claiming a terminal that is not there. What it does carry: its name (folded the same way,
  * so the folder does not grow a heading the moment its only session sleeps), how long it has
- * been asleep, `waiting N` when messages are held for it, and the bin, which here means
+ * been asleep, `waiting N` when messages are held for it (with a `×` that drops just those —
+`dropHeldBtn`), and the bin, which here means
  * **forget** — behind a confirm, by the plan's Q4. A click opens it read-only, and only the
  * Wake button in that pane starts it again. There is no control anywhere that puts a session
  * to sleep, by ruling.
@@ -5860,6 +5861,7 @@ function asleepRow(s, fold = null) {
     w.className = 'waiting-badge';
     w.textContent = wait;
     w.title = `${s.waiting} message${s.waiting === 1 ? ' is' : 's are'} held for it — delivered once it is woken and idle`;
+    w.append(dropHeldBtn(s));
     meta.append(w);
   }
   const when = document.createElement('span');
@@ -5903,6 +5905,41 @@ function asleepRow(s, fold = null) {
   actions.append(pin, forgetBtn(s));
   row.append(actions);
   return row;
+}
+
+/**
+ * The `×` inside `waiting N`: drops everything held for the sleeper on one click, with no
+ * confirm, by the maintainer's ruling of 2026-10-31 — and only that. The record, its
+ * keep-awake and its conversation stay, so it is still asleep and still wakes; forget is the
+ * bin's job. A `<button>` inside the row's `div role="button"`, so it stops its own click and
+ * Enter/Space as the fold's `▾` does, or a press would open the sleeper behind it too. The
+ * tag goes when the store's change broadcasts the roster; nothing here repaints by hand.
+ */
+function dropHeldBtn(s) {
+  const n = s.waiting;
+  const label = `Drop ${n} waiting message${n === 1 ? '' : 's'}`;
+  const btn = document.createElement('button');
+  btn.className = 'waiting-drop';
+  btn.textContent = '×';
+  btn.title = `${label} — it stays asleep`;
+  btn.setAttribute('aria-label', label);
+  btn.onclick = async (e) => {
+    e.stopPropagation();
+    btn.disabled = true;
+    try {
+      const res = await fetch(`/api/asleep/${encodeURIComponent(s.name)}/held`, { method: 'DELETE' });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || `The panel refused (${res.status}).`);
+      if (out.dropped) toast(`${out.dropped} message${out.dropped === 1 ? '' : 's'} for ${s.title} dropped.`);
+    } catch (err) {
+      btn.disabled = false;
+      toast(err.message);
+    }
+  };
+  btn.onkeydown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+  };
+  return btn;
 }
 
 /** The pinned sleeper's grip: drawn, so the column holds still, and inert. */

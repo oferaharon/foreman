@@ -5589,6 +5589,19 @@ app.delete('/api/asleep/:name', (req, res) => {
 });
 
 /**
+ * Drop what is waiting for a sleeper — the `×` on its `waiting N` tag, by the maintainer's
+ * ruling of 2026-10-31: one click, no confirm. Only the held messages go; the record stays,
+ * so it is still asleep, still wakes, and keeps its keep-awake. Forget is unchanged. No
+ * relaunch guard: a wake drains with `takeHeld` in one step, so a drop lands either before
+ * it (and the wake delivers nothing) or after it (and finds nothing to drop).
+ */
+app.delete('/api/asleep/:name/held', (req, res) => {
+  const dropped = hibernation.dropHeld(req.params.name);
+  if (dropped === null) return res.status(404).json({ error: 'That session is not asleep.' });
+  res.json({ ok: true, name: req.params.name, dropped });
+});
+
+/**
  * Keep a session awake, or let it sleep again — ruling 3, per session, by **name**. Accepted
  * for a live session or a sleeper, refused for a name the panel knows nothing about, because
  * a keep-awake for nobody is a setting that would quietly catch whoever is named that next.

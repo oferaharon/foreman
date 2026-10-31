@@ -1287,7 +1287,10 @@ moves it into the new pane's queue on wake, so delivery is still `PaneLock` →
 `assertNotBlocked`. A group room's pane greys its sleeping members and offers **wake N asleep**
 (`POST /api/rooms/:id/wake-asleep`): the same `wakeSleeper`, serially, holding `relaunching`
 across the whole run, a human press only. **Keep awake** is per session, by tmux name; **forget** (the bin on a
-sleeping row) drops the record and its held messages and leaves the transcript on disk.
+sleeping row) drops the record and its held messages and leaves the transcript on disk — and is
+no longer the only way to drop them: the `×` on a sleeping row's `waiting N` (desktop only, one
+click, no confirm, `DELETE /api/asleep/:name/held` → `dropHeld`) drops the held messages alone
+and leaves the sleeper asleep and wakeable.
 Everything is keyed by name in `STATE_DIR/hibernate.json`, which carries unknown keys through;
 launches reserve sleepers' names, a save includes them, a restore skips them. A panel restart
 resets every idle clock, by design. A sleeper's transcript is **claimed** while its record

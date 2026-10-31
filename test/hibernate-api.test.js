@@ -51,6 +51,7 @@ const IDS = {
   gamma: '0ca33a00-0000-4000-8000-0000000ca33a',
   delta: '0de17a00-0000-4000-8000-0000000de17a',
   zeta: '0ce7a000-0000-4000-8000-00000000ce7a',
+  eta: '0e7a0000-0000-4000-8000-0000000e7a00',
 };
 
 function stop(proc) {
@@ -180,7 +181,7 @@ test.before(async () => {
   tmuxDir = await fsp.mkdtemp('/tmp/foreman-hb-');
   port = await freePort();
 
-  const dirs = Object.fromEntries(['alpha', 'beta', 'gamma', 'delta', 'zeta'].map((d) => [d, path.join(stateDir, d)]));
+  const dirs = Object.fromEntries(['alpha', 'beta', 'gamma', 'delta', 'zeta', 'eta'].map((d) => [d, path.join(stateDir, d)]));
   for (const d of Object.values(dirs)) fs.mkdirSync(d, { recursive: true });
   // The lead-refusal case needs a git repo: `launchLead` checks for one before anything else.
   execFileSync('git', ['init', '-q', dirs.delta]);
@@ -214,11 +215,14 @@ test.before(async () => {
         [`${PREFIX}gamma-master`]: record(`${PREFIX}gamma-master`, dirs.gamma, IDS.gamma),
         [`${PREFIX}zeta-main`]: record(`${PREFIX}zeta-main`, dirs.zeta, IDS.zeta),
         [`${PREFIX}delta-lead`]: record(`${PREFIX}delta-lead`, dirs.delta, IDS.delta, { lead: true }),
+        // eta's held messages are dropped with the `×`, and then it is woken.
+        [`${PREFIX}eta-main`]: record(`${PREFIX}eta-main`, dirs.eta, IDS.eta),
       },
       keepAwake: [],
       held: {
         [`${PREFIX}alpha-main`]: [held('first for alpha', 0), held('second for alpha', 1)],
         [`${PREFIX}beta-main`]: [held('one for beta', 0), held('two for beta', 1)],
+        [`${PREFIX}eta-main`]: [held('one for eta', 0), held('two for eta', 1), held('three for eta', 2)],
       },
       // A key this build has never heard of, which the store must carry through.
       fromTheFuture: { kept: true },
@@ -334,13 +338,35 @@ test('forget drops the row and what was waiting, says how many, and keeps the co
   assert.ok(!(await api('GET', '/api/asleep')).body.asleep.some((r) => r.name === `${PREFIX}beta-main`));
 });
 
+/* ------------------------------------------------------------------- drop held --- */
+
+test('the × drops what is waiting and nothing else: still asleep, still kept awake', async () => {
+  const ETA = `${PREFIX}eta-main`;
+  await api('POST', '/api/asleep/keep-awake', { name: ETA, on: true });
+  const out = await api('DELETE', `/api/asleep/${ETA}/held`);
+  assert.equal(out.status, 200);
+  assert.deepEqual(out.body, { ok: true, name: ETA, dropped: 3 });
+  const after = await api('GET', '/api/asleep');
+  const eta = after.body.asleep.find((r) => r.name === ETA);
+  assert.ok(eta, 'the record stays');
+  assert.equal(eta.waiting, 0, 'so `waitingText` draws no tag');
+  assert.deepEqual(after.body.hibernation.keepAwake, [ETA]);
+  assert.ok(fs.existsSync(path.join(stateDir, `${IDS.eta}.jsonl`)), 'the transcript stays on disk');
+  // A second press finds nothing, and is not an error; nobody asleep is.
+  assert.equal((await api('DELETE', `/api/asleep/${ETA}/held`)).body.dropped, 0);
+  assert.equal((await api('DELETE', `/api/asleep/${PREFIX}nobody-main/held`)).status, 404);
+  await api('POST', '/api/asleep/keep-awake', { name: ETA, on: false });
+});
+
 test('the store carried a key it has never heard of through its rewrites', async () => {
   const doc = await until(() => {
     const d = JSON.parse(fs.readFileSync(path.join(stateDir, 'hibernate.json'), 'utf8'));
-    return d.asleep[`${PREFIX}beta-main`] ? null : d;
+    return d.asleep[`${PREFIX}beta-main`] || d.held[`${PREFIX}eta-main`] ? null : d;
   }, 5000);
-  assert.ok(doc, 'the forget reached the file');
+  assert.ok(doc, 'the forget and the drop reached the file');
   assert.deepEqual(doc.fromTheFuture, { kept: true });
+  assert.ok(doc.asleep[`${PREFIX}eta-main`], 'the drop kept the record');
+  assert.equal(doc.held[`${PREFIX}eta-main`], undefined, 'and dropped what was held');
 });
 
 /* --------------------------------------------------------------- the reservation --- */
@@ -415,6 +441,18 @@ test('Wake starts it again under its own name, on --resume and the launch model,
     (onScreen > screen.indexOf('first for alpha')) || (rest.length === 1 && rest[0] === 'second for alpha'),
     `the second follows the first: queued ${JSON.stringify(rest)}`,
   );
+});
+
+test('a sleeper whose held messages were dropped wakes with nothing to deliver', async (t) => {
+  if (!bench) return t.skip('no scratch tmux bench on this machine');
+  const res = await api('POST', `/api/asleep/${PREFIX}eta-main/wake`);
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  assert.equal(res.body.name, `${PREFIX}eta-main`);
+  assert.equal(res.body.queued, 0);
+  const row = await until(async () => (await roster()).find((s) => s.tmuxSession === `${PREFIX}eta-main`));
+  assert.ok(row, 'it is a live row again');
+  assert.deepEqual(row.queued, []);
+  tmux('kill-session', '-t', `=${PREFIX}eta-main`);
 });
 
 /* ------------------------------------------------------- read-only routes for a sleeper --- */
