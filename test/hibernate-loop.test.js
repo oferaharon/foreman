@@ -569,6 +569,8 @@ test('one function sends this feature’s /exit, and no route puts a session to 
   const routes = [...index.matchAll(/app\.(get|post|put|patch|delete)\('([^']*asleep[^']*)'/g)].map((m) => `${m[1]} ${m[2]}`);
   assert.deepEqual(routes.sort(), [
     'delete /api/asleep/:name',
+    // The `×` on `waiting N`: drops what is held, and the sleeper stays asleep.
+    'delete /api/asleep/:name/held',
     'get /api/asleep',
     'post /api/asleep/:name/wake',
     'post /api/asleep/keep-awake',

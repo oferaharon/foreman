@@ -513,7 +513,10 @@ press, the team's own nudges to a sleeping lead — waits rather than failing, a
 `waiting N`. On Wake they go into the session's queue in the order they arrived and are
 delivered as it goes idle, through the same guarded path as everything else the panel types.
 The pane's own composer is replaced by Wake, so you can't type to a sleeper directly. A lead
-going to sleep and waking is said in its team's room.
+going to sleep and waking is said in its team's room. The small `×` inside the `waiting N` tag
+drops every waiting message on one click, with no confirm (`DELETE /api/asleep/:name/held`);
+the session stays asleep, keeps its keep-awake and still wakes — with nothing to deliver.
+Desktop only.
 
 **Waking a room.** In a group room's pane, members that are asleep are greyed in the member
 strip (a dashed dot, and the hover says their posts are held), and a **wake N asleep** button
@@ -527,7 +530,8 @@ is refused with the reason instead. It only ever happens on a press: nothing wak
 members when a post arrives. Group rooms only — not the team room, not the phone.
 
 **Forget.** The bin on a sleeping row means *forget*, behind a confirm: the row and any
-waiting messages go, and the confirm says how many messages that drops. The conversation stays
+waiting messages go, and the confirm says how many messages that drops. To drop only the
+messages and keep the sleeper, use the `×` on `waiting N` instead. The conversation stays
 on disk, where `claude --resume` can still reach it.
 
 **Names.** While a session sleeps, its name is kept for it: `+ new` in that folder won't
@@ -538,7 +542,7 @@ conversation — by pressing Wake.
 
 **On the phone**, sleeping sessions are greyed in their usual list — an ordinary session on
 Standalones, a lead as its team's card on Leads. A tap opens the read-only conversation with
-Wake. There is no keep-awake toggle and no forget on the phone.
+Wake. There is no keep-awake toggle, no forget and no `×` on `waiting N` on the phone.
 
 **A panel restart resets every idle clock.** The panel keeps "last seen busy" in memory, so
 after a restart every session starts its idle time again from the restart. A woken session's

@@ -727,6 +727,20 @@ export class HibernateStore extends EventEmitter {
     return { ...item };
   }
 
+  /**
+   * The `×` on a sleeper's `waiting N`: everything held for it goes, and nothing else does —
+   * the record, its keep-awake and its transcript are untouched, so it is still asleep and
+   * still wakes. `null` for a name that is not asleep; otherwise how many were dropped.
+   */
+  dropHeld(name) {
+    if (!this.asleepBy.has(name)) return null;
+    const dropped = this.heldFor.get(name)?.length || 0;
+    if (!dropped) return 0;
+    this.heldFor.delete(name);
+    this.#touch();
+    return dropped;
+  }
+
   /** Everything held for a name, removed from the store, in order — the wake's drain. */
   takeHeld(name) {
     const items = this.heldFor.get(name) || [];

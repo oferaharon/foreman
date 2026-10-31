@@ -546,6 +546,29 @@ test('forget drops the record and what was held, and says how many', () => {
   s.stop();
 });
 
+test('dropping what is held leaves the sleeper asleep, kept awake and wakeable with nothing', () => {
+  const dir = tmpDir();
+  const s = storeAt(dir);
+  assert.equal(s.dropHeld(`${P}alpha-main`), null, 'nobody asleep under that name');
+  s.put(sleepRecord(row()));
+  s.setKeepAwake(`${P}alpha-main`, true);
+  assert.equal(s.dropHeld(`${P}alpha-main`), 0, 'nothing held is nothing dropped');
+  s.hold(`${P}alpha-main`, 'a');
+  s.hold(`${P}alpha-main`, 'b');
+  assert.equal(s.dropHeld(`${P}alpha-main`), 2);
+  assert.equal(s.heldCount(`${P}alpha-main`), 0);
+  assert.equal(s.has(`${P}alpha-main`), true, 'the record stays');
+  assert.equal(s.isKeepAwake(`${P}alpha-main`), true, 'keep-awake is untouched');
+  assert.deepEqual(s.takeHeld(`${P}alpha-main`), [], 'a wake afterwards hands over nothing');
+  // Still asleep, so it can still be held for — and the drop reached the file.
+  s.hold(`${P}alpha-main`, 'c');
+  s.stop();
+  const t = storeAt(dir);
+  assert.equal(t.has(`${P}alpha-main`), true);
+  assert.deepEqual(t.held(`${P}alpha-main`).map((i) => i.text), ['c']);
+  t.stop();
+});
+
 test('unknown keys are carried through a rewrite, top-level and inside each record', () => {
   const dir = tmpDir();
   const file = path.join(dir, 'hibernate.json');
@@ -591,7 +614,9 @@ test('every change is announced, for the roster broadcast', () => {
   s.hold(`${P}alpha-main`, 'x');
   s.setKeepAwake(`${P}alpha-main`, true);
   s.setKeepAwake(`${P}alpha-main`, true); // no change, no event
+  s.dropHeld(`${P}alpha-main`);
+  s.dropHeld(`${P}alpha-main`); // nothing left to drop, no event
   s.forget(`${P}alpha-main`);
-  assert.equal(n, 4);
+  assert.equal(n, 5);
   s.stop();
 });
