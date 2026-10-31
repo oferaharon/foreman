@@ -48,7 +48,7 @@ import {
 import { parseEffortDialog, nudgeToward } from './effort.js';
 import { MessageQueue } from './queue.js';
 import { PaneLock } from './claim.js';
-import { PinStore, carryPinOrder } from './pins.js';
+import { PinStore, carryPinOrder, splitPinOrder } from './pins.js';
 import { RateLimitStore } from './rate-limits.js';
 import { GroupStore } from './groups.js';
 import {
@@ -132,7 +132,8 @@ import {
 import { Observer, isPeerPrompt, participant } from './observe.js';
 import { readTail } from './transcript.js';
 import { HibernateStore, HIBERNATE_CHOICES } from './hibernate.js';
-import { Hibernator, wakePinOrder } from './hibernate-loop.js';
+import { Hibernator } from './hibernate-loop.js';
+import { asleepItems, drawnPinnedNames, sleeperAnchors } from '../web/asleep.js';
 import {
   attachTerminal,
   chooseFolder,
@@ -265,7 +266,9 @@ const hibernator = new Hibernator({
     setting: readHibernateAfter,
     busy: () => relaunching || restoring,
     watched: watchedSessionIds,
-    pinnedNames,
+    // The group as drawn, sleepers included, so a session going to sleep records the row
+    // directly above it — live or asleep — and keeps its place among sleepers too.
+    pinnedNames: drawnNames,
     log: (line) => console.log(line),
     onSlept: (record) => {
       // A lead's sleep is said in its team's room — through `room.post`, never
@@ -748,7 +751,11 @@ app.post('/api/sessions/:id/pin', async (req, res) => {
   // Absent means "the other one", so a row's button needs no state of its own.
   const pinned = req.body?.pinned === undefined ? !session.pinned : Boolean(req.body.pinned);
 
+  // An unpin takes the row out of the order, and a sleeper anchored to it would otherwise
+  // drop to the bottom; re-anchored from the order as drawn, nothing else on screen moves.
+  const before = pinned ? null : await drawnNames();
   if (pins.set(session.paneId, pinned, { paneCreatedMs: await paneBirthday(session.paneId) })) {
+    if (before) reanchorSleepers(before.filter((n) => n !== session.tmuxSession));
     registry.refresh().catch(() => {});
   }
   res.json({ ok: true, pinned });
@@ -757,23 +764,69 @@ app.post('/api/sessions/:id/pin', async (req, res) => {
 /**
  * Rearrange the pinned group — what the rail's grip writes when a drag lands.
  *
- * The body is the whole group, top first, as **pane ids**: a pin is keyed by pane, and a
- * `/clear` between the roster frame the drag was read off and this write would otherwise
- * turn a good order into a refusal. It may only rearrange (`PinStore#reorder`): a list that
- * pins, unpins or repeats anything is refused, 400 for a shape no client sends and 409 for
- * one that was right a moment ago. Either way the current order rides back, so the rail can
- * put the rows back without waiting for the next roster frame.
+ * The body is the whole group, top first, as drawn: a live row by its **pane id** — a pin is
+ * keyed by pane, and a `/clear` between the roster frame the drag was read off and this write
+ * would otherwise turn a good order into a refusal — and a sleeper as `{asleep: <name>}`,
+ * because its pin is its sleep record's. It may only rearrange (`splitPinOrder`): a list that
+ * pins, unpins or repeats anything, live or asleep, is refused, 400 for a shape no client
+ * sends and 409 for one that was right a moment ago. Either way the current order rides back
+ * — the live pins' and each pinned sleeper's anchor — so the rail can put the rows back
+ * without waiting for the next roster frame.
+ *
+ * One order across two stores, and the split is the design: the live rows' order goes to
+ * `PinStore` exactly as before, and each sleeper's `pinAfter` becomes the name of the row
+ * directly above it (`sleeperAnchors`), which `placePinned` draws back as this very order.
  */
-app.post('/api/pins/order', (req, res) => {
-  const result = pins.reorder(req.body?.panes);
+app.post('/api/pins/order', async (req, res) => {
+  const result = splitPinOrder(req.body?.panes, pins.order(), pinnedSleeperNames());
   if (result.refused) {
-    return res
-      .status(result.refused === 'malformed' ? 400 : 409)
-      .json({ error: result.error, order: pins.order() });
+    return res.status(result.refused === 'malformed' ? 400 : 409).json({ error: result.error, ...pinState() });
   }
-  if (result.changed) registry.refresh().catch(() => {});
-  res.json({ ok: true, order: pins.order() });
+  const moved = pins.reorder(result.panes);
+  if (result.entries.some((e) => e.asleep)) {
+    const nameOf = new Map(registry.list().map((s) => [s.paneId, s.tmuxSession]));
+    for (const p of await listPanes().catch(() => [])) nameOf.set(p.paneId, p.tmuxSession);
+    reanchorSleepers(result.entries.map((e) => e.asleep ?? nameOf.get(e.pane) ?? null));
+  }
+  if (moved.changed) registry.refresh().catch(() => {});
+  res.json({ ok: true, ...pinState() });
 });
+
+/** The names of the sleepers that are pinned — the half of the pinned group `PinStore` never holds. */
+function pinnedSleeperNames() {
+  return hibernation
+    .asleep()
+    .filter((r) => r.pinned)
+    .map((r) => r.name);
+}
+
+/** What the order route answers with: the live pins' order, and each pinned sleeper's anchor. */
+function pinState() {
+  const asleep = {};
+  for (const r of hibernation.asleep()) if (r.pinned) asleep[r.name] = r.pinAfter ?? null;
+  return { order: pins.order(), asleep };
+}
+
+/** The pinned group as the rail draws it, by name, top first — sleepers in their places. */
+async function drawnNames() {
+  return drawnPinnedNames(
+    await pinnedNames(),
+    asleepItems(hibernation.asleep()).filter((s) => s.pinned),
+  );
+}
+
+/**
+ * Write every pinned sleeper's `pinAfter` from this order — the drawn group's names, top
+ * first, with whatever is leaving it already taken out. Only a record whose anchor actually
+ * changes is touched, so a drop among live rows alone writes nothing here.
+ */
+function reanchorSleepers(names) {
+  const sleeping = new Set(pinnedSleeperNames());
+  if (!sleeping.size) return;
+  for (const [name, pinAfter] of sleeperAnchors(names, sleeping)) {
+    if ((hibernation.get(name)?.pinAfter ?? null) !== pinAfter) hibernation.update(name, { pinAfter });
+  }
+}
 
 app.post('/api/sessions/:id/key', async (req, res) => {
   const session = registry.get(req.params.id);
@@ -5375,7 +5428,7 @@ app.get('/api/sessions/:id/sleep', async (req, res) => {
  *
  * The body is `wakeSleeper`, below, which a group room's `wake N asleep` calls too.
  *
- * On success: the pin goes back under the row it sat beneath (`wakePinOrder` →
+ * On success: the pin goes back exactly where its row is drawn (`drawnNames` →
  * `carryPinOrder`), the idle clock starts now (a resume does not move `lastActivity` —
  * measured), everything held for it moves into the new pane's queue **in order** (so it is
  * delivered by the ordinary flusher, through `PaneLock` → `assertNotBlocked`, as the session
@@ -5456,7 +5509,9 @@ async function wakeSleeper(name) {
       pinned: Boolean(record.pinned),
       resume: record.sessionId,
     };
-    const pinOrder = wakePinOrder(await pinnedNames(), record);
+    // The group as drawn, this sleeper included: `carryPinOrder` puts the woken pin back
+    // below the live row nearest above where it is drawn now, which is exactly that place.
+    const pinOrder = await drawnNames();
     // A Terminal window only if one was attached when it slept — restart-one's rule.
     [result] = await startEntries([entry], { terminal: Boolean(record.attached), pinOrder, reserved: new Set() });
   } catch (err) {
@@ -5578,14 +5633,54 @@ app.post('/api/rooms/:id/wake-asleep', async (req, res) => {
  * it go; the conversation stays on disk, where `claude --resume` can still reach it. Not a
  * sleep control, so ruling 1 is untouched.
  */
-app.delete('/api/asleep/:name', (req, res) => {
+app.delete('/api/asleep/:name', async (req, res) => {
   if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
   if (relaunching || restoring) {
     return res.status(409).json({ error: 'A relaunch, restore or wake is running — try again when it finishes.' });
   }
+  // A pinned sleeper leaves the order with its record, so the sleepers anchored under it are
+  // re-anchored from the order as drawn first — or they would drop to the bottom.
+  const before = hibernation.get(req.params.name)?.pinned ? await drawnNames() : null;
   const gone = hibernation.forget(req.params.name);
   if (!gone?.record) return res.status(404).json({ error: 'That session is not asleep.' });
+  if (before) reanchorSleepers(before.filter((n) => n !== req.params.name));
   res.json({ ok: true, name: req.params.name, dropped: gone.dropped, transcriptPath: gone.record.transcriptPath ?? null });
+});
+
+/**
+ * Pin a sleeper, or let it go — the star on a sleeping row, by the maintainer's ruling of
+ * 2026-10-31. Its pin is its record's (`pinned`, `pinAfter`), never `PinStore`'s, which is
+ * keyed by a pane a sleeper does not have; a wake hands it over to the store.
+ *
+ * Absent `pinned` means "the other one", as the live row's star. A pin goes to the bottom of
+ * the group as drawn, as a live row's new pin does; an unpin takes it out and re-anchors the
+ * sleepers that sat under it, so it alone moves — back among its folder's rows. Refused while
+ * a sleep, a wake, a relaunch or a restore runs, `forget`'s rule, because each of those reads
+ * or writes this record's pin.
+ *
+ *   404  not asleep
+ *   409  a sleep, wake, relaunch or restore is running
+ */
+app.post('/api/asleep/:name/pin', async (req, res) => {
+  const name = req.params.name;
+  const record = hibernation.get(name);
+  if (!record) return res.status(404).json({ error: 'That session is not asleep.' });
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.', pinned: Boolean(record.pinned) });
+  if (relaunching || restoring) {
+    return res.status(409).json({ error: 'A relaunch, restore or wake is running — try again when it finishes.', pinned: Boolean(record.pinned) });
+  }
+  const pinned = req.body?.pinned === undefined ? !record.pinned : Boolean(req.body.pinned);
+  if (pinned !== Boolean(record.pinned)) {
+    const drawn = await drawnNames();
+    if (pinned) {
+      const bottom = drawn.filter(Boolean).at(-1) ?? null;
+      hibernation.update(name, { pinned: true, pinAfter: bottom });
+    } else {
+      hibernation.update(name, { pinned: false, pinAfter: null });
+      reanchorSleepers(drawn.filter((n) => n !== name));
+    }
+  }
+  res.json({ ok: true, name, pinned });
 });
 
 /**

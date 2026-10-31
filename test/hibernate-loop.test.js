@@ -447,6 +447,8 @@ test('one function sends this feature’s /exit, and no route puts a session to 
     // The `×` on `waiting N`: drops what is held, and the sleeper stays asleep.
     'delete /api/asleep/:name/held',
     'get /api/asleep',
+    // The star on a sleeping row: writes the record's pin, never its sleep.
+    'post /api/asleep/:name/pin',
     'post /api/asleep/:name/wake',
     'post /api/asleep/keep-awake',
     // A room's `wake N asleep` — a wake, through `wakeSleeper`, never a sleep.

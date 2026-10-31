@@ -98,7 +98,16 @@ import { eligibleFolders, matchesFilter } from './group-folders.js';
 import { foldsInto, splitTitle } from './rail-fold.js';
 // Sleepers on the rail — where each greyed row goes, and what a pane showing one follows.
 // A leaf, so `test/asleep-rail.test.js` runs it in node.
-import { asleepItems, followIntoSleep, mergeByActivity, placePinned, sleepTooltip, waitingText, wokenSession } from './asleep.js';
+import {
+  asleepItems,
+  followIntoSleep,
+  mergeByActivity,
+  placePinned,
+  sleeperAnchors,
+  sleepTooltip,
+  waitingText,
+  wokenSession,
+} from './asleep.js';
 // The idle times the settings picker offers — the one spelling, shared with the validator.
 import { DEFAULT_HIBERNATE, HIBERNATE_CHOICES, hibernateLabel } from './hibernate-choices.js';
 // ^ when a folder heading is furniture, and how the row's title splits into the path it
@@ -1557,10 +1566,30 @@ let pinDrag = null;
 /** How far the pointer travels before a press on the grip becomes a drag, in px. */
 const PIN_DRAG_SLOP = 4;
 
-/** The pinned group as the rail draws it: top first, by the order the server keeps. */
+/** The live pins, top first, by the order the server keeps. */
 function pinnedSessions() {
   return state.sessions.filter((s) => s.pinned).sort(byPinOrder);
 }
+
+/**
+ * The pinned group as the rail draws it, top first: the live pins with each pinned sleeper
+ * back in its place (`placePinned`). One list across two stores — the drag, the keyboard and
+ * the paint all read this, so what moves is what is drawn.
+ */
+function pinnedRows(sleepers = asleepItems(state.asleep)) {
+  return placePinned(
+    pinnedSessions(),
+    sleepers.filter((s) => s.pinned),
+  );
+}
+
+/**
+ * A pinned row's key in the drag: a live row's pane id, a sleeper's `asleep:<name>`. A pane
+ * id always starts with `%`, so the two can never collide; the key is only ever turned back
+ * into the order route's body by `pinEntry`.
+ */
+const pinKey = (s) => (s.asleep ? `asleep:${s.name}` : s.paneId);
+const pinEntry = (key) => (key.startsWith('asleep:') ? { asleep: key.slice('asleep:'.length) } : key);
 
 /**
  * The left-edge grip on a pinned row: the thing you drag, and the mark that says you can.
@@ -1576,10 +1605,10 @@ function pinGrip(s) {
   const grip = document.createElement('button');
   grip.type = 'button';
   grip.className = 'pin-grip';
-  grip.dataset.pane = s.paneId;
+  grip.dataset.pane = pinKey(s);
   grip.title = 'Drag to reorder the pinned sessions (or ↑ / ↓)';
   grip.setAttribute('aria-label', `Move ${s.title || s.project || 'this session'} in the pinned group`);
-  grip.addEventListener('pointerdown', (e) => startPinDrag(e, grip, s.paneId));
+  grip.addEventListener('pointerdown', (e) => startPinDrag(e, grip, pinKey(s)));
   grip.addEventListener('pointermove', movePinDrag);
   grip.addEventListener('pointerup', (e) => endPinDrag(e, true));
   grip.addEventListener('pointercancel', (e) => endPinDrag(e, false));
@@ -1590,8 +1619,8 @@ function pinGrip(s) {
     e.preventDefault();
     e.stopPropagation();
     if (pinDrag) return;
-    const order = pinnedSessions().map((p) => p.paneId);
-    const from = order.indexOf(s.paneId);
+    const order = pinnedRows().map(pinKey);
+    const from = order.indexOf(pinKey(s));
     const next = movedPinOrder(order, from, e.key === 'ArrowUp' ? from - 1 : from + 2);
     if (next) savePinOrder(next);
   };
@@ -1703,17 +1732,35 @@ function endPinDrag(e, drop) {
 /**
  * Write the pinned group's new order, drawing it first.
  *
+ * `order` is the drawn group's keys (`pinKey`), live rows and sleepers interleaved. Drawn
+ * locally the way the server will store it — the live rows' positions, and each sleeper
+ * anchored to the row directly above it (`sleeperAnchors`, the server's own helper) — so the
+ * paint before the answer is the paint after it.
+ *
  * The server may refuse — a pin made or dropped since the frame the rail was drawn from
  * (409), which is its own rule that an order may only rearrange — and then it answers with
- * the order it holds, which the rail takes rather than waiting for the next frame.
+ * what it holds, which the rail takes rather than waiting for the next frame.
  */
 async function savePinOrder(order) {
   const before = new Map(state.sessions.map((s) => [s.paneId, s.pinOrder]));
+  const records = Array.isArray(state.asleep) ? state.asleep : [];
+  const anchorsBefore = new Map(records.map((r) => [r, r?.pinAfter ?? null]));
+  const putAnchors = (anchors) => {
+    for (const r of records) if (r?.pinned && anchors.has(r.name)) r.pinAfter = anchors.get(r.name);
+  };
   const apply = (ids) => {
     const at = new Map(ids.map((id, i) => [id, i]));
     for (const s of state.sessions) if (s.pinned && at.has(s.paneId)) s.pinOrder = at.get(s.paneId);
   };
-  apply(order);
+  const restore = () => {
+    for (const s of state.sessions) if (before.has(s.paneId)) s.pinOrder = before.get(s.paneId);
+    for (const [r, pinAfter] of anchorsBefore) if (r) r.pinAfter = pinAfter;
+  };
+  const byKey = new Map(pinnedRows().map((s) => [pinKey(s), s]));
+  const names = order.map((key) => byKey.get(key)?.tmuxSession ?? null);
+  const sleeping = order.filter((key) => key.startsWith('asleep:')).map((key) => key.slice('asleep:'.length));
+  apply(order.filter((key) => !key.startsWith('asleep:')));
+  putAnchors(sleeperAnchors(names, sleeping));
   renderRail();
 
   let res;
@@ -1722,17 +1769,19 @@ async function savePinOrder(order) {
     res = await fetch('/api/pins/order', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ panes: order }),
+      body: JSON.stringify({ panes: order.map(pinEntry) }),
     });
     data = await res.json().catch(() => ({}));
   } catch {
-    for (const s of state.sessions) if (before.has(s.paneId)) s.pinOrder = before.get(s.paneId);
+    restore();
     renderRail();
     return;
   }
   if (res.ok) return;
-  if (Array.isArray(data.order)) apply(data.order);
-  else for (const s of state.sessions) if (before.has(s.paneId)) s.pinOrder = before.get(s.paneId);
+  if (Array.isArray(data.order)) {
+    apply(data.order);
+    putAnchors(new Map(Object.entries(data.asleep || {})));
+  } else restore();
   renderRail();
   toast(data.error || 'The pinned order could not be saved.');
 }
@@ -4970,9 +5019,9 @@ function renderRail() {
   // In the order the maintainer put them in — the server keeps it (`PinStore`), and the grip
   // on each pinned row rearranges it.
   // A pinned sleeper goes back under the pinned row it sat beneath (`placePinned`), so the
-  // group reads as it did before it slept; its grip is inert, because the order route may
-  // only rearrange pins that exist and a sleeper's pin is the record's, not the store's.
-  const pinned = placePinned(pinnedSessions(), sleepers.filter((s) => s.pinned));
+  // group reads as it did before it slept — and it moves like any other pinned row: the
+  // order route takes live rows by pane and sleepers by name, one order across both.
+  const pinned = pinnedRows(sleepers);
   // A worker row comes out of the *inbox* on a related principle: a worker's permission
   // prompt is its *lead's* to answer and its finished report is its lead's to read — that
   // is what `worker_read` and the guarded answer endpoint exist for. So the lead gets first
@@ -5095,18 +5144,11 @@ function renderRail() {
   if (pinned.length) {
     frag.append(plainLabel(`pinned · ${pinned.length}`, 'pinned-label'));
     for (const s of pinned) {
-      if (s.asleep) {
-        // No `pinBlock`: the drag reads its blocks off that attribute, and a sleeper is not
-        // one it can move. The grip is drawn so the column does not jump, and does nothing.
-        const row = asleepRow(s);
-        row.prepend(inertGrip(s));
-        frag.append(row);
-        continue;
-      }
       // A block is the row and whatever nests under it — a pinned lead's workers move with
-      // it — and the grip goes on the row itself, the only one the pin is about.
+      // it — and the grip goes on the row itself, the only one the pin is about. A sleeper
+      // is a block of one, keyed by name (`pinKey`), since it has no pane.
       const rows = rowsFor(s);
-      for (const row of rows) row.dataset.pinBlock = s.paneId;
+      for (const row of rows) row.dataset.pinBlock = pinKey(s);
       rows[0].prepend(pinGrip(s));
       frag.append(...rows);
     }
@@ -5894,14 +5936,22 @@ function asleepRow(s, fold = null) {
   }
   row.append(btn);
 
-  // The same reserved column as a live row, so the title is the same width. The star is a
-  // mark here, not a button — a sleeper's pin lives on its record and comes back with it.
+  // The same reserved column as a live row, so the title is the same width. The star is the
+  // live row's, written to the sleep record (`toggleAsleepPin`) — a sleeper has no pane for
+  // `PinStore` to key — and a wake hands the pin over to the store where the row is drawn.
   const actions = document.createElement('div');
   actions.className = 'row-actions';
-  const pin = document.createElement('span');
-  pin.className = 'pin-btn is-inert';
-  pin.textContent = s.pinned ? '★' : '';
-  if (s.pinned) pin.title = 'Pinned — it comes back to this place when it wakes';
+  const pin = document.createElement('button');
+  pin.className = 'pin-btn';
+  pin.textContent = s.pinned ? '★' : '☆';
+  pin.setAttribute('aria-pressed', String(Boolean(s.pinned)));
+  pin.title = s.pinned
+    ? 'Unpin — it goes back among its folder’s rows, and wakes there'
+    : 'Pin to the top of the rail — it wakes where it is drawn';
+  pin.onclick = (e) => {
+    e.stopPropagation();
+    toggleAsleepPin(s);
+  };
   actions.append(pin, forgetBtn(s));
   row.append(actions);
   return row;
@@ -5942,13 +5992,54 @@ function dropHeldBtn(s) {
   return btn;
 }
 
-/** The pinned sleeper's grip: drawn, so the column holds still, and inert. */
-function inertGrip(s) {
-  const grip = document.createElement('span');
-  grip.className = 'pin-grip is-inert';
-  grip.title = `${s.title} is asleep — wake it to move it`;
-  grip.setAttribute('aria-hidden', 'true');
-  return grip;
+/**
+ * The star on a sleeping row: `togglePin`'s shape, against the sleeper's own route
+ * (`POST /api/asleep/:name/pin`). Flipped locally first, so the row moves on the click; a
+ * refusal (a sleep or a wake running) puts it back to what the server holds and says why.
+ * The record's change broadcasts the roster, which settles `pinAfter` for every sleeper.
+ */
+async function toggleAsleepPin(s) {
+  const record = (Array.isArray(state.asleep) ? state.asleep : []).find((r) => r?.name === s.name);
+  if (!record) return;
+  const was = Boolean(record.pinned);
+  // Drawn the way the server will write it: a pin at the bottom of the group as drawn, and
+  // an unpin with the sleepers under it re-anchored, so the click's paint is the answer's.
+  const records = state.asleep;
+  const anchorsBefore = new Map(records.map((r) => [r, r?.pinAfter ?? null]));
+  const drawn = pinnedRows().map((x) => x.tmuxSession ?? null);
+  record.pinned = !was;
+  if (!was) record.pinAfter = drawn.filter(Boolean).at(-1) ?? null;
+  else {
+    record.pinAfter = null;
+    const others = records.filter((r) => r?.pinned && r !== record).map((r) => r.name);
+    const anchors = sleeperAnchors(drawn.filter((n) => n !== s.name), others);
+    for (const r of records) if (anchors.has(r?.name)) r.pinAfter = anchors.get(r.name);
+  }
+  const putBack = () => {
+    for (const [r, pinAfter] of anchorsBefore) if (r) r.pinAfter = pinAfter;
+  };
+  renderRail();
+
+  let res;
+  let data = {};
+  try {
+    res = await fetch(`/api/asleep/${encodeURIComponent(s.name)}/pin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pinned: !was }),
+    });
+    data = await res.json().catch(() => ({}));
+  } catch {
+    record.pinned = was;
+    putBack();
+    renderRail();
+    return;
+  }
+  if (res.ok) return;
+  record.pinned = data.pinned === undefined ? was : Boolean(data.pinned);
+  putBack();
+  renderRail();
+  toast(data.error || 'That pin could not be changed.');
 }
 
 /** The bin's three shapes — `closeBtn`'s drawing, shared with `forgetBtn`. */
