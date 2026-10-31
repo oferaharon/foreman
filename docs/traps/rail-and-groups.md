@@ -151,8 +151,9 @@ with it. `renderRail` does it in one place: unpinned sleepers go into `rest` thr
 `mergeByActivity` (`web/asleep.js`), each one in front of the first live row older than its
 stored `lastActivity`, so it sits among its folder's rows where its last turn puts it and a
 folder of nothing but sleepers takes the place its newest sleeper earns. Pinned sleepers go
-back into the pinned group under the row they sat beneath (`placePinned`, `pinAfter`, the
-wake's own rule). A sleeper folds into its folder's single row exactly as a live row would, so
+back into the pinned group under the row drawn directly above them (`placePinned`,
+`pinAfter`), the order the server writes from a drop and reads back at a sleep and a wake
+(`drawnPinnedNames`, one spelling for both ends). A sleeper folds into its folder's single row exactly as a live row would, so
 a folder does not grow a heading the moment its only session sleeps either.
 
 Three things it must not do, all held by building a sleeper as an *item* off the frame's

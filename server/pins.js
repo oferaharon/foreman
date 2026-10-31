@@ -248,3 +248,48 @@ export function carryPinOrder(wanted, current, moved) {
   }
   return [...out, ...unplaced].map((c) => c.paneId);
 }
+
+/**
+ * The pinned group as a drop sends it — live rows and sleepers interleaved, top first — split
+ * into what each store holds, or the reason it is not a rearrangement.
+ *
+ * A live row is its **pane id**, as it always was, and a sleeper is `{asleep: <name>}`,
+ * because a sleeper has no pane and its pin lives on its sleep record by name. The rule is
+ * `pinOrderProblem`'s, extended rather than loosened: the list must name every live pin by
+ * pane and every pinned sleeper by name, each exactly once and nothing else — so an order
+ * that pins, unpins or wakes anything by accident is still refused, and a drop across
+ * sleepers is not.
+ *
+ * @param {unknown} proposed
+ * @param {string[]} current the pin store's order now
+ * @param {Iterable<string>} sleeping the names of the pinned sleepers now
+ * @returns {{panes: string[], entries: Array<{pane: string}|{asleep: string}>} |
+ *   {refused: 'malformed'|'stale', error: string}}
+ */
+export function splitPinOrder(proposed, current, sleeping) {
+  const asleepOf = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x.asleep : undefined);
+  if (
+    !Array.isArray(proposed) ||
+    proposed.some((x) => !(typeof x === 'string' && x) && !(typeof asleepOf(x) === 'string' && asleepOf(x)))
+  ) {
+    return { refused: 'malformed', error: 'The order has to be a list of pane ids and sleeping session names.' };
+  }
+  const panes = proposed.filter((x) => typeof x === 'string');
+  const names = proposed.filter((x) => typeof x !== 'string').map(asleepOf);
+  if (new Set(names).size !== names.length) {
+    return { refused: 'malformed', error: 'That order names one session twice.' };
+  }
+  const problem = pinOrderProblem(current, panes);
+  if (problem) return problem;
+  const want = new Set(sleeping);
+  if (names.length !== want.size || names.some((n) => !want.has(n))) {
+    return {
+      refused: 'stale',
+      error: 'The pinned sessions changed while you were moving one — nothing was reordered.',
+    };
+  }
+  return {
+    panes,
+    entries: proposed.map((x) => (typeof x === 'string' ? { pane: x } : { asleep: asleepOf(x) })),
+  };
+}

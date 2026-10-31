@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { PinStore, carryPinOrder, pinOrderProblem } from '../server/pins.js';
+import { PinStore, carryPinOrder, pinOrderProblem, splitPinOrder } from '../server/pins.js';
 
 function tmpStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-pins-'));
@@ -315,4 +315,49 @@ test('a hand-mangled store starts clean instead of throwing', () => {
   const p = new PinStore(file);
   assert.equal(p.has('%1'), false);
   p.stop();
+});
+
+/* ------------------------------------------------- live rows and sleepers --- */
+
+test('an interleaved drop splits into the live order and the drawn entries', () => {
+  const out = splitPinOrder(['%2', { asleep: 'b' }, '%1', { asleep: 'a' }], ['%1', '%2'], ['a', 'b']);
+  assert.deepEqual(out.panes, ['%2', '%1']);
+  assert.deepEqual(out.entries, [{ pane: '%2' }, { asleep: 'b' }, { pane: '%1' }, { asleep: 'a' }]);
+  assert.deepEqual(splitPinOrder([], [], []), { panes: [], entries: [] }, 'an empty group is a group');
+});
+
+test('it may still only rearrange — a live pin or a pinned sleeper missing, extra or twice is refused', () => {
+  const live = ['%1', '%2'];
+  const asleep = ['a'];
+  const refused = (body) => splitPinOrder(body, live, asleep).refused;
+  assert.equal(refused(['%1', '%2']), 'stale', 'a pinned sleeper left out — an older tab, or one that slept since');
+  assert.equal(refused(['%1', '%2', { asleep: 'a' }, { asleep: 'z' }]), 'stale', 'a sleeper that is not pinned');
+  assert.equal(refused(['%1', { asleep: 'a' }]), 'stale', 'a live pin left out');
+  assert.equal(refused(['%1', '%2', '%3', { asleep: 'a' }]), 'stale', 'a live pin that is not pinned');
+  assert.equal(refused(['%1', '%2', { asleep: 'a' }, { asleep: 'a' }]), 'malformed');
+  assert.equal(refused(['%1', '%1', { asleep: 'a' }]), 'malformed');
+  assert.equal(refused(['%1', '%2', { asleep: '' }]), 'malformed');
+  assert.equal(refused(['%1', '%2', { name: 'a' }]), 'malformed');
+  assert.equal(refused('%1'), 'malformed');
+  assert.equal(splitPinOrder(['%1', '%2'], live, []).refused, undefined, 'no sleepers pinned: the old body still works');
+});
+
+test('a relaunch carried by the drawn order still puts each pin back where its name was', () => {
+  // Drawn x, s (asleep), y, z; the bench relaunch brings x and z back on new panes. The
+  // sleeper's name in `wanted` is ignored — it has no pane — and nothing else moves.
+  const wanted = ['x', 's', 'y', 'z'];
+  const current = [
+    { paneId: '%5', name: 'y' },
+    { paneId: '%6', name: 'x' },
+    { paneId: '%7', name: 'z' },
+  ];
+  assert.deepEqual(carryPinOrder(wanted, current, new Set(['%6', '%7'])), ['%6', '%5', '%7']);
+  // A wake: the woken pin goes back below the live row nearest above where it is drawn.
+  const woke = [
+    { paneId: '%1', name: 'x' },
+    { paneId: '%2', name: 'y' },
+    { paneId: '%9', name: 's' },
+  ];
+  assert.deepEqual(carryPinOrder(wanted, woke, new Set(['%9'])), ['%1', '%9', '%2']);
+  assert.deepEqual(carryPinOrder(['s', 'x', 'y'], woke, new Set(['%9'])), ['%9', '%1', '%2'], 'drawn at the top');
 });

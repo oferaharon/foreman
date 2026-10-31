@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url';
 import {
   asleepItem,
   asleepItems,
+  drawnPinnedNames,
   folderName,
   followIntoSleep,
   mergeByActivity,
   placePinned,
+  sleeperAnchors,
   sleepTooltip,
   waitingText,
   wokenSession,
@@ -108,6 +110,67 @@ test('two sleepers under one anchor go in the order they slept', () => {
   const b = asleepItem(rec('b', { pinned: true, pinAfter: 'x', sleptAt: 2000 }));
   const order = placePinned([live('x')], [b, a]);
   assert.deepEqual(order.map((r) => r.tmuxSession), ['x', 'a', 'b']);
+});
+
+/* ------------------------------------------------- one order, two stores --- */
+
+/** Every order of `names`, for the round-trip below — small enough to be exhaustive. */
+function permutations(names) {
+  if (names.length <= 1) return [names];
+  return names.flatMap((n, i) => permutations([...names.slice(0, i), ...names.slice(i + 1)]).map((p) => [n, ...p]));
+}
+
+test('a drop anywhere, among live rows and sleepers, is drawn back exactly as it was dropped', () => {
+  // Three live pins and three sleepers, every interleaving (720), and sleep times that
+  // disagree with the order on purpose: the anchors alone must carry it.
+  const asleep = new Set(['s1', 's2', 's3']);
+  const slept = { s1: 3000, s2: 1000, s3: 2000 };
+  for (const order of permutations(['x', 'y', 'z', 's1', 's2', 's3'])) {
+    const anchors = sleeperAnchors(order, asleep);
+    const liveOrder = order.filter((n) => !asleep.has(n));
+    const sleepers = [...asleep].map((n) => asleepItem(rec(n, { pinned: true, pinAfter: anchors.get(n), sleptAt: slept[n] })));
+    assert.deepEqual(drawnPinnedNames(liveOrder, sleepers), order, order.join(','));
+  }
+});
+
+test('a sleeper is anchored to the row directly above it, live or asleep; the top has none', () => {
+  const anchors = sleeperAnchors(['s1', 'x', 's2', 's3', null, 's4'], ['s1', 's2', 's3', 's4']);
+  assert.deepEqual(Object.fromEntries(anchors), { s1: null, s2: 'x', s3: 's2', s4: 's3' }, 'an unnamed row is stepped over');
+  assert.deepEqual(Object.fromEntries(sleeperAnchors(['x', 'y'], new Set())), {});
+  assert.deepEqual(Object.fromEntries(sleeperAnchors(null, ['a'])), {});
+});
+
+test('a row leaving the order re-anchors the sleepers under it and moves nothing else', () => {
+  // x, s1, y, s2, s3 — y unpinned (or s2 forgotten): the rest must hold their places.
+  const asleep = ['s1', 's2', 's3'];
+  for (const gone of ['y', 's2', 'x']) {
+    const before = ['x', 's1', 'y', 's2', 's3'];
+    const after = before.filter((n) => n !== gone);
+    const left = asleep.filter((n) => n !== gone);
+    const anchors = sleeperAnchors(after, left);
+    const sleepers = left.map((n) => asleepItem(rec(n, { pinned: true, pinAfter: anchors.get(n) })));
+    assert.deepEqual(drawnPinnedNames(after.filter((n) => !asleep.includes(n)), sleepers), after, `without ${gone}`);
+  }
+});
+
+test('a session going to sleep records the row drawn above it, so it keeps its place among sleepers', () => {
+  // x, s1 (asleep), y — y sleeps: the row above it is s1, not x, and the group reads the same.
+  const drawn = drawnPinnedNames(['x', 'y'], [asleepItem(rec('s1', { pinned: true, pinAfter: 'x', sleptAt: 1 }))]);
+  assert.deepEqual(drawn, ['x', 's1', 'y']);
+  const above = drawn[drawn.indexOf('y') - 1];
+  const sleepers = [
+    asleepItem(rec('s1', { pinned: true, pinAfter: 'x', sleptAt: 1 })),
+    asleepItem(rec('y', { pinned: true, pinAfter: above, sleptAt: 2 })),
+  ];
+  assert.deepEqual(drawnPinnedNames(['x'], sleepers), ['x', 's1', 'y']);
+});
+
+test('the rail draws the pinned group through one list, and every pinned row gets a live grip', () => {
+  assert.match(APP, /const pinned = pinnedRows\(sleepers\);/);
+  assert.doesNotMatch(APP, /inertGrip|is-inert/, 'no inert star or grip left on a sleeper');
+  assert.match(APP, /for \(const row of rows\) row\.dataset\.pinBlock = pinKey\(s\);/);
+  assert.match(APP, /body: JSON\.stringify\(\{ panes: order\.map\(pinEntry\) \}\)/);
+  assert.match(APP, /fetch\(`\/api\/asleep\/\$\{encodeURIComponent\(s\.name\)\}\/pin`/);
 });
 
 /* ------------------------------------------------------------- folders --- */
