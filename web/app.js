@@ -58,7 +58,7 @@ import { botsFolded } from './prefs.js';
 // What the composer's Clear button sends first — a browser preference, set in the settings box.
 import { clearPrep } from './prefs.js';
 import { railFilter } from './prefs.js';
-import { filterFolders, hiddenWanting, inFilter, mergeFilteredOrder } from './rail-filter.js';
+import { filterFolders, hiddenWanting, inFilter, keptLeads, mergeFilteredOrder } from './rail-filter.js';
 // The two-step Clear button's rule: which word it wears and when its second press is allowed.
 import { CLEAR_COMMAND, clearView, DEFAULT_CLEAR_PREP, startClear, stepClear } from './clear-phase.js';
 // What a session still has running behind its composer, in Claude Code's own words. Two
@@ -1634,7 +1634,7 @@ function pinGrip(s) {
     // One place among the pins that are *drawn* — with the rail filtered to a group, the
     // others are off screen and are not stepped past (`mergeFilteredOrder`).
     const folders = railFilterFolders();
-    const order = pinnedRows().filter((x) => inFilter(x, folders)).map(pinKey);
+    const order = pinnedRows().filter((x) => inFilter(x, folders, keptLeads(state.sessions, folders))).map(pinKey);
     const from = order.indexOf(pinKey(s));
     const next = fullPinOrder(movedPinOrder(order, from, e.key === 'ArrowUp' ? from - 1 : from + 2));
     if (next) savePinOrder(next);
@@ -5058,7 +5058,8 @@ function renderRail() {
   // that `state.groups` is the empty boot value and every id reads as deleted.
   const filter = filterFolders(state.groups, railFilter.value || null);
   if (railFilter.value && !filter && rosterSeen) return void setRailFilter('');
-  const shown = (s) => inFilter(s, filter);
+  const filterLeads = keptLeads(state.sessions, filter);
+  const shown = (s) => inFilter(s, filter, filterLeads);
 
   const pinned = pinnedRows(sleepers).filter(shown);
   // A worker row comes out of the *inbox* on a related principle: a worker's permission
