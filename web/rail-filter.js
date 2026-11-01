@@ -34,12 +34,34 @@ export function filterFolders(groups, groupId) {
 }
 
 /**
+ * The `paneCwd` of every lead the filter keeps — the key `renderRail` nests workers by
+ * (`leadRows` is keyed on `paneCwd`, a worker's `workerOf` is its lead's repo). A worker's
+ * own `project` is its worktree folder, which is never filed in a group, so this is the
+ * only way it can follow its lead through the filter. `null` when there is no filter.
+ *
+ * @param {object[]} sessions the live roster
+ * @param {Set<string>|null} folders
+ * @returns {Set<string>|null}
+ */
+export function keptLeads(sessions, folders) {
+  if (!folders || !Array.isArray(sessions)) return null;
+  const out = new Set();
+  for (const s of sessions) {
+    if (s && s.isLead && s.paneCwd && folders.has(s.project)) out.add(s.paneCwd);
+  }
+  return out;
+}
+
+/**
  * Whether one rail row survives the filter. `null` folders means no filter: everything does.
  * A sleeper is a row like any other here — `asleepItem` gives it the same `project`.
+ * A worker also survives whenever its lead does (`leads` from `keptLeads`).
  */
-export function inFilter(row, folders) {
+export function inFilter(row, folders, leads) {
   if (!folders) return true;
-  return Boolean(row) && folders.has(row.project);
+  if (!row) return false;
+  if (folders.has(row.project)) return true;
+  return Boolean(row.workerOf) && Boolean(leads) && leads.has(row.workerOf);
 }
 
 /**
@@ -59,8 +81,9 @@ export function inFilter(row, folders) {
  */
 export function hiddenWanting(sessions, folders, wants) {
   if (!folders || !Array.isArray(sessions)) return 0;
+  const leads = keptLeads(sessions, folders);
   let n = 0;
-  for (const s of sessions) if (s && !inFilter(s, folders) && wants(s)) n++;
+  for (const s of sessions) if (s && !inFilter(s, folders, leads) && wants(s)) n++;
   return n;
 }
 

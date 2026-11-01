@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { filterFolders, hiddenWanting, inFilter, mergeFilteredOrder } from '../web/rail-filter.js';
+import { filterFolders, hiddenWanting, inFilter, keptLeads, mergeFilteredOrder } from '../web/rail-filter.js';
 
 /*
  * The rail narrowed to one group.
@@ -198,4 +198,28 @@ test('the header filter is its own function, so the `+`/`⋯` pair is untouched'
   assert.match(btn, /className = `label-menu shelf-filter/);
   assert.match(btn, /e\.stopPropagation\(\)/);
   assert.match(btn, /setRailFilter\(on \? '' : g\.id\)/);
+});
+
+test('a worker is kept with its lead, hidden without it, and counted by the lead it has', () => {
+  const lead = { id: 'l', isLead: true, project: 'alpha', paneCwd: '/sb/alpha' };
+  const w = { id: 'w', workerOf: '/sb/alpha', project: 'alpha-agent-x', needsYou: true };
+  const stray = { id: 's', workerOf: '/sb/beta', project: 'beta-agent-y', needsYou: true };
+  const all = [lead, w, stray];
+  const wants = (s) => s.needsYou;
+
+  const inGroup = new Set(['alpha']);
+  const leads = keptLeads(all, inGroup);
+  assert.deepEqual([...leads], ['/sb/alpha']);
+  assert.equal(inFilter(w, inGroup, leads), true, 'kept with its lead');
+  assert.equal(inFilter(stray, inGroup, leads), false, 'its lead is not drawn');
+  assert.equal(hiddenWanting(all, inGroup, wants), 1, 'only the worker with a hidden lead counts');
+
+  const elsewhere = new Set(['gamma']);
+  const none = keptLeads(all, elsewhere);
+  assert.equal(inFilter(w, elsewhere, none), false, 'hidden without its lead');
+  assert.equal(hiddenWanting(all, elsewhere, wants), 2);
+
+  assert.equal(keptLeads(all, null), null);
+  assert.equal(inFilter(w, null, null), true);
+  assert.equal(inFilter(w, inGroup), false, 'no leads passed, no free pass');
 });
