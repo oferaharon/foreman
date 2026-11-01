@@ -359,6 +359,29 @@ the server — unlike a group's collapse state, which is a fact about your filin
 follow you between windows, this is a fact about the window you're in, and a phone and a
 desktop want different answers.
 
+**The funnel** at the right end of every group header narrows the rail to that group, one
+group at a time — pressing it on another group moves the filter there, pressing it again on
+the same one lets go. While it holds, **everything outside the group is hidden, Pinned and
+Needs you included**: a pinned row or a waiting session filed in that group still shows, in
+its usual section at the top, and nothing from any other group or ungrouped folder does. The
+group itself is drawn open even if you had folded it; its collapse is not touched, and its
+caret does nothing until the filter is cleared. A filter set in the grouped rail also cuts
+the `recent` list down to the group's rows.
+
+A **crossed-out funnel** appears in the rail head, just left of `recent`, only while a filter
+holds; pressing it hands back exactly the rail you had — folds, `recent`, scroll position.
+It carries a small red count of the sessions the filter is hiding that want you (the ones
+Needs you would have shown, pinned ones included), so nothing waits on you silently; no
+count when nothing does. It is a single icon and an out-of-flow badge because the head has
+no room for a word: at the default rail width it fits on one line with 5px to spare.
+
+Pinned rows can still be reordered while filtered, by drag or arrow keys: the drawn pins move
+among the places they already hold, and the hidden ones stay exactly where they were — the
+order written is always the whole order. The filter is per browser, like `recent`, survives
+a reload, and lets go on its own when its group is deleted or has nothing left to draw. It
+is drawing and nothing else: the roster, notifications, the queue and the server never hear
+of it. Desktop only. The rules are `web/rail-filter.js`.
+
 An **open** group is tinted end to end — heading, folder headings and rows together — so
 the block reads as one thing rather than a heading followed by some rows that happen to
 be indented. Collapsed groups stay flat, which makes the tint itself say "this one is

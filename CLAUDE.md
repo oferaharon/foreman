@@ -718,9 +718,9 @@ fact; the front end's own cascade traps are here too. Evidence:
   Copy `node_modules/marked/lib/marked.esm.js` into the static copy's own `vendor/marked.js`
   before benching anything.
   [rail-and-groups#a-static-copy-of-web](docs/traps/rail-and-groups.md#a-static-copy-of-web)
-- `web/styles.css` (`.rail-actions`, `--rail`) · `web/index.html` (the rail head) — **A fifth
-  button does not fit the rail head at the default width.** Anything adding a sixth control to
-  that row is adding a third line, not a second.
+- `web/styles.css` (`.rail-actions`, `--rail`, `.rail-filter`) · `web/index.html` (the rail
+  head) — **A fifth button does not fit the rail head at the default width.** Now six fit, the
+  sixth a 21px icon with an out-of-flow count and 5px to spare; a seventh is a second line.
   [rail-and-groups#a-fifth-button-in-the-rail-head](docs/traps/rail-and-groups.md#a-fifth-button-in-the-rail-head)
 - `web/m/index.html` · `web/m/m.css` · `web/m/lead.css` (`.m-tab`, `.m-nav-*`) — **The phone
   loads five stylesheets into one `<head>`, so a class the shell shares with a screen is a
@@ -1241,7 +1241,11 @@ Each group also wears a colour, assigned automatically and changeable from the `
 swatch row, drawn as a spine down its header, its folder headings and its rows, with the
 selected row inside taking that colour at full strength; a folder holding exactly one
 session folds into that row's own name instead of printing a heading; and the header's `+`
-files a folder into the group, the `▾`'s own move in reverse.
+files a folder into the group, the `▾`'s own move in reverse. Its funnel narrows the rail to
+that one group (`web/rail-filter.js`), pinned and needs-you included — **drawing only, per
+browser, never a write**: the group's collapse is overridden on screen and left alone on disk,
+and a pin reorder while filtered still writes the whole order (`mergeFilteredOrder`), because
+the order route must name every pin.
 
 **Snapshot / restore** (`server/snapshot.js`) keeps one slot in `~/.foreman/snapshot.json`,
 written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned}` per

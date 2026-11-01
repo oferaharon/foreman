@@ -165,6 +165,7 @@ export const PHONE_TAB_KEY = 'foreman.m.tab';
 export const FILES_VIEW_KEY = 'foreman.filesView';
 export const BOTS_FOLDED_KEY = 'foreman.botsFolded';
 export const CLEAR_PREP_KEY = 'foreman.clearPrep';
+export const RAIL_FILTER_KEY = 'foreman.railFilter';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -244,6 +245,18 @@ export const botsFolded = flag(BOTS_FOLDED_KEY);
  * window sends, and needs no server, no restart and no say over who can reach the panel.
  */
 export const clearPrep = text(CLEAR_PREP_KEY, DEFAULT_CLEAR_PREP);
+
+/**
+ * The group the desktop rail is narrowed to, by id — `''` for no filter.
+ *
+ * Per browser, `flatRail`'s reasoning: a group's collapse is a fact about your filing and
+ * follows you between windows, while what this window is looking at right now is a fact
+ * about the window. `text` rather than `choice` because the vocabulary is the server's
+ * group ids, which this module cannot know; an id that names no group is cleared by the
+ * rail itself (`filterFolders` answers `null`), never trusted. Desktop only — the phone
+ * reads nothing about groups.
+ */
+export const railFilter = text(RAIL_FILTER_KEY, '');
 
 /**
  * The three tabs of the phone's home screen, in the order they are drawn.

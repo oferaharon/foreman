@@ -384,6 +384,13 @@ wraps to a second line and the list loses a row. One line returns at 22.5rem. It
 but that comment was written about the 14rem *floor*, and this now happens at the default.
 Anything adding a sixth control to that row is adding a third line, not a second.
 
+Since then `recent` and `settings` became icons, and the group filter's clear toggle became
+that sixth control — which fits, but only just, and only in one shape. Re-measured on a
+scratch panel at the default width: the five take 251px with their gaps against 284, so a
+sixth at the ordinary icon width leaves **half a pixel**, and the toggle's count drawn beside
+its glyph wrapped `settings` to a second line. It ships at 21.4px (tighter side padding) with
+the count as an out-of-flow badge, 5px to spare. A seventh control there is a second line.
+
 ## The phone's five stylesheets
 
 **The phone loads five stylesheets into one `<head>`, so a class the shell shares with a
