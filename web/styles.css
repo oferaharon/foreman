@@ -282,6 +282,54 @@ body.row-dragging * { cursor: row-resize !important; }
    rail reads, and a view switch sitting flush against them would invite a stray click. */
 .rail-toggle { margin-left: auto; }
 
+/* The clear-filter toggle takes over the push to the right end while it is drawn, so it
+   sits flush against `recent` — each of the two changes how the rail reads — and `recent`
+   keeps the ordinary gap. Its own `[hidden]` rule because `.icon-only`'s `display:
+   inline-flex` beats the UA default (rail-and-groups#the-menu-items-display-rule). On, it
+   reads as pressed: it is the state the rail is in.
+
+   **It costs the head 21px and not a pixel more**, which is the whole of its shape: at the
+   default `--rail: 20rem` the head's content box is 284px, and the five buttons beside it
+   take 251 of that with their gaps, so a sixth plus its gap at the ordinary icon width
+   (26px) leaves half a pixel — and the count drawn beside the glyph pushed `settings` onto
+   a second line. Measured on the scratch panel (rail-and-groups#a-fifth-button-in-the-
+   rail-head). So the side padding is a little tighter than `.icon-only`'s (21.4px, 5px to
+   spare), and the count is a badge over the top-right corner, out of flow, the snapshot's
+   drift dot's own trick. */
+/* `.new-session.` for the weight to beat `.new-session.icon-only`'s padding. */
+.new-session.rail-filter {
+  margin-left: auto;
+  padding-left: 0.2rem;
+  padding-right: 0.2rem;
+}
+.rail-filter[hidden] { display: none; }
+.rail-filter:not([hidden]) + .rail-toggle { margin-left: 0; }
+.rail-filter,
+.rail-filter:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+/* The count of hidden sessions that want you, in the inbox's own colour so it reads as the
+   thing it is; empty — nothing waiting outside the group — draws nothing. */
+.rail-filter-count:empty { display: none; }
+.rail-filter-count {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.45rem;
+  min-width: 0.8rem;
+  height: 0.8rem;
+  padding: 0 0.15rem;
+  border-radius: 0.4rem;
+  background: var(--decision);
+  color: var(--surface);
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 0.8rem;
+  text-align: center;
+}
+
 .rail-toggle[aria-pressed='true'] {
   color: var(--accent);
   border-color: var(--accent);
@@ -1434,6 +1482,18 @@ body.row-dragging * { cursor: row-resize !important; }
 .shelf-label:focus-within .label-menu,
 .label-menu:focus-visible { opacity: 1; }
 .label-menu:hover { color: var(--accent); }
+
+/* The group header's filter: the third `.label-menu`, so the same 40% at rest and the same
+   reserved column. The glyph is an SVG, centred in that column rather than sat on a text
+   baseline. On the filtered group it is lit at full strength in the accent — it is the one
+   control on screen that says why the rest of the rail is gone. */
+.shelf-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.shelf-label .shelf-filter.is-on { opacity: 1; color: var(--accent); }
+.shelf-toggle[aria-disabled='true'] { cursor: default; }
 
 /* --------------------------------------------------------------- menus --- */
 

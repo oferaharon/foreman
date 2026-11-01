@@ -80,6 +80,32 @@
             <button class="new-session" id="briefs" title="What a lead, worker, planner or ordinary session launched here is told">
               briefs
             </button>
+            <!--
+              The clear-filter toggle: drawn only while the rail is narrowed to one group (the
+              funnel on a group header), beside `recent` because each of the two changes how
+              the rail reads. Icon-sized plus a bare count — the head is at its width limit — and the
+              count is the sessions the filter is keeping off screen that want you.
+            -->
+            <button
+              class="new-session icon-only rail-filter"
+              id="railFilter"
+              type="button"
+              hidden
+              aria-label="Clear the group filter"
+              title="Show every group again"
+            >
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" focusable="false">
+                <path
+                  d="M2 3h12l-4.6 5.4v4.4l-2.8 1.4V8.4z"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                  stroke-linejoin="round"
+                />
+                <path d="M1.5 1.5l13 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+              <span class="rail-filter-count" id="railFilterCount"></span>
+            </button>
             <button
               class="new-session rail-toggle icon-only"
               id="flatRail"

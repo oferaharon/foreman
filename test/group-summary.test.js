@@ -241,9 +241,11 @@ test("the header's own `· N` arithmetic is untouched — top-level rows only", 
 
 test('the summary is computed only for a collapsed group, and drawn only there', () => {
   const rail = fn('renderRail');
-  assert.match(rail, /const summary = g\.collapsed\s*\?\s*groupSummary\(/);
+  // `folded` is the stored collapse less the filter's override (`rail-filter.test.js`).
+  assert.match(rail, /const folded = g\.collapsed && !filtered;/);
+  assert.match(rail, /const summary = folded\s*\?\s*groupSummary\(/);
   const header = fn('groupHeader');
-  assert.match(header, /const clauses = \(g\.collapsed && summary\?\.clauses\) \|\| \[\];/);
+  assert.match(header, /const clauses = \(folded && summary\?\.clauses\) \|\| \[\];/);
   assert.match(header, /if \(clauses\.length\) \{/);
 });
 
@@ -255,7 +257,7 @@ test('the dot reads the summary, not the old top-level `busy`', () => {
    * gets read back in.
    */
   const header = fn('groupHeader');
-  assert.match(header, /function groupHeader\(g, count, summary = null\)/);
+  assert.match(header, /function groupHeader\(g, count, summary = null, filtered = false\)/);
   assert.match(header, /if \(summary\.working\) \{/);
   assert.match(header, /dot\.className = 'dot working shelf-dot';/);
   assert.ok(

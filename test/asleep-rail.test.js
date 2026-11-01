@@ -166,7 +166,7 @@ test('a session going to sleep records the row drawn above it, so it keeps its p
 });
 
 test('the rail draws the pinned group through one list, and every pinned row gets a live grip', () => {
-  assert.match(APP, /const pinned = pinnedRows\(sleepers\);/);
+  assert.match(APP, /const pinned = pinnedRows\(sleepers\)(\.filter\(shown\))?;/);
   assert.doesNotMatch(APP, /inertGrip|is-inert/, 'no inert star or grip left on a sleeper');
   assert.match(APP, /for \(const row of rows\) row\.dataset\.pinBlock = pinKey\(s\);/);
   assert.match(APP, /body: JSON\.stringify\(\{ panes: order\.map\(pinEntry\) \}\)/);
