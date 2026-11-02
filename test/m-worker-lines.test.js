@@ -233,7 +233,7 @@ test('the lines are siblings of the card body, never inside it, and each is its 
   assert.equal(line.match(/addEventListener\(/g).length, 1, 'one listener per line');
   assert.match(
     line,
-    /line\.addEventListener\('click', \(\) => \{\s*location\.hash = `#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`;\s*\}\);/,
+    /line\.addEventListener\('click', \(\) => \{\s*pushRoute\(`#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`\);\s*\}\);/,
   );
   // Nothing inside a line is a control of its own — a button inside this button would be
   // the very nesting the card is built to avoid.

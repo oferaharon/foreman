@@ -149,7 +149,7 @@ test('sleepers light no tab mark', () => {
 
 test('a sleeping row opens the read-only route, by name', () => {
   assert.match(fn(app, 'sleeperRow'), /href: `#\/asleep\/\$\{encodeURIComponent\(r\.name\)\}`/);
-  assert.match(fn(app, 'sleepingTeamNode'), /location\.hash = `#\/asleep\/\$\{encodeURIComponent\(rec\.name\)\}`;/);
+  assert.match(fn(app, 'sleepingTeamNode'), /pushRoute\(`#\/asleep\/\$\{encodeURIComponent\(rec\.name\)\}`\);/);
   // Greyed, never lit: both gutter slots are drawn and both are off.
   assert.match(
     fn(app, 'sleepingTeamNode'),

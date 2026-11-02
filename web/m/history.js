@@ -21,7 +21,45 @@
  * The state is stamped on each entry rather than kept in a module variable because it is
  * the one record that survives a document load: `history.state` is serialised with the
  * entry, a variable is not.
+ *
+ * **And the phone never assigns `location.hash`, because on a real iPhone that reloads the
+ * page — MEASURED on iOS 27, on a cabled phone, through the Web Inspector and the device's
+ * own WebKit log; the Simulator does not do it.** The phone reaches the panel over plain
+ * http, which Safari and the installed app both run in a `WebContent.EnhancedSecurity`
+ * process. An assigned hash is a *navigation*: WebCore performs it in the document
+ * (`loadInSameDocument`, `hashchange`, the screen mounts), and meanwhile the UI process's
+ * own policy check on that same navigation answers `swapping process … reason=Process swap
+ * due to EnhancedSecurity change` and loads the whole document again in a new process,
+ * about 30 ms later. That is the refresh on every tap, and it adds a history entry with no
+ * state on it. A back step onto an entry left behind by an earlier document is a navigation
+ * too, and swaps the same way — loading the *previous* navigation's URL, which is the
+ * session the reader was leaving: the swipe back that shows the same session again.
+ *
+ * `pushState` is not a navigation, so the policy check never sees it, and a step back
+ * between two entries of one document is a same-document traversal that never asks it.
+ * So every route change on the phone is `pushRoute` below; a page that is never reloaded
+ * underneath itself never has an entry from another document to step back onto.
  */
+
+/**
+ * Move to `hash` as a new history entry **without a navigation** — see the note above.
+ *
+ * The entry is stamped with where it was pushed from, exactly what `stampFor` would have
+ * written on landing. `pushState` fires no `hashchange`, and the shell routes on one (so
+ * does a room sheet, which closes on it), so one is dispatched — as a task, the way an
+ * assigned hash delivers it, because the callers that close a sheet before a launch's
+ * `finally` repaints rely on that order. `win` is `window` in the page and a stub under
+ * `node --test`. Answers whether it moved.
+ */
+export function pushRoute(hash, win = globalThis) {
+  const from = win.location.hash;
+  if (!hash || hash === from) return false;
+  const oldURL = win.location.href;
+  win.history.pushState({ from }, '', hash);
+  const newURL = win.location.href;
+  win.setTimeout(() => win.dispatchEvent(new win.HashChangeEvent('hashchange', { oldURL, newURL })), 0);
+  return true;
+}
 
 /** The marker on the first entry the app writes, so it is never mistaken for a fresh push. */
 export const ROOT_STATE = Object.freeze({ root: true });
@@ -50,10 +88,10 @@ export function homeTabOf(hash, tabs) {
 /**
  * The state to write on the entry `navigate` has just landed on, or `null` to leave it.
  *
- * Only an entry with **no** state is stamped, because that is exactly a fresh push from
- * `location.hash = …`: every entry the app writes any other way carries state (the root,
- * every replace), and an entry reached by the back or forward gesture keeps what it was
- * stamped with when it was new.
+ * Only an entry with **no** state is stamped, because that is exactly a hash nobody in the
+ * app wrote — one edited in the address bar, or an old link: every entry the app writes
+ * carries state (the root, every `pushRoute`, every replace), and an entry reached by the
+ * back or forward gesture keeps what it was stamped with when it was new.
  */
 export function stampFor(state, prevHash, hash) {
   if (state != null) return null;

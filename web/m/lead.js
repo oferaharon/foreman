@@ -58,6 +58,7 @@
 import { marked } from '/vendor/marked.js';
 import { withBlankTargets } from '../anchor-target.js';
 import { buildCard } from './cards.js';
+import { pushRoute } from './history.js';
 // The ghost-text auto-send flag, shared with the desktop's settings modal — see
 // `web/prefs.js`. `/` and `/m/` are one origin, so one browser gives one answer.
 import { ghostSend } from '../prefs.js';
@@ -329,7 +330,7 @@ function build(host) {
   el.back.setAttribute('aria-label', `Back to ${view.ctx?.homeLabel?.() || 'home'}`);
   el.back.addEventListener('click', () => {
     if (view.ctx?.goHome) view.ctx.goHome();
-    else location.hash = '#/';
+    else pushRoute('#/');
   });
 
   el.name = document.createElement('div');
@@ -565,7 +566,7 @@ function buildAsleep(host) {
   el.back.setAttribute('aria-label', `Back to ${view.ctx?.homeLabel?.() || 'home'}`);
   el.back.addEventListener('click', () => {
     if (view.ctx?.goHome) view.ctx.goHome();
-    else location.hash = '#/';
+    else pushRoute('#/');
   });
 
   el.name = document.createElement('div');

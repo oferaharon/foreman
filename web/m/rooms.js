@@ -114,6 +114,7 @@ import { colourFor } from '../session-colour.js';
 /* Newest first, the phone's own order — see `roomsListView`. The same comparator the
    Standalones tab takes, so the two lists cannot disagree about the tie-break or about where
    a room nobody has spoken in lands. */
+import { pushRoute } from './history.js';
 import { byRecent } from './recent.js';
 
 /** Close enough to the bottom to count as caught up, in px. `lead.js`'s own figure — one
@@ -608,7 +609,7 @@ function build(host) {
     // than spelled `#/rooms` here, so there is one answer to "where does back go", and that
     // answer steps back through the history rather than pushing (`goHome`).
     if (view.ctx?.goHome) view.ctx.goHome();
-    else location.hash = '#/rooms';
+    else pushRoute('#/rooms');
   });
 
   el.title = document.createElement('div');
@@ -1905,12 +1906,12 @@ async function submitCreate() {
 
     s.busy = false;
     // Closed here rather than left to the `hashchange` below, which does close it a moment
-    // later: assigning `location.hash` fires that as a task, and the sheet would repaint
+    // later: `pushRoute` delivers that as a task, and the sheet would repaint
     // once against a roster that has not heard of the new room yet.
     s.close();
     // Straight into it. The room exists on disk and in the next roster frame either way;
     // opening it is what makes the press feel finished.
-    if (data.room?.id) location.hash = `#/room/${encodeURIComponent(data.room.id)}`;
+    if (data.room?.id) pushRoute(`#/room/${encodeURIComponent(data.room.id)}`);
   } catch (err) {
     // The sheet may have been closed while this was out.
     if (createSheet !== s) return;

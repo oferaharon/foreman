@@ -102,7 +102,7 @@ test('a team with no live lead has no shape on the home list at all', () => {
   // the structural half of the rule: were the filter ever to regress, the row would throw
   // rather than draw a half-row with `no lead running` and no way to act on it.
   assert.match(app, /const body = document\.createElement\('button'\);\s*body\.className = 'm-team-body';/);
-  assert.match(app, /location\.hash = `#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`;/);
+  assert.match(app, /pushRoute\(`#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`\);/);
 
   // The row's launch button, its `is-static` body and its error line went with the branch.
   for (const gone of ['m-team-launch', 'm-team-error', 'is-static']) {
@@ -218,9 +218,9 @@ test('there is exactly one way to start a lead, and the sheet is its only caller
 });
 
 test('a successful launch closes the sheet before it navigates', () => {
-  // `location.hash` fires `hashchange` as a task, so the `finally` repaint lands first and
+  // `pushRoute` delivers its `hashchange` as a task, so the `finally` repaint lands first and
   // would flick the row back to `start` for a frame on a launch that worked.
-  assert.match(app, /closeStartSheet\(\);[\s\S]{0,400}?location\.hash = `#\/lead\/\$\{encodeURIComponent\(data\.sessionId\)\}`;/);
+  assert.match(app, /closeStartSheet\(\);[\s\S]{0,400}?pushRoute\(`#\/lead\/\$\{encodeURIComponent\(data\.sessionId\)\}`\);/);
 });
 
 /* ────────────────────────────────────────────────────────── the empty state ─── */

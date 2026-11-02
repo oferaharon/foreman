@@ -1106,6 +1106,13 @@ the page does not paint at all. Evidence: [`docs/traps/browser.md`](docs/traps/b
   `data-theme` — so an unticked box read as ticked.** The UA paints that control and
   `data-theme` is not a signal it reads; `.field-check` is still exposed.
   [browser#a-stock-checkbox-is-painted-by-the-browser](docs/traps/browser.md#a-stock-checkbox-is-painted-by-the-browser)
+- `web/m/history.js` (`pushRoute`) · `web/m/app.js` · `web/m/lead.js` · `web/m/rooms.js` ·
+  `test/m-history.test.js` — **On a real iPhone an assigned `location.hash` reloads the phone
+  view — MEASURED on iOS 27 on a cabled phone; the Simulator does not do it.** A plain-http
+  page runs in WebKit's EnhancedSecurity process, and the UI process answers every navigation
+  with a process swap and a whole document load; `pushState` is not a navigation, so the phone
+  routes with `pushRoute` and never assigns the hash.
+  [browser#an-assigned-hash-reloads-the-page-on-a-real-iphone](docs/traps/browser.md#an-assigned-hash-reloads-the-page-on-a-real-iphone)
 
 ### Rate limits and the status line
 

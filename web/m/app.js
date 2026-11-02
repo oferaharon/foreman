@@ -72,7 +72,7 @@ import { mountLead, updateLead } from './lead.js';
 /* Newest first, on the phone and only on the phone — the maintainer's ruling of 2026-09-16.
    One comparator for both lists that take it, so the Standalones tab and the Rooms tab cannot
    end up disagreeing about the tie-break or about where a missing stamp lands. */
-import { backAction, bootTab, ROOT_STATE, stampFor, tabForKind } from './history.js';
+import { backAction, bootTab, pushRoute, ROOT_STATE, stampFor, tabForKind } from './history.js';
 import { byRecent } from './recent.js';
 /* The Rooms tab's list and the room screen. Its own module with its own state — a phone
    shows one thing at a time, and that stays true only if the second screen is a second
@@ -1543,7 +1543,7 @@ function standalonesView() {
 function roomsView() {
   return roomsListView(state.rooms, {
     onOpen: (id) => {
-      location.hash = `#/room/${encodeURIComponent(id)}`;
+      pushRoute(`#/room/${encodeURIComponent(id)}`);
     },
     onChange: renderHome,
     /* A thunk, not a list. The create sheet outlives any one paint and is repainted from
@@ -1764,7 +1764,7 @@ function teamNode(row) {
   body.className = 'm-team-body';
   body.type = 'button';
   body.addEventListener('click', () => {
-    location.hash = `#/lead/${encodeURIComponent(row.lead.id)}`;
+    pushRoute(`#/lead/${encodeURIComponent(row.lead.id)}`);
   });
 
   /*
@@ -1875,7 +1875,7 @@ function sleepingTeamNode(row) {
   body.className = 'm-team-body';
   body.type = 'button';
   body.addEventListener('click', () => {
-    location.hash = `#/asleep/${encodeURIComponent(rec.name)}`;
+    pushRoute(`#/asleep/${encodeURIComponent(rec.name)}`);
   });
 
   const gutter = document.createElement('span');
@@ -1950,7 +1950,7 @@ function workerLine(w) {
   line.type = 'button';
   line.className = 'm-team-worker';
   line.addEventListener('click', () => {
-    location.hash = `#/worker/${encodeURIComponent(w.id)}`;
+    pushRoute(`#/worker/${encodeURIComponent(w.id)}`);
   });
 
   const waiting = w.word === 'waiting' || w.word === 'review';
@@ -2017,7 +2017,7 @@ function sessionNode(row) {
   body.className = 'm-sess-body';
   body.type = 'button';
   body.addEventListener('click', () => {
-    location.hash = row.href;
+    pushRoute(row.href);
   });
 
   const gutter = document.createElement('span');
@@ -2146,7 +2146,7 @@ async function startLead(team) {
 
     if (data.sessionId) {
       // Closed here rather than left to `leaveRoute`, which does close it a moment later:
-      // assigning `location.hash` fires `hashchange` as a task, so the `finally` below runs
+      // `pushRoute` delivers its `hashchange` as a task, so the `finally` below runs
       // first and would repaint this row back to `start` for a frame on a launch that
       // worked. The route change is still the backstop, and is what covers every other way
       // off this screen.
@@ -2156,7 +2156,7 @@ async function startLead(team) {
       // a transcript carries a synthetic `pane-19` id, `subscribe` answers with an empty
       // transcript, and the registry issues a `rebound` the moment it first speaks. See
       // `onRebound`.
-      location.hash = `#/lead/${encodeURIComponent(data.sessionId)}`;
+      pushRoute(`#/lead/${encodeURIComponent(data.sessionId)}`);
     }
   } catch (err) {
     launchErrors.set(team.repo, err.message || String(err));

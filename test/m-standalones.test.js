@@ -247,14 +247,14 @@ test('the three hashes are three claims, and a rebound keeps the one it was open
   assert.match(app, /history\.replaceState\(history\.state, '', `#\/\$\{route\.kind\}\/\$\{encodeURIComponent\(msg\.to\)\}`\);/);
   // Each list links its own kind, and only its own: the card its lead, the Standalones row
   // its session, and a worker line its worker.
-  assert.match(app, /location\.hash = `#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`;/);
+  assert.match(app, /pushRoute\(`#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`\);/);
   // The Standalones row's link is its `href`, built where the row is: `#/session/` for a live
   // row, and — since hibernation item 5 — `#/asleep/<name>` for a sleeper drawn in the same
   // list. The node follows whichever the row carries.
   assert.match(app, /href: `#\/session\/\$\{encodeURIComponent\(s\.id\)\}`,/);
-  assert.match(app, /location\.hash = row\.href;/);
-  assert.match(app, /location\.hash = `#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`;/);
-  assert.equal(app.match(/location\.hash = `#\/worker\//g).length, 1, 'one link to a worker, on its line');
+  assert.match(app, /pushRoute\(row\.href\);/);
+  assert.match(app, /pushRoute\(`#\/worker\/\$\{encodeURIComponent\(w\.id\)\}`\);/);
+  assert.equal(app.match(/pushRoute\(`#\/worker\//g).length, 1, 'one link to a worker, on its line');
   // Subscribe, teardown and the gone timer are all kind-agnostic — one screen, three routes.
   assert.equal(app.match(/isConversation\(/g).length, 6, 'the definition and its five sites');
 });
