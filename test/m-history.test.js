@@ -5,7 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 import { PHONE_TABS } from '../web/prefs.js';
-import { backAction, bootTab, homeTabOf, ROOT_STATE, stampFor, tabForKind } from '../web/m/history.js';
+import { backAction, bootTab, homeTabOf, pushRoute, ROOT_STATE, stampFor, tabForKind } from '../web/m/history.js';
 
 /*
  * The phone's history, as the installed Home Screen app measured it (iOS 27 Simulator, an
@@ -39,7 +39,7 @@ function phone(start = '#/standalones') {
       if (stamp) entries[at].state = stamp;
       lastHash = entries[at].hash;
     },
-    /** `location.hash = …`: a push, which drops any forward entries. */
+    /** `pushRoute`: a push, which drops any forward entries. */
     push(hash) {
       entries.splice(at + 1);
       entries.push({ hash, state: null });
@@ -194,4 +194,64 @@ test('no back control on the phone pushes a hash any more, and nothing routes by
   assert.match(app, /goHome,/);
   assert.match(read('web/m/lead.js'), /view\.ctx\.goHome\(\)/);
   assert.match(read('web/m/rooms.js'), /view\.ctx\.goHome\(\)/);
+});
+
+/** Just enough of `window` for `pushRoute`: a location, `pushState`, timers and events. */
+function fakeWindow(hash = '#/standalones') {
+  const base = 'http://phone.test/m/';
+  const w = {
+    location: { hash, get href() { return base + w.location.hash; } },
+    pushed: [],
+    timers: [],
+    events: [],
+    history: {
+      pushState(state, _title, url) {
+        w.pushed.push({ state, url });
+        w.location.hash = url;
+      },
+    },
+    setTimeout(fn) { w.timers.push(fn); },
+    dispatchEvent(e) { w.events.push(e); },
+    HashChangeEvent: class { constructor(type, init) { Object.assign(this, { type }, init); } },
+  };
+  return w;
+}
+
+test('pushRoute pushes a stamped entry instead of navigating', () => {
+  const w = fakeWindow('#/standalones');
+  assert.equal(pushRoute('#/session/pane-0', w), true);
+  assert.deepEqual(w.pushed, [{ state: { from: '#/standalones' }, url: '#/session/pane-0' }]);
+  assert.equal(w.location.hash, '#/session/pane-0');
+  // `navigate` would not re-stamp it, and `‹` steps back from it.
+  assert.equal(stampFor(w.pushed[0].state, '#/standalones', '#/session/pane-0'), null);
+  assert.deepEqual(backAction(w.pushed[0].state, '#/standalones'), { op: 'back' });
+});
+
+test('pushRoute delivers its hashchange as a task, not inline', () => {
+  const w = fakeWindow('#/leads');
+  pushRoute('#/lead/abc', w);
+  assert.equal(w.events.length, 0, 'nothing routed before the caller returned');
+  w.timers.forEach((fn) => fn());
+  assert.equal(w.events.length, 1);
+  assert.equal(w.events[0].type, 'hashchange');
+  assert.equal(w.events[0].oldURL, 'http://phone.test/m/#/leads');
+  assert.equal(w.events[0].newURL, 'http://phone.test/m/#/lead/abc');
+});
+
+test('pushRoute onto the hash already showing adds no entry', () => {
+  const w = fakeWindow('#/rooms');
+  assert.equal(pushRoute('#/rooms', w), false);
+  assert.equal(pushRoute('', w), false);
+  assert.equal(w.pushed.length, 0);
+  assert.equal(w.timers.length, 0);
+});
+
+test('nothing on the phone assigns location.hash: on a real iPhone that reloads the page', () => {
+  // Measured on iOS 27: an assigned hash is a navigation, and the UI process answers it with a
+  // process swap and a whole document load. See the note at the top of `web/m/history.js`.
+  for (const rel of ['web/m/app.js', 'web/m/lead.js', 'web/m/rooms.js', 'web/m/cards.js', 'web/m/tasks.js', 'web/m/asleep.js', 'web/m/recent.js', 'web/m/roles.js']) {
+    const code = read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    assert.doesNotMatch(code, /location\.hash\s*=(?!=)/, `${rel} assigns location.hash`);
+    assert.doesNotMatch(code, /location\.(assign|reload)\(|location\.href\s*=(?!=)/, `${rel} navigates the document`);
+  }
 });

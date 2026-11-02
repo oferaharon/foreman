@@ -814,7 +814,7 @@ test('creating sends {name, members} of session ids and nothing else', () => {
   assert.match(submit, /method: 'POST'/);
   assert.match(submit, /'\/api\/rooms'/);
   assert.match(submit, /JSON\.stringify\(\{ name: s\.name\.value\.trim\(\), members: \[\.\.\.s\.picked\] \}\)/);
-  assert.match(submit, /location\.hash = `#\/room\/\$\{encodeURIComponent\(data\.room\.id\)\}`/,
+  assert.match(submit, /pushRoute\(`#\/room\/\$\{encodeURIComponent\(data\.room\.id\)\}`\)/,
     'and it opens the room it just made');
 });
 

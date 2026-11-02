@@ -97,3 +97,40 @@ which is `.team-toggle-row`'s own precedent. **The same exposure is still live o
 `.field-check`**, the bare native checkbox in the `+ new` and settings modals; it was flagged
 rather than fixed because it was out of that task's scope, and it is the next person's to
 take.
+
+## An assigned hash reloads the page on a real iPhone
+
+**On a real iPhone every `location.hash = …` in the phone view was a whole document load,
+and the Simulator never showed it — MEASURED on iOS 27 on a cabled phone, in Safari and in
+the installed Home Screen app, through the Web Inspector (`ios_webkit_debug_proxy`) and the
+device's own WebKit log (`idevicesyslog`).** The phone reaches the panel over plain http, and
+WebKit runs such a page in a `WebContent.EnhancedSecurity` process. An assigned hash is a
+*navigation*. WebCore performs it in place — `FrameLoader::loadInSameDocument`, `hashchange`,
+the screen mounts — and while that happens the UI process's own asynchronous policy check on
+the same navigation logs `WebPageProxy::decidePolicyForNavigationAction, swapping process …
+reason=Process swap due to EnhancedSecurity change` and loads the document again in a new
+process (the inspector sees it as a provisional target committing over the old one) about
+30 ms later. That is the "refresh" on every tap, and it leaves a history entry with no state
+on it, so the back rules built on `history.state` never saw their own entries.
+
+The back gesture then compounds it. Its target entry now belongs to an *earlier document*,
+so WebCore takes `loadDifferentDocumentItem`, which is a navigation, which swaps again — and
+the swapped-in load continues the navigation the UI process already had, which was the tap
+*into* the session. So the swipe back drew the same session again, and only `‹` got out.
+
+**The fix is not to navigate.** `history.pushState` is not a navigation and the policy check
+never sees it, and a step back between two entries of one document is
+`loadInSameDocument` with no policy check either — both measured on the same phone after the
+change, in a Safari tab: one document for the whole run, push, pop, push, pop, ending on the
+right list. So every route change in `web/m/` goes through `pushRoute` in `web/m/history.js`,
+which pushes a stamped entry and then dispatches the `hashchange` the shell routes on, as a
+task, the way an assigned hash delivered it; `test/m-history.test.js` refuses a
+`location.hash =` anywhere in the phone's modules. Tabs were already `replaceState`, which is
+not a navigation either.
+
+Two things about this that are easy to get wrong next time. **The Simulator is not
+evidence here**: its installed app, on loopback and on an insecure hostname, measured one
+document and zero reloads, so any check of phone navigation is done on a real device. And a
+**keep-alive timer** once made the reload stop on the phone (a 100 ms `setInterval` writing
+`sessionStorage`); why was never measured, and it is not the fix — the cause is the policy
+check, and a page that makes no navigation gives it nothing to answer.
