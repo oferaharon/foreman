@@ -121,8 +121,9 @@ the swapped-in load continues the navigation the UI process already had, which w
 **The fix is not to navigate.** `history.pushState` is not a navigation and the policy check
 never sees it, and a step back between two entries of one document is
 `loadInSameDocument` with no policy check either — both measured on the same phone after the
-change, in a Safari tab: one document for the whole run, push, pop, push, pop, ending on the
-right list. So every route change in `web/m/` goes through `pushRoute` in `web/m/history.js`,
+change, in a Safari tab and in the installed Home Screen app: one document for the whole run
+(the app's was still the same document three minutes later), push, pop, push, pop, the swipe
+back and `‹` both ending on the list the session was opened from. So every route change in `web/m/` goes through `pushRoute` in `web/m/history.js`,
 which pushes a stamped entry and then dispatches the `hashchange` the shell routes on, as a
 task, the way an assigned hash delivered it; `test/m-history.test.js` refuses a
 `location.hash =` anywhere in the phone's modules. Tabs were already `replaceState`, which is
