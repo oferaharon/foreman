@@ -244,7 +244,7 @@ test('the three hashes are three claims, and a rebound keeps the one it was open
     /function isConversation\(kind\) \{\s*return kind === 'lead' \|\| kind === 'session' \|\| kind === 'worker';\s*\}/,
   );
   // A rebound moves the id and changes nothing about what the hash claims.
-  assert.match(app, /history\.replaceState\(null, '', `#\/\$\{route\.kind\}\/\$\{encodeURIComponent\(msg\.to\)\}`\);/);
+  assert.match(app, /history\.replaceState\(history\.state, '', `#\/\$\{route\.kind\}\/\$\{encodeURIComponent\(msg\.to\)\}`\);/);
   // Each list links its own kind, and only its own: the card its lead, the Standalones row
   // its session, and a worker line its worker.
   assert.match(app, /location\.hash = `#\/lead\/\$\{encodeURIComponent\(row\.lead\.id\)\}`;/);
@@ -375,12 +375,15 @@ test('the cards are buildCard’s, so the trust-gate refusal applies for free', 
 });
 
 test('back goes to the tab you left, never a bare hash', () => {
-  assert.match(lead, /location\.hash = view\.ctx\?\.homeHash\?\.\(\) \|\| '#\/';/);
+  // Back steps back through the history to that tab rather than pushing its hash
+  // (`goHome`, pinned in `test/m-history.test.js`).
+  assert.match(lead, /if \(view\.ctx\?\.goHome\) view\.ctx\.goHome\(\);/);
   assert.match(lead, /`Back to \$\{view\.ctx\?\.homeLabel\?\.\(\) \|\| 'home'\}`/);
   assert.match(app, /homeHash: \(\) => homeHash\(\),/);
   assert.match(app, /homeLabel: \(\) => TAB_LABELS\[route\.tab\],/);
-  // The shell's own gone screen already went through `homeHash`; it still does.
-  assert.match(app, /back\.addEventListener\('click', \(\) => \{\s*location\.hash = homeHash\(\);/);
+  // The shell's own gone screen goes through the same `goHome`.
+  assert.match(app, /back\.addEventListener\('click', goHome\);/);
+  assert.match(app, /function goHome\(\) \{\s*const act = backAction\(history\.state, homeHash\(\)\);/);
 });
 
 test('the worker count is a lead’s own team, never the folder’s', () => {

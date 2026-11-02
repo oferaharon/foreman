@@ -161,10 +161,11 @@ test('a sleeping row opens the read-only route, by name', () => {
 test('a session that falls asleep on screen turns into its read-only view', () => {
   assert.match(
     fn(app, 'onRoster'),
-    /const sleeper = sleeperFor\(state\.asleep, state\.sessions, route\.sessionId\);\s*if \(sleeper\) \{\s*location\.replace\(`#\/asleep\/\$\{encodeURIComponent\(sleeper\.name\)\}`\);/,
+    /const sleeper = sleeperFor\(state\.asleep, state\.sessions, route\.sessionId\);\s*if \(sleeper\) \{\s*replaceRoute\(`#\/asleep\/\$\{encodeURIComponent\(sleeper\.name\)\}`\);/,
   );
-  // …and a woken one leaves for its live route, replacing the read-only one in history.
-  assert.match(fn(app, 'onAsleepRoster'), /location\.replace\(hash\);/);
+  // …and a woken one leaves for its live route, replacing the read-only one in history —
+  // through `replaceRoute`, which keeps the entry's `from` (`test/m-history.test.js`).
+  assert.match(fn(app, 'onAsleepRoster'), /replaceRoute\(hash\);/);
 });
 
 test('the read-only view subscribes by the record’s session id and gives it back on leave', () => {
