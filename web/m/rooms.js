@@ -492,9 +492,9 @@ function setDraft(id, text) {
 /**
  * Build the screen.
  *
- * `ctx` is the shell's window onto itself and this uses six of it: `roomId`, `room()`,
- * `rooms()`, `homeHash()`, `connected()`, `send` and `on`. Nothing else here reaches into
- * `web/m/app.js`.
+ * `ctx` is the shell's window onto itself and this uses eight of it: `roomId`, `room()`,
+ * `rooms()`, `homeHash()`, `goHome()`, `connected()`, `send` and `on`. Nothing else here
+ * reaches into `web/m/app.js`.
  *
  * The subscription is **the shell's**, not this module's — `enterRoom` sends it and
  * `leaveRoute` takes it back, and `ws.onopen` re-sends it after a reconnect. Kept there
@@ -605,8 +605,10 @@ function build(host) {
   el.back.setAttribute('aria-label', 'Back to rooms');
   el.back.addEventListener('click', () => {
     // The tab you left, which on this route is always Rooms — asked of the shell rather
-    // than spelled `#/rooms` here, so there is one answer to "where does back go".
-    location.hash = view.ctx?.homeHash() || '#/rooms';
+    // than spelled `#/rooms` here, so there is one answer to "where does back go", and that
+    // answer steps back through the history rather than pushing (`goHome`).
+    if (view.ctx?.goHome) view.ctx.goHome();
+    else location.hash = '#/rooms';
   });
 
   el.title = document.createElement('div');

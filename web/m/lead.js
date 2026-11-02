@@ -35,7 +35,8 @@
  *
  *   **The back chevron.** The shell hides its own header here (`.m-app.no-head`), so if
  *   this screen does not draw a way out there isn't one but the phone's own gesture. Where
- *   it goes is `ctx.homeHash()` — the tab you left, never a bare `#/`, which would land a
+ *   it goes is `ctx.goHome()` — back through the history to the list you left when you came
+ *   from one, the tab's own list when you did not, never a bare `#/`, which would land a
  *   reader on Leads however they got here.
  *
  *   **The connection indicator.** Same reason, and it is not a nicety. The socket is what
@@ -327,7 +328,8 @@ function build(host) {
   // and the shell keeps `route.tab` across a conversation screen for exactly this.
   el.back.setAttribute('aria-label', `Back to ${view.ctx?.homeLabel?.() || 'home'}`);
   el.back.addEventListener('click', () => {
-    location.hash = view.ctx?.homeHash?.() || '#/';
+    if (view.ctx?.goHome) view.ctx.goHome();
+    else location.hash = '#/';
   });
 
   el.name = document.createElement('div');
@@ -562,7 +564,8 @@ function buildAsleep(host) {
   el.back.textContent = '‹';
   el.back.setAttribute('aria-label', `Back to ${view.ctx?.homeLabel?.() || 'home'}`);
   el.back.addEventListener('click', () => {
-    location.hash = view.ctx?.homeHash?.() || '#/';
+    if (view.ctx?.goHome) view.ctx.goHome();
+    else location.hash = '#/';
   });
 
   el.name = document.createElement('div');

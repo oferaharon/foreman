@@ -72,6 +72,7 @@ import { mountLead, updateLead } from './lead.js';
 /* Newest first, on the phone and only on the phone — the maintainer's ruling of 2026-09-16.
    One comparator for both lists that take it, so the Standalones tab and the Rooms tab cannot
    end up disagreeing about the tie-break or about where a missing stamp lands. */
+import { backAction, bootTab, ROOT_STATE, stampFor, tabForKind } from './history.js';
 import { byRecent } from './recent.js';
 /* The Rooms tab's list and the room screen. Its own module with its own state — a phone
    shows one thing at a time, and that stays true only if the second screen is a second
@@ -283,13 +284,18 @@ function handle(msg) {
  * the hash and not a flag beside a shared word. A room is not one of them: it is a screen
  * of its own, with its own module and its own subscription, exactly as Trap 13 asked.
  *
- * `tab` is **sticky across a lead, session or room screen**. Those hashes say nothing about
- * which list you came from, so `parseHash` answers `null` there and `navigate` leaves the
- * field alone; the back control then returns you to the tab you left, not to Leads. It is
- * also what `homeHash` reads. A **worker** hash is the one exception, because it *does* say:
- * a worker is drawn on exactly one list — under its lead's card on Leads — so `parseHash`
- * answers `leads` for it, and back from a worker is Leads even after a reload or a bookmark
- * that landed straight on it.
+ * `tab` is **named by every hash that can name it**. Each conversation kind is drawn on
+ * exactly one list — an ordinary session under Standalones, a lead and a worker under
+ * Leads, a room under Rooms — so `parseHash` answers that list for it (`tabForKind`), and
+ * back from a standalone session is Standalones even after a document load that landed
+ * straight on it. A **sleeper** is the one exception: it is drawn greyed in whichever list
+ * it slept in, so its hash answers `null`, `navigate` leaves the field alone, and the tab
+ * you left is the answer. On a document load `bootTab` decides instead — see the boot block.
+ *
+ * And `‹` does not *assign* that tab's hash any more: it steps back through the history
+ * when the entry it is on was pushed from inside the app (`goHome`, `web/m/history.js`),
+ * because assigning pushed, and a pushed list made the back gesture land on the session
+ * again — measured in the installed Home Screen app.
  */
 const route = { kind: 'home', tab: 'leads', sessionId: null, roomId: null, name: null };
 
@@ -302,6 +308,27 @@ const TABS = PHONE_TABS.map((key) => ({ key, label: TAB_LABELS[key] }));
 /** Where "back" goes from a conversation screen: the tab you were on, never a bare `#/`. */
 function homeHash() {
   return `#/${route.tab}`;
+}
+
+/**
+ * Move to `hash` in place of the entry on screen, keeping that entry's state — its `from` is
+ * still where the reader came from, so a sleeper that wakes under the reader still steps back
+ * to the list it was opened from. `replaceState` fires no `hashchange`, so this routes itself.
+ */
+function replaceRoute(hash) {
+  history.replaceState(history.state, '', hash);
+  navigate();
+}
+
+/**
+ * Every `‹` on the phone. Back through the history when this entry was pushed from inside
+ * the app, so the control and the back gesture land on the same entry; a replace onto the
+ * tab's list otherwise — a conversation opened cold has nothing of ours behind it.
+ */
+function goHome() {
+  const act = backAction(history.state, homeHash());
+  if (act.op === 'back') history.back();
+  else replaceRoute(act.hash);
 }
 
 /** The three route kinds that mount a conversation. Asked rather than spelled out at each
@@ -349,17 +376,16 @@ function parseHash() {
   // than a flag beside one shared word.
   const conv = /^#\/(lead|session|worker)\/(.+)$/.exec(hash);
   if (conv) {
-    // A worker is only ever drawn under its lead's card, so its hash names the tab it came
-    // from and the others do not — see the note over `route`.
-    const tab = conv[1] === 'worker' ? 'leads' : null;
-    return { kind: conv[1], sessionId: decodeURIComponent(conv[2]), roomId: null, tab };
+    // Each kind is drawn on exactly one list, so its hash names the tab — see the note over
+    // `route`.
+    return { kind: conv[1], sessionId: decodeURIComponent(conv[2]), roomId: null, tab: tabForKind(conv[1]) };
   }
   // A room id is opaque and is minted by the store, so it is matched the same greedy way a
   // session id is and decoded rather than validated here — an id that names nothing is
   // answered by the server's own `group-room` frame with `room: null`, which the screen
   // draws as "there is no room with that id" instead of an empty log.
   const room = /^#\/room\/(.+)$/.exec(hash);
-  if (room) return { kind: 'room', sessionId: null, roomId: decodeURIComponent(room[1]), tab: null };
+  if (room) return { kind: 'room', sessionId: null, roomId: decodeURIComponent(room[1]), tab: tabForKind('room') };
   // A sleeper is addressed by its **tmux session name**, the key the sleep record is stored
   // under and the one Wake is posted to — names are the contract and pane ids reset. Its
   // session id is looked up off the record once it is known (`enterAsleep`), never carried in
@@ -374,7 +400,17 @@ function parseHash() {
   return { kind: 'home', sessionId: null, roomId: null, name: null, tab };
 }
 
+/** The hash the last `navigate` landed on: the `from` of the next entry pushed. */
+let lastHash = null;
+
 function navigate() {
+  // A fresh push carries no state; stamp it with where it was pushed from, so `‹` knows it
+  // may step back rather than push (`stampFor`). Written with `replaceState`, which fires no
+  // `hashchange`, before anything below can read the entry.
+  const stamp = stampFor(history.state, lastHash, location.hash);
+  if (stamp) history.replaceState(stamp, '');
+  lastHash = location.hash;
+
   const next = parseHash();
   if (
     next.kind === route.kind &&
@@ -687,7 +723,9 @@ for (const { key, label } of TABS) {
 
   btn.append(text, dot);
   btn.addEventListener('click', () => {
-    location.hash = `#/${key}`;
+    // Replaced, not pushed: a tab is a place, not a step. Pushed, the back gesture on a list
+    // walked back through every tab you had looked at before it left the app.
+    replaceRoute(`#/${key}`);
   });
 
   tabNodes.set(key, { btn, dot });
@@ -2387,7 +2425,7 @@ function enterAsleep() {
  * The asleep route's answer to a roster frame. Three outcomes, in this order:
  *
  *   1. **It is awake.** A live row carries its name (or, for one beat, its session id): leave
- *      for that row's own route. `location.replace`, so back from the live session is the
+ *      for that row's own route. `replaceRoute`, so back from the live session is the
  *      list and not this read-only page of something no longer asleep.
  *   2. **It is asleep.** Subscribe once its session id is known, and repaint.
  *   3. **Neither.** Before the first frame that carries `asleep` that is simply "not told
@@ -2401,7 +2439,7 @@ function onAsleepRoster() {
   if (live) {
     const hash = liveRouteFor(live);
     if (hash) {
-      location.replace(hash);
+      replaceRoute(hash);
       return;
     }
   }
@@ -2460,7 +2498,8 @@ async function wakeSleeper(name) {
  * is written against; nothing else here is public. Three of them landed with the Standalones
  * tab — `kind`, `homeHash` and `homeLabel` — because one screen module serves more than one
  * route (three, since workers joined on 2026-10-08) and has to know which, and because
- * "back" is the tab you left rather than a bare `#/`.
+ * "back" is the tab you left rather than a bare `#/`. `goHome` joined them when `‹` stopped
+ * pushing that tab's hash and started stepping back to it (`web/m/history.js`).
  */
 function makeCtx() {
   const mine = [];
@@ -2503,6 +2542,7 @@ function makeCtx() {
     /** Where "back" goes and what to call it: the tab you left, never a bare `#/`. */
     homeHash: () => homeHash(),
     homeLabel: () => TAB_LABELS[route.tab],
+    goHome,
     /*
      * How many workers this lead has running, for the mark on its `tasks` tab.
      *
@@ -2607,6 +2647,7 @@ function makeRoomCtx() {
        layer earlier, where a header refactor cannot reach it. */
     connected: () => state.connected,
     homeHash,
+    goHome,
     send: (msg) => send({ slot: SLOT, ...msg }),
     on: (type, fn) => {
       mine.push([type, fn]);
@@ -2646,7 +2687,8 @@ function onRebound(msg) {
   // The kind the route was opened on, kept: a rebound moves the id and changes nothing
   // about what the hash claims, and rewriting it as the other kind would answer
   // `roleRefusal` with a question nobody asked.
-  history.replaceState(null, '', `#/${route.kind}/${encodeURIComponent(msg.to)}`);
+  history.replaceState(history.state, '', `#/${route.kind}/${encodeURIComponent(msg.to)}`);
+  lastHash = location.hash;
   updateLead(sessionOf(msg.to));
 }
 
@@ -2702,7 +2744,7 @@ function onRoster() {
    */
   const sleeper = sleeperFor(state.asleep, state.sessions, route.sessionId);
   if (sleeper) {
-    location.replace(`#/asleep/${encodeURIComponent(sleeper.name)}`);
+    replaceRoute(`#/asleep/${encodeURIComponent(sleeper.name)}`);
     return;
   }
 
@@ -2743,9 +2785,7 @@ function showGone(reason = 'exited') {
   // The tab you left, named and returned to — not a bare `#/`, which would land on Leads
   // however you got here.
   back.textContent = `‹ ${TAB_LABELS[route.tab].toLowerCase()}`;
-  back.addEventListener('click', () => {
-    location.hash = homeHash();
-  });
+  back.addEventListener('click', goHome);
   box.append(text, back);
   el.screen.appendChild(box);
 }
@@ -2841,7 +2881,8 @@ window.addEventListener('hashchange', navigate);
 paintConn();
 
 /*
- * The remembered tab, and the **only** place it is consulted.
+ * The remembered tab, and the **only** place it is consulted — here, and through `bootTab`
+ * below for a sleeper's route, the one hash that cannot name its list.
  *
  * `location.hash` is empty exactly when the page was opened with no route — the Home Screen
  * app's `start_url` is `/m/`, and so is a typed address. That is the moment the memory is
@@ -2851,8 +2892,16 @@ paintConn();
  *
  * `replaceState` rather than assigning `location.hash`: this runs before the first
  * `navigate`, and a `hashchange` fired here would route twice on every cold open.
+ *
+ * The first entry is marked `ROOT_STATE` so `navigate` never stamps it as a push — it has
+ * nothing of ours behind it, and `‹` on it replaces rather than steps back. An entry that
+ * already carries state is a reload, or iOS restoring the app after reclaiming its web
+ * process in the background, and keeps its own: its `from` is still where the reader came
+ * from, and `bootTab` reads the tab out of it.
  */
-if (!location.hash) history.replaceState(null, '', `#/${phoneTab.value}`);
+if (!location.hash) history.replaceState(ROOT_STATE, '', `#/${phoneTab.value}`);
+else if (history.state == null) history.replaceState(ROOT_STATE, '');
+route.tab = bootTab(parseHash().kind, history.state, phoneTab.value, PHONE_TABS);
 
 // No route yet, so `navigate` always mounts one — including a reload that landed straight
 // on `#/lead/<id>`, which has to come back to that lead rather than to the list.

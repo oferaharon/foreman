@@ -360,10 +360,10 @@ test('a worker’s task ending while its screen is open falls to the gone state,
 });
 
 test('back from a worker is Leads, even from a reload that landed on one', () => {
-  // A worker is drawn only under its lead's card, so its hash names the tab and the other
-  // conversation hashes do not.
-  assert.match(app, /const tab = conv\[1\] === 'worker' \? 'leads' : null;/);
-  assert.match(app, /return \{ kind: conv\[1\], sessionId: decodeURIComponent\(conv\[2\]\), roomId: null, tab \};/);
+  // A worker is drawn only under its lead's card, so its hash names the tab — and since
+  // every conversation kind is drawn on exactly one list, they all do now (`tabForKind`,
+  // `test/m-history.test.js`).
+  assert.match(app, /roomId: null, tab: tabForKind\(conv\[1\]\) \};/);
 });
 
 test('the worker screen is the standalone screen: no tasks tab, its own name', () => {
