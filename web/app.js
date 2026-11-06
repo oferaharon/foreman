@@ -17334,19 +17334,17 @@ function createPane(slot, host) {
   }
 
   /**
-   * Effort — and the one control here that changes something outside this session.
-   *
-   * `/effort` has no `s`. Its Enter writes `effortLevel` for every session started
-   * afterwards, and the effort row inside `/model` writes globally even when you press the
-   * "this session only" key. Both measured. So this looks like the model picker and is
-   * labelled as the opposite of it: the menu says what it is before you pick, and the
-   * button carries a mark that it is a default rather than a per-session setting.
+   * Effort. Since Claude Code v2.1.296 the slider offers `s` for this session only, and
+   * the server commits with it, so a pick changes this session and nothing on disk. An
+   * older slider offers no `s`, and its Enter writes `effortLevel` for every session
+   * started afterwards. The button cannot know which one is behind it until the slider is
+   * open, so the menu reads `sessionOnly` off the dialog and says which before you pick.
    */
   function buildEffortPicker(s) {
     const btn = document.createElement('button');
     btn.className = 'effort-btn';
     btn.textContent = s.effort || 'effort';
-    btn.title = 'Effort — this is the default for every new session, not just this one';
+    btn.title = 'Effort. The menu says whether a pick is for this session or a default for new ones.';
     btn.disabled = !s.interactive;
 
     btn.onclick = async () => {
@@ -17355,7 +17353,12 @@ function createPane(slot, host) {
       btn.textContent = 'opening…';
       try {
         const data = await postJSON(`/api/sessions/${encodeURIComponent(s.id)}/effort/open`, {});
-        openEffortMenu(btn, s, data.dialog);
+        // Resolved after the await, for the reason `buildModelPicker` gives. The open
+        // slider hides the composer footer, so `renderHead` rebuilds the composer and
+        // `btn` is detached. `openMenu` refuses a detached anchor and runs `onDismiss`,
+        // which Escapes the slider, so before this the menu never appeared at all.
+        const live = composerEl?.effort;
+        openEffortMenu(live?.isConnected ? live : btn, s, data.dialog);
       } catch (err) {
         setComposerNote(err.message, 'err');
       } finally {
@@ -17372,26 +17375,48 @@ function createPane(slot, host) {
         () => {},
       );
 
+    const commit = async (body, what) => {
+      setComposerNote(`setting ${what}…`);
+      try {
+        const done = await postJSON(`/api/sessions/${encodeURIComponent(s.id)}/effort`, body);
+        const ultra = done.ultracode === null ? '' : ` · ultracode ${done.ultracode ? 'on' : 'off'}`;
+        setComposerNote(`effort: ${done.effort}${ultra} — ${done.scope}`);
+      } catch (err) {
+        await cancel();
+        setComposerNote(err.message, 'err');
+      }
+    };
+
     const items = [
-      { note: 'Sets the default for every new session — Claude Code has no per-session effort.' },
+      {
+        note: dialog.sessionOnly
+          ? 'This session only. Nothing is saved for new sessions.'
+          : 'Sets the default for every new session. This Claude Code has no per-session effort.',
+      },
       { separator: true },
       ...dialog.levels.map((l) => ({
         label: l.id,
         checked: l.current,
-        onPick: async () => {
-          setComposerNote(`setting effort to ${l.id}…`);
-          try {
-            const done = await postJSON(`/api/sessions/${encodeURIComponent(s.id)}/effort`, {
-              level: l.id,
-            });
-            setComposerNote(`effort: ${done.effort} — ${done.scope}`);
-          } catch (err) {
-            await cancel();
-            setComposerNote(err.message, 'err');
-          }
-        },
+        onPick: () => commit({ level: l.id }, `effort to ${l.id}`),
       })),
     ];
+
+    // v2.1.296 made Ultracode a toggle beside the track rather than a stop on it. Picking it
+    // flips the toggle and commits at the level the marker is already on.
+    if (dialog.ultracode !== null) {
+      items.push(
+        { separator: true },
+        {
+          label: 'ultracode',
+          checked: dialog.ultracode,
+          onPick: () =>
+            commit(
+              { level: dialog.current, ultracode: !dialog.ultracode },
+              `ultracode ${dialog.ultracode ? 'off' : 'on'}`,
+            ),
+        },
+      );
+    }
 
     openMenu(anchor, items, { onDismiss: cancel });
   }
