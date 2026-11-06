@@ -54,6 +54,11 @@ test('everything that is not a question box is refused', () => {
   for (const file of [
     'dialog-model.txt',
     'dialog-effort.txt',
+    'dialog-effort-v296.txt',
+    'dialog-effort-v296-narrow.txt',
+    'dialog-effort-v296-short.txt',
+    'dialog-effort-v296-wrapped.txt',
+    'dialog-effort-v296-wrapped-ultracode.txt',
     'dialog-config.txt',
     'dialog-resume.txt',
     'prompt-bash.txt',

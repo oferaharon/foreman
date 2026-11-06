@@ -45,7 +45,7 @@ import {
   stepToward,
   footerModelName,
 } from './model.js';
-import { parseEffortDialog, nudgeToward } from './effort.js';
+import { parseEffortDialog, nudgeToward, commitKey } from './effort.js';
 import { MessageQueue } from './queue.js';
 import { PaneLock } from './claim.js';
 import { PinStore, carryPinOrder, splitPinOrder } from './pins.js';
@@ -4431,15 +4431,16 @@ app.post('/api/sessions/:id/model', async (req, res) => {
 /* ------------------------------------------------------------- effort --- */
 
 /*
- * The effort slider — see `effort.js`, and read the second paragraph of it before touching
- * anything here. Unlike the model picker beside it in the composer, **this writes a global
- * default**: there is no session-only key in that dialog, and the row inside `/model`
- * ignores `s`. Both were measured. So the panel names it as global rather than pretending
- * otherwise, and this endpoint is the only place in the codebase that deliberately changes
- * a setting outside the session it was asked from.
+ * The effort slider. See `effort.js`, and read what it says each key writes before you
+ * touch anything here. Since Claude Code v2.1.296 the slider offers `s` for this session
+ * only, and that is the key used here: it writes nothing to disk, the same as the model
+ * picker's `s`. An older screen offers no `s`. There `Enter` is the only way to commit,
+ * and it writes a default for every new session, so the response's `scope` says which of
+ * the two happened. The menu reads the same flag off the open dialog and says so before
+ * anything is picked.
  */
 
-const EFFORT_STEPS = 10; // six stops today; a bound, not a count
+const EFFORT_STEPS = 10; // five stops today; a bound, not a count
 
 app.post('/api/sessions/:id/effort/open', async (req, res) => {
   const session = registry.get(req.params.id);
@@ -4479,40 +4480,60 @@ app.post('/api/sessions/:id/effort/cancel', async (req, res) => {
 });
 
 /**
- * Move the marker onto a level and confirm.
+ * Move the marker onto a level, set Ultracode if asked, and commit.
  *
- * Nudged one press at a time with the pane re-read after each, so a scale that gains a
- * stop stops this rather than landing somewhere nobody chose — it already went from five
- * to six. Arrow keys write nothing; only the `Enter` at the end does, and what it writes
- * is `effortLevel` for every session started afterwards.
+ * Nudged one press at a time with the pane re-read after each, so a scale that changes
+ * shape stops this rather than landing somewhere nobody chose. It has gone from five stops
+ * to six and back to five. Arrow keys and `Tab` write nothing. Only the commit key at the
+ * end does, and `commitKey` picks the one that writes least.
+ *
+ * `ultracode` is optional. Omitted, the toggle is left as the pane shows it. It is refused
+ * on the older screen, where Ultracode is a stop on the track rather than a toggle.
  */
 app.post('/api/sessions/:id/effort', async (req, res) => {
   const session = registry.get(req.params.id);
   if (!session?.paneId) return res.status(404).json({ error: 'Unknown or read-only session.' });
 
   const wanted = String(req.body?.level || '');
+  const ultracode = req.body?.ultracode;
+  if (ultracode !== undefined && typeof ultracode !== 'boolean') {
+    return res.status(400).json({ error: 'ultracode must be true or false.' });
+  }
 
   try {
-    for (let step = 0; step <= EFFORT_STEPS; step += 1) {
+    // One more press than the scale has stops, plus one for the toggle.
+    for (let step = 0; step <= EFFORT_STEPS + 1; step += 1) {
       const dialog = parseEffortDialog(await capturePane(session.paneId, 40));
       if (!dialog) return res.status(409).json({ error: 'The effort slider is not open.' });
       if (!dialog.levels.some((l) => l.id === wanted)) {
         return res.status(400).json({ error: `“${wanted}” is not on the scale.` });
       }
-
-      const key = nudgeToward(dialog, wanted);
-      if (!key) {
-        await sendKeys(session.paneId, 'Enter');
-        await new Promise((r) => setTimeout(r, 400));
-        registry.refresh().catch(() => {});
-        return res.json({ ok: true, effort: wanted, scope: 'default for new sessions' });
+      if (ultracode !== undefined && dialog.ultracode === null) {
+        return res.status(400).json({ error: 'This slider has no Ultracode toggle.' });
       }
-      await sendKeys(session.paneId, key);
-      await new Promise((r) => setTimeout(r, 160));
+
+      const key =
+        nudgeToward(dialog, wanted) ||
+        (ultracode !== undefined && dialog.ultracode !== ultracode ? 'Tab' : null);
+      if (key) {
+        await sendKeys(session.paneId, key);
+        await new Promise((r) => setTimeout(r, 160));
+        continue;
+      }
+
+      const commit = commitKey(dialog);
+      await sendKeys(session.paneId, commit.key);
+      await new Promise((r) => setTimeout(r, 400));
+      registry.refresh().catch(() => {});
+      // The box closes when it takes the key. Still open means nothing was committed.
+      if (parseEffortDialog(await capturePane(session.paneId, 40))) {
+        return res.status(502).json({ error: 'The slider did not take the key, so nothing was set.' });
+      }
+      return res.json({ ok: true, effort: wanted, ultracode: dialog.ultracode, scope: commit.scope });
     }
-    // Nothing was confirmed, so nothing was written. Say so plainly and leave it open.
+    // Nothing was committed, so nothing was written. Say so plainly and leave it open.
     res.status(500).json({
-      error: 'The marker would not settle on that level — nothing was set. Finish it in the terminal.',
+      error: 'The marker would not settle on that level, so nothing was set. Finish it in the terminal.',
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
