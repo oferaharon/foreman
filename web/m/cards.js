@@ -39,9 +39,10 @@
  *   /model      a digit there does not move a cursor, it *commits* — and commits as the
  *               **global default for every future session**. Measured the expensive way;
  *               `~/.claude/settings.json` was restored from a backup.
- *   /effort     has no session-only path at all. Its Enter writes `effortLevel` globally,
- *               and the `s` ("this session only") key inside /model still wrote it
- *               globally. Also measured, also restored from a backup.
+ *   /effort     a track, not a list, whose Enter writes a default for every future
+ *               session. Since v2.1.296 it also offers `s` for this session only, which
+ *               the desktop uses. One wrong key on a phone is still a global write.
+ *               Measured, and restored from a backup.
  *
  * And the **startup trust gate** is its own screen too, which is not a permission prompt
  * however much it parses like one — different copy, no digits since v2.1.257, and an answer
@@ -767,10 +768,10 @@ function hatches(s, q, card, err) {
  * **`/model` and `/effort`**, which only appear because the maintainer opened them at the
  * Mac. These are readable — the panel has a parser for each — and they still get no
  * buttons, because a digit in `/model` does not move a cursor, it commits, and it commits
- * as the **global default for every future session**; and `/effort` has no session-only
- * setting at all, so its Enter writes `effortLevel` globally. The desktop steps the cursor
- * and commits with `s`; a phone has no business doing either, and the dialog is already
- * open in front of whoever opened it.
+ * as the **global default for every future session**; and `/effort`'s Enter writes a
+ * default for every new session too. The desktop walks each one with arrow keys and
+ * commits with `s`. A phone has no business doing either, and the dialog is already open
+ * in front of whoever opened it.
  *
  * **Anything else** — most likely `Switch model?`, which is `needs-decision` with no
  * prompt behind it, the same shape the trust gate was documented as having and does not.
@@ -797,7 +798,7 @@ function opaqueCard(s) {
       picker
         ? `${name} is open in this session's terminal. The phone offers no controls here: a ` +
             'digit in /model commits the choice as the global default for every future session, ' +
-            'and /effort has no session-only setting at all. Finish it at the Mac.'
+            'and Enter in /effort saves a default for new sessions. Finish it at the Mac.'
         : 'This session is holding a box the panel could not read. Answer it at the Mac; the ' +
             'panel will not guess.',
     ),

@@ -64,6 +64,8 @@ for (const [what, fixture] of [
   ['the /model picker', 'dialog-model'],
   ['the /model switch confirmation', 'dialog-model-confirm'],
   ['the /effort track', 'dialog-effort'],
+  ['the v2.1.296 /effort track', 'dialog-effort-v296'],
+  ['the v2.1.296 /effort track at 56 columns', 'dialog-effort-v296-wrapped'],
 ]) {
   test(`${what} refuses a claim, whatever the roster says`, async () => {
     const lock = new PaneLock(reading(fixture));

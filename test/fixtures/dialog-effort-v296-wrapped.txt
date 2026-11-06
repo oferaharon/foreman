@@ -1,0 +1,30 @@
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 with high effort · Claude Max
+ ▝▝   ▝▝   ~/…/foreman-sandbox/alpha
+
+
+❯ /effort
+  ⎿  Set effort level to high (saved as your default for
+     new sessions): Comprehensive implementation with
+     extensive testing and documentation
+
+❯ /effort
+
+────────────────────────────────────────────────────────
+  Effort
+
+       Faster                             Smarter
+       ────────────────────────────────────────▲─
+       low     medium     high     xhigh      max
+
+  May use excessive tokens resulting in long response
+  times or overthinking. Use sparingly for the hardest
+  tasks.
+
+                     Ultracode  off
+                     Tab to toggle
+
+  ←/→ to adjust · Enter to confirm · s for this
+  session only · Esc to cancel
+
+

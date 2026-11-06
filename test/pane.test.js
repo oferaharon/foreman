@@ -71,6 +71,8 @@ test('a bare spinner frame with no duration yet still yields the word', () => {
 for (const [name, file, title] of [
   ['/model', 'dialog-model.txt', 'Select model'],
   ['/effort', 'dialog-effort.txt', 'Effort'],
+  ['/effort on v2.1.296', 'dialog-effort-v296.txt', 'Effort'],
+  ['/effort on v2.1.296 at 56 columns', 'dialog-effort-v296-wrapped.txt', 'Effort'],
   ['/resume', 'dialog-resume.txt', 'Resume session'],
 ]) {
   test(`${name} reads as a dialog, not idle`, () => {

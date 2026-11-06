@@ -4855,9 +4855,10 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 /* ---- effort ---- */
 
-/* Same quiet treatment as the model button, plus a dotted underline: this one is not a
-   fact about the session you're looking at, and the button should not read as though it
-   is. The tooltip and the menu's own note say the rest. */
+/* Same quiet treatment as the model button, plus a dotted underline. The level it names
+   comes from the transcript's last reply, so it can be a turn behind, and on an older
+   Claude Code a pick is a default for new sessions rather than this one. The menu's own
+   note says which before anything is picked. */
 .effort-btn {
   flex: none;
   font-family: var(--mono);
