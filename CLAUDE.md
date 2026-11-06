@@ -27,8 +27,9 @@ can be more than one of them), `question.js`
 context and bypass permissions"), `model.js` (`/model` — where a digit commits **as the
 global default**, so the cursor is stepped and `s` commits instead, and where `s` sometimes
 raises a second box that *is* answered by a digit) and `effort.js`
-(`/effort` — not a list at all but a marker on a track, and the only one with **no
-session-only path**: its Enter writes `effortLevel` for every future session). They look
+(`/effort` — not a list at all but a marker on a track with an Ultracode toggle beside it,
+where Enter writes a default for every future session and, since v2.1.296, `s` commits for
+this session only and is what the panel presses). They look
 alike on screen and answer nothing alike. `test/plan.test.js`, `test/model.test.js` and
 `test/effort.test.js` pin the cross-refusals; keep it that way.
 
@@ -310,6 +311,12 @@ pane width every one of them depends on. Evidence:
   scrape) — **The footer's right-hand slot rotates.** Read effort from the transcript, never by
   scraping; model and `ctx:` are stable in the footer and are read there.
   [pane-parsers#the-footers-rotating-slot](docs/traps/pane-parsers.md#the-footers-rotating-slot)
+- `server/effort.js` (`parseEffortDialog`, `commitKey`) · `web/app.js` (`buildEffortPicker`)
+  · `test/fixtures/dialog-effort-v296*.txt` — **v2.1.296 put the Ultracode toggle on the
+  track's own line, and the picker had been passing a detached anchor since 2026-09-01 —
+  both MEASURED.** Each tail is cut by name, a label past the track's end refuses the
+  screen, `s` commits, and the anchor is resolved after the await.
+  [pane-parsers#the-effort-slider](docs/traps/pane-parsers.md#the-effort-slider)
 - `server/tmux.js` (`parseBypass`, `MODES`) · `server/sessions.js` — **`bypass permissions` is
   on the mode line but is not a mode.** It must never join `MODES`, and `null` is not `false`.
   [pane-parsers#bypass-permissions-is-not-a-mode](docs/traps/pane-parsers.md#bypass-permissions-is-not-a-mode)
@@ -1539,15 +1546,17 @@ human saying so: see the five rules under *The team*.
   matters. Harmless to sending — `C-u` clears the line first — but it will fool you.
   `server/ghost.js` is now the one reader of that attribute; read its trap under Traps
   before reaching for the dim run yourself — the run is not one run.
-- **Effort has no session-only setting. At all.** `/effort` offers `←/→ to adjust · Enter
-  to confirm` and nothing else, and that Enter writes `effortLevel` into
-  `~/.claude/settings.json` — Claude Code says so itself: *"saved as your default for new
-  sessions"*. The effort row inside `/model` is no escape: pressing **`s`** there, the
-  "use this session only" key, still wrote it globally. Both measured, both restored from a
-  backup. So the panel's effort picker is labelled as a global setting rather than dressed
-  up as a sibling of the model picker beside it. What *is* safe: arrow keys alone change
-  nothing on disk, which is what lets the marker be walked into place before committing.
-
+- **Effort's Enter is a global write, and `s` is not — MEASURED on v2.1.296.** `/effort`
+  now offers `←/→ to adjust · Enter to confirm · s for this session only`. Its Enter writes
+  `modelSettings.<current model>.effortLevel` into `~/.claude/settings.json` (*"saved as
+  your default for new sessions"*), while `s`, `Tab` (the Ultracode toggle) and the arrows
+  write nothing, each checked against a hash of the file. So the panel commits with `s`.
+  Up to v2.1.232 there was no `s` and Enter wrote the top-level `effortLevel`, and an old
+  binary can still be running in a session, so `commitKey` falls back to Enter only where
+  the screen offers no `s`, and the menu says which before you pick. The effort row inside
+  `/model` wrote globally even on `s` when last measured, so do not route effort through
+  it. **Back `~/.claude/settings.json` up before pressing anything in `/effort` by hand.**
+  [pane-parsers#the-effort-slider](docs/traps/pane-parsers.md#the-effort-slider)
 - **In `/model`, a digit *commits*, and commits as the global default.** Not "moves the
   cursor", not "selects and waits for Enter" — pressing `4` picks Sonnet **and** rewrites
   `model` in `~/.claude/settings.json` for every session you start afterwards. Measured the

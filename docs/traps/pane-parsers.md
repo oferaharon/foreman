@@ -210,6 +210,64 @@ something wrong; but there is no slack left if Claude Code ever draws an eighth 
 and *sometimes* effort. Read effort from the transcript (`effort` on every assistant
 record), never by scraping. Model and `ctx:` are stable in the footer and are read there.
 
+## The effort slider
+
+**v2.1.296 put the Ultracode toggle on the track's own line, and the picker had been
+passing a detached anchor since 2026-09-01. Both were MEASURED.** Either one alone was
+enough to make "press an effort level" do nothing. All of it was measured on v2.1.296 in
+the sandbox's `alpha`, through a scratch panel on a scratch tmux server, with
+`~/.claude/settings.json` backed up first and restored byte-identical.
+
+**The screen.** v2.1.232 drew six stops, `ultracode` the last of them, with nothing on the
+track's line but the track. v2.1.296 draws five stops and puts Ultracode beside the track
+as a `Tab` toggle:
+
+    ──────────────────────────────▲───────────      Ultracode  off
+    low     medium     high     xhigh      max      Tab to toggle
+
+`TRACK_RE` is anchored at both ends, so it refused that line, `parseEffortDialog` answered
+null, and `POST /effort/open` answered **502 "The effort slider did not come up"** at 220,
+80 and 70 columns. Below about 67 columns the toggle wraps to two lines under the labels,
+and the old parser read that screen fine, which is why a narrow capture alone would have
+said nothing was wrong. While the `max` stop is selected, a warning paragraph can sit
+between the labels and the wrapped toggle. While Ultracode is on, the caption
+`Ultracode: dynamic workflows on every task` appears, and it is not the toggle. The fix
+cuts the two tails off **by name** (`TOGGLE_TAIL_RE`, `TOGGLE_HINT_TAIL_RE`) and refuses
+any label that starts past the track's end. Loosening the track test, or letting the label
+scan run on, would have read `Tab to toggle` as three more stops. Fixtures:
+`dialog-effort-v296{,-narrow,-short,-wrapped,-wrapped-ultracode}.txt`, each captured from a
+session created at its own size (220×50, 70×30, 80×23, 56×30) and never resized.
+
+**The keys**, each checked against a hash of `settings.json`:
+
+| key | v2.1.296 | writes |
+| --- | --- | --- |
+| `←` / `→` | moves the marker | nothing |
+| `Tab` | flips Ultracode | nothing |
+| `s` | *"Set effort level to high (this session only)"* | nothing |
+| `Enter` | *"… (saved as your default for new sessions)"* | `modelSettings.<current model>.effortLevel` |
+
+v2.1.232 offered no `s`, and its Enter wrote the top-level `effortLevel`. `commitKey`
+presses `s` wherever the footer offers it (the phrase wraps onto the footer's second line
+at 56 columns, so both lines are read) and falls back to Enter only on a screen with no
+`s`. The menu reads the same `sessionOnly` flag off the open dialog and says which before
+anything is picked.
+
+**The anchor.** Opening the slider hides the composer footer, so the next roster frame
+changes `composerSig`, `renderHead` rebuilds the composer, and the button the click handler
+captured is detached by the time `/effort/open` answers. Since 2026-09-01 `openMenu`
+refuses a detached anchor and runs `onDismiss`, which is the picker's `cancel`, so the
+menu never appeared and the slider was Escaped straight away. In the browser that shows up
+as `200 /effort/open` followed at once by `200 /effort/cancel`. The model picker was given
+"resolve the anchor after the await" in the same change. The effort picker now does the
+same thing (`composerEl?.effort`).
+
+**Not this trap, but it looked like one on the bench.** On a fresh session with one reply,
+the button read `effort` rather than the level. A 129 KB attachment record follows that
+reply, so `probe`'s 64 KB tail window never reaches the assistant record. It goes away
+once a session has a few turns. See
+[transcript#probe-samples-head-and-tail](transcript.md#probe-samples-head-and-tail).
+
 ## bypass permissions is not a mode
 
 **`bypass permissions` is on the mode line but is not a mode.** A session started with

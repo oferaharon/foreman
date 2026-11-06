@@ -1257,17 +1257,20 @@ own picker with the composer refusing to send until somebody pressed Esc in the 
 
 ### Choosing an effort level
 
-The effort level sits beside the model, and looks almost the same — but it is the opposite
-kind of control, and the panel says so rather than hiding it. Claude Code has **no
-per-session effort**: `/effort` offers only `Enter to confirm`, and what that writes is
-`effortLevel` for every session you start afterwards. The row inside `/model` is no
-different — pressing `s`, the "this session only" key, still writes it globally. Both were
-measured, and both had to be put back from a backup.
+The effort level sits beside the model and works the same way on current Claude Code: a
+pick is **for this session only**. Since v2.1.296, `/effort` offers `s for this session
+only`, and the panel commits with it. `s` writes nothing to disk, while `Enter` saves a
+default for every new session (`modelSettings.<model>.effortLevel`). Both were measured.
+An older Claude Code offers no `s`, and its Enter is the only way to commit, so on that
+screen the menu says the pick will be a default for new sessions *before* you choose.
 
-So the button carries a dotted underline instead of the model's plain one, its tooltip says
-what it changes, and the menu opens with a line saying it before you pick anything. Picking
-a level walks the marker along the track one press at a time — arrow keys write nothing, so
-nothing is committed until the `Enter` at the end.
+Picking a level walks the marker along the track one press at a time and then presses
+`s`. Arrow keys write nothing. The menu also carries **ultracode**, a checkbox where
+v2.1.296 draws a `Tab` toggle beside the track (older versions drew it as a sixth stop).
+Picking it flips the toggle and commits at the level you are already on.
+
+The button names the level from the transcript's last reply, so it changes after the next
+reply lands. The composer note says what was set straight away.
 
 ### Opening a Terminal on a session
 
