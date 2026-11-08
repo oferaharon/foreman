@@ -672,10 +672,11 @@ fact; the front end's own cascade traps are here too. Evidence:
   sketched.** 50% is the point that maximises the *weaker* of the spine's contrast against its
   worst ground and the marker's step over the spine, rather than trading one for the other.
   [rail-and-groups#the-spine-and-the-marker](docs/traps/rail-and-groups.md#the-spine-and-the-marker)
-- `web/app.js` (`sessionRow`) · `web/styles.css` (`.session`) — **A `▾` on the row's own path
-  can't be a `<button>`, because the row it sits inside already is one — or was.** Every row
-  is now `<div role="button" tabindex="0">` with its own `keydown` handler, and the invalid
-  `aria-selected` is now `aria-current` on the open row alone.
+- `web/app.js` (`sessionRow`) · `web/styles.css` (`.session`) · `web/rooms-band.js`
+  (`buildRow`) — **A `▾` on the row's own path can't be a `<button>`, because the row it sits
+  inside already is one — or was.** Every row is now `<div role="button" tabindex="0">` with
+  its own `keydown` handler, and the invalid `aria-selected` is now `aria-current` on the open
+  row alone. A room row followed for its funnel, and answers a key only when it is the target.
   [rail-and-groups#the-row-is-not-a-button](docs/traps/rail-and-groups.md#the-row-is-not-a-button)
 - `web/rail-fold.js` · `web/app.js` (`sessionRow`) — **The fold's title split is bound to the
   folder, never to the string's own last dash.** The split only fires when the title begins
@@ -1259,7 +1260,10 @@ files a folder into the group, the `▾`'s own move in reverse. Its funnel narro
 that one group (`web/rail-filter.js`), pinned and needs-you included — **drawing only, per
 browser, never a write**: the group's collapse is overridden on screen and left alone on disk,
 and a pin reorder while filtered still writes the whole order (`mergeFilteredOrder`), because
-the order route must name every pin.
+the order route must name every pin. A room row in the rooms band carries the same funnel and
+narrows the rail to that room's members, asleep ones included, resolved by `memberRow` — the
+**same** filter, one stored value (`g<N>` or `room:<id>`), so one holds at a time across both
+kinds; an archived room lets go of it, and the band itself is never filtered.
 
 **Snapshot / restore** (`server/snapshot.js`) keeps one slot in `~/.foreman/snapshot.json`,
 written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned}` per

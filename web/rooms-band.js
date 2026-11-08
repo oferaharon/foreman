@@ -563,9 +563,10 @@ export function patchBand(list, rooms = [], opts = {}) {
  * node can never keep a state the room has left. The press stops at the funnel: the row
  * around it opens the room, and a filter press must not also open it.
  *
- * `empty` is `aria-disabled`, never `disabled`: a click on a disabled control is not
- * dispatched to it at all, so it could not stop the press reaching the row, and a dead
- * funnel that opened the room would be the worse surprise. `none` keeps the button in the
+ * `empty` is `aria-disabled`, never `disabled`: a click on a disabled button never reaches
+ * its own handler, so it could not stop the press, and whether the row behind it then
+ * opened the room would be the browser's call. A dead funnel that opened the room would be
+ * the worse surprise. `none` keeps the button in the
  * row, invisible and out of the tab order, so an archived room's numbers line up with the
  * open rooms' above it — `.room-live`'s own reason — and a click there is the row's.
  */

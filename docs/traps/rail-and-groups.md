@@ -225,6 +225,17 @@ sitting there unnoticed: `aria-selected` belongs to `option`/`tab`, not a button
 `role="button"` div, and is now `aria-current` — set only on the open row, so a screen
 reader isn't walking past `aria-current="false"` on every other one.
 
+**The rooms band's row made the same move, for the same reason, when it grew a funnel.**
+`.room-row` was a `<button>` until the rail filter put a real `<button class="room-filter">`
+inside it; it is now `div role="button" tabindex="0"`, built once by `buildRow` and patched
+in place like the rest of the band (rooms#moving-a-row-round-a-focused-one-scrolls-the-band —
+a press focuses the funnel, so the row it sits in must never be moved or replaced). Two
+details differ from `sessionRow`, both deliberate. Its `keydown` answers only when the row
+itself is the target, because a key on the funnel bubbles to it and is the funnel's to answer.
+And the funnel with nobody to narrow to is `aria-disabled`, never `disabled`: a click on a
+disabled button never reaches its own handler, so it could not stop the press, and whether
+the row behind it then opened the room would be the browser's call.
+
 ## The fold's title split
 
 **The fold's title split is bound to the folder, never to the string's own last dash.** A
