@@ -532,6 +532,20 @@ the answer is no:
 whatever the setting says. Its tooltip says, in words, whether the session would sleep and
 why not ("Won't sleep yet: a background shell is running").
 
+**Keeping a whole room awake.** A group room's header carries the same toggle for everyone in
+the room, beside the funnel. It reads *keep awake* when nobody is held, *kept awake* (lit) when
+everybody is, and *kept awake 2/3* when some are; in a narrow pane the same box draws an eye, or
+just the count while the room is mixed. A press from all-on turns it off for all of them, and a
+press from anything else turns it on for all of them. It is one `POST /api/asleep/keep-awake`
+per member, the session button's own route, so the room and each member's own button read the
+same setting and every browser follows on the next frame. A sleeping member gets the flag by
+name and stays asleep: a press never wakes anyone, the flag does nothing while it sleeps, and
+from its next wake hibernation refuses it until somebody turns the flag off. A member with no
+live row and no sleep record is not stored, because a keep-awake for nobody would catch whoever
+is named that next: it is skipped, left out of the count, and named under the member strip. A
+human press only: no `foreman` tool reaches it and it types into no pane. Group rooms only, not
+the phone, and an archived room has no button.
+
 **The greyed row.** A sleeping session stays under its folder heading (and so inside its
 group), or in the pinned group under the row it sat beneath. It says how long it has been
 asleep, never enters the inbox, never counts as unread, and doesn't light a collapsed group's

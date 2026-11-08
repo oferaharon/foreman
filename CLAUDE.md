@@ -1324,7 +1324,10 @@ above). **Messages wait**: `sendOrHold` holds anything sent to a sleeping name
 moves it into the new pane's queue on wake, so delivery is still `PaneLock` →
 `assertNotBlocked`. A group room's pane greys its sleeping members and offers **wake N asleep**
 (`POST /api/rooms/:id/wake-asleep`): the same `wakeSleeper`, serially, holding `relaunching`
-across the whole run, a human press only. **Keep awake** is per session, by tmux name; **forget** (the bin on a
+across the whole run, a human press only. **Keep awake** is per session, by tmux name, and a group room's header sets it for every
+member it can reach (`roomKeepAwake`, `web/rooms-pane.js`): one POST per member through the same
+route, a human press only, waking nobody, and skipping a member with no live row and no sleep
+record rather than storing it. **Forget** (the bin on a
 sleeping row) drops the record and its held messages and leaves the transcript on disk — and is
 no longer the only way to drop them: the `×` on a sleeping row's `waiting N` (desktop only, one
 click, no confirm, `DELETE /api/asleep/:name/held` → `dropHeld`) drops the held messages alone
