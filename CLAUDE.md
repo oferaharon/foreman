@@ -1263,7 +1263,9 @@ and a pin reorder while filtered still writes the whole order (`mergeFilteredOrd
 the order route must name every pin. A room row in the rooms band carries the same funnel and
 narrows the rail to that room's members, asleep ones included, resolved by `memberRow` — the
 **same** filter, one stored value (`g<N>` or `room:<id>`), so one holds at a time across both
-kinds; an archived room lets go of it, and the band itself is never filtered.
+kinds; an archived room lets go of it, and the band itself is never filtered. The header of an
+open group-room pane wears the same funnel, painted from that one value by `paintGroupFilter`, so
+it and the band's always agree.
 
 **Snapshot / restore** (`server/snapshot.js`) keeps one slot in `~/.foreman/snapshot.json`,
 written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned}` per

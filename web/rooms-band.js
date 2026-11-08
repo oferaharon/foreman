@@ -570,8 +570,8 @@ export function patchBand(list, rooms = [], opts = {}) {
  * row, invisible and out of the tab order, so an archived room's numbers line up with the
  * open rooms' above it — `.room-live`'s own reason — and a click there is the row's.
  */
-function paintFilter(btn, room, state, onFilter) {
-  btn.className = `room-filter${state === 'on' ? ' is-on' : ''}${state === 'none' ? ' is-none' : ''}`;
+export function paintFilter(btn, room, state, onFilter, base = 'room-filter') {
+  btn.className = `${base}${state === 'on' ? ' is-on' : ''}${state === 'none' ? ' is-none' : ''}`;
   btn.tabIndex = state === 'none' ? -1 : 0;
   btn.setAttribute('aria-pressed', String(state === 'on'));
   if (state === 'empty') btn.setAttribute('aria-disabled', 'true');

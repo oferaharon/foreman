@@ -8492,3 +8492,24 @@ body.pin-reordering * { cursor: grabbing !important; }
    spelled out rather than left to the UA default. */
 .asleep-err { grid-column: 1 / -1; font-size: 0.78rem; color: var(--decision); }
 .asleep-err[hidden] { display: none; }
+
+/* The funnel in an open group room's header: the band row's toggle, in the header's own
+   button. Icon-only, so it takes the glyph's width and the cluster's gap and no word; lit in
+   the accent while the rail is filtered to this room, dim and inert when nobody in the room
+   is on the rail. `[hidden]` is spelled out because `.ghost-btn`'s display would beat it. */
+.main-head.is-group .room-head-filter {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* The fold button's own box (`.room-fold-btn`), for its reason: an icon button centred in
+     `.head-meta` comes out shorter than the two word buttons, and a step in a row reads as
+     one of them being broken. */
+  align-self: stretch;
+  line-height: 0;
+  padding: 0 0.4rem;
+  color: var(--ink-muted);
+}
+.main-head.is-group .room-head-filter:hover { color: var(--accent); }
+.main-head.is-group .room-head-filter[hidden] { display: none; }
+.main-head.is-group .room-head-filter.is-on { color: var(--accent); border-color: var(--accent); }
+.main-head.is-group .room-head-filter[aria-disabled='true'] { cursor: default; opacity: 0.4; }

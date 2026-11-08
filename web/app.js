@@ -176,7 +176,7 @@ import { colourFor } from './session-colour.js';
 // the signature are things a node test can hold, and a render function inlined here is
 // neither. `patchBand` reaches for `document` the way `buildTrustCard` does, and is
 // driven by the same kind of stub in its own test.
-import { patchBand, bandSig, nextBandTick, relightBand } from './rooms-band.js';
+import { patchBand, bandSig, nextBandTick, relightBand, filterState, paintFilter } from './rooms-band.js';
 import { newestCreatedFirst } from './rooms-newest.js';
 // The create modal's arithmetic: who may be in a room, in what order they are offered, and
 // what stops the button being pressable. The seventh, for the band's own reason one line up
@@ -9532,7 +9532,20 @@ function createPane(slot, host) {
     close.textContent = 'close';
     close.title = 'Close this room';
     close.onclick = closeGroup;
+
+    /*
+     * The same funnel the room's row in the rooms band wears, and the same toggle — it sets
+     * or clears `room:<id>` through `setRailFilter`, so the two can never disagree: both are
+     * painted from `railFilter.value` and from nothing of their own. Painted by
+     * `paintGroupFilter`, which `renderGroupHead` calls on the roster beat and `setRailFilter`
+     * calls the moment the value changes. Nothing about it joins `composerSig`.
+     */
+    const filter = document.createElement('button');
+    filter.type = 'button';
+    filter.append(funnelIcon());
+    view.groupHeadEl.filter = filter;
     meta.append(fold, close);
+    fold.after(filter); // second in the cluster: the fold stays first
     head.append(meta);
     box.append(head);
 
@@ -9599,6 +9612,7 @@ function createPane(slot, host) {
     // why the disabled `split` button came off a lead's header. Re-asked on the roster beat
     // because the second pane can be opened and closed under this head.
     if (els.fold) els.fold.hidden = panes.length < 2;
+    paintGroupFilter();
 
     /*
      * The archive control, beside `close`.
@@ -9633,6 +9647,22 @@ function createPane(slot, host) {
       btn.onclick = () =>
         armConfirm(btn, `archive “${room.name || 'this room'}”?`, () => patchGroup({ archived: true }, btn));
     }
+  }
+
+  /** The header's funnel, from the room and the stored filter alone — assigned, never toggled
+   *  (`paintFilter`). An archived room draws none: a header has no column to keep aligned. */
+  function paintGroupFilter() {
+    const btn = view.groupHeadEl?.filter;
+    const room = groupLive();
+    if (!btn || !room) return;
+    const target = filterTarget(railFilter.value);
+    const st = filterState(room, {
+      sessions: state.sessions,
+      asleep: state.asleep,
+      filterId: target?.kind === 'room' ? target.id : null,
+    });
+    paintFilter(btn, room, st, (id) => setRailFilter(id ? roomFilterValue(id) : ''), 'ghost-btn room-head-filter');
+    btn.hidden = st === 'none';
   }
 
   /** Swap the heading for an input, and put it back whatever happens next. */
@@ -18562,6 +18592,10 @@ function createPane(slot, host) {
      *  stored: a slot that has stopped holding a room answers `null` and loses its class in
      *  the same beat. */
     groupRoomId: () => (view.kind === 'group-room' ? view.groupRoom?.id ?? null : null),
+    /** Repaint the open room's header funnel — `setRailFilter` calls it when the value moves. */
+    paintGroupFilter: () => {
+      if (view.kind === 'group-room') paintGroupFilter();
+    },
     /** Put one bot in this pane. `openBotPane` is the caller that decides which pane. */
     openBot,
     /** The bot this pane is holding, or null — what the band reads to mark a row open, and
@@ -19264,6 +19298,7 @@ function setRailFilter(id) {
   if (!was && id) scrollBeforeFilter = el.railList.scrollTop;
   railFilter.set(id || '');
   renderRail();
+  for (const p of panes) p.paintGroupFilter();
   if (was !== railFilter.value) {
     el.railList.scrollTop = !railFilter.value && scrollBeforeFilter != null ? scrollBeforeFilter : 0;
     if (!railFilter.value) scrollBeforeFilter = null;

@@ -378,7 +378,9 @@ one drawn open for the filter's duration and none of their funnels lit. A member
 its nested workers, as it does under a group filter. The rooms band itself is never
 filtered — it is where you switch rooms or let go — and the room's funnel stays lit in the
 accent while it holds. A room with nobody left on the rail, live or asleep, offers a dimmed
-funnel that does nothing, and an archived room offers none.
+funnel that does nothing, and an archived room offers none. The header of an open room pane
+wears the same funnel, second in its button cluster after the fold: one toggle, painted from the
+same stored value, so pressing either lights both, and an archived room's header draws none.
 
 A **crossed-out funnel** appears in the rail head, just left of `recent`, only while a filter
 holds, and its hover names what is filtered — `the group Tools`, `the room alpha-beta`;
