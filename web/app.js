@@ -58,7 +58,17 @@ import { botsFolded } from './prefs.js';
 // What the composer's Clear button sends first — a browser preference, set in the settings box.
 import { clearPrep } from './prefs.js';
 import { railFilter } from './prefs.js';
-import { filterFolders, hiddenWanting, inFilter, keptLeads, mergeFilteredOrder } from './rail-filter.js';
+import {
+  filterLabel,
+  filterTarget,
+  hiddenWanting,
+  inFilter,
+  keptLeads,
+  mergeFilteredOrder,
+  resolveFilter,
+  roomFilterValue,
+} from './rail-filter.js';
+import { funnelIcon } from './funnel-icon.js';
 // The two-step Clear button's rule: which word it wears and when its second press is allowed.
 import { CLEAR_COMMAND, clearView, DEFAULT_CLEAR_PREP, startClear, stepClear } from './clear-phase.js';
 // What a session still has running behind its composer, in Claude Code's own words. Two
@@ -1631,10 +1641,10 @@ function pinGrip(s) {
     e.preventDefault();
     e.stopPropagation();
     if (pinDrag) return;
-    // One place among the pins that are *drawn* — with the rail filtered to a group, the
-    // others are off screen and are not stepped past (`mergeFilteredOrder`).
-    const folders = railFilterFolders();
-    const order = pinnedRows().filter((x) => inFilter(x, folders, keptLeads(state.sessions, folders))).map(pinKey);
+    // One place among the pins that are *drawn* — with the rail filtered to a group or a
+    // room, the others are off screen and are not stepped past (`mergeFilteredOrder`).
+    const filter = railFilterNow();
+    const order = pinnedRows().filter((x) => inFilter(x, filter, keptLeads(state.sessions, filter))).map(pinKey);
     const from = order.indexOf(pinKey(s));
     const next = fullPinOrder(movedPinOrder(order, from, e.key === 'ArrowUp' ? from - 1 : from + 2));
     if (next) savePinOrder(next);
@@ -1739,7 +1749,7 @@ function endPinDrag(e, drop) {
   }
   if (e && drop && d.active) d.target = pinDropTarget(d, e.clientX, e.clientY);
   const next = drop && d.active && d.target != null ? movedPinOrder(d.blocks.map((b) => b.paneId), d.from, d.target) : null;
-  // The blocks are the *drawn* pins, so with the rail filtered to a group they are not every
+  // The blocks are the *drawn* pins, so with the rail filtered they are not every
   // pin — and the order route must name every one. `fullPinOrder` writes the drawn ones back
   // into their own slots and leaves the hidden ones where they were.
   const full = fullPinOrder(next);
@@ -4432,7 +4442,13 @@ function renderRoomsBand() {
   // the signature spells only each room's `live/total`, so a beat on which nobody's session
   // came or went still re-signs to the same string and patches nothing.
   const sessions = state.sessions;
-  const sig = bandSig(rooms, { openIds, archivedCollapsed, sessions });
+  // The rail filter, as the room id it is on or null — each row's funnel is lit by it, and
+  // offered by whether the room has anybody on the rail, asleep included, to narrow to. The
+  // band itself is never filtered: it is how a filter is switched or let go of.
+  const asleep = state.asleep;
+  const target = filterTarget(railFilter.value);
+  const filterId = target?.kind === 'room' ? target.id : null;
+  const sig = bandSig(rooms, { openIds, archivedCollapsed, sessions, asleep, filterId });
   if (sig === roomsSig) return;
   roomsSig = sig;
 
@@ -4440,8 +4456,11 @@ function renderRoomsBand() {
     openIds,
     archivedCollapsed,
     sessions,
+    asleep,
+    filterId,
     onOpen: openGroupRoom,
     onToggleArchived: toggleArchivedRooms,
+    onFilter: (id) => setRailFilter(id ? roomFilterValue(id) : ''),
   });
   scheduleRoomsTick();
 }
@@ -5051,12 +5070,14 @@ function renderRail() {
   // A pinned sleeper goes back under the pinned row it sat beneath (`placePinned`), so the
   // group reads as it did before it slept — and it moves like any other pinned row: the
   // order route takes live rows by pane and sleepers by name, one order across both.
-  // The rail narrowed to one group (`web/rail-filter.js`): every list below is cut to the
-  // rows whose folder is filed there — pinned and the inbox included, by the maintainer's
-  // ruling, so the group is all there is on screen. A stale id — the group deleted, or with
+  // The rail narrowed to one group or one room (`web/rail-filter.js`): every list below is
+  // cut to the rows whose folder is filed in the group, or to the room's members — pinned
+  // and the inbox included, by the maintainer's ruling, so the group or the room is all
+  // there is on screen. A stale value — the group deleted, the room deleted or archived, or
   // nothing left to draw — clears itself, but only once a roster frame has arrived: before
-  // that `state.groups` is the empty boot value and every id reads as deleted.
-  const filter = filterFolders(state.groups, railFilter.value || null);
+  // that `state.groups` and `state.rooms` are the empty boot values and every id reads as
+  // deleted.
+  const filter = railFilterNow();
   if (railFilter.value && !filter && rosterSeen) return void setRailFilter('');
   const filterLeads = keptLeads(state.sessions, filter);
   const shown = (s) => inFilter(s, filter, filterLeads);
@@ -5107,7 +5128,8 @@ function renderRail() {
   // promised: out of the inbox, never off the screen.
   const inInbox = new Set(inbox.map((s) => s.id));
   const leadRows = new Map(); // repo -> lead session
-  // And only leads the filter lets through: a lead filed in another group is not drawn, so
+  // And only leads the filter lets through: a lead filed in another group, or outside the
+  // room, is not drawn, so
   // its workers fall back to their own folder headings like any other unnested worker.
   for (const s of state.sessions) if (s.isLead && !inInbox.has(s.id) && shown(s)) leadRows.set(s.paneCwd, s);
   const nestedWorkers = new Map(); // lead session id -> [workers]
@@ -5134,8 +5156,9 @@ function renderRail() {
   // the "an empty heading isn't drawn" rule measures what is drawn, and a greyed row is.
   rest = mergeByActivity(rest, sleepers.filter((s) => !s.pinned && shown(s)));
 
-  // A filter over a group with nothing left to draw anywhere — every session in it closed or
-  // filed elsewhere — would leave a blank rail with a toggle in its head. It lets go instead.
+  // A filter over a group or a room with nothing left to draw anywhere — every session in it
+  // closed, filed elsewhere or removed from the room — would leave a blank rail with a toggle
+  // in its head. It lets go instead.
   if (filter && rosterSeen && !pinned.length && !inbox.length && !rest.length) return void setRailFilter('');
   /** Only the rows that are running — what the collapsed group's dot may be lit by. */
   const awake = (list) => list.filter((s) => !s.asleep);
@@ -5235,9 +5258,11 @@ function renderRail() {
   const filed = new Set();
   for (const g of state.groups) {
     for (const f of g.folders) filed.add(f);
-    // Filtered, the other groups have nothing in `folders` already — this only says so
-    // before the arithmetic rather than after it.
-    const filtered = Boolean(filter) && g.id === railFilter.value;
+    // Filtered to a group, the other groups have nothing in `folders` already — this only
+    // says so before the arithmetic rather than after it. Filtered to a room, every group is
+    // in play: its members are filed wherever they are filed, and each group that holds one
+    // is drawn, open, with the rest of its rows gone. `!count` below drops the others.
+    const filtered = Boolean(filter) && (filter.kind === 'room' || g.id === filter.id);
     if (filter && !filtered) continue;
     const mine = g.folders.filter((f) => folders.has(f));
     const count = mine.reduce((n, f) => n + folders.get(f).length, 0);
@@ -5285,7 +5310,9 @@ function renderRail() {
     // `· N`, which is about rows, and a sleeper is drawn as one.
     //
     // The filtered group is drawn open whatever its stored collapse says: a filter is "show
-    // me this group", and a filter over a fold would show one heading. Nothing is written —
+    // me this group", and a filter over a fold would show one heading. Under a room filter
+    // every drawn group is, for the same reason — a member behind a fold is a member the
+    // filter promised and did not show. Nothing is written —
     // the collapse is the group's, shared between windows, and clearing the filter has to
     // hand back exactly the rail it found — so `folded` is what is drawn, never stored.
     const folded = g.collapsed && !filtered;
@@ -5537,7 +5564,9 @@ function folderHeading(folder, inGroup, count = 0) {
 function groupHeader(g, count, summary = null, filtered = false) {
   // `filtered` draws the group open and leaves its stored collapse alone (`renderRail`), so
   // the toggle is inert while it holds: a press would write a fold nothing on screen shows.
+  // It holds under a room filter too, and then the funnel is not this group's to light.
   const folded = g.collapsed && !filtered;
+  const lit = filtered && filterTarget(railFilter.value)?.kind === 'group';
   const row = document.createElement('div');
   row.className = `group-label shelf-label${folded ? ' collapsed' : ''}`;
 
@@ -5546,7 +5575,9 @@ function groupHeader(g, count, summary = null, filtered = false) {
   toggle.setAttribute('aria-expanded', String(!folded));
   if (filtered) {
     toggle.setAttribute('aria-disabled', 'true');
-    toggle.title = `The rail is filtered to ${g.name} — clear the filter to fold it`;
+    toggle.title = lit
+      ? `The rail is filtered to ${g.name} — clear the filter to fold it`
+      : `The rail is filtered to a room — clear the filter to fold ${g.name}`;
   } else {
     toggle.title = g.collapsed ? `Open ${g.name}` : `Collapse ${g.name}`;
     toggle.onclick = () => setGroupCollapsed(g, !g.collapsed);
@@ -5612,8 +5643,9 @@ function groupHeader(g, count, summary = null, filtered = false) {
   };
   row.append(menu);
   // The third, rightmost: narrow the rail to this group. Its own function so the pair above
-  // stays the pair its tests pin.
-  row.append(groupFilterButton(g, filtered));
+  // stays the pair its tests pin. Lit only by this group's own filter — under a room filter
+  // it is the way across to this group, which replaces the room's.
+  row.append(groupFilterButton(g, lit));
 
   /*
    * Folded away, and what that is hiding — the second line, and the one state it is drawn
@@ -5670,38 +5702,10 @@ function groupHeader(g, count, summary = null, filtered = false) {
   return row;
 }
 
-/** A funnel, in `currentColor` — the filter's one glyph, on the group header and in the
- *  rail head's clear toggle, where a slash through it says what pressing it does. */
-function funnelIcon(struck = false) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('width', '11');
-  svg.setAttribute('height', '11');
-  svg.setAttribute('aria-hidden', 'true');
-  svg.setAttribute('focusable', 'false');
-  const path = document.createElementNS(ns, 'path');
-  path.setAttribute('d', 'M2 3h12l-4.6 5.4v4.4l-2.8 1.4V8.4z');
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '1.5');
-  path.setAttribute('stroke-linejoin', 'round');
-  svg.append(path);
-  if (struck) {
-    const slash = document.createElementNS(ns, 'path');
-    slash.setAttribute('d', 'M1.5 1.5l13 13');
-    slash.setAttribute('stroke', 'currentColor');
-    slash.setAttribute('stroke-width', '1.5');
-    slash.setAttribute('stroke-linecap', 'round');
-    svg.append(slash);
-  }
-  return svg;
-}
-
 /**
  * The group header's filter: narrow the rail to this group, or — pressed on the group it is
- * already narrowed to — let go. One group at a time, so pressing it on another group moves
- * the filter there. A `.label-menu` like the `+` and `⋯` beside it, so it reserves the same
+ * already narrowed to — let go. One filter at a time across groups and rooms, so pressing it
+ * on another group, or while a room's filter holds, moves the filter here. A `.label-menu` like the `+` and `⋯` beside it, so it reserves the same
  * 1.1rem column and costs the heading width, never height (the sticky offset below hangs
  * off that height).
  */
@@ -19236,16 +19240,24 @@ if (el.roomsAdd) el.roomsAdd.onclick = openCreateRoom;
 // only control: a bot is registered from the CLI, never from here.
 if (el.botsHead) el.botsHead.onclick = toggleBotsFold;
 
-/** The folders the rail is currently filtered to, or null — for readers outside
- *  `renderRail`, which takes the same answer for itself. */
-function railFilterFolders() {
-  return filterFolders(state.groups, railFilter.value || null);
+/** The filter the rail is drawn through right now (`resolveFilter`), or null — one answer
+ *  for `renderRail` and for the readers outside it, the pinned grip's arrows among them. */
+function railFilterNow() {
+  return resolveFilter(railFilter.value || null, {
+    groups: state.groups,
+    rooms: state.rooms,
+    sessions: state.sessions,
+    asleep: state.asleep,
+  });
 }
 
 /**
- * Narrow the rail to one group, or `''` to let go. This browser's alone (`web/prefs.js`),
- * and nothing else is touched — collapse state, `recent`, pins — so letting go draws exactly
- * the rail the filter found, scrolled where it was.
+ * Narrow the rail to one group (its id) or one room (`roomFilterValue`), or `''` to let go.
+ * One value for both kinds, so setting either replaces the other. This browser's alone
+ * (`web/prefs.js`), and nothing else is touched — collapse state, `recent`, pins — so letting
+ * go draws exactly the rail the filter found, scrolled where it was. Switching from one
+ * filter to another keeps the scroll the *unfiltered* rail had, so letting go of the second
+ * still hands back the rail as it was before the first.
  */
 function setRailFilter(id) {
   const was = railFilter.value;
@@ -19261,19 +19273,18 @@ function setRailFilter(id) {
 /**
  * The clear toggle in the rail head: drawn only while a filter holds, and carrying how many
  * sessions the filter is keeping off screen that want the maintainer — so nothing outside
- * the group waits on them silently. A bare number, not "2 need you": the head is at its
- * width limit (rail-and-groups#a-fifth-button-in-the-rail-head), and the words are in the
- * tooltip and the accessible name.
+ * the group or room waits on them silently. A bare number, not "2 need you": the head is at
+ * its width limit (rail-and-groups#a-fifth-button-in-the-rail-head), and the words — which
+ * group or which room — are in the tooltip and the accessible name.
  */
-function paintRailFilter(folders, hidden) {
+function paintRailFilter(filter, hidden) {
   const btn = el.railFilter;
   if (!btn) return;
-  btn.hidden = !folders;
-  if (!folders) return;
-  const g = state.groups.find((x) => x.id === railFilter.value);
-  const name = g?.name || 'one group';
+  btn.hidden = !filter;
+  if (!filter) return;
+  const name = filterLabel(filter);
   const need = hidden ? ` — ${hidden} session${hidden === 1 ? '' : 's'} outside it need${hidden === 1 ? 's' : ''} you` : '';
-  btn.title = `Filtered to ${name}${need}. Show every group again.`;
+  btn.title = `Filtered to ${name}${need}. Show every session again.`;
   btn.setAttribute('aria-label', `Clear the filter on ${name}${need}`);
   el.railFilterCount.textContent = hidden > 0 ? String(hidden) : '';
 }

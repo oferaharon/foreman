@@ -359,17 +359,30 @@ the server — unlike a group's collapse state, which is a fact about your filin
 follow you between windows, this is a fact about the window you're in, and a phone and a
 desktop want different answers.
 
-**The funnel** at the right end of every group header narrows the rail to that group, one
-group at a time — pressing it on another group moves the filter there, pressing it again on
-the same one lets go. While it holds, **everything outside the group is hidden, Pinned and
+**The funnel** at the right end of every group header narrows the rail to that group, and
+the one at the right end of every room row in the rooms band narrows it to that room's
+members. One filter at a time across both kinds — pressing a funnel on another group or room
+moves the filter there, pressing it again on the same one lets go. While it holds, **everything outside the group is hidden, Pinned and
 Needs you included**: a pinned row or a waiting session filed in that group still shows, in
 its usual section at the top, and nothing from any other group or ungrouped folder does. The
 group itself is drawn open even if you had folded it; its collapse is not touched, and its
 caret does nothing until the filter is cleared. A filter set in the grouped rail also cuts
 the `recent` list down to the group's rows.
 
+A **room's** filter keeps its members and nothing else — resolved exactly as the room's own
+member strip resolves them, by tmux session name first, so a session that happens to share a
+member's folder or a member's old pane is not let in. A member that is asleep stays, greyed,
+where it sleeps. Members keep their usual places: a pinned member under Pinned, a waiting one
+under Needs you, the rest under their own group and folder headings, every group that holds
+one drawn open for the filter's duration and none of their funnels lit. A member lead keeps
+its nested workers, as it does under a group filter. The rooms band itself is never
+filtered — it is where you switch rooms or let go — and the room's funnel stays lit in the
+accent while it holds. A room with nobody left on the rail, live or asleep, offers a dimmed
+funnel that does nothing, and an archived room offers none.
+
 A **crossed-out funnel** appears in the rail head, just left of `recent`, only while a filter
-holds; pressing it hands back exactly the rail you had — folds, `recent`, scroll position.
+holds, and its hover names what is filtered — `the group Tools`, `the room alpha-beta`;
+pressing it hands back exactly the rail you had — folds, `recent`, scroll position.
 It carries a small red count of the sessions the filter is hiding that want you (the ones
 Needs you would have shown, pinned ones included), so nothing waits on you silently; no
 count when nothing does. It is a single icon and an out-of-flow badge because the head has
@@ -378,7 +391,8 @@ no room for a word: at the default rail width it fits on one line with 5px to sp
 Pinned rows can still be reordered while filtered, by drag or arrow keys: the drawn pins move
 among the places they already hold, and the hidden ones stay exactly where they were — the
 order written is always the whole order. The filter is per browser, like `recent`, survives
-a reload, and lets go on its own when its group is deleted or has nothing left to draw. It
+a reload, and lets go on its own when its group is deleted, its room is archived, or it has
+nothing left to draw. It
 is drawing and nothing else: the roster, notifications, the queue and the server never hear
 of it. Desktop only. The rules are `web/rail-filter.js`.
 
@@ -1516,7 +1530,9 @@ it in words (`2 of 3 members live`), and it repaints when a member comes or goes
 every roster beat. After the name, how long ago the room was last posted in, in the rail's own
 spelling (`now`, `5m`, `3h`, `2d`), moved on by the same timer as the `◎`; a room nobody has
 spoken in shows none. Archived rooms fold into a
-collapsed `archived · N`, and an archived row carries its age but no dot. The band's head and
+collapsed `archived · N`, and an archived row carries its age but no dot. Every open row ends
+in a **funnel** that narrows the rail to the room's members (the rail filter, above); pressing it
+never opens the room. The band's head and
 its `+ room` are in the rail even when there are no rooms at all — a control that only appears
 once you have used it is a control nobody finds.
 

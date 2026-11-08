@@ -7065,6 +7065,36 @@ body.pin-reordering * { cursor: grabbing !important; }
   padding: 0 0.35rem;
 }
 
+/* The row's funnel: narrow the rail to this room's members (`filterState`, `web/rooms-band.js`).
+   The group header's `.shelf-filter` in this band's grammar — the same reserved 1.1rem
+   column at the right end, the same glyph (`web/funnel-icon.js`), permanently there at 40%
+   for that header's reason (a control you can only find by hovering is a control nobody
+   finds), full on the row's hover or focus, and lit in the accent on the room the rail is
+   filtered to, the one control in the band that says why the rest of the rail is gone. No
+   padding and no margin: the row's own `gap` spaces it, and the row's height is unchanged.
+   No transition: it is patched on a roster beat, and an automated window runs none. */
+.room-filter {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  padding: 0;
+  color: var(--ink-faint);
+  opacity: 0.4;
+}
+.room-row:hover .room-filter,
+.room-row:focus-within .room-filter,
+.room-filter:focus-visible { opacity: 1; }
+.room-filter:hover { color: var(--accent); }
+.room-filter.is-on { opacity: 1; color: var(--accent); }
+/* Nobody on the rail to narrow to: drawn, so the column does not jump, and inert. */
+.room-row .room-filter[aria-disabled='true'] { cursor: default; opacity: 0.2; color: var(--ink-faint); }
+/* An archived room: the column is kept so its numbers line up with the open rows above,
+   and nothing is drawn in it. `visibility`, never `[hidden]` — that would give the
+   column back and move every number on the row. */
+.room-filter.is-none { visibility: hidden; }
+
 /* The archived fold: the rail's group heading in miniature, down to the caret, because it
    does the one thing that heading does. A sibling of the rows it opens rather than a box
    around them — see `bandEntries` — so nothing has to be taken apart to be patched. */
