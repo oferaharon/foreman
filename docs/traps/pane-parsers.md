@@ -89,6 +89,57 @@ called narrow is a standing grant. Here the asymmetry inverts: a tip we fail to 
 costs one wrong header line — today's bug — while a body line wrongly taken for a tip loses
 the command from the card entirely: same reasoning, opposite answer.
 
+## The Chrome box has no footer
+
+**Claude in Chrome's permission box draws no footer and no question, and says Allow and Deny
+instead of Yes and No — MEASURED on v2.1.296, in the sandbox.** It is its own component in
+Claude Code, not the `Tool use … (MCP)` box every other MCP tool gets (that one was captured
+the same afternoon from a scratch stdio server and still parses: title, `(MCP)` subject,
+`Do you want to proceed?`, `Esc to cancel · Tab to amend`). The Chrome box is:
+
+    ──────────────────────────────────────────
+     Claude in Chrome wants to navigate on 127.0.0.1:48796
+    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+     http://127.0.0.1:48796/
+    ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+     ❯ 1. Allow
+       2. Allow all actions on 127.0.0.1:48796 for this session
+       3. Deny (esc)
+
+or, for an action that names no page, the bare title over a blank line and `1. Allow` /
+`2. Deny (esc)`. Nothing is drawn below the last row — not a footer, not the composer, and
+**not the background-agent list either**: with two subagents running, that list is drawn
+under the composer and comes back the moment the box is answered, but never under the box
+(`prompt-chrome-agents-80x23.txt`). `parsePrompt` found no `FOOTER_RE` line in the last
+three, returned null at its first test, and `dialogTitle` still found the sentence under the
+rule — so the panel named the box a dialog, drew "… is open in the terminal", and offered no
+buttons. A regression only in the sense that the box is new; nothing here had ever read it.
+
+What reads it now, all in `server/permission.js`:
+
+- **`ESC_ROW_RE` stands in for the footer**, on three conditions as narrow as the footer: the
+  **last** non-empty line (a footer may sit anywhere in the last three; this may not), in
+  exactly `OPTION_RE`'s shape, with the label exactly `Deny (esc)`. `OPTION_RE` itself is not
+  loosened. Every other screen — question, plan, model, effort, trust gate — draws a footer or
+  key hint under its last option, and each of their parsers is pinned refusing all eight
+  captures, and `parsePrompt` refusing theirs, by the existing cross-refusal lists.
+- **No question is searched for** on that box: a fenced URL that ends in `?` is the subject.
+- **The title is rejoined** (`joinTitle`), because a long host at 70 columns wraps the
+  sentence onto a second line at the title's own column, and read the ordinary way the host
+  became the subject and the URL slid into detail. Only on this box: the Edit box's
+  `Edit file` / `sample.txt` share a column too, and are two fields.
+- **`classify` reads `Allow` as it reads `Yes`.** The bare `Allow` is narrow, an `Allow` that
+  qualifies itself is broad — option 2 here is a standing grant for every action on the site,
+  the option-2 trap in new words — and `Deny` refuses. Left as `other`, the broad row would
+  have been armed by neither client.
+
+The captures are seven at 220, 80×23 and 70 plus the agents one; every box was raised by a
+sandbox `alpha` session asking the Chrome tools to act on a page served on loopback, and
+every box was answered Deny — in the terminal, and once from a scratch panel's own button,
+which is the end-to-end proof. Raising the three-option box needs no Allow first: a
+`navigate` call with an explicit tab id goes straight to it. The mode line the box hides
+reads `⏸ manual mode on`, which `MODES` already knew; it was never a suspect in the end.
+
 ## Permission prompts never reach the transcript
 
 **Permission prompts never reach the transcript.** The pane is the only source — and the

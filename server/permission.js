@@ -25,8 +25,39 @@
  *    Esc to cancel · Tab to amend     <- footer
  */
 
-/** The footer is the only reliable "a prompt is open right now" marker. */
+/** The footer is the only reliable "a prompt is open right now" marker — on most boxes. */
 const FOOTER_RE = /(Esc to cancel|Enter to confirm|esc to reject)/i;
+
+/**
+ * The one box that draws no footer, and what stands in for it.
+ *
+ * Claude in Chrome's permission box (v2.1.296, `test/fixtures/prompt-chrome*.txt`) is its
+ * own component, not the `Tool use … (MCP)` box every other MCP tool gets — and it has no
+ * question line and **no key-hint footer at all**. Its escape hint rides on its last option
+ * instead:
+ *
+ *   ──────────────────────────────────────────
+ *    Claude in Chrome wants to navigate on 127.0.0.1:48796   <- title
+ *   ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ *    http://127.0.0.1:48796/                                <- subject, fenced
+ *   ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ *    ❯ 1. Allow
+ *      2. Allow all actions on 127.0.0.1:48796 for this session
+ *      3. Deny (esc)                                        <- the footer's stand-in
+ *
+ * (or `1. Allow` / `2. Deny (esc)` under a bare title, when the action names no page.)
+ * With nothing matching `FOOTER_RE`, `parsePrompt` returned null at its first test and the
+ * panel named the box a dialog it could only point at the terminal for.
+ *
+ * So this row is accepted as the end of a box, on three conditions that keep it as narrow
+ * as the footer it replaces: it is the **last** non-empty line on screen (a footer may sit
+ * anywhere in the last three; this may not, because nothing is drawn below it), it is a
+ * numbered row in exactly `OPTION_RE`'s shape, and its label is exactly `Deny (esc)`. The
+ * shared `OPTION_RE` is untouched. Every other screen here — question, plan, model, effort,
+ * trust gate — draws a footer or a key hint below its last option, so none of them can end
+ * on this line; the cross-refusal tests pin that against the real captures.
+ */
+const ESC_ROW_RE = /^\s*(?:❯\s*)?\d{1,2}\.\s+Deny \(esc\)\s*$/;
 
 /** ` ❯ 1. Yes` / `   3. No` */
 const OPTION_RE = /^\s*(❯)?\s*(\d{1,2})\.\s+(.+?)\s*$/;
@@ -52,10 +83,11 @@ const TRANSCRIPT_RE = /^\s*[⏺✻✳✽❯⎿⚠]/;
 const MODE_RE = /switch to .+ mode|bypass permissions/;
 
 /**
- * The bare yes: `Yes`, and nothing after it but punctuation or a key hint. This is the
- * only approval that grants exactly the call in front of you.
+ * The bare yes: `Yes` — or `Allow`, the Chrome box's word for it — and nothing after it but
+ * punctuation or a key hint. This is the only approval that grants exactly the call in front
+ * of you.
  */
-const NARROW_YES_RE = /^yes[\s.!]*(\([^)]*\))?[\s.!]*$/;
+const NARROW_YES_RE = /^(?:yes|allow)[\s.!]*(\([^)]*\))?[\s.!]*$/;
 
 /** The trust gate's own yes — see the carve-out in `classify`. */
 const TRUST_RE = /^yes,?\s+i trust\b/;
@@ -97,6 +129,14 @@ const TRUST_RE = /^yes,?\s+i trust\b/;
  * and "never ask me anything again" want to be drawn differently, and folding the second
  * into the first would have been the same mistake one level up.
  *
+ * **The same rule in a second vocabulary.** Claude in Chrome's box (see `ESC_ROW_RE`) says
+ * `Allow` / `Allow all actions on <host> for this session` / `Deny (esc)` where every other
+ * box says Yes and No. The words are new and the structure is not, so the rule is extended
+ * rather than added to: bare `Allow` is the narrow approval, an `Allow` that qualifies
+ * itself is broad — that row is a standing grant for every action on a site, option 2 as
+ * ever — and `Deny` refuses. Left as `other`, the broad row would be armed by neither
+ * client; the burden of proof still sits on being narrow.
+ *
  * **One carve-out**: the trust gate's `Yes, I trust this folder`. It is a qualified yes and
  * it is a standing decision, and it stays `approve` all the same, because that screen is
  * routed away from this card entirely rather than classified for it. `web/trust-gate.js` is
@@ -115,8 +155,8 @@ const TRUST_RE = /^yes,?\s+i trust\b/;
  */
 function classify(label) {
   const l = label.toLowerCase();
-  if (/^no\b|^don'?t|^cancel/.test(l)) return 'deny';
-  if (!/^yes\b/.test(l)) return 'other';
+  if (/^no\b|^don'?t|^cancel|^deny\b/.test(l)) return 'deny';
+  if (!/^(?:yes|allow)\b/.test(l)) return 'other';
   if (MODE_RE.test(l)) return 'approve-mode';
   if (TRUST_RE.test(l)) return 'approve';
   return NARROW_YES_RE.test(l) ? 'approve' : 'approve-always';
@@ -190,6 +230,36 @@ function dropTip(body) {
 }
 
 /**
+ * The footerless box's title, rejoined where it wrapped.
+ *
+ * Its title is a sentence that names the site — `Claude in Chrome wants to navigate on
+ * <host>` — and at 70 columns a long host pushes it onto a second line at the title's own
+ * column (`test/fixtures/prompt-chrome-wrapped.txt`). Read the ordinary way, the host
+ * became the `subject` and the URL slid into `detail`, so the card's header said *what*
+ * without *where*. Unlike the Bash and Edit boxes, nothing below this title sits at its
+ * column by design: the body is the fenced URL (behind a `╌` divider) or nothing, and
+ * Claude Code's own notices under it come after a blank. So the title is every line from
+ * the first down to the first blank, divider or change of indent — at most four, the same
+ * belt `dropTip` wears — and only on this box; the Edit box's `Edit file` / `sample.txt`
+ * share a column and are two fields.
+ */
+function joinTitle(body) {
+  if (!body.length) return body;
+  let end = 1;
+  while (
+    end < body.length &&
+    end < 4 &&
+    !body[end].gapAbove &&
+    !body[end].ruleAbove &&
+    body[end].indent === body[0].indent
+  ) {
+    end += 1;
+  }
+  const title = { ...body[0], text: body.slice(0, end).map((e) => e.text).join(' ') };
+  return [title, ...body.slice(end)];
+}
+
+/**
  * @param {string} text  raw `capture-pane` output
  * @returns {null | {title, subject, detail, question, options, cursor, raw}}
  */
@@ -197,10 +267,16 @@ export function parsePrompt(text) {
   const lines = text.split('\n').map((l) => l.replace(/\s+$/, ''));
 
   // Find the footer among the last few non-empty lines. Anything older is scrollback
-  // from a prompt that has already been answered.
+  // from a prompt that has already been answered. Failing that, the Chrome box's own last
+  // row, which is its footer's stand-in and must be the very last line (`ESC_ROW_RE`).
+  // `footerIdx` is where the option walk starts upward from — one past that row, then,
+  // so the row itself is walked as the box's last option.
   const nonEmptyIdx = lines.map((l, i) => (l.trim() ? i : -1)).filter((i) => i >= 0);
   const tail = nonEmptyIdx.slice(-3);
-  const footerIdx = tail.find((i) => FOOTER_RE.test(lines[i]));
+  const lastIdx = nonEmptyIdx.at(-1);
+  let footerIdx = tail.find((i) => FOOTER_RE.test(lines[i]));
+  const footerless = footerIdx === undefined && lastIdx !== undefined && ESC_ROW_RE.test(lines[lastIdx]);
+  if (footerless) footerIdx = lastIdx + 1;
   if (footerIdx === undefined) return null;
 
   /*
@@ -269,10 +345,12 @@ export function parsePrompt(text) {
   if (options.length < 2) return null;
   if (options.some((o, n) => o.index !== n + 1)) return null;
 
-  // The question is the nearest line above the options that reads as one.
+  // The question is the nearest line above the options that reads as one. The footerless
+  // box asks none — its title is the question — so nothing there is searched for one: a
+  // fenced URL that happens to end in `?` is the subject, not a question.
   let question = null;
   let bodyEnd = i;
-  for (let j = i; j >= 0 && i - j < 8; j -= 1) {
+  for (let j = i; !footerless && j >= 0 && i - j < 8; j -= 1) {
     const line = lines[j];
     if (!line.trim() || RULE_RE.test(line)) continue;
     if (line.trim().endsWith('?')) {
@@ -286,10 +364,16 @@ export function parsePrompt(text) {
   // the two facts `dropTip` needs about each line: its own indent, and whether a blank
   // line sits above it. Walking upward, a blank marks the entry unshifted most recently,
   // which is the one directly below it.
+  //
+  // A divider is recorded the same way, as `ruleAbove` on the line below it: the footerless
+  // box fences its subject with one, and that is how its title knows where it ends.
   const bodyLines = [];
   for (let j = bodyEnd; j >= 0 && bodyEnd - j < 24; j -= 1) {
     const line = lines[j];
-    if (INNER_RULE_RE.test(line)) continue; // a section divider, keep walking
+    if (INNER_RULE_RE.test(line)) {
+      if (bodyLines.length) bodyLines[0].ruleAbove = true;
+      continue; // a section divider, keep walking
+    }
     if (BOX_EDGE_RE.test(line)) break;
     if (TRANSCRIPT_RE.test(line)) break;
     if (line.trim()) {
@@ -299,7 +383,7 @@ export function parsePrompt(text) {
     }
   }
 
-  const body = dropTip(bodyLines).map((e) => e.text);
+  const body = (footerless ? joinTitle(bodyLines) : dropTip(bodyLines)).map((e) => e.text);
 
   const title = body[0] || null;
   const subject = body[1] || null;

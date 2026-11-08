@@ -283,6 +283,12 @@ pane width every one of them depends on. Evidence:
   used to break on the tail.** The unnumbered tail is joined only where it aligns, and the
   box's own `Tip:` line is dropped before the body walk.
   [pane-parsers#a-wrapped-option-label-and-the-tip-line](docs/traps/pane-parsers.md#a-wrapped-option-label-and-the-tip-line)
+- `server/permission.js` (`ESC_ROW_RE`, `joinTitle`, `classify`) ·
+  `test/fixtures/prompt-chrome*.txt` — **Claude in Chrome's permission box draws no footer and
+  no question, and says Allow/Deny — MEASURED on v2.1.296.** Its last row, `Deny (esc)`, is
+  the footer's stand-in only as the very last line; `OPTION_RE` stays strict, and a qualified
+  `Allow` is a broader yes like a qualified `Yes`.
+  [pane-parsers#the-chrome-box-has-no-footer](docs/traps/pane-parsers.md#the-chrome-box-has-no-footer)
 - `server/permission.js` (`parsePrompt`) · `server/tmux.js` (`DECISION_RE`) — **Permission
   prompts never reach the transcript.** Both are gated on the composer being absent, or a diff
   of the fixtures reads as a live box.

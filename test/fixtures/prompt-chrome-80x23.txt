@@ -1,0 +1,23 @@
+ ▐▛███▛█   Claude Code v2.1.296
+▝▜██████▀  Opus 5.5 with xhigh effort · Claude Max
+ ▝▝   ▝▝   ~/…/foreman-sandbox/alpha
+
+⚠ Your login expires in 2 days · run /login to renew
+
+❯ Use ToolSearch to load mcp__claude-in-chrome__navigate, then call
+  mcp__claude-in-chrome__navigate exactly once with url
+  "http://127.0.0.1:48796/" and tabId 1. Call no other Chrome tool, before or
+  after. If it is denied, stop.
+
+⏺ Calling claude-in-chrome… (ctrl+o to expand)
+
+────────────────────────────────────────────────────────────────────────────────
+ Claude in Chrome wants to navigate on 127.0.0.1:48796
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ http://127.0.0.1:48796/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ ❯ 1. Allow
+   2. Allow all actions on 127.0.0.1:48796 for this session
+   3. Deny (esc)
+
+

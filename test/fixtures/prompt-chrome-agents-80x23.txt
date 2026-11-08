@@ -1,0 +1,23 @@
+  once with url "http://127.0.0.1:48796/" and tabId 1. Call no other Chrome
+  tool. If it is denied, stop.
+
+⏺ 2 background agents launched (↓ to manage)
+   ├ Lighthouse story one
+   └ Lighthouse story two
+
+  Calling claude-in-chrome… (ctrl+o to expand)
+
+────────────────────────────────────────────────────────────────────────────────
+ Claude in Chrome wants to navigate on 127.0.0.1:48796
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ http://127.0.0.1:48796/
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ ❯ 1. Allow
+   2. Allow all actions on 127.0.0.1:48796 for this session
+   3. Deny (esc)
+
+
+
+
+
+
