@@ -208,11 +208,15 @@ import {
   handedText,
   handedWaiting,
   insertMention,
+  keepAwakeFace,
+  keepAwakePress,
+  keepAwakeResultText,
   memberKey,
   memberName,
   memberRow,
   mentionMatches,
   mentionQuery,
+  roomKeepAwake,
   roomOrdered,
   wakeLabel,
   wakeResultText,
@@ -4081,6 +4085,26 @@ function openGroupAddMenu(anchor, g) {
 /** Whether this session is kept awake by hand — the frame's `hibernation.keepAwake`, by name. */
 function keptAwake(s) {
   return Boolean(s?.tmuxSession) && state.hibernation.keepAwake.includes(s.tmuxSession);
+}
+
+/** A room header's keep-awake in a narrow pane, where there is no room for the word. */
+function eyeIcon() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '13');
+  svg.setAttribute('height', '13');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.5');
+  for (const d of ['M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z', 'M8 6.25a1.75 1.75 0 1 0 0 3.5 1.75 1.75 0 0 0 0-3.5z']) {
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', d);
+    svg.append(path);
+  }
+  return svg;
 }
 
 /** The header's keep-awake toggle: a word and a pressed state, like `thinking` beside it. */
@@ -8223,8 +8247,12 @@ function createPane(slot, host) {
     // state for `groupHeadError`'s reason — the strip repaints on every roster beat, and a
     // run's own frames are exactly the beats that would wipe a result painted onto a node.
     groupWakeBusy: false,
-    groupWakeNote: null, // {woke: string|null, failed: string[]} from `wakeResultText`
+    // {woke, failed} from `wakeResultText`, or {skipped, failed} from `keepAwakeResultText` —
+    // one line, and the last press speaks.
+    groupWakeNote: null,
     groupWakeEl: null,
+    // The header's keep-awake press in flight, for `groupHeadBusy`'s reason.
+    groupKeepBusy: false,
     // The composer's standing refusal, for the same reason again and kept apart from the
     // header's: one is about the message, the other about the room, and one line saying both
     // would be a line that contradicts itself.
@@ -9254,6 +9282,7 @@ function createPane(slot, host) {
     view.groupWakeBusy = false;
     view.groupWakeNote = null;
     view.groupWakeEl = null;
+    view.groupKeepBusy = false;
     groupComposerEl = null;
     groupStripSig = '';
   }
@@ -9544,8 +9573,28 @@ function createPane(slot, host) {
     filter.type = 'button';
     filter.append(funnelIcon());
     view.groupHeadEl.filter = filter;
+
+    /*
+     * Keep-awake for the whole room, by name, the session header's own toggle said once per
+     * member. It is the setting and nothing else: it wakes nobody and types into no pane.
+     * Painted by `paintGroupKeepAwake` on the roster beat, which is what keeps it in step with
+     * a session's own button, another browser and the membership. Nothing about it joins
+     * `composerSig`.
+     */
+    const keepAwake = document.createElement('button');
+    keepAwake.type = 'button';
+    keepAwake.className = 'ghost-btn room-keep-awake';
+    keepAwake.onclick = pressGroupKeepAwake;
+    const keepWord = document.createElement('span');
+    keepWord.className = 'keep-word';
+    const keepCount = document.createElement('span');
+    const keepMini = document.createElement('span');
+    keepMini.className = 'keep-mini';
+    keepMini.append(eyeIcon(), keepCount);
+    keepAwake.append(keepWord, keepMini);
+    Object.assign(view.groupHeadEl, { keepAwake, keepWord, keepCount });
     meta.append(fold, close);
-    fold.after(filter); // second in the cluster: the fold stays first
+    fold.after(filter, keepAwake); // the fold stays first, the funnel second
     head.append(meta);
     box.append(head);
 
@@ -9613,6 +9662,7 @@ function createPane(slot, host) {
     // because the second pane can be opened and closed under this head.
     if (els.fold) els.fold.hidden = panes.length < 2;
     paintGroupFilter();
+    paintGroupKeepAwake();
 
     /*
      * The archive control, beside `close`.
@@ -9663,6 +9713,66 @@ function createPane(slot, host) {
     });
     paintFilter(btn, room, st, (id) => setRailFilter(id ? roomFilterValue(id) : ''), 'ghost-btn room-head-filter');
     btn.hidden = st === 'none';
+  }
+
+  /** The header's keep-awake, from the room and the frame alone. An archived room draws none. */
+  function paintGroupKeepAwake() {
+    const els = view.groupHeadEl;
+    const btn = els?.keepAwake;
+    const room = groupLive();
+    if (!btn || !room) return;
+    const face = keepAwakeFace(roomKeepAwake(room, state.sessions, state.asleep, state.hibernation.keepAwake));
+    btn.hidden = face.hidden || Boolean(room.archivedAt);
+    els.keepWord.textContent = face.text;
+    els.keepCount.textContent = face.count;
+    btn.title = face.title;
+    // Named by the word in every width: a narrow pane's compact face hides it.
+    btn.setAttribute('aria-label', face.text);
+    btn.setAttribute('aria-pressed', face.pressed);
+  }
+
+  /**
+   * One press, one POST per member through the session button's own route, which re-checks at
+   * this moment that each name is one the panel knows — so the guard against a keep-awake for
+   * nobody is the route's and not this browser's picture of it. Each POST broadcasts a frame,
+   * which is what a session's own button and another browser repaint from; the local patch is
+   * only so this one is not a beat behind them. `is-busy` rather than `disabled`, as the session
+   * button, so a keyboard press keeps its focus.
+   */
+  async function pressGroupKeepAwake() {
+    const room = groupLive();
+    const id = room?.id;
+    if (!id || room.archivedAt || view.groupKeepBusy) return;
+    const facts = roomKeepAwake(room, state.sessions, state.asleep, state.hibernation.keepAwake);
+    if (!facts.total) return;
+    const on = keepAwakePress(facts);
+    const btn = view.groupHeadEl?.keepAwake;
+    view.groupKeepBusy = true;
+    btn?.classList.add('is-busy');
+    const results = await Promise.all(
+      facts.targets.map(async ({ name }) => {
+        try {
+          await postJSON('/api/asleep/keep-awake', { name, on });
+          return { name, ok: true };
+        } catch (err) {
+          return { name, ok: false, error: err.message };
+        }
+      }),
+    );
+    const names = new Set(state.hibernation.keepAwake);
+    for (const r of results) {
+      if (r.ok && on) names.add(r.name);
+      else if (r.ok) names.delete(r.name);
+    }
+    state.hibernation = { ...state.hibernation, keepAwake: [...names] };
+    btn?.classList.remove('is-busy');
+    const here = view.kind === 'group-room' && view.groupRoom?.id === id;
+    if (here) {
+      view.groupKeepBusy = false;
+      view.groupWakeNote = keepAwakeResultText(results, facts.skipped);
+    }
+    for (const p of panes) p.renderHead();
+    if (here) pinGroup(); // the note above the list may have come or gone
   }
 
   /** Swap the heading for an input, and put it back whatever happens next. */
@@ -9927,18 +10037,20 @@ function createPane(slot, host) {
     }
   }
 
-  /** What the last `wake N asleep` did, drawn from view state. Woken names in the line's own
-   *  muted ink; each failure as the server's sentence, in the refusal colour. */
+  /** What the last `wake N asleep` or keep-awake press did, drawn from view state. Woken and
+   *  skipped names in the line's own muted ink; each failure as the server's sentence, in the
+   *  refusal colour. */
   function renderGroupWakeNote() {
     const el = view.groupWakeEl;
     if (!el) return;
     const note = view.groupWakeNote;
-    el.hidden = !note || (!note.woke && !note.failed.length);
+    const quiet = note?.woke || note?.skipped;
+    el.hidden = !note || (!quiet && !note.failed.length);
     if (el.hidden) return el.replaceChildren();
     const parts = [];
-    if (note.woke) {
+    if (quiet) {
       const ok = document.createElement('span');
-      ok.textContent = note.woke;
+      ok.textContent = quiet;
       parts.push(ok);
     }
     for (const f of note.failed) {

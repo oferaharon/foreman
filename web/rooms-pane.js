@@ -190,6 +190,115 @@ export function wakeResultText(results = [], label = (n) => n) {
   return { woke: woken.length ? `woke ${woken.join(', ')}` : null, failed };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Keep awake, for the whole room.                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Who in this room the keep-awake toggle reaches, and how many of them are held already.
+ *
+ * Resolved the one way, through `memberRow` and `asleepMembers`, and keyed the way the setting
+ * is: a live member by **its row's** tmux session name, which is what its own header's button
+ * sends, and a sleeper by its stored name. A member that is neither is `skipped`, because the
+ * route refuses a name it does not know — a keep-awake for nobody would quietly catch whoever
+ * is named that next — and it does not count towards `total`, or a room with one member gone
+ * could never read as all-on and could never be turned off. So does a member whose row is a
+ * worker: `memberRow` draws its dot, but no worker's header offers the toggle, and none sleeps.
+ *
+ * `state` is `'none'` (nobody to reach), `'off'`, `'some'` or `'all'`.
+ *
+ * @param {object} room
+ * @param {Array<object>} sessions the roster
+ * @param {Array<{name: string}>} asleep the frame's `asleep` sibling
+ * @param {string[]} keepAwake the frame's `hibernation.keepAwake`
+ * @returns {{targets: Array<{name: string, label: string, asleep: boolean, on: boolean}>,
+ *   skipped: string[], on: number, total: number, state: string}}
+ */
+export function roomKeepAwake(room, sessions = [], asleep = [], keepAwake = []) {
+  const kept = new Set(Array.isArray(keepAwake) ? keepAwake : []);
+  const sleepers = asleepMembers(room, sessions, asleep);
+  const targets = [];
+  const skipped = [];
+  for (const m of Array.isArray(room?.members) ? room.members : []) {
+    const row = memberRow(m, sessions);
+    const stored = str(m?.tmuxSession);
+    const live = row && row.team?.role !== 'worker' ? str(row.tmuxSession) : '';
+    const name = row ? live : sleepers.includes(stored) ? stored : '';
+    if (!name) {
+      skipped.push(memberName(m));
+      continue;
+    }
+    if (targets.some((t) => t.name === name)) continue;
+    targets.push({ name, label: memberName(m), asleep: !row, on: kept.has(name) });
+  }
+  const on = targets.filter((t) => t.on).length;
+  const total = targets.length;
+  return { targets, skipped, on, total, state: !total ? 'none' : on === total ? 'all' : on ? 'some' : 'off' };
+}
+
+/**
+ * The direction one press goes, from the same facts the button is drawn from: every member
+ * already held lets them all go, and anything less holds them all. Every target is sent either
+ * way rather than the difference, so a frame a beat behind another browser still ends with the
+ * room where the press said; the route changes nothing, and broadcasts nothing, for a name
+ * already there.
+ */
+export const keepAwakePress = (facts) => facts?.state !== 'all';
+
+/**
+ * The button's face: the session header's two words, the count only when the room is mixed,
+ * and `aria-pressed` — `'mixed'` being the attribute's own third value, which also leaves it
+ * out of `.ghost-btn[aria-pressed="true"]`, so only an all-on room is lit. `count` alone is
+ * what a narrow pane's compact face draws for a mixed room. Hidden when there is nobody to
+ * reach: a control nobody can press should not be drawn.
+ *
+ * @returns {{hidden: boolean, text: string, count: string, pressed: string, title: string}}
+ */
+export function keepAwakeFace(facts) {
+  const { targets = [], skipped = [], on = 0, total = 0, state = 'none' } = facts || {};
+  if (state === 'none') return { hidden: true, text: 'keep awake', count: '', pressed: 'false', title: '' };
+  const them = total === 1 ? 'this room’s one member' : `all ${total} members`;
+  const lines = [];
+  if (state === 'all') {
+    lines.push(`${total === 1 ? 'Kept awake' : `All ${total} kept awake`} — hibernation never closes ${total === 1 ? 'it' : 'them'}. Click to let ${total === 1 ? 'it' : 'them'} sleep when idle.`);
+  } else if (state === 'some') {
+    const held = targets.filter((t) => t.on).map((t) => t.label);
+    lines.push(`${on} of ${total} kept awake: ${held.join(', ')}. Click to keep ${them} awake.`);
+  } else {
+    lines.push(`Click to keep ${them} awake, so hibernation never closes ${total === 1 ? 'it' : 'them'}.`);
+  }
+  if (targets.some((t) => t.asleep)) {
+    lines.push('A press wakes nobody: a sleeping member stays asleep, and the setting holds from its next wake.');
+  }
+  if (skipped.length) lines.push(`${skipped.join(', ')}: no session to keep awake, so skipped.`);
+  const count = state === 'some' ? `${on}/${total}` : '';
+  return {
+    hidden: false,
+    text: state === 'all' ? 'kept awake' : count ? `kept awake ${count}` : 'keep awake',
+    count,
+    pressed: state === 'all' ? 'true' : state === 'some' ? 'mixed' : 'false',
+    title: lines.join('\n'),
+  };
+}
+
+/**
+ * What one press has to say, or nothing: the button itself says a clean press landed. Skips in
+ * the note's muted ink, because a member with no session is not a failure of the press; each
+ * refusal as the server's own sentence, for `wakeResultText`'s reason.
+ *
+ * @param {Array<{name: string, ok: boolean, error?: string}>} results
+ * @param {string[]} skipped
+ * @returns {{woke: null, skipped: string|null, failed: string[]}|null}
+ */
+export function keepAwakeResultText(results = [], skipped = []) {
+  const left = Array.isArray(skipped) ? skipped : [];
+  const failed = (Array.isArray(results) ? results : [])
+    .filter((r) => !r?.ok)
+    .map((r) => str(r?.error) || `${str(r?.name)} did not change.`);
+  if (!left.length && !failed.length) return null;
+  return { woke: null, skipped: left.length ? `skipped ${left.join(', ')} — no session to keep awake` : null, failed };
+}
+
 /**
  * What became of one post, as one quiet line.
  *
