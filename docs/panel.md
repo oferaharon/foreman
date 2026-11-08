@@ -988,6 +988,15 @@ if the named option isn't on screen or its label has changed since you saw it.
 If the box can't be parsed confidently, the panel says so and offers no buttons rather
 than guessing.
 
+**Claude in Chrome draws its own box**, and it reads differently from the rest: a sentence
+for a title (`Claude in Chrome wants to navigate on <host>`), the page's URL fenced under
+it when there is one, then `1. Allow`, sometimes `2. Allow all actions on <host> for this
+session`, and `Deny (esc)` last — no question, and no key-hint footer at all. The panel
+answers it the same way, by the option's digit, and reads it by the same rule: the bare
+`Allow` is the narrow yes, and `Allow all actions…` is a standing grant for the whole site,
+so it asks for a second click like every other broader yes. Every other MCP tool still gets
+Claude Code's ordinary `Tool use … (MCP)` box, which never needed anything new.
+
 ### Session names
 
 Every tmux session the panel mints is named `<prefix><folder>-<label>` — by default

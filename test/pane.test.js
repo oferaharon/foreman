@@ -141,6 +141,30 @@ test('a permission box is a decision, never a dialog', () => {
   assert.equal(state.prompt.options.length, 3);
 });
 
+test('the Claude in Chrome box is a decision too, though it draws no footer', () => {
+  // The regression: no `Esc to cancel` line, so `parsePrompt` declined, the title was
+  // still found under the rule, and the box arrived as a dialog the panel could only point
+  // at the terminal for. Real v2.1.296 captures at 220, 80×23 and 70 columns.
+  for (const name of [
+    'prompt-chrome.txt',
+    'prompt-chrome-80x23.txt',
+    'prompt-chrome-narrow.txt',
+    'prompt-chrome-wrapped.txt',
+    'prompt-chrome-agents-80x23.txt',
+    'prompt-chrome-two.txt',
+    'prompt-chrome-two-80x23.txt',
+    'prompt-chrome-two-narrow.txt',
+  ]) {
+    const state = parsePane(fixture(name));
+    assert.equal(state.state, 'needs-decision', name);
+    assert.equal(state.dialog, null, name);
+    assert.equal(state.plan, null, name);
+    assert.equal(state.question, null, name);
+    assert.ok(state.prompt?.options.length >= 2, name);
+    assert.equal(state.bypass, null, `${name}: the box owns the footer, so the mode is unknown`);
+  }
+});
+
 test('a dialog naming a model does not leak that into the header', () => {
   // The /model picker lists "Opus 5", "Sonnet 5", "Haiku 4.5" as options. Reading one of
   // those as the session's model would put a lie in the header.

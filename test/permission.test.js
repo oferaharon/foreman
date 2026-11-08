@@ -319,3 +319,137 @@ test('a body line that is not a tip is never eaten as one', () => {
   // And a box with no tip at all is untouched.
   assert.equal(box(' the command', ' what it does').subject, 'the command');
 });
+
+/* ------------------------------------------------ the Claude in Chrome box --- */
+
+/*
+ * Real captures, Claude Code v2.1.296, a sandbox alpha session in manual mode asking the
+ * Chrome tools to act on a loopback bench page; every box was answered Deny in the terminal.
+ * The box draws no question and no key-hint footer — its escape hint rides on the last
+ * option — so before `ESC_ROW_RE` the parser returned null and the panel named it a dialog.
+ */
+// `-agents-80x23` was raised with two background subagents running: their list is drawn
+// below the composer, never below this box, so `Deny (esc)` is still the last line.
+const CHROME = [
+  'prompt-chrome.txt',
+  'prompt-chrome-80x23.txt',
+  'prompt-chrome-narrow.txt',
+  'prompt-chrome-agents-80x23.txt',
+];
+const CHROME_TWO = ['prompt-chrome-two.txt', 'prompt-chrome-two-80x23.txt', 'prompt-chrome-two-narrow.txt'];
+
+test('the Chrome box with a page reads at 220, 80×23 and 70 columns', () => {
+  for (const name of CHROME) {
+    const p = parsePrompt(fixture(name));
+    assert.ok(p, `${name}: should parse`);
+    assert.equal(p.title, 'Claude in Chrome wants to navigate on 127.0.0.1:48796', name);
+    assert.equal(p.subject, 'http://127.0.0.1:48796/', name);
+    assert.deepEqual(p.detail, [], name);
+    assert.equal(p.question, null, name);
+    assert.equal(p.cursor, 1, name);
+    assert.deepEqual(
+      p.options.map((o) => [o.index, o.label, o.kind]),
+      [
+        [1, 'Allow', 'approve'],
+        [2, 'Allow all actions on 127.0.0.1:48796 for this session', 'approve-always'],
+        [3, 'Deny (esc)', 'deny'],
+      ],
+      name,
+    );
+  }
+});
+
+test('…and option 2 there is the broad yes, answered by its own digit', () => {
+  // The option-2 trap in this box's vocabulary: the second row is a standing grant for
+  // every action on the site, and deny is the third row's digit — never a position.
+  for (const name of CHROME) {
+    const p = parsePrompt(fixture(name));
+    assert.equal(p.options[1].kind, 'approve-always', name);
+    const deny = p.options.find((o) => o.kind === 'deny');
+    assert.equal(keyForOption(p, deny.index), '3', name);
+    assert.equal(keyForOption(p, 1), '1', name);
+  }
+});
+
+test('the Chrome box with no page reads as Allow / Deny at every width', () => {
+  for (const name of CHROME_TWO) {
+    const p = parsePrompt(fixture(name));
+    assert.ok(p, `${name}: should parse`);
+    assert.equal(p.title, 'Claude in Chrome wants to create a browser window and read your tabs', name);
+    assert.equal(p.subject, null, name);
+    assert.equal(p.question, null, name);
+    assert.deepEqual(
+      p.options.map((o) => [o.index, o.label, o.kind]),
+      [
+        [1, 'Allow', 'approve'],
+        [2, 'Deny (esc)', 'deny'],
+      ],
+      name,
+    );
+    assert.equal(keyForOption(p, 2), '2', name);
+  }
+});
+
+test('a long host wraps the title and option 2 at 70 columns, and both rejoin', () => {
+  const p = parsePrompt(fixture('prompt-chrome-wrapped.txt'));
+  const host = 'a-long-bench-host-name-for-wrapping.localhost:48796';
+  assert.ok(p, 'should parse');
+  // Read the ordinary way the host became the subject and the URL slid into detail.
+  assert.equal(p.title, `Claude in Chrome wants to navigate on ${host}`);
+  assert.equal(p.subject, `http://${host}/`);
+  assert.deepEqual(p.detail, []);
+  assert.deepEqual(
+    p.options.map((o) => [o.index, o.label, o.kind]),
+    [
+      [1, 'Allow', 'approve'],
+      [2, `Allow all actions on ${host} for this session`, 'approve-always'],
+      [3, 'Deny (esc)', 'deny'],
+    ],
+  );
+});
+
+test('the footer stand-in only counts as the very last line, and only as `Deny (esc)`', () => {
+  const box = fixture('prompt-chrome-80x23.txt').trimEnd();
+  assert.ok(parsePrompt(box), 'control: the box itself parses');
+
+  // Answered and scrolled up: the composer is drawn below it.
+  const answered = [
+    box,
+    '',
+    '────────────────────────────────────────',
+    '❯ ',
+    '────────────────────────────────────────',
+    '  alpha (main) | Opus 5.5 | ctx: 5%',
+    '  ⏸ manual mode on · ← 2 agents',
+  ].join('\n');
+  assert.equal(parsePrompt(answered), null, 'a box with anything below it is history');
+  // One stray line under it is enough — a footer may sit in the last three, this may not.
+  assert.equal(parsePrompt(`${box}\n  something else`), null);
+  // A label that merely begins like it is not it.
+  assert.equal(parsePrompt(box.replace('Deny (esc)', 'Deny (esc) and tell Claude why')), null);
+  assert.equal(parsePrompt(box.replace('Deny (esc)', 'Deny')), null);
+  // And the run rule still applies behind the new anchor: a gap in the digits refuses.
+  assert.equal(parsePrompt(box.replace('2. Allow all', '4. Allow all')), null);
+});
+
+test('Allow and Deny are classified by the same structural rule as Yes and No', () => {
+  const box = (...labels) =>
+    parsePrompt(
+      [
+        ' Claude in Chrome wants to click on example.test',
+        ...labels.map((l, n) => `${n === 0 ? ' ❯' : '  '} ${n + 1}. ${l}`),
+      ].join('\n'),
+    );
+  const kinds = (...labels) => box(...labels).options.map((o) => o.kind);
+
+  assert.deepEqual(kinds('Allow', 'Deny (esc)'), ['approve', 'deny']);
+  // A qualified Allow is broad, phrase list or not — including one never met before.
+  assert.deepEqual(kinds('Allow', 'Allow all actions on example.test for this session', 'Deny (esc)'), [
+    'approve',
+    'approve-always',
+    'deny',
+  ]);
+  assert.deepEqual(kinds('Allow once more', 'Deny (esc)'), ['approve-always', 'deny']);
+  // A word that only starts with the letters is not the word.
+  assert.deepEqual(kinds('Allowance', 'Deny (esc)'), ['other', 'deny']);
+});
