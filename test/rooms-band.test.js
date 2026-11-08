@@ -8,6 +8,7 @@ import {
   ARCHIVED_KEY,
   bandEntries,
   bandSig,
+  filterState,
   isRecent,
   livenessText,
   memberLabel,
@@ -122,6 +123,11 @@ const room = (id, name, over = {}) => ({
 function withDom(fn) {
   const real = globalThis.document;
   globalThis.document = {
+    // The row's funnel is an SVG (`web/funnel-icon.js`); its nodes are the same recorder,
+    // and nothing in this file reads inside one.
+    createElementNS(_ns, tag) {
+      return this.createElement(tag);
+    },
     createElement(tag) {
       const node = {
         tagName: tag.toUpperCase(),
@@ -472,7 +478,11 @@ test('one room is one row, with its name, its member count and no badge', () => 
     patchBand(list, [room('r1', 'alpha ↔ beta')]);
     assert.equal(list.children.length, 1);
     const [row] = list.children;
-    assert.equal(row.tagName, 'BUTTON');
+    // A `div role="button"`, because the funnel inside it is a real button
+    // (rail-and-groups#the-row-is-not-a-button), and focusable by hand for the same reason.
+    assert.equal(row.tagName, 'DIV');
+    assert.equal(row.attrs.role, 'button');
+    assert.equal(row.tabIndex, 0);
     assert.equal(span(row, 'room-name').textContent, 'alpha ↔ beta');
     assert.equal(span(row, 'room-count').textContent, '2');
     assert.equal(span(row, 'room-unseen').hidden, true, 'zero draws nothing');
@@ -858,7 +868,7 @@ test('a row draws its age beside its name, and an archived row draws one too', (
     const rows = list.children.filter((c) => /^room-row\b/.test(c.className));
     const [spoken, quiet, gone] = rows;
     const names = spoken.children.map((c) => c.className.split(' ')[0]);
-    assert.deepEqual(names, ['room-mark', 'room-live', 'room-name', 'room-age', 'room-count', 'room-unseen']);
+    assert.deepEqual(names, ['room-mark', 'room-live', 'room-name', 'room-age', 'room-count', 'room-unseen', 'room-filter']);
     assert.equal(span(spoken, 'room-age').textContent, '3h');
     assert.match(span(spoken, 'room-age').title, /^last post /);
     assert.equal(span(quiet, 'room-age').textContent, '', 'no posts, no age');
@@ -936,7 +946,7 @@ test('liveness is `memberRow`’s answer, member by member — never a second re
   assert.deepEqual(live(room('r1', 'x', { members }), sessions), { live: 1, total: 3, state: 'some' });
 
   // Imported, and the band spells none of the rungs itself.
-  assert.match(band, /import \{ memberRow \} from '\.\/rooms-pane\.js';/);
+  assert.match(band, /import \{ asleepMembers, memberRow \} from '\.\/rooms-pane\.js';/);
   assert.match(fn('roomLiveness', band), /memberRow\(m, sessions\)/);
   assert.ok(!/tmuxSession|paneId/.test(strip(fn('roomLiveness', band))), 'no rung re-spelled here');
 });
@@ -1011,9 +1021,136 @@ test('the signature moves when a member’s session comes or goes, and on no oth
 test('the app hands the roster to both the signature and the patch', () => {
   const from = app.indexOf('\nfunction renderRoomsBand(');
   const render = app.slice(from, app.indexOf('\n}\n', from));
-  assert.match(render, /bandSig\(rooms, \{ openIds, archivedCollapsed, sessions \}\)/);
+  assert.match(render, /bandSig\(rooms, \{ openIds, archivedCollapsed, sessions, asleep, filterId \}\)/);
   assert.match(render, /patchBand\(el\.roomsList, rooms, \{[\s\S]*?\bsessions,/);
   assert.match(render, /const sessions = state\.sessions;/, 'one read, so the two cannot see different rosters');
+});
+
+/* ------------------------------------------------------------ the funnel --- */
+
+/*
+ * The row's funnel narrows the rail to the room's members (`web/rail-filter.js`). What is
+ * pinned is what would go wrong silently: a press that also opened the room, a filter
+ * change that rebuilt or moved the row a press had just focused (the band's scroll-jump
+ * trap), a funnel offered on a room with nobody on the rail to narrow to, and a key pressed
+ * on the funnel that the row answered as well.
+ */
+
+const funnel = (row) => row.children.find((c) => /^room-filter\b/.test(c.className));
+
+test('the funnel reads on, off, empty or none — and empty is anybody live or asleep', () => {
+  const r = room('r1', 'alpha ↔ beta');
+  assert.equal(filterState(r, { sessions: [alphaRow] }), 'off');
+  assert.equal(filterState(r, { sessions: [alphaRow], filterId: 'r1' }), 'on');
+  assert.equal(filterState(r, { sessions: [alphaRow], filterId: 'r2' }), 'off');
+  assert.equal(filterState(r, { sessions: [] }), 'empty', 'nobody on the rail to narrow to');
+  assert.equal(filterState(r, { sessions: [], asleep: [{ name: 'foreman-beta-main' }] }), 'off', 'an asleep member is on the rail');
+  assert.equal(filterState(r, { sessions: [], filterId: 'r1' }), 'on', 'a lit funnel is always the way out');
+  assert.equal(filterState(room('r2', 'gone', { archivedAt: 5 }), { sessions: [alphaRow] }), 'none');
+  assert.equal(filterState(r, { archived: true, sessions: [alphaRow] }), 'none');
+});
+
+test('a press on the funnel filters, stops at the funnel, and pressed again lets go', () => {
+  withDom(() => {
+    const list = container();
+    const calls = [];
+    const opened = [];
+    const opts = { sessions: [alphaRow], onFilter: (id) => calls.push(id), onOpen: (id) => opened.push(id) };
+    patchBand(list, [room('r1', 'alpha ↔ beta')], opts);
+    const btn = funnel(list.children[0]);
+    assert.equal(btn.tagName, 'BUTTON');
+    assert.equal(btn.attrs['aria-pressed'], 'false');
+    let stopped = false;
+    btn.onclick({ stopPropagation: () => (stopped = true) });
+    assert.deepEqual(calls, ['r1']);
+    assert.ok(stopped, 'the row around it must not open the room as well');
+    assert.deepEqual(opened, []);
+
+    patchBand(list, [room('r1', 'alpha ↔ beta')], { ...opts, filterId: 'r1' });
+    const lit = funnel(list.children[0]);
+    assert.equal(lit, btn, 'the same node, lit in place');
+    assert.match(lit.className, /\bis-on\b/);
+    assert.equal(lit.attrs['aria-pressed'], 'true');
+    lit.onclick({ stopPropagation() {} });
+    assert.deepEqual(calls, ['r1', null], 'the lit funnel clears');
+  });
+});
+
+test('a funnel with nobody to narrow to does nothing, and an archived row keeps the column blank', () => {
+  withDom(() => {
+    const list = container();
+    const calls = [];
+    patchBand(list, [room('r1', 'alpha ↔ beta'), room('r2', 'gone', { archivedAt: 5 })], {
+      sessions: [],
+      archivedCollapsed: false,
+      onFilter: (id) => calls.push(id),
+    });
+    const rows = list.children.filter((c) => /^room-row\b/.test(c.className));
+    const empty = funnel(rows[0]);
+    assert.equal(empty.attrs['aria-disabled'], 'true');
+    let stopped = false;
+    empty.onclick({ stopPropagation: () => (stopped = true) });
+    assert.deepEqual(calls, []);
+    assert.ok(stopped, 'still the funnel’s press, never the row’s');
+    const blank = funnel(rows[1]);
+    assert.match(blank.className, /\bis-none\b/);
+    assert.equal(blank.tabIndex, -1);
+    assert.equal(blank.attrs['aria-hidden'], 'true');
+  });
+});
+
+test('turning the filter on and off moves no row and replaces no node', () => {
+  withDom(() => {
+    const list = container();
+    const rooms = [room('r1', 'alpha ↔ beta'), room('r2', 'gamma')];
+    patchBand(list, rooms, { sessions: [alphaRow] });
+    const before = [...list.children];
+    const funnels = before.map(funnel);
+    const moves = list.moves;
+    patchBand(list, rooms, { sessions: [alphaRow], filterId: 'r2' });
+    patchBand(list, rooms, { sessions: [alphaRow], filterId: 'r1' });
+    patchBand(list, rooms, { sessions: [alphaRow] });
+    assert.equal(list.moves, moves, 'a focused funnel’s row stays exactly where it was');
+    assert.deepEqual([...list.children], before);
+    assert.deepEqual(list.children.map(funnel), funnels);
+  });
+});
+
+test('the signature moves with the filter, and with whether a room has anybody to narrow to', () => {
+  const rooms = [room('r1', 'alpha ↔ beta')];
+  const sig = (o) => bandSig(rooms, { sessions: [], ...o });
+  assert.notEqual(sig({ filterId: 'r1' }), sig({}));
+  assert.equal(sig({ filterId: 'r9' }), sig({}), 'another room’s filter changes nothing here');
+  assert.notEqual(sig({ asleep: [{ name: 'foreman-alpha-main' }] }), sig({}), 'a member asleep offers the funnel');
+});
+
+test('Enter or Space on the row opens the room; a key on the funnel is the funnel’s', () => {
+  withDom(() => {
+    const list = container();
+    const opened = [];
+    patchBand(list, [room('r1', 'alpha ↔ beta')], { sessions: [alphaRow], onOpen: (id) => opened.push(id) });
+    const [row] = list.children;
+    let prevented = 0;
+    const key = (k, target) => ({ key: k, target, preventDefault: () => prevented++ });
+    row.onkeydown(key('Enter', row));
+    row.onkeydown(key(' ', row));
+    row.onkeydown(key('a', row));
+    row.onkeydown(key('Enter', funnel(row)));
+    assert.deepEqual(opened, ['r1', 'r1']);
+    assert.equal(prevented, 2, 'Space must not scroll the band');
+  });
+});
+
+test('the funnel is the group header’s in this band’s grammar, and its glyph is one spelling', () => {
+  assert.match(band, /import \{ funnelIcon \} from '\.\/funnel-icon\.js';/);
+  assert.match(app, /import \{ funnelIcon \} from '\.\/funnel-icon\.js';/);
+  assert.ok(!/\nfunction funnelIcon\(/.test(app), 'no second copy of the glyph in app.js');
+  const base = styles.match(/\.room-filter \{[^}]*\}/)[0];
+  assert.match(base, /width: 1\.1rem;/, 'the group header’s reserved column');
+  assert.match(base, /opacity: 0\.4;/, 'there at rest, like the group header’s');
+  assert.ok(!/transition|margin/.test(base));
+  assert.match(styles, /\.room-filter\.is-on \{ opacity: 1; color: var\(--accent\); \}/);
+  assert.match(styles, /\.room-filter\.is-none \{ visibility: hidden; \}/, 'never [hidden]: the column must stay');
 });
 
 test('the dot is three tokens, grey for none and never the decision red', () => {

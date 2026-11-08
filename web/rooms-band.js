@@ -41,7 +41,9 @@ import { ageText } from './group-summary.js';
 // Who a stored member is on the roster right now — the room pane's member strip asks the
 // same function for its per-member dots, so the band's one dot and the strip's several can
 // never disagree about who is live. See `roomLiveness` below.
-import { memberRow } from './rooms-pane.js';
+import { asleepMembers, memberRow } from './rooms-pane.js';
+// The rail filter's glyph, the group header's own (`web/funnel-icon.js`).
+import { funnelIcon } from './funnel-icon.js';
 
 /** The archived fold's own key in the flat entry list. Rooms take `room:<id>`, so no room
  *  id can ever collide with it — the store's ids are opaque but the prefix is ours. */
@@ -132,7 +134,10 @@ export function bandEntries(rooms = [], { archivedCollapsed = true } = {}) {
  * timer that ticks it (`nextBandTick`, `relightBand`) touches one span and nothing else.
  * `lastAt` is, as it always was, so a post re-ages its row on the frame that carries it.
  */
-export function bandSig(rooms = [], { openIds = [], archivedCollapsed = true, sessions = [] } = {}) {
+export function bandSig(
+  rooms = [],
+  { openIds = [], archivedCollapsed = true, sessions = [], asleep = [], filterId = null } = {},
+) {
   const open = new Set(openIds);
   const entries = bandEntries(rooms, { archivedCollapsed });
   return entries
@@ -150,6 +155,9 @@ export function bandSig(rooms = [], { openIds = [], archivedCollapsed = true, se
         e.archived ? 1 : 0,
         open.has(e.room.id) ? 1 : 0,
         live ? `${live.live}/${live.total}` : '-',
+        // The funnel: lit on the room the rail is filtered to, and offered only when the
+        // room has somebody on the rail to narrow to (`filterState`).
+        filterState(e.room, { archived: e.archived, live, sessions, asleep, filterId }),
       ].join('|');
     })
     .join('~');
@@ -321,6 +329,23 @@ export function livenessText(live) {
   return `${live.live} of ${live.total} member${live.total === 1 ? '' : 's'} live`;
 }
 
+/**
+ * The row's funnel, as one word: `on` for the room the rail is filtered to, `off` for one it
+ * could be, `empty` for a room with nobody on the rail — no member live and none asleep — and
+ * `none` for an archived room, which a filter cannot hold (`roomFilter` lets go of one).
+ *
+ * `empty` is offered nothing rather than a press that would draw a blank rail and let go in
+ * the same beat (`renderRail`'s "nothing left to draw" rule); a lit funnel is always
+ * clickable, whatever its room's members are doing, because it is the way out.
+ */
+export function filterState(room, { archived = false, live = null, sessions = [], asleep = [], filterId = null } = {}) {
+  if (!room || archived || room.archivedAt) return 'none';
+  if (filterId && room.id === filterId) return 'on';
+  const facts = live || roomLiveness(room, sessions);
+  if (facts?.live) return 'off';
+  return asleepMembers(room, sessions, asleep).length ? 'off' : 'empty';
+}
+
 /** The dot's whole class. Assigned rather than toggled, `markClass`'s reason. An archived
  *  room keeps the span — so its name lines up with the open rows above it — and wears no
  *  state, which the stylesheet draws as nothing at all. */
@@ -338,17 +363,24 @@ const liveClass = (live) => (live ? `room-live is-${live.state}` : 'room-live');
  */
 const parts = new WeakMap();
 
-/** One room, as a node with six spans and nothing measured. Built once per room and
- *  patched thereafter — see `patchBand`.
+/** One room, as a node with six spans, a funnel and nothing measured. Built once per room
+ *  and patched thereafter — see `patchBand`.
  *
  *  The order is the reading order: the two marks (activity, then who is alive), the name —
  *  the one span that gives — and then the three that never shrink: how long ago, how many,
  *  and how many unseen. The age sits against the name because it is about the conversation;
  *  the stylesheet holds it a little further off the count than the row's own gap, because
- *  `3h 2` at one gap read on the bench as one figure. */
+ *  `3h 2` at one gap read on the bench as one figure. The funnel is last, the rightmost
+ *  thing on the row, where the group header keeps its own.
+ *
+ *  **The row is a `div role="button"`, no longer a `<button>`, because the funnel inside it
+ *  is a real one** and interactive content cannot nest — the session row's own move and its
+ *  own reason (rail-and-groups#the-row-is-not-a-button). The keyboard half a `<button>` gave
+ *  for free is wired by hand in `patchBand`. */
 function buildRow(key) {
-  const row = document.createElement('button');
-  row.type = 'button';
+  const row = document.createElement('div');
+  row.setAttribute('role', 'button');
+  row.tabIndex = 0;
   row.className = 'room-row';
   row.dataset.roomKey = key;
 
@@ -380,7 +412,15 @@ function buildRow(key) {
   unseen.className = 'room-unseen';
   row.append(unseen);
 
-  parts.set(row, { mark, live, name, age, count, unseen });
+  // Narrow the rail to this room's members. Built once with the row and patched like every
+  // other part of it, so a press — which focuses it — never costs the row its node.
+  const filter = document.createElement('button');
+  filter.type = 'button';
+  filter.className = 'room-filter';
+  filter.append(funnelIcon());
+  row.append(filter);
+
+  parts.set(row, { mark, live, name, age, count, unseen, filter });
   return row;
 }
 
@@ -428,7 +468,10 @@ export function patchBand(list, rooms = [], opts = {}) {
     archivedCollapsed = true,
     onOpen = null,
     onToggleArchived = null,
+    onFilter = null,
     sessions = [],
+    asleep = [],
+    filterId = null,
     now = Date.now(),
   } = opts;
   if (!list) return [];
@@ -469,7 +512,7 @@ export function patchBand(list, rooms = [], opts = {}) {
 
     const { room } = entry;
     const row = found || buildRow(entry.key);
-    const { mark, live, name, age, count, unseen } = parts.get(row);
+    const { mark, live, name, age, count, unseen, filter } = parts.get(row);
     mark.className = markClass(isRecent(room, now));
     // Archived rows get no dot (`roomLiveness` answers `null`), and lose every word the
     // dot carried on a reused node — a row archived under the cursor keeps its node.
@@ -500,10 +543,58 @@ export function patchBand(list, rooms = [], opts = {}) {
     unseen.title = n ? `${room.unseen} since you last opened this room` : '';
     row.title = roomTitle(room, { archived: entry.archived, live: facts });
     row.onclick = () => onOpen?.(room.id);
+    // The keyboard half of `role="button"`, `sessionRow`'s: Enter and Space open the room,
+    // and `preventDefault` keeps Space from scrolling the band. Only for a key on the row
+    // itself — one on the funnel is the funnel's, and a real button answers it with a click.
+    row.onkeydown = (e) => {
+      if (e.target !== row || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      onOpen?.(room.id);
+    };
+    paintFilter(filter, room, filterState(room, { archived: entry.archived, live: facts, sessions, asleep, filterId }), onFilter);
     place(list, row, drawn.length);
     drawn.push(row);
   }
   return drawn;
+}
+
+/**
+ * The funnel's face, from `filterState`'s word. Assigned rather than toggled, so a reused
+ * node can never keep a state the room has left. The press stops at the funnel: the row
+ * around it opens the room, and a filter press must not also open it.
+ *
+ * `empty` is `aria-disabled`, never `disabled`: a click on a disabled control is not
+ * dispatched to it at all, so it could not stop the press reaching the row, and a dead
+ * funnel that opened the room would be the worse surprise. `none` keeps the button in the
+ * row, invisible and out of the tab order, so an archived room's numbers line up with the
+ * open rooms' above it — `.room-live`'s own reason — and a click there is the row's.
+ */
+function paintFilter(btn, room, state, onFilter) {
+  btn.className = `room-filter${state === 'on' ? ' is-on' : ''}${state === 'none' ? ' is-none' : ''}`;
+  btn.tabIndex = state === 'none' ? -1 : 0;
+  btn.setAttribute('aria-pressed', String(state === 'on'));
+  if (state === 'empty') btn.setAttribute('aria-disabled', 'true');
+  else btn.removeAttribute('aria-disabled');
+  if (state === 'none') {
+    btn.setAttribute('aria-hidden', 'true');
+    btn.removeAttribute('aria-label');
+    btn.title = '';
+  } else {
+    const say =
+      state === 'on'
+        ? 'Show every session again'
+        : state === 'empty'
+          ? `Nobody in ${room.name} is on the rail to narrow it to`
+          : `Show only the members of ${room.name}`;
+    btn.removeAttribute('aria-hidden');
+    btn.setAttribute('aria-label', say);
+    btn.title = say;
+  }
+  btn.onclick = (e) => {
+    e?.stopPropagation?.();
+    if (state === 'empty' || state === 'none') return;
+    onFilter?.(state === 'on' ? null : room.id);
+  };
 }
 
 /**
