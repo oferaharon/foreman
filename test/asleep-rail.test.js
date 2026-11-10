@@ -253,9 +253,11 @@ test('the asleep pane never builds a composer, and composerSig learns nothing ab
   assert.ok(!/asleep|hibernat/.test(sig.slice(0, sig.indexOf('\n  }\n'))), 'composerSig is untouched');
 });
 
-test('sleepers never reach the inbox, unread or the collapsed group’s dot', () => {
-  // The inbox and the unread stat are computed off `state.sessions`, which never holds one.
-  assert.match(APP, /const inbox = state\.sessions\.filter\(/);
+test('sleepers never wear a needs-you stripe, count as unread or light the collapsed group’s dot', () => {
+  // The rows and the unread stat are computed off `state.sessions`, which never holds one;
+  // sleepers are merged in afterwards as items, and the jump's walk skips them by name.
+  assert.match(APP, /let rest = byRecency\(state\.sessions\.filter\(/);
+  assert.match(APP, /if \(!s\.asleep\) order\.push\(\{ id: s\.id, kind: stripeKind\(s\), group \}\);/);
   assert.match(APP, /const unread = state\.sessions\.filter\(\(s\) => s\.unread > 0\)\.length;/);
   // The dot's summary is taken over awake rows only.
   assert.match(APP, /groupSummary\(expand\(awake\(/);

@@ -183,6 +183,57 @@ test('the age buckets are the rail rows own, to the character', () => {
   assert.equal(ageText(NOW + 60_000, NOW), 'now');
 });
 
+/* ------------------------------------------- what needs you behind the fold --- */
+
+/*
+ * Nothing hoists out of a folder any more (the maintainer's ruling of 2026-11-09), so a
+ * folded group hides the rows that want him too, and its `N need you` is the only thing on
+ * screen that says they are there. The rule is the stripe's (`stripeKind`, `web/needs-you.js`),
+ * asked of the same worker-inclusive set the working dot reads.
+ */
+
+test('a folded group counts what needs you, workers included on the stripe’s own rule', () => {
+  const rows = [
+    lead({ needsYou: true, unread: 2 }), // a reply waiting
+    worker({ id: 'w-1', needsYou: true, status: 'needs-decision' }), // quiet: its lead's to answer
+    worker({ id: 'w-2', needsYou: true, status: 'needs-decision', team: { role: 'worker', stuck: true } }),
+    row({ id: 'plain', needsYou: false, unread: 0 }),
+  ];
+  const s = groupSummary(rows, NOW);
+  assert.equal(s.need, 2, 'the lead and the stuck worker — never the quiet one');
+  assert.equal(s.blocked, 1, 'the stuck worker is blocked; the lead only holds a reply');
+  assert.deepEqual(s.parts[0], { text: '2 need you', tone: 'blocked' });
+});
+
+test('the needs-you clause leads the line, and is red only when something is blocked', () => {
+  const unreadOnly = groupSummary([row({ needsYou: true, unread: 1, lastActivity: ago(4) })], NOW);
+  assert.deepEqual(unreadOnly.parts, [
+    { text: '1 needs you', tone: 'unread' },
+    { text: 'newest 4m', tone: null },
+  ]);
+  assert.equal(summaryText(unreadOnly, NOW), '1 needs you · newest 4m');
+
+  const blocked = groupSummary(
+    [row({ needsYou: true, question: { question: 'Which?' }, lastActivity: ago(4) }), row({ id: 'b', status: 'working', lastActivity: ago(9) })],
+    NOW,
+  );
+  assert.deepEqual(blocked.clauses, ['1 needs you', '1 working', 'newest 4m']);
+  assert.equal(blocked.parts[0].tone, 'blocked');
+  assert.ok(blocked.parts.slice(1).every((p) => p.tone === null), 'only the needs-you clause has a tone');
+});
+
+test('nothing wanting draws no needs-you clause — never `0 need you`', () => {
+  const s = groupSummary([row({ status: 'working', lastActivity: ago(4) })], NOW);
+  assert.equal(s.need, 0);
+  assert.equal(s.blocked, 0);
+  assert.ok(!s.clauses.some((c) => /need/.test(c)));
+  assert.deepEqual(summaryClauses({ need: 0, blocked: 0, working: 1 }, NOW), ['1 working']);
+});
+
+test('a sleeper is never counted, even carrying a stale needsYou', () => {
+  assert.equal(groupSummary([row({ asleep: true, needsYou: true, unread: 3 })], NOW).need, 0);
+});
+
 /* ------------------------------------------------------- the source scan --- */
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -245,8 +296,8 @@ test('the summary is computed only for a collapsed group, and drawn only there',
   assert.match(rail, /const folded = g\.collapsed && !filtered;/);
   assert.match(rail, /const summary = folded\s*\?\s*groupSummary\(/);
   const header = fn('groupHeader');
-  assert.match(header, /const clauses = \(folded && summary\?\.clauses\) \|\| \[\];/);
-  assert.match(header, /if \(clauses\.length\) \{/);
+  assert.match(header, /const parts = \(folded && summary\?\.parts\) \|\| \[\];/);
+  assert.match(header, /if \(parts\.length\) \{/);
 });
 
 test('the dot reads the summary, not the old top-level `busy`', () => {
@@ -269,6 +320,16 @@ test('the dot reads the summary, not the old top-level `busy`', () => {
     !/const busy = mine\.reduce/.test(rail),
     'the group loop no longer computes a top-level busy count',
   );
+});
+
+test('the needs-you clause is drawn in the stripes’ colours, and the dot sits after it', () => {
+  const header = fn('groupHeader');
+  assert.match(header, /if \(part\.tone\) span\.className = `shelf-need is-\$\{part\.tone\}`;/);
+  // The working dot is not appended at the head of the line any more — it leads the first
+  // clause after the needs-you one, so an amber pulse never sits beside `2 need you`.
+  assert.match(header, /if \(dot && !part\.tone\) \{\s*line\.append\(dot\);/);
+  assert.match(styles, /\.shelf-need\.is-blocked \{ color: var\(--decision\); \}/);
+  assert.match(styles, /\.shelf-need\.is-unread \{ color: var\(--accent\); \}/);
 });
 
 test('the line lives inside the header element — no fourth sibling in a flat list', () => {

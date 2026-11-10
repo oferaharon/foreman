@@ -223,6 +223,36 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .brand .link { color: var(--accent); }
 
+/* The jump count, right-aligned on the brand line: the unread badge's own shape and colour,
+   red instead when any session it counts is blocked — the stripes' two colours, so the count
+   says which kind is waiting before it is pressed. Its own `[hidden]` rule because the
+   `display` below would otherwise beat the UA default (rail-and-groups#the-menu-items-display-rule).
+   `align-self: center` because the line is `baseline` for the wordmark and a pill has no
+   baseline worth sitting on. */
+.rail-jump {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.35rem;
+  height: 1.15rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--surface);
+  background: var(--accent);
+  cursor: pointer;
+}
+.rail-jump.is-blocked { background: var(--decision); }
+.rail-jump:hover { filter: brightness(1.12); }
+.rail-jump:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.rail-jump[hidden] { display: none; }
+
 /* The mark sits on a baseline row with the wordmark and the dot — both text, so the row
    stays `align-items: baseline` for them and the image opts itself out with `align-self`.
    Its own tile carries a fixed dark background (see mark.svg), so it reads the same in
@@ -1152,11 +1182,6 @@ body.row-dragging * { cursor: row-resize !important; }
   z-index: 1;
 }
 
-.inbox-label {
-  color: var(--decision);
-  letter-spacing: 0.13em;
-}
-
 .pinned-label { color: var(--accent); }
 
 /* A group you made, and the folder headings filed under it. The group sticks to the top
@@ -1405,8 +1430,15 @@ body.row-dragging * { cursor: row-resize !important; }
    line colour and not measured to be read as a glyph. */
 .shelf-sep { opacity: 0.55; }
 
-/* The dot leads the line, so it needs no left nudge of its own here. */
+/* The dot leads its clause, so it needs no left nudge of its own here. */
 .shelf-summary .shelf-dot { margin-left: 0; }
+
+/* `N need you`, first on the line and the one clause on it that asks for something — in the
+   stripes' own two colours, red when any row it counts is blocked. Bold for the same reason
+   an unread row's title is: it is the line's news. */
+.shelf-need { font-weight: 700; }
+.shelf-need.is-blocked { color: var(--decision); }
+.shelf-need.is-unread { color: var(--accent); }
 
 .shelf-toggle {
   flex: 1;
@@ -1651,6 +1683,43 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 
 .session-row.is-open .session-title { color: var(--ink); }
+
+/* ------------------------------------------------------- the needs-you stripe --- */
+
+/* A row that wants you stays where it lives and says so on its own left edge: red
+   (`--decision`) when the session is blocked asking something, the accent when it only holds
+   a reply you have not read. The rule is `stripeKind` (`web/needs-you.js`); this is only how
+   it is drawn.
+
+   **The left edge is already two things, so the stripe is told apart from both by shape as
+   well as colour** (rail-and-groups#the-spine-and-the-marker). The spine and the selected
+   marker are each the row's own 3px border: square, full height, and continuous from one
+   row into the next. The stripe is a separate node laid over that border — 5px wide, so it
+   is plainly the bolder of the two, inset 5px from the row's top and bottom, and rounded on
+   its inner side, so it reads as a tab sitting *on* the edge rather than as more edge. The
+   inset is what keeps two wanting rows one above the other as two marks rather than one
+   long bar, and what leaves the spine or the marker visible above and below it — so a
+   selected row that is also blocked still shows its marker, and a row in a group still
+   shows which group. The colours are measured against the ten group hues and the grounds
+   in the trap file; the shape is what carries the one pair colour cannot — an unread stripe
+   and the selected marker outside a group are both the accent.
+
+   Out of flow, so nothing in the row moves when it appears; over the border's x rather than
+   inside the padding, so it clears the pinned grip (whose dots sit 5–11px in) and a
+   worker's connecting rule (8.8px). */
+.session-row.needs-you { position: relative; }
+
+.need-stripe {
+  position: absolute;
+  left: -3px;
+  top: 5px;
+  bottom: 5px;
+  width: 5px;
+  border-radius: 0 3px 3px 0;
+  pointer-events: none;
+}
+.session-row.needs-blocked .need-stripe { background: var(--decision); }
+.session-row.needs-unread .need-stripe { background: var(--accent); }
 
 /* A `div role="button"`, not a `<button>` — see `sessionRow`'s own note for why (a folded
    folder's `▾` lives inside this box, and interactive content cannot nest). The one thing

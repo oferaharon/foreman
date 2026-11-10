@@ -43,6 +43,16 @@
             <img class="brand-logo" src="/icons/mark.svg" alt="" aria-hidden="true">
             Foreman
             <span class="link" id="conn">●</span>
+            <!--
+              The jump count: how many sessions want you, red when any is blocked and the
+              accent when every one only holds a reply, absent at zero. Each press opens the
+              next one in rail order, wrapping round (`jumpToNeeding`), and ⇧⇥ is the same
+              walk. On the brand line rather than among `.rail-actions`, because that row is
+              full — six controls with 5px to spare at the default width, and a seventh is a
+              second line (rail-and-groups#a-fifth-button-in-the-rail-head) — while this line
+              has the whole width right of the wordmark empty.
+            -->
+            <button class="rail-jump" id="railJump" type="button" hidden></button>
           </div>
 
           <!--
