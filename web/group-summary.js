@@ -1,11 +1,13 @@
 /*
  * What a folded group is hiding, in one line.
  *
- * A collapsed group draws one row on screen: its name, its caret, its `· N`. Collapsing is
- * only safe because the inbox hoists anything blocked or unread *out* of its folder first —
- * but **working** is neither, so a busy session is the one state a closed group can
- * genuinely hide. The pulsing dot on the heading has stood in for that since groups
- * existed; this adds the rest of the sentence beside it: `2 working · newest 4m · 3 tasks`.
+ * A collapsed group draws one row on screen: its name, its caret, its `· N`. Collapsing
+ * used to be safe because the inbox hoisted anything blocked or unread *out* of its folder
+ * first. **There is no inbox any more** — by the maintainer's ruling of 2026-11-09 a row that
+ * wants him stays where it lives and wears a stripe (`web/needs-you.js`) — so a folded group
+ * now hides those rows too, and this line is the only thing that says they are there:
+ * `2 need you · 2 working · newest 4m · 3 tasks`, the first clause red when any of them is
+ * blocked. The pulsing dot on the heading has stood in for *working* since groups existed.
  *
  * The thirteenth pure module under `web/`, here for the reason each of the twelve before it
  * gives: every mistake available in this arithmetic **renders perfectly**. A count taken
@@ -25,6 +27,10 @@
  *
  * No DOM, no storage, no `window` — plain objects in, plain numbers and strings out.
  */
+
+// Who wants the maintainer and how badly: the stripe's own rule, so the folded count and the
+// rows it stands in for cannot disagree about which ones those are.
+import { needText, needTally } from './needs-you.js';
 
 /**
  * How long ago, in the rail's own spelling: `now`, `4m`, `3h`, `2d`, and `''` for a
@@ -63,10 +69,15 @@ const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : n
  *   map `renderRail` already built; this function never knows about nesting, it only
  *   counts what it is handed, which is what keeps the set a decision made in one place.
  * @param {number} [now] the clock the age is read against
- * @returns {{working: number, newestMs: number|null, tasks: number|null, clauses: string[]}}
+ * @returns {{need: number, blocked: number, working: number, newestMs: number|null,
+ *   tasks: number|null, clauses: string[], parts: Array<{text: string, tone: string|null}>}}
  */
 export function groupSummary(rows, now = Date.now()) {
   const list = Array.isArray(rows) ? rows : [];
+
+  // What wants the maintainer in here, workers included on the stripe's own rule — a worker
+  // counts once `stuck` fires, exactly as it would take a stripe if the group were open.
+  const { need, blocked } = needTally(list);
 
   // The same test `renderRail` has always used for the dot, asked of a wider set.
   const working = list.filter((s) => s?.status === 'working').length;
@@ -95,12 +106,34 @@ export function groupSummary(rows, now = Date.now()) {
     tasks = (tasks ?? 0) + (s.team.tasks || 0);
   }
 
-  const facts = { working, newestMs, tasks };
-  return { ...facts, clauses: summaryClauses(facts, now) };
+  const facts = { need, blocked, working, newestMs, tasks };
+  const parts = summaryParts(facts, now);
+  return { ...facts, clauses: parts.map((p) => p.text), parts };
 }
 
 /**
- * The line, clause by clause: `['2 working', 'newest 4m', '3 tasks']`.
+ * The line as clauses that know their tone: `[{text: '2 need you', tone: 'blocked'}, …]`.
+ *
+ * Only the needs-you clause carries one — `'blocked'` when any row it counts is blocked,
+ * `'unread'` when every one of them only holds a reply — and it goes **first**, because it
+ * is the one clause on this line that asks for something. The rest are `summaryClauses`'
+ * own, unchanged, with `tone: null`.
+ *
+ * @param {{need?: number, blocked?: number, working?: number, newestMs?: number|null,
+ *   tasks?: number|null}} summary
+ * @param {number} [now]
+ * @returns {Array<{text: string, tone: 'blocked'|'unread'|null}>}
+ */
+export function summaryParts(summary, now = Date.now()) {
+  const out = [];
+  const need = summary?.need || 0;
+  if (need > 0) out.push({ text: needText(need), tone: summary?.blocked > 0 ? 'blocked' : 'unread' });
+  for (const text of restClauses(summary, now)) out.push({ text, tone: null });
+  return out;
+}
+
+/**
+ * The line, clause by clause: `['1 needs you', '2 working', 'newest 4m', '3 tasks']`.
  *
  * **A clause that is zero is omitted, never printed as a zero.** `0 tasks` under a group
  * with no team in it is furniture in the exact sense the rail already refuses it — the
@@ -112,11 +145,17 @@ export function groupSummary(rows, now = Date.now()) {
  * as its own muted element, the way the meta line does. `summaryText` is the same answer
  * for anything that wants it flat — a tooltip, a test, a report.
  *
- * @param {{working?: number, newestMs?: number|null, tasks?: number|null}} summary
+ * @param {{need?: number, blocked?: number, working?: number, newestMs?: number|null,
+ *   tasks?: number|null}} summary
  * @param {number} [now]
  * @returns {string[]}
  */
 export function summaryClauses(summary, now = Date.now()) {
+  return summaryParts(summary, now).map((p) => p.text);
+}
+
+/** Every clause but the needs-you one, in their order — `summaryParts` puts that one first. */
+function restClauses(summary, now) {
   const out = [];
   const working = summary?.working || 0;
   // "working" is not a noun here, so there is no singular to spell: `1 working` is right.
@@ -131,6 +170,6 @@ export function summaryClauses(summary, now = Date.now()) {
   return out;
 }
 
-/** The same line as one string — `2 working · newest 4m · 3 tasks`, or `''`. */
+/** The same line as one string — `1 needs you · 2 working · newest 4m · 3 tasks`, or `''`. */
 export const summaryText = (summary, now = Date.now()) =>
   summaryClauses(summary, now).join(' · ');

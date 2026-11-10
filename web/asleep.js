@@ -4,7 +4,7 @@
  *
  * A sleeper is **not** a roster row and never becomes one: it rides the frame as the sibling
  * `asleep` field (`server/index.js`'s `rosterFrame`), and nothing that walks `sessions` —
- * the inbox, notifications, unread, pins, `adopt`'s own pick — is ever handed one. What the
+ * the needs-you stripes, notifications, unread, pins, `adopt`'s own pick — is ever handed one. What the
  * rail draws is an *item* built from the record, `{asleep: true, …}`, which `renderRail`
  * slots into the lists it already builds: the pinned group after the row it sat under, and
  * its folder (and so its group) by its stored `lastActivity`, exactly where it was.

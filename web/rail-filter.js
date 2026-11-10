@@ -11,7 +11,7 @@
  * server accepted would drop the hidden pins to the bottom. No DOM, no storage, no `window`.
  *
  * What the filter is, said once: **a statement about what this browser's rail draws, and
- * nothing else.** The roster, the inbox's own rule, notifications, the queue and every
+ * nothing else.** The roster, the needs-you rule (`web/needs-you.js`), notifications, the queue and every
  * server-side consumer never hear of it. It is kept per browser (`railFilter` in
  * `web/prefs.js`) as **one** value, which is what makes "one filter at a time across both
  * kinds" a fact rather than a rule two writers have to remember: a group's id (`g3`), or a
@@ -178,9 +178,10 @@ export function inFilter(row, filter, leads) {
  * How many sessions the filter is hiding that want the maintainer — the number the clear
  * toggle carries, so nothing outside the group or room waits on them silently.
  *
- * `wants` is the caller's own inbox rule (`needsYou` less a quiet worker), passed in rather
- * than re-spelled here: the count must be about exactly the rows the inbox would have
- * hoisted, and a second spelling would drift from the first the day the inbox rule changes.
+ * `wants` is the caller's own needs-you rule (`wantsYou` in `web/needs-you.js` — `needsYou`
+ * less a quiet worker, the old inbox's test), passed in rather than re-spelled here: the count
+ * must be about exactly the rows that would wear a stripe on screen, and a second spelling
+ * would drift from the first the day that rule changes.
  * It is taken over **every** live session — pinned ones included, since a pinned row that
  * wants you is hidden by the filter just the same — and never over sleepers, which by the
  * sleep rule had nothing unread and were asking nothing.

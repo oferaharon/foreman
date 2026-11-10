@@ -129,11 +129,12 @@ quietly unfile a real project that happens to share the name.
 
 ## An empty heading isn't drawn
 
-**A heading with nothing under it isn't drawn, and "nothing" is measured after hoisting.**
+**A heading with nothing under it isn't drawn, and "nothing" is measured after pinning.**
 `renderRail` skips a group whose `count` is 0 — computed from the rows it is *about* to
-draw, which is what makes it agree with the screen: a group whose only session is up in the
-inbox reads as empty here and is right to, because the row is on screen two headings
-higher. Note what it costs, since nothing on screen says it: a group with nothing running
+draw, which is what makes it agree with the screen: a group whose only session is pinned
+reads as empty here and is right to, because the row is on screen a few headings higher.
+(Until 2026-11-09 the needs-you inbox took rows out the same way; it is gone, and a row
+that wants you now stays under its heading and keeps it drawn.) Note what it costs, since nothing on screen says it: a group with nothing running
 anywhere has no heading, so there is nothing to rename or delete it from until one of its
 folders wakes up. Its folders can still be re-filed from the folder menu, which lists every
 group. And when you remove rows from a flat list, check the tint: it is tiled from three
@@ -157,26 +158,35 @@ back into the pinned group under the row drawn directly above them (`placePinned
 a folder does not grow a heading the moment its only session sleeps either.
 
 Three things it must not do, all held by building a sleeper as an *item* off the frame's
-`asleep` sibling and never as a row in `state.sessions`. It never enters the inbox, which is
-built off `state.sessions` alone, before the merge. It never counts as unread. And the
+`asleep` sibling and never as a row in `state.sessions`. It never wears a needs-you stripe —
+`stripeKind` answers a sleeper `null`, and the jump's walk skips it by `asleep`. It never
+counts as unread. And the
 collapsed group's dot reads `awake(...)` — the same lists with sleepers filtered back out —
 because a sleeper is the one row that is certainly doing nothing.
 
 ## What a collapsed group hides
 
-**A collapsed group hides one thing for ordinary rows and two for workers.** For an
-ordinary session and for a lead, folding is safe because the inbox hoists anything blocked
-or unread *out* of its folder first — but **working** is neither, so a busy session is the
-one state a closed group can genuinely hide. Hence the pulsing dot on the heading, drawn
-only when collapsed, and now a second line beside it: `2 working · newest 4m · 3 tasks`.
+**A collapsed group hides every row in it, and since 2026-11-09 that includes the rows
+that want you — so its summary line is the only thing on screen that says they are there.**
+Folding used to be safe for ordinary sessions and leads because the inbox hoisted anything
+blocked or unread *out* of its folder first, leaving only **working** for a closed group to
+hide (hence the pulsing dot). The maintainer then ruled against rows moving at all ("I don't
+like when sessions move all the time"): nothing hoists, a row that wants you stays in its
+folder and wears a stripe, and a fold now hides it with the rest. What stands in for it is
+the summary's first clause, `N need you` — red when any of them is blocked, the accent when
+every one only holds a reply — drawn whenever the group is folded and something inside it
+wants you, ahead of `2 working · newest 4m · 3 tasks`. And the rail head's jump still walks
+those rows, at the header's place, opening them **without unfolding anything** — the
+collapse is the group's, shared between windows, and a jump is not a request to change it.
 
-The hoisting rule then changed, for workers alone. A worker's permission prompt is its
-lead's to answer and its finished report is its lead's to read, so a worker row no longer
-hoists until `stuck` fires (`stuckAfterMinutes`, default 20) — a deliberate call, taken
-knowing that a blocked-but-not-yet-stuck worker inside a *collapsed* team group is therefore
-not visible. The trade was bought with the lead row's `N waiting` count, which names the
-same fact the inbox stopped showing, and backstopped by the stuck timer, which
-puts the row in the inbox for real once it has actually been abandoned there.
+Workers follow the stripe's rule, which is the old inbox's: a worker's permission prompt is
+its lead's to answer and its finished report its lead's to read, so a worker counts — and
+wears a stripe — only once `stuck` fires (`stuckAfterMinutes`, default 20). That trade was
+taken on 2026-08-27 knowing a blocked-but-not-yet-stuck worker inside a *collapsed* team
+group is not visible, bought with the lead row's own count and backstopped by the stuck
+timer; this change neither widens nor narrows it, because `wantsYou` is the same expression
+(`web/needs-you.js`, built on `quietWorker`, now exported from `web/notify.js` as the one
+spelling the notification already used).
 
 ## The collapsed group's dot
 
@@ -186,14 +196,20 @@ group's own `count` — top-level rows only — was also, until this, the set th
 `busy` were computed over: a worker working inside a collapsed team group lit nothing at
 all until the stuck timer fired twenty minutes later. `web/group-summary.js`'s
 `groupSummary` closes that hole by reading the **worker-inclusive** set instead — the same
-`expand()` the fold rule already builds, folded workers included — so the dot and the new
-summary line both count a busy worker the moment it starts, not twenty minutes after. `busy`
-itself is gone from the group loop; the module's `working` is what feeds the dot now. The
-accepted cost, taken on the maintainer's own ruling: a collapsed team group now pulses when
-*only* a nested worker is busy and every top-level row in it is idle — worth knowing before
-reading a quiet-looking heading as quiet. The header's own `· N` is untouched and still
-counts top-level rows alone, which is why it and the summary line one row down can
+`expand()` the fold rule already builds, folded workers included — so the dot and the
+summary line both count a busy worker the moment it starts, not twenty minutes after. The
+`N need you` clause is taken over that same set, so a stuck worker behind a fold is counted
+too. `busy` itself is gone from the group loop; the module's `working` is what feeds the dot
+now. The accepted cost, taken on the maintainer's own ruling: a collapsed team group now
+pulses when *only* a nested worker is busy and every top-level row in it is idle — worth
+knowing before reading a quiet-looking heading as quiet. The header's own `· N` is untouched
+and still counts top-level rows alone, which is why it and the summary line one row down can
 legitimately disagree — `· 1` on the heading, `3 working` in the line below it, both true.
+
+The dot used to lead the line; it now leads the `working` clause instead, after `N need
+you`, because an amber pulse beside the needs-you count reads as something about *those*
+rows. Leading also makes the needs-you clause the last thing the line's `overflow: hidden`
+would clip at a narrow rail.
 
 ## The spine and the marker
 
@@ -209,6 +225,59 @@ trading one for the other. In dark theme the binding ground is `--shelf` (contra
 theme's binding ground is `--surface-sunk` (1.68 – 2.45) with a 1.65 – 2.98 marker step. The
 amended mockup's own drawing — spine and marker in one colour — was refused for exactly
 this reason once it was measured rather than eyeballed.
+
+## The needs-you stripe
+
+**The left edge was already two things, so the stripe is told apart from both by shape as
+well as colour — measured, because colour alone fails for one pair outright.** Since the
+2026-11-09 ruling a row that wants you stays where it lives and says so on its own left edge:
+`--decision` when it is blocked, `--accent` (the unread badge's colour) when it only holds a
+reply. The spine (half-strength group hue) and the selected marker (full hue, or the accent
+outside a group) are both the row's own 3px border: square, full height, continuous from row
+to row. The stripe is a separate out-of-flow node laid over that border — 5px wide, inset
+5px from the row's top and bottom, rounded on its inner side — so it reads as a tab sitting
+*on* the edge, two wanting rows one above the other stay two marks, and the spine or marker
+still shows above and below it (a selected row that is also blocked keeps its marker; a row
+in a group still shows which group).
+
+The colour measurements, all ten hues, both themes (`--shelf` and `--row-open` mixed as the
+tokens mix them):
+
+| | light | dark |
+| --- | --- | --- |
+| blocked vs every ground (surface, shelf, sunk, row-open) | contrast ≥ 3.83 | ≥ 4.06 |
+| unread vs every ground | contrast ≥ 4.65 | ≥ 4.37 |
+| blocked vs the spine | ΔE2000 ≥ 23.5 | ≥ 28.2 |
+| unread vs the spine | ΔE2000 ≥ 24.5 | ≥ 18.7 |
+| blocked vs the marker, ten hues | ΔE2000 15.5 – 66.4 (slot 6) | 13.9 – 64.1 (slot 6) |
+| unread vs the marker, ten hues | ΔE2000 12.5 – 65.5 (slot 2) | 14.5 – 60.9 |
+| unread vs the marker outside a group | **ΔE 0 — the same accent** | **ΔE 0** |
+| blocked vs unread | ΔE2000 39.4 | 36.3 |
+
+Both colours clear WCAG 1.4.11's 3:1 against every ground a row can sit on, and both step
+further from the spine than the marker itself does (the marker's own floor is ΔE 16.0 light /
+18.0 dark). Against the marker, colour is weakest exactly where the ring's reservation put
+it — red against slot 6, the accent against slot 2 — and **an unread stripe and the
+selected marker outside a group are the same colour**. That pair is what the geometry is
+for: 5px against 3px, inset and rounded against flush and square, and no filled band against
+`--row-open`'s. Benched with slot 6 and slot 2 groups, light and dark, a selected row beside
+an unread one outside any group, and a pinned row whose grip sits beside the stripe.
+
+Three placement facts. It is a node and not a pseudo-element because both of the row's are
+taken (`::before` a worker's connecting rule, `::after` the pinned drop line). It sits over
+the border's x, `left: -3px`, which clears the pinned grip's dots (5–11px in) and a worker's
+rule (8.8px). And `.in-group-last` rows carry the block's 0.5rem closing padding inside their
+own box, so their stripe's bottom inset adds it back — without that the last row's stripe
+drew 8px longer than every other (seen on the bench, 64px row against 56).
+
+**Nothing moving needed one more change than the hoist.** The roster arrives ranked —
+blocked first, then unread, then recency (`server/sessions.js`'s sort) — and with the inbox
+taking those rows out first, what reached the folders happened to be recency. Without the
+inbox the same ranking would be the hoist again in miniature: a row jumping to the top of its
+folder, and its folder to the top of the rail, the moment it asked something. `byRecency`
+(`web/needs-you.js`) re-sorts the rail's copy; the server's ranking is left alone, because
+the phone and the task list read it. Do not drop the re-sort as redundant: it is the half of
+"rows never move" that the deleted code was doing silently.
 
 ## The row is not a button
 
@@ -401,6 +470,11 @@ scratch panel at the default width: the five take 251px with their gaps against 
 sixth at the ordinary icon width leaves **half a pixel**, and the toggle's count drawn beside
 its glyph wrapped `settings` to a second line. It ships at 21.4px (tighter side padding) with
 the count as an out-of-flow badge, 5px to spare. A seventh control there is a second line.
+
+Which is why the needs-you **jump count** is not there. It sits on the brand line instead,
+right-aligned after the connection dot, where everything right of the wordmark was empty —
+measured on the bench at the default width with the filter toggle drawn as well: `.rail-actions`
+still one line.
 
 ## The phone's five stylesheets
 

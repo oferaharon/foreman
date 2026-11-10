@@ -46,7 +46,7 @@ const hasTeamLine = (s) => Boolean(s?.team);
  *   folder holds one *session*. Hand in the list `rowsFor` will expand to, never the
  *   folder map's own entry.
  * - The **team line** refuses a lead standing alone and a worker standing alone (one that
- *   fell back to its own folder heading because its lead is up in the inbox). The audit
+ *   fell back to its own folder heading because its lead is not live, or is filtered out). The audit
  *   table's ruling is that a lead or worker row keeps its full title however alone it is —
  *   its third line already carries a role and a branch, and a path spliced onto the front
  *   of that is three facts fighting for one line.

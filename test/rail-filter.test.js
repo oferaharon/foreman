@@ -158,19 +158,20 @@ test('a drawn list that does not agree with the pins writes nothing', () => {
 
 /* ---------------------------------------------------------------- source scan --- */
 
-test('pinned, the inbox and the rest are all cut by the filter', () => {
+test('pinned and the rest are both cut by the filter — there is no inbox left to cut', () => {
   const rail = fn('renderRail');
   assert.match(rail, /const pinned = pinnedRows\(sleepers\)\.filter\(shown\);/);
-  assert.match(rail, /const inbox = state\.sessions\.filter\([^\n]*&& shown\(s\)\);/);
-  assert.match(rail, /let rest = state\.sessions\.filter\([^\n]*&& shown\(s\)\);/);
+  assert.ok(!/const inbox\b/.test(rail), 'no needs-you section any more (the 2026-11-09 ruling)');
+  assert.match(rail, /let rest = byRecency\(state\.sessions\.filter\([^\n]*&& shown\(s\)\)\);/);
   assert.match(rail, /sleepers\.filter\(\(s\) => !s\.pinned && shown\(s\)\)/);
   // A lead in another group must not collect workers it will never draw.
-  assert.match(rail, /s\.isLead && !inInbox\.has\(s\.id\) && shown\(s\)/);
+  assert.match(rail, /s\.isLead && shown\(s\)\) leadRows\.set/);
 });
 
-test('the count is taken with the inbox’s own rule, not a second spelling', () => {
+test('the count is taken with the stripe’s own rule, not a second spelling', () => {
   const rail = fn('renderRail');
-  assert.match(rail, /hiddenWanting\(state\.sessions, filter, \(s\) => s\.needsYou && !quietWorker\(s\)\)/);
+  assert.match(rail, /hiddenWanting\(state\.sessions, filter, wantsYou\)/);
+  assert.match(app, /^import \{[^}]*\bwantsYou\b[^}]*\} from '\.\/needs-you\.js';$/m);
 });
 
 test('a stale filter clears only once a roster frame has arrived', () => {
@@ -182,7 +183,8 @@ test('a stale filter clears only once a roster frame has arrived', () => {
 test('the filtered group draws open without writing its collapse', () => {
   const rail = fn('renderRail');
   assert.match(rail, /const folded = g\.collapsed && !filtered;/);
-  assert.match(rail, /if \(folded\) continue;/);
+  // Folded, nothing is drawn — the jump's walk notes the rows behind it, and writes nothing.
+  assert.match(rail, /if \(folded\) \{\s*for \(const s of expand\(awake\([^\n]*\) note\(s, g\.id\);\s*continue;\s*\}/);
   assert.ok(!/setGroupCollapsed/.test(rail), 'the rail never writes a collapse');
   assert.ok(!/setGroupCollapsed|flatRail/.test(fn('setRailFilter')), 'letting go touches nothing else');
   const header = fn('groupHeader');

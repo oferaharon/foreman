@@ -128,6 +128,10 @@ import { DEFAULT_HIBERNATE, HIBERNATE_CHOICES, hibernateLabel } from './hibernat
 // perfectly: a fold one row too eager hides a heading over two sessions, and a title split
 // on its own punctuation invents a path that is not the folder.
 import { ageText, groupSummary } from './group-summary.js';
+// What a row that wants the maintainer wears now that nothing hoists it: the stripe's kind,
+// the old inbox's own test, the rail's recency order and the jump control's next row. The
+// rules are `notify.js`'s (`needsKind`, `quietWorker`), imported there and never re-spelled.
+import { byRecency, nextNeeding, stripeKind, wantsYou } from './needs-you.js';
 // ^ what a folded group is hiding, in one line — and the one spelling of the rail's age
 // buckets, which `relativeTime` below delegates to. The set it counts over is
 // worker-inclusive and deliberately disagrees with the heading's own `· N` one line up:
@@ -297,7 +301,7 @@ const state = {
   // `BotStore#list` hands them over: `{id, name, helper: {online, lastSeen}, conversations,
   // active, lastTs, lastActiveAt, current}`. A sibling of `sessions` on the roster frame like
   // the rooms, and **never a row in `sessions`**: a bot has no pane, so nothing that walks the
-  // session list — the inbox, the notifications, read state, `adopt` — can ever be handed one.
+  // session list — the needs-you stripes, the notifications, read state, `adopt` — can ever be handed one.
   // Its conversations never ride this frame; a bot pane subscribes for them.
   //
   // An empty array is the ordinary answer, `rooms`' reason — hence `'bots' in msg`.
@@ -306,7 +310,7 @@ const state = {
   // and will start again, in the same folder under the same name, only when Wake is pressed —
   // exactly as the frame carries them: the sleep record plus `waiting`, the count of messages
   // held for it. A sibling of `sessions`, the bots' precedent, and **never a row in
-  // `sessions`**: nothing that walks the session list — the inbox, the notifications, unread,
+  // `sessions`**: nothing that walks the session list — the needs-you stripes, the notifications, unread,
   // pins, `adopt`'s pick — can ever be handed one. `renderRail` draws each greyed where its
   // row was (`web/asleep.js`); a click opens it read-only.
   //
@@ -491,6 +495,7 @@ const el = {
   flatRail: document.getElementById('flatRail'),
   railFilter: document.getElementById('railFilter'),
   railFilterCount: document.getElementById('railFilterCount'),
+  railJump: document.getElementById('railJump'),
   railQuota: document.getElementById('railQuota'),
   railList: document.getElementById('railList'),
   railFoot: document.querySelector('.rail-foot'),
@@ -1588,6 +1593,15 @@ let rosterSeen = false;
 
 /** Where the list was scrolled when a filter went on, to hand back when it comes off. */
 let scrollBeforeFilter = null;
+
+/**
+ * The rail's last walk, top to bottom (`renderRail`'s `order`): every live row it accounts
+ * for, `{id, kind, group}`, folded groups' contents included at their header. Module scope
+ * because the rail is rebuilt from scratch on every roster frame and the jump is pressed
+ * between them — and declared up here, beside the rail's other state, so no repaint can
+ * reach `paintJump` before the binding exists.
+ */
+let jumpOrder = [];
 
 /** How far the pointer travels before a press on the grip becomes a drag, in px. */
 const PIN_DRAG_SLOP = 4;
@@ -5081,23 +5095,22 @@ function renderRail() {
     el.railStat.append(span);
   }
 
-  // Pinned rows come out of everything else, inbox included — a pin is a promise about
-  // where a session will be, and one that moved to the inbox the moment it asked you
-  // something would break that promise exactly when you were looking for it. The badges
-  // travel with the row, so nothing about why it wants you is lost.
+  // **Nothing moves because it wants you.** By the maintainer's ruling of 2026-11-09 there
+  // is no `needs you` section any more: a row that is blocked asking something, or holds a
+  // reply he has not read, stays exactly where it lives — its folder, its group, its pin or
+  // its place in `recent` — and wears a stripe down its own left edge instead (`sessionRow`,
+  // `stripeKind` in `web/needs-you.js`). A folded group counts what it is holding
+  // (`groupSummary`), and the count in the rail head walks them (`jumpToNeeding`).
   //
-  // The inbox comes out of the project groups on the same principle: a session appears
-  // once, and leaves the queue once you've dealt with it.
-  //
-  // In the order the maintainer put them in — the server keeps it (`PinStore`), and the grip
-  // on each pinned row rearranges it.
+  // Pinned rows sit in the pinned group, in the order the maintainer put them in — the
+  // server keeps it (`PinStore`), and the grip on each pinned row rearranges it.
   // A pinned sleeper goes back under the pinned row it sat beneath (`placePinned`), so the
   // group reads as it did before it slept — and it moves like any other pinned row: the
   // order route takes live rows by pane and sleepers by name, one order across both.
   // The rail narrowed to one group or one room (`web/rail-filter.js`): every list below is
   // cut to the rows whose folder is filed in the group, or to the room's members — pinned
-  // and the inbox included, by the maintainer's ruling, so the group or the room is all
-  // there is on screen. A stale value — the group deleted, the room deleted or archived, or
+  // included, by the maintainer's ruling, so the group or the room is all there is on
+  // screen. A stale value — the group deleted, the room deleted or archived, or
   // nothing left to draw — clears itself, but only once a roster frame has arrived: before
   // that `state.groups` and `state.rooms` are the empty boot values and every id reads as
   // deleted.
@@ -5107,55 +5120,52 @@ function renderRail() {
   const shown = (s) => inFilter(s, filter, filterLeads);
 
   const pinned = pinnedRows(sleepers).filter(shown);
-  // A worker row comes out of the *inbox* on a related principle: a worker's permission
-  // prompt is its *lead's* to answer and its finished report is its lead's to read — that
-  // is what `worker_read` and the guarded answer endpoint exist for. So the lead gets first
-  // refusal, and the maintainer sees the row only once `stuck` says it has actually been
-  // abandoned there (`stuckAfterMinutes`, default 20).
+  // A worker that wants something is its *lead's* to deal with first: its permission prompt
+  // is the lead's to answer and its finished report the lead's to read — that is what
+  // `worker_read` and the guarded answer endpoint exist for. So it wears no stripe, counts
+  // in no folded group and is skipped by the jump until `stuck` says it has actually been
+  // abandoned there (`stuckAfterMinutes`, default 20). `wantsYou` is that rule, and the old
+  // inbox's test to the letter.
   //
   // Note where this lives. `needsYou` itself is untouched, because `/api/team/tasks` puts
   // it on a task's `live` object and that is how `team_status` tells the *lead* one of its
-  // workers is waiting. Quieting it at source would hush the maintainer's inbox by blinding
-  // the one party now solely responsible for noticing. Change who gets hoisted, never the
-  // flag.
+  // workers is waiting. Quieting it at source would hush the maintainer's rail by blinding
+  // the one party now solely responsible for noticing. Change what the rail draws, never
+  // the flag.
   //
-  // Leads are deliberately not covered: a lead asking the maintainer something is exactly
-  // what should reach them. And it self-limits — `team` is gated on OPEN_STATES, so a closed
-  // task takes the whole object with it and the row is an ordinary session again.
-  const quietWorker = (s) => s.team?.role === 'worker' && !s.team.stuck;
-  const inbox = state.sessions.filter((s) => !s.pinned && s.needsYou && !quietWorker(s) && shown(s));
-  let rest = state.sessions.filter((s) => !s.pinned && (!s.needsYou || quietWorker(s)) && shown(s));
-  // What the filter is keeping off screen that would have been in the inbox — or pinned and
-  // wanting you, which the inbox rule would have hoisted but for the pin — for the clear
-  // toggle to carry. The inbox's own rule, passed in, so the two cannot come to disagree.
-  paintRailFilter(filter, hiddenWanting(state.sessions, filter, (s) => s.needsYou && !quietWorker(s)));
+  // The roster arrives ranked — blocked first, then unread, then recency (`server/sessions.js`)
+  // — which with the inbox gone would be the hoist again in miniature: a row jumping to the
+  // top of its folder, and the folder to the top of the rail, the moment it asked something.
+  // `byRecency` puts the rail's copy back in the order nobody wanting anything would give it;
+  // the server's ranking stays, because the phone and the task list read it.
+  let rest = byRecency(state.sessions.filter((s) => !s.pinned && shown(s)));
+  // What the filter is keeping off screen that wants you — pinned rows included, which the
+  // filter hides just the same — for the clear toggle to carry. The stripe's own rule,
+  // passed in, so the two cannot come to disagree.
+  const hidden = hiddenWanting(state.sessions, filter, wantsYou);
+  paintRailFilter(filter, hidden);
 
   // A team reads as one thing: a worker files under its lead's row, not under a folder
   // heading — the mapping comes from the task store (`workerOf`), never from paths. What
-  // reaches here is every worker that isn't pinned and isn't stuck, which since the
-  // quieting is most of them. A pinned worker sits where the pin promised.
+  // reaches here is every worker that isn't pinned, blocked and stuck ones included: nothing
+  // hoists any more, so a worker that wants you stays nested and wears its stripe there. A
+  // pinned worker sits where the pin promised.
   //
-  // **Only leads that are actually drawn *here* collect workers, and `inInbox` is the whole
-  // reason.** A lead in the inbox is drawn by `sessionRow` on its own, not by `rowsFor` —
-  // so filing a worker under it hands that row to something which never renders it and the
-  // session disappears from the rail outright: no folder heading, no group, nowhere. Same
-  // class of failure as a blanked transcript, and the panel's worst.
+  // **Only leads that are actually drawn through `rowsFor` may collect workers.** A lead
+  // that was drawn some other way — as the inbox used to draw its rows, by `sessionRow`
+  // alone — would be handed workers it never renders, and they would vanish from the rail
+  // outright: no folder heading, no group, nowhere. Same class of failure as a blanked
+  // transcript, and the panel's worst. Every lead now goes through `rowsFor` (pinned, open
+  // group, ungrouped folder, `recent`) or is held whole behind a fold that counts its workers
+  // (`expand`), so the guard is the filter alone — and if a lead is ever drawn by anything
+  // else again, it has to come back.
   //
-  // It was latent for as long as it existed, and only because of a rule that is now gone:
-  // a worker that wanted anything hoisted itself into the inbox, so the ones left to nest
-  // were quiet ones, and a lead being in the inbox at the same moment was rare enough that
-  // nobody hit it. The quieting removed that accident — a blocked worker now *stays* here
-  // to be nested — so this guard is load-bearing rather than tidy. Do not simplify it back
-  // to `if (s.isLead)`; the depended-on rule is not coming back.
-  //
-  // Unnested, a worker falls back to its own folder heading, which is what the quieting
-  // promised: out of the inbox, never off the screen.
-  const inInbox = new Set(inbox.map((s) => s.id));
+  // Unnested, a worker falls back to its own folder heading — never off the screen.
   const leadRows = new Map(); // repo -> lead session
   // And only leads the filter lets through: a lead filed in another group, or outside the
   // room, is not drawn, so
   // its workers fall back to their own folder headings like any other unnested worker.
-  for (const s of state.sessions) if (s.isLead && !inInbox.has(s.id) && shown(s)) leadRows.set(s.paneCwd, s);
+  for (const s of state.sessions) if (s.isLead && shown(s)) leadRows.set(s.paneCwd, s);
   const nestedWorkers = new Map(); // lead session id -> [workers]
   rest = rest.filter((s) => {
     if (!s.workerOf || !leadRows.has(s.workerOf)) return true;
@@ -5175,7 +5185,7 @@ function renderRail() {
 
   // Sleepers that are not pinned go back among the rows they slept beside, by their stored
   // last activity — so under their own folder heading, and with it inside their group — and
-  // never into the inbox above, which was built off `state.sessions` alone. Merged *before*
+  // never wear a stripe: `stripeKind` answers a sleeper `null`. Merged *before*
   // the folder map is built, so a folder whose only sessions are asleep is still a folder:
   // the "an empty heading isn't drawn" rule measures what is drawn, and a greyed row is.
   rest = mergeByActivity(rest, sleepers.filter((s) => !s.pinned && shown(s)));
@@ -5183,7 +5193,7 @@ function renderRail() {
   // A filter over a group or a room with nothing left to draw anywhere — every session in it
   // closed, filed elsewhere or removed from the room — would leave a blank rail with a toggle
   // in its head. It lets go instead.
-  if (filter && rosterSeen && !pinned.length && !inbox.length && !rest.length) return void setRailFilter('');
+  if (filter && rosterSeen && !pinned.length && !rest.length) return void setRailFilter('');
   /** Only the rows that are running — what the collapsed group's dot may be lit by. */
   const awake = (list) => list.filter((s) => !s.asleep);
 
@@ -5193,12 +5203,27 @@ function renderRail() {
   const rowsFor = (s, fold = null) => {
     if (s.asleep) return [asleepRow(s, fold)];
     const rows = [sessionRow(s, fold)];
+    note(s);
     for (const w of nestedWorkers.get(s.id) || []) {
       const row = sessionRow(w);
       row.classList.add('worker-row');
       rows.push(row);
+      note(w);
     }
     return rows;
+  };
+
+  /*
+   * The jump control's walk: every live row the rail accounts for, top to bottom, wanting
+   * or not — each one as `rowsFor` draws it, and the contents of a folded group at its
+   * header (`group`), so a row behind a fold is still reached and the header is what scrolls
+   * into view. A sleeper is left out: it never wants anything and cannot be opened live.
+   * What the filter hides is not in it — the clear toggle counts those — so the walk is what
+   * this rail shows, and the control's title says so.
+   */
+  const order = [];
+  const note = (s, group = null) => {
+    if (!s.asleep) order.push({ id: s.id, kind: stripeKind(s), group });
   };
 
   // Folders, in the order the roster hands them over — which is recency, so the folder
@@ -5250,21 +5275,16 @@ function renderRail() {
       frag.append(...rows);
     }
   }
-  if (inbox.length) {
-    frag.append(plainLabel(`needs you · ${inbox.length}`, 'inbox-label'));
-    for (const s of inbox) frag.append(sessionRow(s));
-  }
 
   // Flat: no shelving, no folder headings, just what moved last.
   //
-  // Pinned and the inbox stay, because neither is a group you made — one is a promise
-  // about where a row will be and the other is the queue of things that stopped for you.
-  // What goes is the filing: on a morning where you know the session you want but not
-  // which of nine folders it lives in, headings are three extra reads.
-  // `rest` is already in recency order — the roster sorts by `lastActivity` once pinned
-  // and blocked rows are out of it — so there is nothing to re-sort here.
+  // Pinned stays, because it is not a group you made — it is a promise about where a row
+  // will be. What goes is the filing: on a morning where you know the session you want but
+  // not which of nine folders it lives in, headings are three extra reads.
+  // `rest` is already in recency order (`byRecency`, above), so there is nothing to re-sort
+  // here — and a row that wants you keeps its place in it, stripe and all.
   if (state.flatRail) {
-    if (rest.length && (pinned.length || inbox.length)) {
+    if (rest.length && pinned.length) {
       const rule = document.createElement('div');
       rule.className = 'rail-rule';
       frag.append(rule);
@@ -5272,6 +5292,7 @@ function renderRail() {
     for (const s of rest) frag.append(...rowsFor(s));
     el.railList.replaceChildren(frag);
     refocusGrip(focusedGrip);
+    paintJump(order, filter, hidden);
     renderSharedRow();
     renderBotsBand();
     renderRoomsBand();
@@ -5291,10 +5312,11 @@ function renderRail() {
     const mine = g.folders.filter((f) => folders.has(f));
     const count = mine.reduce((n, f) => n + folders.get(f).length, 0);
 
-    // A heading over nothing is furniture. Empty is measured *after* hoisting, against the
-    // rows this loop is about to draw — so a group whose only session is up in the inbox
-    // reads as empty here and is right to: the row is on screen, two headings higher, and
-    // the shelf it normally sits on has nothing on it. It comes back when the session does.
+    // A heading over nothing is furniture. Empty is measured against the rows this loop is
+    // about to draw — a pinned row is up in the pinned group, so a group whose only session
+    // is pinned reads as empty here and is right to: the row is on screen, a few headings
+    // higher, and the shelf it normally sits on has nothing on it. Nothing else takes a row
+    // out of its group any more; a row that wants you stays here and wears its stripe.
     if (!count) continue;
 
     // The group's colour, on every sibling the group owns.
@@ -5302,7 +5324,7 @@ function renderRail() {
     // The rail is a flat list, so there is no container to set this on once — the spine is
     // tiled from the header, the folder headings and the rows the same way the tint is, and
     // each of them has to carry the hue itself. Everything that never comes through this
-    // loop (a pinned row, an inbox row, an ungrouped folder) gets no `--h` at all, which is
+    // loop (a pinned row, an ungrouped folder) gets no `--h` at all, which is
     // what keeps its selected marker on the accent with no branch here or in the stylesheet.
     //
     // Re-set on every build, which is correct: `renderRail` rebuilds the rail from scratch
@@ -5345,9 +5367,14 @@ function renderRail() {
       : null;
 
     frag.append(wear(groupHeader(g, count, summary, filtered)));
-    // Collapsing can't hide anything you need: a session that wants you is in the inbox
-    // above, and a pinned one is above that. What's left in here is quiet by definition.
-    if (folded) continue;
+    // Folded, the rows are not drawn — and since nothing hoists any more, a row in here that
+    // wants you is hidden with the rest. Two things stand in for it: the summary's `N need
+    // you`, red when one of them is blocked, and the jump, which still walks these rows (at
+    // the header's place) and opens them without unfolding anything.
+    if (folded) {
+      for (const s of expand(awake(mine.flatMap((f) => folders.get(f))))) note(s, g.id);
+      continue;
+    }
     let tail = null;
     for (const f of mine) {
       // A folder of one prints no heading — its name is the row's path, `▾` and all. The
@@ -5378,6 +5405,7 @@ function renderRail() {
 
   el.railList.replaceChildren(frag);
   refocusGrip(focusedGrip);
+  paintJump(order, filter, hidden);
   renderSharedRow();
   // A sibling band drawn from the same frame on the same beat, for the reason the line
   // below gives about the connections: every place that already redraws the rail is a place
@@ -5593,6 +5621,8 @@ function groupHeader(g, count, summary = null, filtered = false) {
   const lit = filtered && filterTarget(railFilter.value)?.kind === 'group';
   const row = document.createElement('div');
   row.className = `group-label shelf-label${folded ? ' collapsed' : ''}`;
+  // What the jump control scrolls into view when the row it opened is behind this fold.
+  row.dataset.group = g.id;
 
   const toggle = document.createElement('button');
   toggle.className = 'shelf-toggle';
@@ -5675,11 +5705,11 @@ function groupHeader(g, count, summary = null, filtered = false) {
    * Folded away, and what that is hiding — the second line, and the one state it is drawn
    * in.
    *
-   * Collapsing is only safe because the inbox hoists anything blocked or unread out of its
-   * folder first — but *working* is neither, so a busy session is the one state a closed
-   * group can genuinely hide. The pulsing dot has stood in for that since groups existed;
-   * this is the rest of the sentence beside it, and the dot now counts the same
-   * worker-inclusive set the words do.
+   * Nothing hoists out of a folder any more (the maintainer's ruling of 2026-11-09), so a
+   * fold hides every row in it, the ones that want you included — and this line's first
+   * clause, `N need you`, red when any of them is blocked, is the only thing on screen that
+   * says they are there. *Working* the pulsing dot has stood in for since groups existed;
+   * the dot counts the same worker-inclusive set the words do.
    *
    * **Inside the header's own box, never a sibling beneath it.** The rail is a flat list
    * and an open group's tint and spine are *tiled* from adjacent full-width siblings, so a
@@ -5691,8 +5721,8 @@ function groupHeader(g, count, summary = null, filtered = false) {
    * Appended last, after the two controls, so those stay on the header's first line where
    * item 4 put them — the summary sits under the name, not beside the buttons.
    */
-  const clauses = (folded && summary?.clauses) || [];
-  if (clauses.length) {
+  const parts = (folded && summary?.parts) || [];
+  if (parts.length) {
     const line = document.createElement('div');
     line.className = 'shelf-summary';
     // The count above is top-level rows; this line is everything inside. Said here because
@@ -5701,22 +5731,33 @@ function groupHeader(g, count, summary = null, filtered = false) {
 
     // Nothing running anywhere inside draws no dot — as it always has, and now over a set
     // wide enough for that to mean what it says.
+    let dot = null;
     if (summary.working) {
-      const dot = document.createElement('span');
+      dot = document.createElement('span');
       dot.className = 'dot working shelf-dot';
       dot.title = `${summary.working} session${summary.working === 1 ? '' : 's'} working in here`;
-      line.append(dot);
     }
 
-    clauses.forEach((clause, i) => {
+    // The needs-you clause leads, and the dot goes in front of the first clause after it
+    // rather than at the head of the line: an amber pulse beside `2 need you` would read as
+    // something about *those* rows. First also means it is the last thing the line's
+    // `overflow: hidden` would ever clip at a narrow rail.
+    parts.forEach((part, i) => {
       if (i) {
         const sep = document.createElement('span');
         sep.className = 'shelf-sep';
         sep.textContent = '·';
         line.append(sep);
       }
+      if (dot && !part.tone) {
+        line.append(dot);
+        dot = null;
+      }
       const span = document.createElement('span');
-      span.textContent = clause;
+      span.textContent = part.text;
+      // The needs-you clause, in the stripe's own two colours — red if any row it counts is
+      // blocked, the accent if every one of them only holds a reply.
+      if (part.tone) span.className = `shelf-need is-${part.tone}`;
       line.append(span);
     });
 
@@ -5822,6 +5863,31 @@ function sessionRow(s, fold = null) {
   // which also carries the hover and selected states so they cover the pin as well.
   const row = document.createElement('div');
   row.className = `session-row${s.pinned ? ' is-pinned' : ''}${s.isLead ? ' is-lead' : ''}`;
+  // What the jump control finds the row by once it has opened it.
+  row.dataset.session = s.id;
+
+  /*
+   * **The stripe: this row wants you, and it says so where it stands.** Nothing hoists a row
+   * out of its folder any more (the maintainer's ruling of 2026-11-09), so the left edge
+   * carries it — red (`--decision`) when the session is blocked asking something, the accent
+   * (`--accent`, the unread badge's own colour) when it only holds a reply you have not
+   * read. Blocked wins. `stripeKind` is the whole rule and it is imported: the old inbox's
+   * test, split by `needsKind`, so a worker its lead is handling wears nothing until `stuck`.
+   *
+   * A node of its own rather than a pseudo-element because both of the row's are taken —
+   * `::before` is a worker's connecting rule, `::after` the pinned group's drop line — and a
+   * node rather than the border because the border is already two things, the group's spine
+   * and the open row's marker (rail-and-groups#the-spine-and-the-marker). The stylesheet
+   * says why it reads apart from both.
+   */
+  const need = stripeKind(s);
+  if (need) {
+    row.classList.add('needs-you', `needs-${need}`);
+    const stripe = document.createElement('span');
+    stripe.className = 'need-stripe';
+    stripe.setAttribute('aria-hidden', 'true');
+    row.append(stripe);
+  }
 
   /*
    * **`.session` is a `div role="button"`, not a `<button>`, and uniformly so.**
@@ -5908,8 +5974,8 @@ function sessionRow(s, fold = null) {
     meta.append(bypass);
   }
 
-  // The row's own reason for being at the top of the rail. Without it a question
-  // sits in the inbox with nothing saying why.
+  // The row's own reason for wearing a red stripe. Without it a question is a red edge
+  // with nothing saying why.
   if (s.question) {
     const asks = document.createElement('span');
     asks.className = 'asks-badge';
@@ -12557,7 +12623,7 @@ function createPane(slot, host) {
   }
 
   /**
-   * The rail's inbox rule, applied to the task list: what needs you comes first, and
+   * The rail's old inbox rule, applied to the task list: what needs you comes first, and
    * only then recency. It matters more here than it used to, because the block now
    * stops at five rows (see `capTaskList`) and everything past them is a scroll away.
    *
@@ -19340,26 +19406,23 @@ function renderAllStreams() {
 /* ---------------------------------------------------------------- go --- */
 
 /**
- * ⇧⇥ jumps to the next session wanting attention — blocked first, then unread.
- * Skips the one you're already on so repeated presses walk the queue, and it walks the
- * focused pane, leaving the other where you parked it — or, if a thread is what you are
- * focused in, the pane that can actually hold a session. Same rule as a rail click, and it
- * is `sessionPane`'s for the same reason: a keypress meaning "next session" must not be
- * what closes a thread.
+ * ⇧⇥ is the rail head's jump count from the keyboard: the next session wanting you, in rail
+ * order, wrapping round (`jumpToNeeding`). It used to walk the roster's own ranking — every
+ * blocked row, then every unread one, quiet workers included — which stopped being the
+ * rail's order the day the rail stopped hoisting; two "next" controls answering two
+ * different nexts would be the worse bug. It walks the focused pane, leaving the other
+ * where you parked it — or, if a thread is what you are focused in, the pane that can
+ * actually hold a session. Same rule as a rail click, and it is `sessionPane`'s for the same
+ * reason: a keypress meaning "next session" must not be what closes a thread.
  */
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Tab' || !e.shiftKey) return;
   const tag = document.activeElement?.tagName;
   if (tag === 'TEXTAREA' || tag === 'INPUT') return;
 
-  const queue = state.sessions.filter((s) => s.needsYou);
-  if (!queue.length) return;
+  if (!jumpOrder.some((x) => x.kind)) return;
   e.preventDefault();
-
-  const pane = sessionPane();
-  if (!pane) return;
-  const at = queue.findIndex((s) => s.id === pane.selected());
-  openSession(queue[(at + 1) % queue.length].id);
+  jumpToNeeding();
 });
 
 /** ⌘\ / Ctrl+\ opens the split, and closes the pane you are not in. */
@@ -19437,6 +19500,83 @@ function paintRailFilter(filter, hidden) {
 }
 
 if (el.railFilter) el.railFilter.onclick = () => setRailFilter('');
+
+/**
+ * The jump count in the rail head: how many sessions want you, red when any of them is
+ * blocked and the accent when every one only holds a reply — the stripes' two colours —
+ * and absent at zero.
+ *
+ * **It walks what this rail shows.** Under a group or room filter that is the filter's rows
+ * alone; the ones the filter hides are the clear toggle's count, two buttons along, and the
+ * title says so rather than leaving a reader to wonder why the two numbers differ. The
+ * simpler honest choice: opening a session the rail does not draw has no row to scroll to.
+ */
+function paintJump(order, filter, hidden) {
+  jumpOrder = order;
+  const btn = el.railJump;
+  if (!btn) return;
+  const wanting = order.filter((x) => x.kind);
+  const n = wanting.length;
+  btn.hidden = n === 0;
+  if (!n) return;
+  const blocked = wanting.filter((x) => x.kind === 'blocked').length;
+  btn.classList.toggle('is-blocked', blocked > 0);
+  btn.textContent = String(n);
+  const what = `${n} session${n === 1 ? '' : 's'} need${n === 1 ? 's' : ''} you${blocked ? ` (${blocked} blocked)` : ''}`;
+  const scope = filter
+    ? ` in ${filterLabel(filter)}${hidden ? ` — ${hidden} more outside it, counted on the filter's own toggle` : ''}`
+    : '';
+  btn.title = `${what}${scope}. Open the next one.`;
+  btn.setAttribute('aria-label', `${what}${scope} — open the next one`);
+}
+
+/**
+ * Open the next session that wants you after the one the focused pane holds, in rail order,
+ * wrapping round (`nextNeeding`), and bring its row into view. False when nothing wants you.
+ *
+ * **A row behind a folded group is opened with the group left folded**, and the group's
+ * header is what scrolls into view — its `N need you` already says what is behind it. The
+ * collapse is the group's and is shared between windows, and a jump is not a request to
+ * change it: nothing here writes, and nothing is drawn open that is stored shut. Unfolding
+ * it is one click on the header, the way it always was.
+ */
+function jumpToNeeding() {
+  const pane = sessionPane();
+  if (!pane) return false;
+  const next = nextNeeding(jumpOrder, pane.selected());
+  if (!next) return false;
+  openSession(next.id);
+  revealRailRow(next);
+  return true;
+}
+
+/**
+ * Scroll the jumped-to row — or, behind a fold, its group's header — into view, and only if
+ * it is not already clear of the rail's edges and of whatever sticky headings are pinned over
+ * the top of the list. Measured off the DOM rather than a constant: the sticky offsets are
+ * hand-measured in the stylesheet and move whenever a header does
+ * (rail-and-groups#a-flat-list-of-siblings).
+ */
+function revealRailRow(entry) {
+  const list = el.railList;
+  const node =
+    (entry.group && list.querySelector(`.shelf-label[data-group="${CSS.escape(entry.group)}"]`)) ||
+    list.querySelector(`.session-row[data-session="${CSS.escape(entry.id)}"]`);
+  if (!node) return;
+  const box = list.getBoundingClientRect();
+  let top = box.top;
+  for (const h of list.querySelectorAll('.group-label')) {
+    if (h === node || getComputedStyle(h).position !== 'sticky') continue;
+    const r = h.getBoundingClientRect();
+    // Stuck to the top of the list — the only headings that cover a row scrolled under them.
+    if (r.top <= box.top + parseFloat(getComputedStyle(h).top || '0') + 1 && r.bottom > top) top = r.bottom;
+  }
+  const r = node.getBoundingClientRect();
+  if (r.top >= top && r.bottom <= box.bottom) return;
+  node.scrollIntoView({ block: 'center' });
+}
+
+if (el.railJump) el.railJump.onclick = () => jumpToNeeding();
 
 function paintFlatToggle() {
   el.flatRail.setAttribute('aria-pressed', String(state.flatRail));

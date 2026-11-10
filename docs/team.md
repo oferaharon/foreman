@@ -64,13 +64,14 @@ So a worker reads like any other session in that repo, because it is named like 
 Workers nest under their lead in the rail, indented with a thin connecting rule, so a
 team reads as one unit — in the order they were dispatched, newest on top, and they stay
 in it: everything else in the rail re-sorts itself by what moved last, and a block you
-read top to bottom should not rearrange because somebody spoke to the middle one. But a
-worker that is blocked or unread is still hoisted into the inbox, because the one thing
-the rail must never do is hide something you need to see.
+read top to bottom should not rearrange because somebody spoke to the middle one. A worker
+that is blocked or unread stays nested too — nothing in the rail moves because it wants you
+— and once its stuck timer fires it wears the needs-you stripe there (until then it is its
+lead's to answer, and wears none).
 
-Which is why a team session gets a **third line**, and nothing else does: hoisted into the
-inbox or pinned to the top, a worker has left its lead behind and the indent no longer says
-anything. The line is a role and the one fact worth the width — `worker · agent/add-a-search-index`
+Which is why a team session gets a **third line**, and nothing else does: pinned to the top,
+or filtered away from its lead, a worker has left its lead behind and the indent no longer
+says anything. The line is a role and the one fact worth the width — `worker · agent/add-a-search-index`
 under a worker, `lead · 4 tasks` (open ones) under a lead. The `lead` badge moved down onto
 it rather than being repeated there; the meta line above is for *state* (bypassing, asking,
 queued) and a role is not state. Every row that is not on a team stays two lines exactly as

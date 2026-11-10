@@ -64,10 +64,10 @@ team](docs/team.md), [running it](docs/running.md).
 
 ### The rail, and the sessions that need you
 
-Every live session on the Mac, grouped by folder, with a **Needs you** group at the top
-holding whatever is blocked or has replied while you weren't looking — sessions move into
-it rather than appearing twice, so it empties as you deal with it.
-[Docs →](docs/panel.md#unread-and-the-needs-you-queue)
+Every live session on the Mac, grouped by folder. Whatever is blocked or has replied while
+you weren't looking stays where it is and wears a stripe — red for blocked, blue for unread —
+a folded group says how many it is holding, and one count in the head walks you through them.
+[Docs →](docs/panel.md#unread-and-what-needs-you)
 
 </td>
 <td width="50%">

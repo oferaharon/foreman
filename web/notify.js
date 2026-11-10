@@ -34,16 +34,17 @@ import { isTrustGate } from './trust-gate.js';
  * A worker whose lead is meant to be handling it.
  *
  * The rail's own rule, deliberately re-used rather than re-derived: since the quieting, a
- * worker's permission prompt is its lead's to answer and does not hoist into the inbox
- * until the stuck timer fires. A notification that ignored that would undo the quieting
- * from a different direction — the maintainer would be pulled out of whatever they were
- * doing by exactly the prompts they decided they did not want to be shown. When `stuck`
- * goes true the row enters the inbox, and this returns false, and the alert fires then.
+ * worker's permission prompt is its lead's to answer and wears no needs-you stripe until the
+ * stuck timer fires. A notification that ignored that would undo the quieting from a
+ * different direction — the maintainer would be pulled out of whatever they were doing by
+ * exactly the prompts they decided they did not want to be shown. When `stuck` goes true the
+ * row takes its stripe, and this returns false, and the alert fires then.
  *
- * `quietWorker` in `web/app.js` is the same expression for the same reason; if one moves,
- * move both.
+ * Exported, and the **one** spelling: `web/needs-you.js` imports it for the rail's stripe,
+ * the folded group's count and the jump control, so the rail and the notification cannot
+ * come to disagree about which worker is quiet.
  */
-const quietWorker = (s) => s?.team?.role === 'worker' && !s.team.stuck;
+export const quietWorker = (s) => s?.team?.role === 'worker' && !s.team.stuck;
 
 /**
  * What a session is stuck on, or `null` if it is not stuck on anything.
