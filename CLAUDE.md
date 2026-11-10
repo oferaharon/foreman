@@ -662,24 +662,31 @@ fact; the front end's own cascade traps are here too. Evidence:
   and only reaches for the basename when the path is genuinely under `worktrees/`.
   [rail-and-groups#how-a-group-is-filed](docs/traps/rail-and-groups.md#how-a-group-is-filed)
 - `web/app.js` (`renderRail`) — **A heading with nothing under it isn't drawn, and "nothing"
-  is measured after hoisting.** A group with nothing running anywhere has no heading, so
+  is measured after pinning.** A group with nothing running anywhere has no heading, so
   there is nothing to rename or delete it from until one of its folders wakes up.
   [rail-and-groups#an-empty-heading-isnt-drawn](docs/traps/rail-and-groups.md#an-empty-heading-isnt-drawn)
 - `web/app.js` (`renderRail`) · `web/asleep.js` (`mergeByActivity`, `placePinned`) — **A folder
   whose only sessions are asleep still draws its heading, because sleepers are merged into the
-  rail's rows before the folder map is built.** Never into the inbox, never unread, and the
+  rail's rows before the folder map is built.** Never a needs-you stripe, never unread, and the
   collapsed group's dot reads the rows with sleepers filtered out.
   [rail-and-groups#a-folder-of-sleepers-keeps-its-heading](docs/traps/rail-and-groups.md#a-folder-of-sleepers-keeps-its-heading)
-- `web/rail-fold.js` · `web/app.js` (`renderRail`) — **A collapsed group hides one thing for
-  ordinary rows and two for workers.** `working` is neither blocked nor unread, so it is the
-  one state the inbox never hoists out — and a worker row no longer hoists until `stuck`
-  fires.
+- `web/group-summary.js` (`summaryParts`) · `web/needs-you.js` · `web/app.js` (`renderRail`) —
+  **A collapsed group hides every row in it, and since 2026-11-09 that includes the rows that
+  want you — so its summary line is the only thing on screen that says they are there.**
+  Nothing hoists any more; `N need you` leads the folded line, red when one is blocked, a
+  worker counting only once `stuck` fires, and the jump opens such a row without unfolding.
   [rail-and-groups#what-a-collapsed-group-hides](docs/traps/rail-and-groups.md#what-a-collapsed-group-hides)
 - `web/group-summary.js` (`groupSummary`) · `web/app.js` (`renderRail`) — **The dot used to
   cover only the ordinary-row half of that trade, and now covers both.** The summary reads the
   worker-inclusive set, so a collapsed team group now pulses when *only* a nested worker is
   busy; the header's own `· N` still counts top-level rows alone.
   [rail-and-groups#the-collapsed-groups-dot](docs/traps/rail-and-groups.md#the-collapsed-groups-dot)
+- `web/needs-you.js` (`stripeKind`, `byRecency`) · `web/styles.css` (`.need-stripe`) —
+  **The needs-you stripe shares the left edge with the spine and the marker, so it differs by
+  shape as well as colour — MEASURED; an unread stripe and the selected marker outside a
+  group are the same accent.** 5px, inset and rounded, over the border; and `byRecency` is
+  load-bearing, because the roster's blocked-first ranking is the hoist again in miniature.
+  [rail-and-groups#the-needs-you-stripe](docs/traps/rail-and-groups.md#the-needs-you-stripe)
 - `web/tokens.css` (`--row-open`, `--group-N`) · `web/styles.css` (`.session-row.in-group`) —
   **The spine runs at half strength and the marker at full, and that split is measured, not
   sketched.** 50% is the point that maximises the *weaker* of the spine's contrast against its
@@ -1228,10 +1235,22 @@ documents, `SendUserFile` attachments, and the links it fetched, cited or create
 path link in the conversation, bounded to that same set. `docs/panel.md`'s "Files a session
 produced" has the shape; the per-turn image strip and its byte route are untouched.
 
+**Nothing in the rail moves because it wants you** (the maintainer's ruling of 2026-11-09,
+`web/needs-you.js`). There is no `needs you` section: a row blocked on a box, or holding a
+reply you have not read, stays in its folder, group, pin or place in `recent` and wears a
+stripe down its own left edge — red when blocked, the accent when only unread — on the old
+inbox's own test (`needsYou` less a worker its lead is handling, until `stuck`), split by
+`needsKind`. A folded group leads its summary with `N need you`, and a count on the rail
+head's brand line (and `⇧⇥`) opens the next one in rail order, wrapping, without unfolding a
+group or writing anything. The rail re-sorts its copy of the roster by recency, because the
+roster's own blocked-first ranking would otherwise move rows within their folders. Desktop
+only; the phone never had a needs-you section.
+
 **Pinning** (`server/pins.js`, pane-keyed and persisted like the queue) adds a `pinned` group
-above the inbox. Pinned rows come *out* of the inbox rather than moving into it — a pin is a
-promise about where a row will be, and one that relocated the moment it needed you would
-break that promise exactly when you were looking for it. **The group's order is the
+above everything else. A pinned row stays there whatever state it is in — it wears its
+stripe where the pin put it — because a pin is a promise about where a row will be, and one
+that relocated the moment it needed you would break that promise exactly when you were
+looking for it. **The group's order is the
 maintainer's**: a new pin goes to the bottom, a grip on each pinned row's left edge drags it
 (a pinned lead with its nested workers, as one block), `POST /api/pins/order` writes it and
 may only rearrange the pins that exist, and relaunch-all, restart-one and snapshot restore
@@ -1248,10 +1267,11 @@ sleeper under a sleeper wakes at the bottom. Desktop only; the phone reads nothi
 **Groups** (`server/groups.js`) file folder headings under names you choose and fold them
 away. Four things are load-bearing. A group holds **folders**, not sessions — sessions rotate
 with `/clear`, folders don't. A folder is in exactly one group, enforced in `assign`, because
-the one thing worse than an unsorted rail is a session drawn twice. Collapse is safe for
-ordinary sessions and leads because the inbox hoists anything blocked or unread *out* of its
-folder first — no longer true of **workers**, which hoist only once `stuck` fires. What a
-collapsed team group can hide is
+the one thing worse than an unsorted rail is a session drawn twice. **Collapse now hides
+the rows that want you too** — nothing hoists them out any more — so a folded group's
+summary line leads with `N need you` (red if any is blocked, workers counted once `stuck`
+fires), and that clause is the only thing on screen standing in for them; the rail head's
+jump still reaches them without unfolding. What a collapsed group can hide is
 [rail-and-groups#what-a-collapsed-group-hides](docs/traps/rail-and-groups.md#what-a-collapsed-group-hides),
 and the measurement of what the dot does and doesn't cover is
 [rail-and-groups#the-collapsed-groups-dot](docs/traps/rail-and-groups.md#the-collapsed-groups-dot).
@@ -1321,7 +1341,7 @@ asking, holding a box, queued, running background work or a `/loop`, holding an 
 reply, with something typed in its terminal, open in a browser, or set to keep awake —
 every rule in `sleepVerdict`, in words, and every doubt a no. **Sleepers ride beside the
 roster, never in it**: an `asleep` sibling on the frame, the `rooms`/`bots` precedent, so the
-inbox, notifications, the queue, pins, snapshot, relaunch, `/exit` and read state are never
+needs-you stripes, notifications, the queue, pins, snapshot, relaunch, `/exit` and read state are never
 handed one. The rail draws each greyed in place; clicking opens the conversation read-only
 with **Wake**, which is `wakeSleeper` → `startEntries` — the restore half of `relaunchBench` — on `--resume`
 of the same conversation, under the same name and role, on the **launch model**, re-pinned
@@ -1472,7 +1492,7 @@ panel's own copy, byte-identical and kept 90 days from its last record; each dep
 one row in the rail's **bots** band and a read-only pane. **Bots are not in the roster, and
 that is the design rather than a gap**: they ride the roster frame as a sibling `bots` field,
 exactly as rooms do, so the "only sessions with a live pane" rule stays literally true and
-every consumer of the session list — the inbox, notifications, pins, groups, snapshot,
+every consumer of the session list — the needs-you stripes, notifications, pins, groups, snapshot,
 relaunch, `/exit`, the queue, read state — is never handed one. An allow-list across fifteen
 consumers is fifteen places to forget; a list they are never given has nothing to forget.
 So a bot has no pane id, nothing can type into it, every `/api/sessions/:id/…` route answers

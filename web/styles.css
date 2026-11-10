@@ -1720,6 +1720,9 @@ body.row-dragging * { cursor: row-resize !important; }
 }
 .session-row.needs-blocked .need-stripe { background: var(--decision); }
 .session-row.needs-unread .need-stripe { background: var(--accent); }
+/* The last row of an open group carries the block's closing `padding-bottom` (0.5rem) inside
+   its own box, so the same 5px inset would draw its stripe 8px longer than every other one. */
+.session-row.in-group-last .need-stripe { bottom: calc(5px + 0.5rem); }
 
 /* A `div role="button"`, not a `<button>` — see `sessionRow`'s own note for why (a folded
    folder's `▾` lives inside this box, and interactive content cannot nest). The one thing

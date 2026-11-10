@@ -120,7 +120,7 @@ plan, the trust gate — and stops there on purpose. A rate limit is an account-
 not a session blocked on a human, and nothing here would tell you which session to go
 answer anyway. If red is worth chasing, that's what the bar is for.
 
-### Unread and the needs-you queue
+### Unread and what needs you
 
 Each session carries a read watermark — an ISO timestamp, stored server-side in
 `~/.foreman/read.json` so closing the tab doesn't resurrect a hundred unread
@@ -129,12 +129,35 @@ messages and two windows agree.
 Unread counts **assistant replies only**, not tool calls. In a session with 1,700 Bash
 calls and a dozen replies, "12 unread" is the useful number.
 
-A **Needs you** group sits at the top of the rail, under any pinned sessions: blocked on a permission
-prompt or one of Claude's own questions first, then ones that replied while you weren't
-looking. Sessions move *into*
-the group rather than appearing twice, so it empties as you deal with it. A session
-that's still `working` is held back — it hasn't finished talking yet. `⇧⇥` cycles the
-queue.
+**Nothing moves because it wants you.** A session blocked on a permission prompt, one of
+Claude's own questions, a plan or the trust gate — or one that replied while you weren't
+looking — stays exactly where it lives: its folder, its group, the pinned group, or its place
+in `recent`. It says so with a **stripe down its own left edge**: **red** when it is blocked
+asking something, the **accent** (the unread badge's colour) when it only has a reply you
+haven't read. Blocked wins when it is both. The stripe sits on top of the dot and the badge
+rather than replacing them, and it is a short rounded tab rather than more edge, so it reads
+apart from a group's spine and from the selected row's marker. A session that's still
+`working` is held back — it hasn't finished talking yet — and a worker its lead is handling
+gets no stripe until its stuck timer fires.
+
+There used to be a **Needs you** section at the top that rows moved into; it went on
+2026-11-09, because sessions moving all the time was the problem. The rail now orders rows
+by what moved last and nothing else.
+
+A **folded group** says what it is holding on its second line, and when something inside
+wants you that comes first: `2 need you · 1 working · newest 4m`, red when any of them is
+blocked, nested workers counted on the same rule. Without the old section to pull those rows
+out first, that clause is the only thing standing in for them while the group is folded.
+
+**The count on the brand line**, right of `Foreman`, is how many sessions want you — red when
+any is blocked, the accent when every one only holds a reply, and gone at zero. Each click
+opens the next one after the session you have open, in the order the rail draws them,
+wrapping round at the bottom, and scrolls its row into view. `⇧⇥` is the same walk from the
+keyboard. A row behind a **folded group** is opened with the group left folded — the
+header scrolls into view instead, and the fold, which is shared between your windows, is
+never written. While the rail is **filtered** to a group or a room, the count and the walk
+cover what the filter shows; the ones it hides are the clear-filter toggle's own count, and
+the jump count's tooltip says how many.
 
 ![The whole rail: a pinned session on the accent, then a Needs you group holding one
 session stopped on a permission prompt and one carrying two unread replies, then an open
@@ -163,7 +186,7 @@ through history is reading the past, not catching up.
 The rail sorts itself, which is right for triage and wrong for the session you are
 actually working in — it slides down the moment two others so much as blink. The star at
 the right of a rail row (or `pin` in a pane header) nails it to a **Pinned** group above
-everything else, the inbox included.
+everything else.
 
 **The pinned group is in the order you put it in.** A new pin goes to the bottom, so adding
 a second never moves the first. To rearrange, drag a pinned row by the grip on its left
@@ -177,9 +200,9 @@ set changed while you were dragging — something pinned or unpinned from anothe
 nothing is reordered and a toast says so. A pinned sleeper is part of the group and moves the
 same way (see *Hibernation*).
 
-Pinned rows still carry their own badges — unread counts, `asking`, queued messages — so a
-pinned session that wants you says so where you already are, rather than jumping to a
-different part of the rail to say it.
+Pinned rows still carry their own badges and stripe — unread counts, `asking`, queued
+messages, the red or accent edge — so a pinned session that wants you says so where you
+already are, rather than jumping to a different part of the rail to say it.
 
 Pins are stored server-side in `~/.foreman/pins.json`, keyed by **pane** rather than
 session id: `/clear` mints a new session id, and a pin that quietly fell off when you
@@ -318,8 +341,8 @@ folder heading filed under it, and every row under those, nested workers include
 read which group a row belongs to off the edge of the rail without reading a word. The
 **selected row** inside a group takes that colour at full strength, brighter than the
 spine running past it — that's the one row in the group you're actually looking at.
-Pinned rows, the Needs you queue, and folders you haven't grouped carry no colour at all;
-their marker is the plain accent it's always been.
+Pinned rows and folders you haven't grouped carry no colour at all; their marker is the
+plain accent it's always been.
 
 A folder holding exactly one session doesn't get a heading of its own any more — the
 folder's name becomes the start of the row's own name instead, `alpha ▾ / main`, with the
@@ -330,12 +353,11 @@ true for anything this panel launched but not guaranteed for a session some othe
 started — those can carry a `<repo>-<branch>` title with nothing folder-shaped about it,
 and they keep their heading rather than have the panel invent a path that isn't real.
 
-Collapsing can't hide anything you need: a session blocked on you is in **Needs you**
-above, and a pinned one is above that. What's left inside a group is quiet by
-definition — with one exception, which is why a folded group grows the same pulsing dot
-its rows carry when something inside it is **working**, plus a line saying what: `2
-working · newest 4m · 3 tasks`, all of it counting nested workers as well as the folders
-you can see. That's worth saying plainly, because it's a different set from the number on
+Collapsing hides everything inside, the sessions that want you included — nothing pulls
+them out any more — so a folded group grows a line saying what it is holding, and what
+wants you comes first: `1 needs you · 2 working · newest 4m · 3 tasks`, the first clause red
+when something inside is blocked, plus the same pulsing dot its rows carry when something
+is **working**. All of it counts nested workers as well as the folders you can see. That's worth saying plainly, because it's a different set from the number on
 the header one line up — the header's own `· N` still counts top-level rows only, the way
 it always has, so a lead with three workers reads `· 1` on its heading and its collapsed
 group's summary line can still say `3 working`. Two numbers, two questions, one line
@@ -352,9 +374,9 @@ headings both — for one list ordered by what moved last. For the morning where
 which session you want but not which of nine folders it lives in, the filing is three
 extra reads.
 
-**Pinned** and **Needs you** survive the switch, because neither is a group you made: one
-is a promise about where a row will be, the other is the queue of things that stopped for
-you. A rule separates them from the list. The setting lives in the browser rather than on
+**Pinned** survives the switch, because it is not a group you made — it is a promise about
+where a row will be. A rule separates it from the list. Rows that want you keep their
+stripes and their places in the list. The setting lives in the browser rather than on
 the server — unlike a group's collapse state, which is a fact about your filing and should
 follow you between windows, this is a fact about the window you're in, and a phone and a
 desktop want different answers.
@@ -362,9 +384,10 @@ desktop want different answers.
 **The funnel** at the right end of every group header narrows the rail to that group, and
 the one at the right end of every room row in the rooms band narrows it to that room's
 members. One filter at a time across both kinds — pressing a funnel on another group or room
-moves the filter there, pressing it again on the same one lets go. While it holds, **everything outside the group is hidden, Pinned and
-Needs you included**: a pinned row or a waiting session filed in that group still shows, in
-its usual section at the top, and nothing from any other group or ungrouped folder does. The
+moves the filter there, pressing it again on the same one lets go. While it holds, **everything outside the group is hidden, Pinned
+included**: a pinned row filed in that group still shows under Pinned, a session that wants
+you shows where it lives with its stripe, and nothing from any other group or ungrouped
+folder does. The
 group itself is drawn open even if you had folded it; its collapse is not touched, and its
 caret does nothing until the filter is cleared. A filter set in the grouped rail also cuts
 the `recent` list down to the group's rows.
@@ -372,8 +395,8 @@ the `recent` list down to the group's rows.
 A **room's** filter keeps its members and nothing else — resolved exactly as the room's own
 member strip resolves them, by tmux session name first, so a session that happens to share a
 member's folder or a member's old pane is not let in. A member that is asleep stays, greyed,
-where it sleeps. Members keep their usual places: a pinned member under Pinned, a waiting one
-under Needs you, the rest under their own group and folder headings, every group that holds
+where it sleeps. Members keep their usual places: a pinned member under Pinned, the rest
+under their own group and folder headings, every group that holds
 one drawn open for the filter's duration and none of their funnels lit. A member lead keeps
 its nested workers, as it does under a group filter. The rooms band itself is never
 filtered — it is where you switch rooms or let go — and the room's funnel stays lit in the
@@ -386,8 +409,9 @@ A **crossed-out funnel** appears in the rail head, just left of `recent`, only w
 holds, and its hover names what is filtered — `the group Tools`, `the room alpha-beta`;
 pressing it hands back exactly the rail you had — folds, `recent`, scroll position.
 It carries a small red count of the sessions the filter is hiding that want you (the ones
-Needs you would have shown, pinned ones included), so nothing waits on you silently; no
-count when nothing does. It is a single icon and an out-of-flow badge because the head has
+that would wear a stripe, pinned ones included), so nothing waits on you silently; no
+count when nothing does. The brand line's jump count is the other half: it counts and walks
+only what the filter shows. It is a single icon and an out-of-flow badge because the head has
 no room for a word: at the default rail width it fits on one line with 5px to spare.
 
 Pinned rows can still be reordered while filtered, by drag or arrow keys: the drawn pins move
@@ -548,7 +572,7 @@ the phone, and an archived room has no button.
 
 **The greyed row.** A sleeping session stays under its folder heading (and so inside its
 group), or in the pinned group under the row it sat beneath. It says how long it has been
-asleep, never enters the inbox, never counts as unread, and doesn't light a collapsed group's
+asleep, never wears a needs-you stripe, never counts as unread, and doesn't light a collapsed group's
 dot. A folder whose sessions are all asleep keeps its heading. The rail's stat line gains
 `asleep N` once hibernation is on or anything is asleep.
 
@@ -1179,8 +1203,8 @@ read". Text above a drawn composer is transcript, whatever it looks like.
 ### Claude's own questions
 
 When Claude asks *you* something (`AskUserQuestion`), the panel renders the options and
-answers for you — the same card as a permission prompt, and the session sorts to the top
-of **needs you** with an `asking` chip.
+answers for you — the same card as a permission prompt, and the session's row wears the red
+needs-you stripe and an `asking` chip, where it already was.
 
 Single-select rows send on click, because one keypress is exactly what the terminal does.
 Multi-select rows tick, and **submit** walks the terminal's own path: toggle each row, press
@@ -1820,7 +1844,7 @@ prompt at any given moment.
 
 Two quiet rules it inherits rather than invents. A **worker's** own prompts stay silent until
 its stuck timer fires, because a worker's prompt is its lead's to answer — the same rule that
-keeps it out of the inbox. And "it replied and you haven't read it" is not a notification; it
+keeps the rail's needs-you stripe off it. And "it replied and you haven't read it" is not a notification; it
 is an unread badge, which is where it stays.
 
 A third thing this deliberately does not cover: the [rate-limit gauges](#rate-limit-gauges).
