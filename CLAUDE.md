@@ -67,7 +67,7 @@ There is no API. Everything is assembled from three places:
 
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
-`effort.js`, `ghost.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
+`effort.js`, `ghost.js`, `exit-box.js`, `exit-session.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
 `rooms-line.js`, `session-launch.js`, `briefs.js`, `bots.js`, `bot-subs.js`, `context-window.js`,
 `hibernate.js`, `hibernate-loop.js` and
 `parsePane` in `tmux.js`; on the team side `tasks.js`,
@@ -488,6 +488,13 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   <launchModel>`, after `--resume`, exactly once — and a `/model` pick does not survive a
   relaunch, by ruling.
   [launch#a-resume-comes-back-on-the-transcripts-model](docs/traps/launch.md#a-resume-comes-back-on-the-transcripts-model)
+- `server/exit-box.js` (`parseExitBox`, `isExitBox`) · `server/exit-session.js` (`exitAndWait`,
+  `waitNamesGone`) · `POST /api/team/tasks/:id/close` · `test/fixtures/dialog-exit-background*.txt`
+  — **`/exit` with background work running raises a box and stays up, and the task close swept
+  a live session's folder — MEASURED on v2.1.296 at 220×50 and 80×23.** A digit on that box
+  commits; the close answers `Exit and stop tasks` by label and sweeps only once the name has
+  left tmux.
+  [launch#exit-with-background-work-running-asks-first](docs/traps/launch.md#exit-with-background-work-running-asks-first)
 - `server/snapshot.js` (`restoreSessions`) · `~/.claude.json` — **A relaunch into a folder
   whose trust was never recorded lands on the trust gate.** Three sessions answering their
   gates at once can lose one to the last writer.

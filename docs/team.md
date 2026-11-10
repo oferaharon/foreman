@@ -482,6 +482,14 @@ be an ancestor of the base — looking at `origin/<base>` and at local `<base>`,
 first, and refusing if it cannot tell. The refusal names what to do. Discarding work
 deliberately is the *abandon* outcome, which is what that word is for.
 
+**…and nothing is deleted until the worker's session is gone.** Closing types `/exit` into
+the worker and waits for its tmux session to leave. A worker with background work running —
+a shell, a monitor, a scheduled task — gets a *Background work is running* box from Claude
+Code instead of an exit; the close answers it with *Exit and stop tasks*, since it is already
+the order to end that session and delete its folder, and the room's close line names what
+that stopped. A session that still has not gone is a refusal that changes nothing: the task,
+its worktree and its branch all stay, and the room says why.
+
 **Unless you say otherwise, the decision to merge is yours, and it is never inferred.**
 Not from green checks, not from a timer, not from silence, not from the lead's own
 confidence in the diff. On your explicit word, per PR, in conversation — "merge it",

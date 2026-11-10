@@ -399,6 +399,7 @@ per screen — and nothing on screen tells you when you get it wrong:
 | `Type something.`, single-select | **opens an editor** on that row — type, then `Enter` |
 | `Type something`, multi-select | **ticks it**, cursor unmoved, no editor |
 | `Chat about this` | **declines the questions** and hands the composer back |
+| `Background work is running` (`/exit`'s box) | selects **and submits** — the close walks the cursor instead |
 
 ## Chat about this, and Type something
 

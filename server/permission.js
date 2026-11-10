@@ -25,6 +25,8 @@
  *    Esc to cancel · Tab to amend     <- footer
  */
 
+import { isExitBox } from './exit-box.js';
+
 /** The footer is the only reliable "a prompt is open right now" marker — on most boxes. */
 const FOOTER_RE = /(Esc to cancel|Enter to confirm|esc to reject)/i;
 
@@ -264,6 +266,12 @@ function joinTitle(body) {
  * @returns {null | {title, subject, detail, question, options, cursor, raw}}
  */
 export function parsePrompt(text) {
+  // The box `/exit` raises over running background work is numbered rows over an
+  // `Enter to confirm · Esc to cancel` footer, and read as a permission prompt here until it
+  // had a reader of its own. It is not one — a digit on it commits, and none of its rows is
+  // a yes — so it is refused by its witness rather than classified (`server/exit-box.js`).
+  if (isExitBox(text)) return null;
+
   const lines = text.split('\n').map((l) => l.replace(/\s+$/, ''));
 
   // Find the footer among the last few non-empty lines. Anything older is scrollback

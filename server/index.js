@@ -63,6 +63,7 @@ import {
   liveWorkers,
 } from './snapshot.js';
 import { TaskStore, TASK_KINDS } from './tasks.js';
+import { EXIT_GONE_TIMEOUT_MS, STILL_UP, exitAndWait, waitNamesGone } from './exit-session.js';
 import { parseTags } from '../web/task-tags.js';
 import { createWorktree, removeWorktree, pruneWorktrees, runSetup, tidyLabel, WORKTREES_DIR } from './worktree.js';
 import {
@@ -2716,9 +2717,27 @@ function selfMergeClause(repo, task) {
 }
 
 /**
+ * The close line's last clause, when ending the session stopped background work — the box's
+ * own list, verbatim, so what the close ended is on the record rather than silent. `''`
+ * otherwise, so a close with nothing running reads exactly as it always has.
+ *
+ * @param {string[]} stopped
+ */
+function stoppedClause(stopped) {
+  return stopped.length ? ` Its session had background work running, stopped on exit: ${stopped.join('; ')}.` : '';
+}
+
+/**
  * Abandon a task: end its session (same guards as the bin — never type into a box),
  * remove its worktree and branch, mark it. A `failed` task keeps its worktree as
  * evidence unless the request insists.
+ *
+ * **Nothing is swept until the session is gone.** The order is: every refusal that needs
+ * no keystroke (the merged gate), then `/exit` and a wait for the tmux *name* to leave
+ * (`exitAndWait`), and only then the record, the worktree, the branch and the room line. A
+ * session that will not go is a 409 that has changed nothing — task state, worktree and
+ * branch all stay — because the alternative, found live, is a session left running in a
+ * deleted folder with no task to show it under, announced as cleaned up.
  */
 app.post('/api/team/tasks/:id/close', async (req, res) => {
   const task = tasks.get(req.params.id);
@@ -2742,25 +2761,14 @@ app.post('/api/team/tasks/:id/close', async (req, res) => {
     return res.json({ ok: true, task: tasks.get(task.id) });
   }
 
-  const session = task.tmuxSession
-    ? registry.list().find((s) => s.tmuxSession === task.tmuxSession)
-    : null;
-  if (session?.paneId) {
-    const live = await readPaneState(session.paneId);
-    if (live.prompt || live.plan || live.question || live.state === 'needs-decision' || live.state === 'dialog') {
-      return res.status(409).json({
-        error: 'The worker has something open in the terminal — answer or interrupt it first.',
-      });
-    }
-    await sendText(session.paneId, '/exit').catch(() => {});
-    await new Promise((r) => setTimeout(r, 700));
-  }
-
   // `done` is earned, not default: it records that the work was merged, and the lead's
   // brief requires the PR verified merged before asking for it. Everything else is an
   // abandonment, and a failed task keeps its evidence either way unless told otherwise.
-  const done = req.body?.outcome === 'done' && task.state !== 'failed';
-  const keepWorktree = task.state === 'failed' && !req.body?.removeWorktree;
+  // Read once, here: the exit below can take seconds, and the crash sweep may mark a task
+  // `failed` the moment its session leaves — which is this close working, not a crash.
+  const failed = task.state === 'failed';
+  const done = req.body?.outcome === 'done' && !failed;
+  const keepWorktree = failed && !req.body?.removeWorktree;
 
   /*
    * **`done` is checked, not trusted.** Closing as done force-deletes the branch
@@ -2790,6 +2798,45 @@ app.post('/api/team/tasks/:id/close', async (req, res) => {
     if (!verdict.ok) {
       return res.status(409).json({ error: verdict.error, branch: task.branch, base: verdict.base });
     }
+  }
+
+  /*
+   * End the session, and know it ended. The gate above runs first, so a refused close has
+   * not touched the worker either.
+   *
+   * `/exit` with background work running raises "Background work is running" instead of
+   * exiting, and `exitAndWait` answers it with `Exit and stop tasks` — the lead's call, in
+   * the team's decisions, which the maintainer may reverse: this close is already the order
+   * to end the session and delete its folder, `Move to background` would leave work running
+   * in that folder, and `Stay` is the orphan. What it stopped is named in the room line.
+   */
+  const session = task.tmuxSession
+    ? registry.list().find((s) => s.tmuxSession === task.tmuxSession)
+    : null;
+  let stopped = [];
+  if (session?.paneId) {
+    // Every way a pane can be holding something (`heldBy`): a box that was up before this
+    // close is somebody else's, and is never answered here.
+    const held = heldBy(await readPaneState(session.paneId));
+    if (held) {
+      return res.status(409).json({
+        error: `The worker was not closed: ${held}. Answer or interrupt it first — nothing was changed.`,
+      });
+    }
+    const exit = await exitAndWait(
+      { paneId: session.paneId, name: session.tmuxSession },
+      { sendText, sendKeys, capturePane: (paneId) => capturePane(paneId, 40), readPaneState, liveSessionNames },
+    ).catch((err) => ({ gone: false, stopped: [], why: `/exit was refused (${err.message})` }));
+    if (!exit.gone) {
+      const error =
+        `${task.id} was not closed: its session ${session.tmuxSession} ${exit.why}. ` +
+        `Nothing was changed — the task is still ${task.state}, and its worktree and branch are still there.`;
+      room.post(task.repo, { from: 'panel', to: 'lead', kind: 'system', about: task.id, alert: true, text: error });
+      await registry.refresh().catch(() => {});
+      broadcastRoster();
+      return res.status(409).json({ error, stopped: exit.stopped });
+    }
+    stopped = exit.stopped;
   }
 
   // Last chance to read the branch: the sweep below deletes it. Re-read even when the
@@ -2829,24 +2876,25 @@ app.post('/api/team/tasks/:id/close', async (req, res) => {
     // there is still something there to go and look at.
     groups.retireWorktree(task.worktree);
   }
-  tasks.update(task.id, { state: task.state === 'failed' ? 'failed' : done ? 'done' : 'abandoned' });
+  tasks.update(task.id, { state: failed ? 'failed' : done ? 'done' : 'abandoned' });
   // One `event` for every way this line can read. It names what the *panel* did — the task
   // was closed — and never the outcome, which is `done`, `abandoned` or `failed` and is
   // already in the sentence for a human. Splitting it into three keywords would put the
   // outcome in two places, and the room's keyword is a category, not a verdict.
   room.post(task.repo, {
     from: 'panel', to: 'lead', kind: 'system', about: task.id, event: 'closed',
-    text: done
+    text: (done
       ? task.kind === 'plan'
         // Worth saying out loud: closing a plan task removes its worktree and branch and
         // leaves the plan itself alone — it lives in the team folder, not the checkout.
         ? `Plan task ${task.id} is done; the plan stays at ${task.planFile || planPath(task.repo, task.id)}.`
         : `Task ${task.id} is done — merged and cleaned up.${task.pr ? ` (${task.pr})` : ''}${selfMergeClause(task.repo, tasks.get(task.id))}`
-      : `Task ${task.id} closed (${tasks.get(task.id).state}); worktree ${keepWorktree ? 'kept' : 'removed'}.`,
+      : `Task ${task.id} closed (${tasks.get(task.id).state}); worktree ${keepWorktree ? 'kept' : 'removed'}.`) +
+      stoppedClause(stopped),
   });
   await registry.refresh().catch(() => {});
   broadcastRoster();
-  res.json({ ok: true, task: tasks.get(task.id), worktreeKept: keepWorktree });
+  res.json({ ok: true, task: tasks.get(task.id), worktreeKept: keepWorktree, stopped });
 });
 
 /* ------------------------------------------------------------ trigger --- */
@@ -4983,23 +5031,14 @@ app.post('/api/snapshot/restore', async (req, res) => {
 
 /* -------------------------------------------------------- relaunch --- */
 
-/**
- * How long to wait for a session to actually go after `/exit`.
- *
- * The name is the thing being waited on, not the process: `uniqueSessionName` reads the
- * live list, so relaunching while the old `<prefix>alpha-main` is still in it mints
- * `<prefix>alpha-main-2` — a session that no longer answers to the name anybody saved,
- * pinned or filed. Measured at about three seconds for one session on this Mac; the
- * ceiling is generous because the failure it guards against is silent and permanent, while
- * waiting a few seconds longer costs nothing.
+/*
+ * How long to wait for a session to go after `/exit` (`EXIT_GONE_TIMEOUT_MS`), what to call
+ * one that did not (`STILL_UP`) and the wait itself (`waitNamesGone`) live in
+ * `server/exit-session.js`, because the task close waits the same way.
  */
-const EXIT_GONE_TIMEOUT_MS = 20000;
 
 /** Set while a relaunch is running, for the same reason `restoring` exists. */
 let relaunching = false;
-
-/** Why a session that was sent `/exit` was not started again: its name never freed. */
-const STILL_UP = 'did not close in time — still running';
 
 /** The pinned group as tmux session names, top first, or null where a pane has none. */
 async function pinnedNames() {
@@ -5144,14 +5183,10 @@ async function relaunchBench(entries, { terminal, emit = () => {} }) {
   }
 
   /* ---- wait for the names to actually free up ---- */
-  const wanted = new Set(exiting.map((e) => e.tmuxSession).filter(Boolean));
-  const deadline = Date.now() + EXIT_GONE_TIMEOUT_MS;
-  let stillUp = [];
-  while (wanted.size) {
-    stillUp = (await liveSessionNames()).filter((n) => wanted.has(n));
-    if (!stillUp.length || Date.now() > deadline) break;
-    await new Promise((r) => setTimeout(r, 300));
-  }
+  const stillUp = await waitNamesGone(
+    exiting.map((e) => e.tmuxSession),
+    { liveSessionNames, timeoutMs: EXIT_GONE_TIMEOUT_MS },
+  );
   for (const name of stillUp) {
     // It never went. Relaunching now would mint a `-2`, so it doesn't: the name stays
     // live, `restoreSessions` skips it, and the report says which.

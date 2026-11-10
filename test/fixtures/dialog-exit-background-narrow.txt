@@ -1,0 +1,23 @@
+
+⏺ Bash(sleep 600)
+  ⎿  Running in the background (↓ to manage)
+
+⏺ started
+
+✻ Baked for 2s · done 11:00 PM · 1 shell still running
+
+❯ /exit
+
+────────────────────────────────────────────────────────────────────────────────
+  Background work is running
+  The following will stop when you exit:
+
+  shell · sleep 600
+
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+
+
