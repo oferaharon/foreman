@@ -2169,3 +2169,159 @@ test('neither the recorded path nor the computed one exists — 404 naming both'
   assert.deepEqual(res.body.triedPaths, [stale, computed]);
   assert.equal(res.body.path, computed, 'the last one tried — where it would land, same as before this fix');
 });
+
+/*
+ * A team's default worker effort, and the lead's per-task departure from it — the
+ * maintainer's ruling of 2026-11-10. Against the first scratch panel above (`api`), which
+ * is alive for the whole file: `gitRepo` stops every dispatch at `Setup failed`, past the
+ * point where the record is written and short of a session, which is exactly where these
+ * want to look. What sits beyond that — the `--effort` flag and the room line — is read
+ * off the source in `test/worker-effort.test.js`, and was benched against a real worker.
+ */
+
+test('the config serves the levels, and a team.json without a default effort reads as high', async () => {
+  // `gitRepo`'s team.json was written with nothing but `repo` and `setup` — the shape of
+  // every team.json on disk before this field existed.
+  const res = await api('GET', `/api/team/config?folder=${encodeURIComponent(gitRepo)}`);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.efforts, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal(res.body.defaultEffort, 'high');
+});
+
+test('the default effort is validated on write: a level lands, anything else is refused and lands nothing', async () => {
+  const effortRepo = path.join(stateDir, 'EffortTeam');
+  writeTeamJson(teamKeyFor(effortRepo), JSON.stringify({ repo: effortRepo }));
+  const file = path.join(stateDir, 'teams', teamKeyFor(effortRepo), 'team.json');
+
+  const set = await api('PATCH', '/api/team/config', { folder: effortRepo, defaultEffort: 'medium' });
+  assert.equal(set.status, 200, set.body.error);
+  assert.equal(set.body.defaultEffort, 'medium');
+  assert.deepEqual(set.body.efforts, ['low', 'medium', 'high', 'xhigh', 'max'], 'the PATCH answers in the GET\'s shape');
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).defaultEffort, 'medium', 'and it is on disk');
+
+  for (const bad of ['ultracode', 'HIGH', 'high --model x', 7]) {
+    const res = await api('PATCH', '/api/team/config', { folder: effortRepo, defaultEffort: bad });
+    assert.equal(res.status, 400, String(bad));
+    assert.match(res.body.error, /Unknown effort/);
+  }
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).defaultEffort, 'medium', 'a refused write wrote nothing');
+
+  // Another key's write leaves it alone — PATCH rebuilds from what is stored.
+  await api('PATCH', '/api/team/config', { folder: effortRepo, toggles: { flagConflicts: false } });
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).defaultEffort, 'medium');
+});
+
+test('a pending task stores its effort as asked — null means the default when it starts', async () => {
+  const plain = await api('POST', '/api/team/tasks', { folder: repo, label: 'effort-omitted', body: 'b' });
+  assert.equal(plain.status, 200, plain.body.error);
+  assert.equal(plain.body.task.effort, null);
+  assert.equal(plain.body.task.effortReason, null);
+
+  const named = await api('POST', '/api/team/tasks', {
+    folder: repo, label: 'effort-named', body: 'b', effort: 'low', effortReason: 'a one-line rename',
+  });
+  assert.equal(named.status, 200, named.body.error);
+  assert.equal(named.body.task.effort, 'low');
+  assert.equal(named.body.task.effortReason, 'a one-line rename');
+});
+
+test('recording a task refuses a bad level, a reasonless departure, and a level for a model that takes none', async () => {
+  const unknown = await api('POST', '/api/team/tasks', { folder: repo, label: 'e1', body: 'b', effort: 'ultracode' });
+  assert.equal(unknown.status, 400);
+  assert.match(unknown.body.error, /Unknown effort "ultracode"/);
+
+  const noReason = await api('POST', '/api/team/tasks', { folder: repo, label: 'e2', body: 'b', effort: 'max' });
+  assert.equal(noReason.status, 400);
+  assert.match(noReason.body.error, /Naming a non-default effort \(max over high\) needs a one-line effortReason/);
+
+  const haiku = await api('POST', '/api/team/tasks', {
+    folder: repo, label: 'e3', body: 'b',
+    model: 'claude-haiku-4-5-20251001', modelReason: 'tiny',
+    effort: 'low', effortReason: 'tiny',
+  });
+  assert.equal(haiku.status, 400);
+  assert.match(haiku.body.error, /Haiku 4\.5 takes no effort level/);
+
+  // Nothing refused left a record behind.
+  const ids = (await api('GET', '/api/team/tasks')).body.tasks.map((t) => t.id);
+  for (const id of ['e1', 'e2', 'e3']) assert.ok(!ids.includes(id), id);
+});
+
+/** A git checkout of the effort tests' own, so no earlier test's workers fill its cap —
+ *  `prepareGitRepo`'s shape: a legacy stored `setup` that fails, so every dispatch stops at
+ *  `Setup failed` with its record written. Made on first use. */
+let effortGit;
+function effortGitRepo() {
+  if (effortGit) return effortGit;
+  effortGit = path.join(stateDir, 'EffortGitRepo');
+  fs.mkdirSync(effortGit, { recursive: true });
+  const git = (args) => execFileSync('git', args, { cwd: effortGit, encoding: 'utf8' });
+  git(['init', '-b', 'main']);
+  git(['config', 'user.email', 'test@test']);
+  git(['config', 'user.name', 'test']);
+  fs.writeFileSync(path.join(effortGit, 'README.md'), 'hello\n');
+  git(['add', '.']);
+  git(['commit', '-m', 'first']);
+  writeTeamJson(teamKeyFor(effortGit), JSON.stringify({ repo: effortGit, setup: 'exit 7', maxWorkers: 8 }, null, 2));
+  return effortGit;
+}
+
+test('a dispatch with no effort launches on the team default, and the record says so', async () => {
+  const res = await api('POST', '/api/team/dispatch', { folder: effortGitRepo(), label: 'effort-default', body: 'b' });
+  assert.equal(res.status, 500, res.body.error);
+  assert.match(res.body.error, /Setup failed/);
+  const task = (await api('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'effort-default');
+  assert.equal(task.effort, 'high', 'gitRepo never set one — the default, not the global xhigh');
+  assert.equal(task.effortReason, null);
+});
+
+test('a departure needs its reason, and is stored with it', async () => {
+  const noReason = await api('POST', '/api/team/dispatch', {
+    folder: effortGitRepo(), label: 'effort-bare', body: 'b', effort: 'xhigh',
+  });
+  assert.equal(noReason.status, 400);
+  assert.match(noReason.body.error, /needs a one-line effortReason/);
+  // Refused before the worktree: nothing on disk, nothing in the store.
+  assert.ok(!(await api('GET', '/api/team/tasks')).body.tasks.some((t) => t.id === 'effort-bare'));
+
+  const res = await api('POST', '/api/team/dispatch', {
+    folder: effortGitRepo(), label: 'effort-up', body: 'b', effort: 'xhigh', effortReason: 'a concurrency bug, genuinely hard',
+  });
+  assert.equal(res.status, 500, res.body.error);
+  assert.match(res.body.error, /Setup failed/);
+  const task = (await api('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'effort-up');
+  assert.equal(task.effort, 'xhigh');
+  assert.equal(task.effortReason, 'a concurrency bug, genuinely hard');
+});
+
+test('a dispatch refuses an unknown level before anything exists', async () => {
+  const res = await api('POST', '/api/team/dispatch', { folder: effortGitRepo(), label: 'effort-typo', body: 'b', effort: 'hihg' });
+  assert.equal(res.status, 400);
+  assert.match(res.body.error, /Unknown effort "hihg"/);
+  assert.ok(!(await api('GET', '/api/team/tasks')).body.tasks.some((t) => t.id === 'effort-typo'));
+});
+
+test('a Haiku worker launches with no effort, and its record claims none', async () => {
+  const res = await api('POST', '/api/team/dispatch', {
+    folder: effortGitRepo(), label: 'effort-haiku', body: 'b', model: 'claude-haiku-4-5-20251001', modelReason: 'tiny',
+  });
+  assert.equal(res.status, 500, res.body.error);
+  const task = (await api('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'effort-haiku');
+  assert.equal(task.model, 'claude-haiku-4-5-20251001');
+  assert.equal(task.effort, null, 'measured: Haiku records no effort, so the panel claims none');
+});
+
+test('a promotion resolves the effort now, and carries a recorded one through', async () => {
+  await api('POST', '/api/team/tasks', { folder: effortGitRepo(), label: 'promote-effort-default', body: 'b' });
+  await api('POST', '/api/team/dispatch', { folder: effortGitRepo(), id: 'promote-effort-default', startedBy: 'yes' });
+  const tasks = (await api('GET', '/api/team/tasks')).body.tasks;
+  assert.equal(tasks.find((t) => t.id === 'promote-effort-default').effort, 'high', 'resolved at the start');
+
+  await api('POST', '/api/team/tasks', {
+    folder: effortGitRepo(), label: 'promote-effort-low', body: 'b', effort: 'low', effortReason: 'docs only',
+  });
+  await api('POST', '/api/team/dispatch', { folder: effortGitRepo(), id: 'promote-effort-low', startedBy: 'yes' });
+  const low = (await api('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'promote-effort-low');
+  assert.equal(low.effort, 'low');
+  assert.equal(low.effortReason, 'docs only', 'the reason recorded with it is the one it starts on');
+});

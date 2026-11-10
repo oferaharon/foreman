@@ -70,7 +70,9 @@ import {
   writeWorkerSettings,
   answerTrustGate,
   resolveWorkerModel,
+  resolveWorkerEffort,
   WORKER_MODELS,
+  WORKER_EFFORTS,
   workerModelNames,
 } from './dispatch.js';
 import { ensureTeam, readTeam, setSlate, teamDir, teamKey, leadSettings, normalizeReviewPaths, plannerStance, plansDir, planPath, TEAMS_DIR } from './team.js';
@@ -1958,6 +1960,24 @@ app.post('/api/team/dispatch', async (req, res) => {
       error: `Naming a non-default model (${model.model} over ${model.defaultModel}) needs a one-line modelReason — ${humanName(repo)} reads it in the room.`,
     });
   }
+  // The effort, on the model's exact pattern — the maintainer's ruling of 2026-11-10: the
+  // team default unless the lead says otherwise, a departure needs a reason, an unknown
+  // level fails here before any worktree exists. Resolved against the model just resolved,
+  // because a model that takes no effort level launches without the flag (`takesEffort`).
+  // A pending record stores its effort unresolved, `null` meaning the team default at the
+  // time it starts, so a promotion resolves it now — as it does the model.
+  let effort;
+  try {
+    effort = resolveWorkerEffort(req.body?.effort ?? pending?.effort, team?.defaultEffort, model.model);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const effortReason = String(req.body?.effortReason || pending?.effortReason || '').trim();
+  if (!effort.isDefault && !effortReason) {
+    return res.status(400).json({
+      error: `Naming a non-default effort (${effort.effort} over ${effort.defaultEffort}) needs a one-line effortReason — ${humanName(repo)} reads it in the room.`,
+    });
+  }
 
   let wt;
   try {
@@ -1994,6 +2014,10 @@ app.post('/api/team/dispatch', async (req, res) => {
     // Validated at dispatch and posted to the room since the model argument existed, and
     // until now never stored — so every worker that has ever run has a blank one.
     modelReason: modelReason || null,
+    // What it launched at — `null` only for a model that takes no effort level, which is
+    // then also launched without the flag.
+    effort: effort.effort,
+    effortReason: effortReason || null,
   };
   const task = pending
     ? tasks.update(label, {
@@ -2093,14 +2117,17 @@ app.post('/api/team/dispatch', async (req, res) => {
       label,
       nameComponent: path.basename(wt.top),
       terminal: false,
-      // `--model` and nothing else — the model argument is a validated id, never a
-      // general extra-flags channel, and skipPermissions stays unreachable from here.
+      // `--model` and `--effort` and nothing else — each is a value validated against its
+      // own list, never a general extra-flags channel, and skipPermissions stays
+      // unreachable from here. `--effort` is session-only (measured: settings.json is
+      // untouched) and is left off for a model that takes no effort level.
       extraArgs: [
         '--settings', settingsFile,
         '--append-system-prompt-file', wBriefFile,
         '--mcp-config', wMcpFile,
         '--strict-mcp-config',
         '--model', model.model,
+        ...(effort.effort ? ['--effort', effort.effort] : []),
       ],
     });
 
@@ -2146,6 +2173,15 @@ app.post('/api/team/dispatch', async (req, res) => {
       room.post(repo, {
         from: 'panel', to: 'lead', kind: 'system', about: label, event: 'model',
         text: `Worker ${label} launched on ${model.model}, not the default ${model.defaultModel} — ${modelReason}`,
+      });
+    }
+    // The same for effort, as its own line with its own stamp: a task can depart on one and
+    // not the other, and `event: 'effort'` lets the room name it without reading the
+    // sentence. Uncoloured, like the model line — `roomEntryNode` gives no hue to either.
+    if (!effort.isDefault) {
+      room.post(repo, {
+        from: 'panel', to: 'lead', kind: 'system', about: label, event: 'effort',
+        text: `Worker ${label} launched at ${effort.effort} effort, not the default ${effort.defaultEffort} — ${effortReason}`,
       });
     }
 
@@ -2218,6 +2254,20 @@ app.post('/api/team/tasks', (req, res) => {
       error: `Naming a non-default model (${model.model} over ${model.defaultModel}) needs a one-line modelReason — ${humanName(repo)} reads it in the room.`,
     });
   }
+  // The effort the same way, and stored the same way: validated against today's answers,
+  // then recorded as asked, `null` meaning the team default at the time it starts.
+  let effort;
+  try {
+    effort = resolveWorkerEffort(req.body?.effort, team?.defaultEffort, model.model);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+  const effortReason = String(req.body?.effortReason || '').trim();
+  if (!effort.isDefault && !effortReason) {
+    return res.status(400).json({
+      error: `Naming a non-default effort (${effort.effort} over ${effort.defaultEffort}) needs a one-line effortReason — ${humanName(repo)} reads it in the room.`,
+    });
+  }
 
   // No `branch`, `worktree`, `base` or `planFile`: all four are facts about a checkout,
   // and there is no checkout. A plan task's `planFile` is derived at promotion by
@@ -2232,6 +2282,8 @@ app.post('/api/team/tasks', (req, res) => {
     state: 'pending',
     model: req.body?.model ?? null,
     modelReason: modelReason || null,
+    effort: req.body?.effort ?? null,
+    effortReason: effortReason || null,
     tags: requested.tags,
   });
 
@@ -2418,6 +2470,8 @@ app.get('/api/team/config', async (req, res) => {
   // what each id is *called*, because `claude-opus-5-5` and `claude-opus-5` are one
   // character apart in a dropdown the maintainer is expected to answer correctly. The
   // names are served rather than spelled in the browser so there is still only one copy.
+  // `efforts` is the same for the default-effort picker beside it; the levels are their own
+  // names, so no map rides with them.
   //
   // `forgeResolved` and `baseResolved` are the same pattern and the same ruling (a control
   // the user cannot answer correctly should not be a control) — with one real difference
@@ -2435,6 +2489,7 @@ app.get('/api/team/config', async (req, res) => {
     ...team,
     models: WORKER_MODELS,
     modelNames: workerModelNames(team.defaultModel),
+    efforts: WORKER_EFFORTS,
     setupResolved: resolveSetup(team.setup, repo),
     forgeResolved,
     baseResolved,
@@ -2485,6 +2540,17 @@ app.patch('/api/team/config', async (req, res) => {
       return res.status(400).json({ error: err.message });
     }
   }
+  // The default effort, validated exactly as a dispatch validates a requested one — a
+  // default the dispatch would refuse must never be storable. No model is passed: a default
+  // is a team's answer for every model, and the one kind that takes none is the dispatch's
+  // business, not the picker's.
+  if (req.body?.defaultEffort !== undefined) {
+    try {
+      next.defaultEffort = resolveWorkerEffort(req.body.defaultEffort, null).effort;
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  }
   // The bound on `leadDecidesMerges`, and the one new top-level key this endpoint writes.
   // Whitelisted by name like every other, and validated through the one function that
   // decides the list's shape (`normalizeReviewPaths`) — so what the panel stores and what
@@ -2531,6 +2597,7 @@ app.patch('/api/team/config', async (req, res) => {
       ...next,
       models: WORKER_MODELS,
       modelNames: workerModelNames(next.defaultModel),
+      efforts: WORKER_EFFORTS,
       setupResolved: resolveSetup(next.setup, repo),
       forgeResolved,
       baseResolved,

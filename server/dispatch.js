@@ -2,7 +2,16 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
 import { trustOption } from '../web/trust-gate.js';
-import { WORKER_MODELS, DEFAULT_WORKER_MODEL, isKnownModel } from './worker-models.js';
+import {
+  WORKER_MODELS,
+  DEFAULT_WORKER_MODEL,
+  isKnownModel,
+  WORKER_EFFORTS,
+  DEFAULT_WORKER_EFFORT,
+  isKnownEffort,
+  takesEffort,
+  modelLabel,
+} from './worker-models.js';
 import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
 import { mcpServerRule } from './project-mcp.js';
 
@@ -26,6 +35,8 @@ export {
   WORKER_MODEL_NAMES,
   modelLabel,
   workerModelNames,
+  WORKER_EFFORTS,
+  DEFAULT_WORKER_EFFORT,
 } from './worker-models.js';
 
 const validModel = (id) => isKnownModel(String(id));
@@ -60,6 +71,53 @@ export function resolveWorkerModel(requested, teamDefault) {
   }
   const model = asked || fallback;
   return { model, defaultModel: fallback, isDefault: model === fallback };
+}
+
+/**
+ * The one answer to "what effort does this worker launch at" — `resolveWorkerModel`'s
+ * twin, by the maintainer's ruling of 2026-11-10, and deliberately the same shape so the
+ * dispatch reads the two the same way.
+ *
+ * Explicit beats team.json's `defaultEffort` beats `DEFAULT_WORKER_EFFORT`; both are
+ * validated, the stored one even when an explicit choice masks it, so a hand-edited
+ * team.json surfaces on the next dispatch. The validation is the whole wall: the CLI
+ * itself warns about a bad `--effort` and launches on the global default anyway.
+ *
+ * `model` is the *resolved* model, because one kind of model takes no effort at all
+ * (`takesEffort`, measured): there the answer is `effort: null` — launch without the
+ * flag, record nothing — and an explicit level is refused, since humouring it would put
+ * a level on the record that the session never ran at. Omitting `model` skips that
+ * question, which is what the team-settings write wants: a default is stored whatever
+ * the default model is.
+ *
+ * @param {string|null|undefined} requested  the lead's choice, if any
+ * @param {string|null|undefined} teamDefault  team.json's `defaultEffort`
+ * @param {string|null} [model]  the model this worker launches on
+ * @returns {{effort: string|null, defaultEffort: string, isDefault: boolean}}
+ *          isDefault: no departure for the room to hear about — true for a model that
+ *          takes no effort, since nothing was departed from.
+ */
+export function resolveWorkerEffort(requested, teamDefault, model = null) {
+  const fallback = String(teamDefault ?? '').trim() || DEFAULT_WORKER_EFFORT;
+  if (!isKnownEffort(fallback)) {
+    throw new Error(
+      `team.json's defaultEffort "${fallback}" is not an effort level this panel knows — fix it in the team panel.`,
+    );
+  }
+  const asked = String(requested ?? '').trim();
+  if (asked && !isKnownEffort(asked)) {
+    throw new Error(`Unknown effort "${asked}" — a worker's effort is one of: ${WORKER_EFFORTS.join(', ')}.`);
+  }
+  if (model && !takesEffort(model)) {
+    if (asked) {
+      throw new Error(
+        `${modelLabel(model)} takes no effort level (measured: Claude Code accepts --effort for it and runs without one) — omit effort for this model.`,
+      );
+    }
+    return { effort: null, defaultEffort: fallback, isDefault: true };
+  }
+  const effort = asked || fallback;
+  return { effort, defaultEffort: fallback, isDefault: effort === fallback };
 }
 
 /**

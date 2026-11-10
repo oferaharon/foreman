@@ -310,6 +310,8 @@ function openBrief(t, chipState) {
   fact('kind', t.kind);
   fact('model', t.model);
   fact('why', t.modelReason);
+  fact('effort', t.effort);
+  fact('why', t.effortReason);
   fact('source', t.source);
   fact('branch', t.branch);
   if (t.kind === 'plan') fact('plan', t.planFile);

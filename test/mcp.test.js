@@ -7,7 +7,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { FALLBACK, humanName } from '../server/human-name.js';
-import { WORKER_MODELS, DEFAULT_WORKER_MODEL } from '../server/worker-models.js';
+import { WORKER_MODELS, DEFAULT_WORKER_MODEL, WORKER_EFFORTS, MODELS_WITHOUT_EFFORT } from '../server/worker-models.js';
 import { TAG_MEANINGS, WHAT_TAGS, parseTags } from '../web/task-tags.js';
 
 // The tags by position, imported rather than retyped — the one-spelling rule
@@ -140,7 +140,8 @@ function briefOfMirror(body) {
 function summarizeTaskMirror(t) {
   return {
     id: t.id, kind: t.kind, tags: t.tags, state: t.state, branch: t.branch, pr: t.pr, model: t.model,
-    modelReason: t.modelReason, startedBy: t.startedBy, staleBase: t.staleBase,
+    modelReason: t.modelReason, effort: t.effort, effortReason: t.effortReason,
+    startedBy: t.startedBy, staleBase: t.staleBase,
     brief: briefOfMirror(t.body), selfMerge: t.selfMerge, live: t.live,
     deploy: t.deploy && { state: t.deploy.state, deployed: t.deploy.deployed },
   };
@@ -686,6 +687,40 @@ test('task_dispatch names exactly the models the dispatch will accept', async ()
   // The whole list, in the list's own order and spelling — a hand-typed copy that happened
   // to contain every id would still fail this, which is the point.
   assert.ok(tool.description.includes(WORKER_MODELS.join(', ')), 'interpolated, not retyped');
+});
+
+test('task_dispatch and task_add offer the effort levels from the leaf, with a reason beside them', async () => {
+  // The 2026-11-10 ruling: a team default, and a rare departure with a reason. The enum is
+  // the leaf's list — imported into the child, which this proves survives the stdio
+  // boundary — so the schema cannot offer a level the dispatch would refuse.
+  const res = await lead.rpc({ jsonrpc: '2.0', id: 96, method: 'tools/list' });
+  for (const name of ['task_dispatch', 'task_add']) {
+    const tool = res.result.tools.find((t) => t.name === name);
+    assert.deepEqual(tool.inputSchema.properties.effort.enum, WORKER_EFFORTS, `${name}: the leaf's levels, in order`);
+    assert.match(tool.inputSchema.properties.effort.description, /Omit for the team default/);
+    assert.match(tool.inputSchema.properties.effortReason.description, /Required when effort departs from the default/);
+    assert.ok(!tool.inputSchema.required.includes('effort'), `${name}: omitting it is the normal case`);
+  }
+  const dispatch = res.result.tools.find((t) => t.name === 'task_dispatch');
+  assert.ok(dispatch.description.includes(WORKER_EFFORTS.join(', ')), 'interpolated, not retyped');
+  assert.match(dispatch.description, /omit it and the worker starts on the team default/);
+  for (const id of MODELS_WITHOUT_EFFORT) assert.ok(dispatch.description.includes(`${id} takes no effort level`), id);
+});
+
+test('effort and its reason ride both recording tools through to the panel', async () => {
+  await call(lead, 97, 'task_dispatch', {
+    label: 'effortful', body: 'b', what: BUG, effort: 'xhigh', effortReason: 'a race nobody has pinned',
+  });
+  assert.equal(stubState.dispatches.at(-1).effort, 'xhigh');
+  assert.equal(stubState.dispatches.at(-1).effortReason, 'a race nobody has pinned');
+
+  await call(lead, 98, 'task_add', { label: 'effort-later', body: 'b', what: CHORE, effort: 'low', effortReason: 'docs' });
+  assert.equal(stubState.added.at(-1).effort, 'low');
+  assert.equal(stubState.added.at(-1).effortReason, 'docs');
+
+  // Omitted means absent, so the endpoint owns the default — as for the model.
+  await call(lead, 99, 'task_dispatch', { label: 'effortless', body: 'b', what: BUG });
+  assert.equal(stubState.dispatches.at(-1).effort, undefined);
 });
 
 test('worker_read resolves a task id to its session', async () => {
