@@ -96,6 +96,17 @@ repository's history. The consequence is the design: a prompt a worker actually 
 not friction to engineer around, it is the signal. Routine work never asks; if a worker
 stops, something is genuinely a judgement call.
 
+**What a worker runs on is two team defaults, and the lead's word against them.** The
+*model* is the lead's call per task, judged on its size and complexity; omitted, it is the
+team's worker model (Opus 5.5 unless you change it). The *effort* is the team's worker
+effort — `high` unless you change it — and the lead departs from it only rarely, for one
+task, with a reason. Either departure is written into the room, which level or model and why,
+so you can see when the lead called it wrong; an unknown model or level fails the dispatch
+instead of starting anything. Effort reaches the worker as `claude --effort`, which lasts for
+that session only and writes nothing to your own Claude Code settings. Before this existed
+every worker inherited your global effort — xhigh, for Opus — whatever the task was. Haiku
+4.5 takes no effort level at all, so a Haiku worker starts without one and its task says so.
+
 A worker outlives its PR. When it finishes it stays idle in the rail until the PR is
 merged or closed, because the first thing that happens to a PR is somebody wanting a
 change, and the worker that wrote it still holds every bit of context about why.
@@ -217,9 +228,9 @@ left gutter carrying whatever colour the line has. A dispatch is green — a wor
 is the one piece of machinery that is good news — two workers on one file stays amber, and
 a task merely recorded but not yet started is a dashed grey rule, quieter than the default
 rather than louder. A lead merging on its own judgment is the accent colour, the same one
-the panel spends on authority everywhere else. Everything else — including the four
+the panel spends on authority everywhere else. Everything else — including the
 commonest machinery shapes, a task closing, a PR opening, a worker starting, a worker's
-model — gets a keyword and no colour at all: a hue here means *look at this*, and routine
+model or effort — gets a keyword and no colour at all: a hue here means *look at this*, and routine
 bookkeeping is the opposite of that. The colour comes from what the poster said the line
 *is* (`event: 'dispatch'` on the entry, or `kind: 'conflict'`), never from reading its
 sentence, so rewording the message cannot silently turn a colour off.
@@ -315,8 +326,9 @@ a deployed pill, one done plan task — each with its state as a chip and its br
 underneath.](images/team-tasks.png)
 
 **Settings** — the autonomy toggles plus the team's knobs: how many workers may run at
-once and how long a worker may sit stuck before the room is told, both editable while
-the team is running. Three detected values sit beside them read-only, each with the reason
+once, how long a worker may sit stuck before the room is told, and the **worker model** and
+**worker effort** every worker starts on unless the lead says otherwise — all editable while
+the team is running, and a change reaches the next dispatch, never a worker already going. Three detected values sit beside them read-only, each with the reason
 it was chosen: the **setup** command, read off the project's files; the **forge**, read off
 the repo's own `origin` (see [The forge](#the-forge)); and the **base branch**. None of the
 three is a box, deliberately — a wrong value there is a bug in detection, not something for
