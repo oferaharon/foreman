@@ -22,7 +22,7 @@ export const PASS_EVERY_MS = 60_000;
 
 /**
  * How long a sleep waits for its name to leave tmux after `/exit` — relaunch's figure
- * (`EXIT_GONE_TIMEOUT_MS` in `index.js`), for relaunch's reason: about three seconds is
+ * (`EXIT_GONE_TIMEOUT_MS` in `exit-session.js`), for relaunch's reason: about three seconds is
  * normal, and the ceiling only costs waiting.
  */
 export const SLEEP_EXIT_TIMEOUT_MS = 20_000;

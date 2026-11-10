@@ -397,11 +397,12 @@ whose fire it never saw.
 **And one the next item needs: `/exit` asks first.** With a cron live, `/exit` does not exit:
 it draws *"The following will stop when you exit: scheduled task · Every 30 minutes · …"*
 over `1. Exit and stop tasks`, `2. Move to background and exit`, `3. Stay`, `Enter to
-confirm · Esc to cancel`. `parsePane` reads it as `needs-decision` with a prompt, so
-`heldBy` calls it *"a permission prompt"* — it blocks, under the wrong words — and `Esc`
-put the session back on its composer with the cron intact. That box is a last line of
-defence, not a witness: a sleep that reaches it has already typed `/exit`, and must Escape
-it rather than wait out the name.
+confirm · Esc to cancel`. `parsePane` read it as `needs-decision` with a prompt, so
+`heldBy` called it *"a permission prompt"* — it blocked, under the wrong words — and `Esc`
+put the session back on its composer with the cron intact. (It now has a reader of its own
+and reads as a dialog by name: *`/exit` with background work running asks first*, below.)
+That box is a last line of defence, not a witness: a sleep that reaches it has already typed
+`/exit`, and must Escape it rather than wait out the name.
 
 **And what the screen shows: nothing.** After `/loop 30m …` the mode line still read
 `⏵⏵ auto mode on (shift+tab to cycle) · ← 2 agents` — no shell, monitor or cron segment, and
@@ -470,7 +471,8 @@ somebody will be tempted to relax:
 
   **What the box was: a teardown frame, inferred, not caught.** `heldBy`'s words name the
   shape — no composer in `parsePane`'s last 14 lines, no parsed prompt, no dialog title, so
-  `dialog: 'dialog'`; the cron box would have read *"a permission prompt"*. Six sandbox exits
+  `dialog: 'dialog'`; the cron box would have read *"a permission prompt"* (now *"“Background
+  work is running” is open in its terminal"*). Six sandbox exits
   in `alpha` (v2.1.296, 220×50, `claude` and the panel's own `/bin/zsh -ilc claude`, fresh
   and after one turn), captured as fast as tmux would answer — 42 to 60 frames each, about
   0.9 s from `Enter` to the name freeing — read `idle` on every frame that captured, with
@@ -491,6 +493,78 @@ somebody will be tempted to relax:
   or wake holds the bench, and the loop holds its own `sleeping` flag from the re-read until
   the name frees — relaunch all, restart one, restore, wake and forget all answer 409 while
   it is up.
+
+## `/exit` with background work running asks first
+
+**`/exit` with background work running raises a box and stays up, and the task close swept a
+live session's folder — MEASURED on v2.1.296 at 220×50 and 80×23.** Found live, in another
+team: a lead closed a worker `done` while a Monitor was running. The close typed `/exit`,
+slept 700 ms, force-removed the worktree and branch and posted *"done — merged and cleaned
+up"* — and the session was still up, at its composer in a deleted folder, with no open task
+to draw a worker chip under and a worktree path that cannot nest under its lead, so it sat
+under a rail heading of its own. Nothing in `server/` recognised the box.
+
+Measured in the sandbox's `alpha`, a `run_in_background` `sleep 600` and a Monitor live, each
+session created at the size it was captured at (`test/fixtures/dialog-exit-background.txt`,
+`-narrow.txt`, and `-cursor2.txt` after one `Down`):
+
+```
+  Background work is running
+  The following will stop when you exit:
+  shell · sleep 600
+  monitor · wait for the marker file
+  ❯ 1. Exit and stop tasks
+    2. Move to background and exit
+    3. Stay
+
+  Enter to confirm · Esc to cancel
+```
+
+- **A digit selects and submits.** `3` went straight back to the composer: no cursor move, no
+  waiting for Enter. So nothing in the panel sends this box a digit.
+- **`Down`/`Up` move the `❯` and wrap** — three `Down`s from row 1 land on row 1 — so a walk
+  is press-and-re-read, never a count.
+- **`Enter` on `Exit and stop tasks` kills the work and exits.** The background `sleep 600`
+  was gone and the tmux name freed 1.2 s after the key; a whole close through a scratch panel
+  answered in 1.7 s, three times out of three, the Monitor's process gone with it.
+- **`Esc` puts the composer back with every task still running.**
+- The box opened with the cursor on row 1 every time, at both sizes; the list is one
+  `<kind> · <what>` line per task (`shell · …`, `monitor · …`, and the cron box above's
+  `scheduled task · …`).
+
+**It read as a permission prompt.** Numbered rows over `Enter to confirm · Esc to cancel` —
+the trust gate's footer, word for word — and `parsePrompt` took it: three rows classed
+`other`, drawn on the desktop as three one-tap buttons answered by digit, and `heldBy`
+calling it *"a permission prompt"*. `server/exit-box.js` is its reader (`parseExitBox`) and
+witness (`isExitBox`); `parsePrompt` refuses on the witness, so `parsePane` reads it as
+`dialog: 'Background work is running'`, and `OPTION_RE` is untouched. The witness walks **up
+from the live footer** — rows, then `<kind> · <what>` lines, then the lead and the title
+directly above — rather than searching for the title, because a copy of this box in the
+scrollback (a worker editing these very fixtures) must not vouch for a trust gate drawn below
+it. `test/exit-box.test.js` pins all six parsers refusing each other on it.
+
+**What the close does now** (`exitAndWait`, `server/exit-session.js`): every refusal that
+needs no keystroke first — the merged gate used to run *after* the `/exit`, so a refused
+`done` still ended the worker — then `/exit`, then a poll for the **name** leaving tmux,
+`EXIT_GONE_TIMEOUT_MS`, the same wait relaunch uses (`waitNamesGone`). If this box appears it
+walks the cursor onto `Exit and stop tasks` **by label**, re-reading each step, arrow keys
+only, `Enter` only with the pane's own `❯` on that row. The other two rows are worse for a
+close: `Move to background and exit` leaves work running detached in a folder about to be
+deleted, and `Stay` is the orphan. That answer is the lead's call, recorded in the team's
+decisions, and the maintainer may reverse it. What the box listed is named in the close's
+room line. A box it recognises but cannot answer by label is Escaped, never guessed at; any
+other box is waited past, because a frame from the middle of an exit can read as a box (the
+hibernation section above), and the name decides. A name still there at the deadline is a
+409 with an alert line in the room, and **nothing is changed** — task state, worktree and
+branch all stay.
+
+**Still exposed to the same box, and not fixed here:** the rail bin's `/exit`
+(`POST /api/sessions/:id/exit`) answers `ok` after 700 ms with the box up — a human is
+looking at that row, and it now names the box instead of offering the digit buttons, so it
+is answered in the terminal or Escaped with interrupt; relaunch all and restart one wait for
+the name and report *"did not close in time — still running"*, leaving the box up on that
+pane. Hibernation refuses any session with background work and Escapes the box as a
+backstop.
 
 ## `/exit` and `--resume` leave different marks, so the idle clock has four inputs
 
