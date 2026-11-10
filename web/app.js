@@ -1594,6 +1594,15 @@ let rosterSeen = false;
 /** Where the list was scrolled when a filter went on, to hand back when it comes off. */
 let scrollBeforeFilter = null;
 
+/**
+ * The rail's last walk, top to bottom (`renderRail`'s `order`): every live row it accounts
+ * for, `{id, kind, group}`, folded groups' contents included at their header. Module scope
+ * because the rail is rebuilt from scratch on every roster frame and the jump is pressed
+ * between them — and declared up here, beside the rail's other state, so no repaint can
+ * reach `paintJump` before the binding exists.
+ */
+let jumpOrder = [];
+
 /** How far the pointer travels before a press on the grip becomes a drag, in px. */
 const PIN_DRAG_SLOP = 4;
 
@@ -19491,14 +19500,6 @@ function paintRailFilter(filter, hidden) {
 }
 
 if (el.railFilter) el.railFilter.onclick = () => setRailFilter('');
-
-/**
- * The rail's last walk, top to bottom (`renderRail`'s `order`): every live row it accounts
- * for, `{id, kind, group}`, folded groups' contents included at their header. Module scope
- * because the rail is rebuilt from scratch on every roster frame and the jump is pressed
- * between them.
- */
-let jumpOrder = [];
 
 /**
  * The jump count in the rail head: how many sessions want you, red when any of them is
