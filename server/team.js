@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
-import { DEFAULT_WORKER_MODEL } from './worker-models.js';
+import { DEFAULT_WORKER_MODEL, DEFAULT_WORKER_EFFORT } from './worker-models.js';
 import { mcpServerRule } from './project-mcp.js';
 
 /**
@@ -64,6 +64,12 @@ const DEFAULTS = {
   // to one question. The lead may name another per task; the room says which and why, and
   // a team.json already on disk keeps whatever default it was written with.
   defaultModel: DEFAULT_WORKER_MODEL,
+  // The effort workers launch at when the lead names none — `high`, the maintainer's ruling
+  // of 2026-11-10, seeded from `DEFAULT_WORKER_EFFORT` for the reason the model is. Being a
+  // new key, it is also what every team.json already on disk reads as, through the merge
+  // below — which is the point: before it every worker inherited the global xhigh, and a
+  // team that never touches the picker must still stop doing that.
+  defaultEffort: DEFAULT_WORKER_EFFORT,
   // Phrases an authenticated trigger may put into this team's lead, each
   // `{ id, match }` with `match` anchored `^...$` — see `server/trigger.js`, which
   // refuses the lot if one is not. **Empty is the default and empty means no**: a team

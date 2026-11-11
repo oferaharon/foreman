@@ -172,6 +172,24 @@ test('the lead brief names worker_interrupt, and keeps it apart from /exit and f
   }
 });
 
+test('the lead brief gives worker effort as the team default, with a rare, reasoned departure', () => {
+  // The 2026-11-10 ruling, and what it is *not*: the 2026-09-25 rejection of a lead that
+  // calculates effort per task. So the sentence that leads is the default, and a departure
+  // is named as rare and as needing a reason the room shows — the model's accountability.
+  for (const forge of [{ forge: 'github', via: 'gh', reading: 'GitHub' }, null]) {
+    const brief = briefFor(forge);
+    assert.match(brief, /\*\*The worker's effort is the team's default, not a per-task calculation\.\*\*/);
+    assert.match(brief, /omit `effort` and that is what it\s+gets/);
+    assert.match(brief, /name the reason in `effortReason`: it is required, and it is posted to\s+the room/);
+    assert.match(brief, /A departure should be rare\./);
+    // Beside the model paragraph, whose own sentences are untouched.
+    const model = brief.indexOf("**The worker's model is your call, per task.**");
+    const effort = brief.indexOf("**The worker's effort is the team's default");
+    assert.ok(model >= 0 && effort > model, 'after the model paragraph');
+    assert.match(brief, /That accountability is the deal — use the judgment, own it\./);
+  }
+});
+
 const forgeSectionOf = (forge, human) => forgeSection({ forge, base: 'main', human });
 
 test('the brief is one template literal, and a bare backtick would break the module', async () => {

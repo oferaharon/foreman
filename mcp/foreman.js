@@ -8,7 +8,9 @@ import { TASK_STATES, OPEN_STATES } from '../server/tasks.js';
 // dispatch would refuse (or never told about one it would accept) is the silent divergence
 // `docs/traps/one-spelling.md` is about. `worker-models.js` is a leaf with no imports for
 // exactly this caller: `dispatch.js` would drag `tmux.js` and the pane parsers in here.
-import { WORKER_MODELS } from '../server/worker-models.js';
+// The effort levels and the models that take none come from the same leaf, for the same
+// reason.
+import { WORKER_MODELS, WORKER_EFFORTS, MODELS_WITHOUT_EFFORT } from '../server/worker-models.js';
 // The four task tags, from the leaf that spells them once — this is the first import from
 // `../web/` here, and it is safe for the reason `worker-models.js` is: the leaf imports
 // nothing, so nothing else rides into a stdio child with it.
@@ -227,6 +229,28 @@ const WHAT_PARAM = {
 };
 
 /**
+ * A worker's effort, as the lead names it — the maintainer's ruling of 2026-11-10: a team
+ * default every worker starts on, and a rare, justified departure per task. Not a level the
+ * lead *calculates* for each task; that was rejected on 2026-09-25 and this does not bring
+ * it back, which is why the sentence leads with "omit it".
+ *
+ * The enum is the leaf's own list, so the schema and the dispatch cannot disagree; the
+ * panel validates again regardless, because a request does not have to come through here.
+ */
+const EFFORT_SENTENCE = `The worker's effort works the same way and is rarer still: omit it and the worker starts on the team default, which is right for almost every task; name one of ${WORKER_EFFORTS.join(', ')} only for a clear reason, given in effortReason and posted to the room. ${MODELS_WITHOUT_EFFORT.length ? `${MODELS_WITHOUT_EFFORT.join(', ')} takes no effort level — omit effort for it.` : ''}`.trim();
+
+const EFFORT_PARAM = {
+  type: 'string',
+  enum: [...WORKER_EFFORTS],
+  description: 'The effort to launch this worker at. Omit for the team default — almost always the right answer.',
+};
+
+const EFFORT_REASON_PARAM = {
+  type: 'string',
+  description: 'One line on why this task needs a non-default effort. Required when effort departs from the default.',
+};
+
+/**
  * The stale-server check, for the two tools that record a task.
  *
  * A panel still running code from before tags reads only the fields it knows, so it drops
@@ -288,6 +312,8 @@ function summarizeTask(t) {
     pr: t.pr,
     model: t.model,
     modelReason: t.modelReason,
+    effort: t.effort,
+    effortReason: t.effortReason,
     startedBy: t.startedBy,
     staleBase: t.staleBase,
     brief: briefOf(t.body),
@@ -586,7 +612,7 @@ const LEAD_TOOLS = [
   {
     name: 'task_dispatch',
     description:
-      `Create a worktree branched from main and start a worker session on it; the body becomes the worker's first message. Only after ${HUMAN} has confirmed the task in conversation — never dispatch unconfirmed work. Set kind "plan" to dispatch a PLANNER instead of a builder: it researches the repo and writes a plan document, and its permissions deny writing code at all. Use a planner for anything big or vague, or where ${HUMAN} would want to see the shape before code exists — then bring them the plan (plan_read) for approval before dispatching builders against it. The worker's model is your call, judged per task on its size and complexity: omit it for the team default, or name one of ${WORKER_MODELS.join(', ')} (a [1m] suffix selects the 1M-context variant). Naming a non-default model requires a modelReason — it is posted to the room, where ${HUMAN} judges the call. Note Haiku cannot run auto mode (measured): a Haiku worker prompts on everything, so it is almost never the right choice. Name what the task is in \`what\` — required, one of four, and it stays on the task for its whole life.`,
+      `Create a worktree branched from main and start a worker session on it; the body becomes the worker's first message. Only after ${HUMAN} has confirmed the task in conversation — never dispatch unconfirmed work. Set kind "plan" to dispatch a PLANNER instead of a builder: it researches the repo and writes a plan document, and its permissions deny writing code at all. Use a planner for anything big or vague, or where ${HUMAN} would want to see the shape before code exists — then bring them the plan (plan_read) for approval before dispatching builders against it. The worker's model is your call, judged per task on its size and complexity: omit it for the team default, or name one of ${WORKER_MODELS.join(', ')} (a [1m] suffix selects the 1M-context variant). Naming a non-default model requires a modelReason — it is posted to the room, where ${HUMAN} judges the call. Note Haiku cannot run auto mode (measured): a Haiku worker prompts on everything, so it is almost never the right choice. ${EFFORT_SENTENCE} Name what the task is in \`what\` — required, one of four, and it stays on the task for its whole life.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -600,6 +626,8 @@ const LEAD_TOOLS = [
         what: WHAT_PARAM,
         model: { type: 'string', description: 'The model to launch this worker with. Omit for the team default.' },
         modelReason: { type: 'string', description: 'One line on why this task needs a non-default model. Required when model departs from the default.' },
+        effort: EFFORT_PARAM,
+        effortReason: EFFORT_REASON_PARAM,
       },
       required: ['label', 'body', 'what'],
       additionalProperties: false,
@@ -617,6 +645,8 @@ const LEAD_TOOLS = [
         tags: [args.what],
         model: args.model,
         modelReason: args.modelReason,
+        effort: args.effort,
+        effortReason: args.effortReason,
         source: 'lead',
       });
       return withTagCheck(started, args.what);
@@ -625,7 +655,7 @@ const LEAD_TOOLS = [
   {
     name: 'task_add',
     description:
-      `Record a task WITHOUT starting anything: a task record with the brief on it, a label and a kind, and no session, no worktree, no branch and no cost. Only after ${HUMAN} has confirmed the task in conversation — the same discipline as task_dispatch, and you may batch several once they have said yes to them. What it is for: an idea worth keeping that is not worth starting right now, and an approved task that has nowhere to go because the worker cap is full. Write the body as if a worker were about to read it — the moment you discuss an idea is the moment you know most about it, and an hour later that context is gone. ADDING IS NOT STARTING. A pending task never becomes a worker on its own — not on a freed slot, not on a timer, and not on the yes that got it recorded. Starting one needs a fresh, per-task yes from ${HUMAN}, however short. The model is validated now and stored as you gave it; omit it and it resolves to the team default at the moment it actually starts, which is the right answer for an idea that may sit for a month. Name what the task is in \`what\` — required, one of four; it is recorded now and carried through the start, and task_set_tags changes it. Returns the tidied id — that, not the label you typed, is the name to start it by later, with task_start.`,
+      `Record a task WITHOUT starting anything: a task record with the brief on it, a label and a kind, and no session, no worktree, no branch and no cost. Only after ${HUMAN} has confirmed the task in conversation — the same discipline as task_dispatch, and you may batch several once they have said yes to them. What it is for: an idea worth keeping that is not worth starting right now, and an approved task that has nowhere to go because the worker cap is full. Write the body as if a worker were about to read it — the moment you discuss an idea is the moment you know most about it, and an hour later that context is gone. ADDING IS NOT STARTING. A pending task never becomes a worker on its own — not on a freed slot, not on a timer, and not on the yes that got it recorded. Starting one needs a fresh, per-task yes from ${HUMAN}, however short. The model is validated now and stored as you gave it; omit it and it resolves to the team default at the moment it actually starts, which is the right answer for an idea that may sit for a month. Effort is the same: validated now, stored as given, and omitted it is the team default when the task starts. Name what the task is in \`what\` — required, one of four; it is recorded now and carried through the start, and task_set_tags changes it. Returns the tidied id — that, not the label you typed, is the name to start it by later, with task_start.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -639,6 +669,8 @@ const LEAD_TOOLS = [
         what: WHAT_PARAM,
         model: { type: 'string', description: 'The model to start this task on. Omit for the team default as it stands when it starts.' },
         modelReason: { type: 'string', description: 'One line on why this task needs a non-default model. Required when model departs from the default.' },
+        effort: { ...EFFORT_PARAM, description: 'The effort to start this task at. Omit for the team default as it stands when it starts — almost always the right answer.' },
+        effortReason: EFFORT_REASON_PARAM,
       },
       required: ['label', 'body', 'what'],
       additionalProperties: false,
@@ -653,6 +685,8 @@ const LEAD_TOOLS = [
         tags: [args.what],
         model: args.model,
         modelReason: args.modelReason,
+        effort: args.effort,
+        effortReason: args.effortReason,
         source: 'lead',
       });
       return withTagCheck(recorded, args.what);
@@ -661,7 +695,7 @@ const LEAD_TOOLS = [
   {
     name: 'task_start',
     description:
-      `Start a PENDING task: turn a record that has been sitting in the backlog into a real worker, using the same machinery as task_dispatch — worktree, branch, session, brief. NOTHING STARTS OFF THE BACKLOG ON THE ORIGINAL GREEN-LIGHT. The yes that got a task recorded was a yes to the idea; starting it spends money, a worker slot and a worktree, so it needs a fresh, per-task yes from ${HUMAN}, however short ("yes", "go on then", "start search-index"). Quote it in \`confirmation\` — it is stored on the task and posted to the room where ${HUMAN} reads it back, so a confirmation you did not get is a claim they can see you making. Nothing else may start a pending task: not a freed slot, not a timer, not your own judgement that it is obviously next. If the cap is full the start is refused and the task stays pending — say so and leave it there. Use \`body\` only to replace the recorded brief (${HUMAN} changed the scope, or the repo moved on since it was written); omit it and the task starts on the brief it was recorded with. The model resolves now, not when it was recorded: a task recorded without one starts on the team default as it stands today.`,
+      `Start a PENDING task: turn a record that has been sitting in the backlog into a real worker, using the same machinery as task_dispatch — worktree, branch, session, brief. NOTHING STARTS OFF THE BACKLOG ON THE ORIGINAL GREEN-LIGHT. The yes that got a task recorded was a yes to the idea; starting it spends money, a worker slot and a worktree, so it needs a fresh, per-task yes from ${HUMAN}, however short ("yes", "go on then", "start search-index"). Quote it in \`confirmation\` — it is stored on the task and posted to the room where ${HUMAN} reads it back, so a confirmation you did not get is a claim they can see you making. Nothing else may start a pending task: not a freed slot, not a timer, not your own judgement that it is obviously next. If the cap is full the start is refused and the task stays pending — say so and leave it there. Use \`body\` only to replace the recorded brief (${HUMAN} changed the scope, or the repo moved on since it was written); omit it and the task starts on the brief it was recorded with. The model and the effort resolve now, not when they were recorded: a task recorded without one starts on the team default as it stands today.`,
     inputSchema: {
       type: 'object',
       properties: {

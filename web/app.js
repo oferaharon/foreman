@@ -6836,6 +6836,11 @@ function openTaskBrief(t, chipState) {
   // the line the maintainer wants visible: it is the only place a model choice can be
   // judged after the sentence that argued for it has scrolled out of the room.
   fact('why', t.modelReason);
+  // The effort it launched at, and the lead's reason when that departs from the team
+  // default — the same pair as the model, for the same reader. A task from before workers
+  // had an effort shows none, which is true: it inherited a setting the panel never saw.
+  fact('effort', t.effort);
+  fact('why', t.effortReason);
   fact('source', t.source);
   fact('branch', t.branch);
   if (t.kind === 'plan') fact('plan', t.planFile);
@@ -12509,6 +12514,42 @@ function createPane(slot, host) {
     modelWrap.append(modelPick);
     modelRow.append(modelText, modelWrap);
     elm.append(modelRow);
+    // The default worker effort, beside the model and built the same way — the maintainer's
+    // ruling of 2026-11-10. The levels come down with the config (`efforts`, spelled once
+    // server-side) and are their own names, so the option text is the value. A stored level
+    // the list does not carry is still drawn, as for the model, so the picker never lies
+    // about what a worker would start on — the dispatch refuses it, and says so.
+    const effortRow = document.createElement('label');
+    effortRow.className = 'team-knob-row';
+    const effortText = document.createElement('span');
+    effortText.textContent = 'worker effort';
+    effortText.title =
+      'What workers start at when the lead names none. The lead may depart from it for one task with a reason — when it does, the room says which and why.';
+    const effortPick = document.createElement('select');
+    const effortIds = Array.isArray(team.efforts) ? [...team.efforts] : [];
+    if (team.defaultEffort && !effortIds.includes(team.defaultEffort)) effortIds.push(team.defaultEffort);
+    for (const level of effortIds) {
+      const opt = document.createElement('option');
+      opt.value = level;
+      opt.textContent = level;
+      effortPick.append(opt);
+    }
+    effortPick.value = team.defaultEffort || '';
+    effortPick.onchange = async () => {
+      effortPick.disabled = true;
+      try {
+        await patchTeam({ defaultEffort: effortPick.value });
+      } catch (err) {
+        effortPick.value = team.defaultEffort || '';
+        errLine(elm, err.message);
+      }
+      effortPick.disabled = false;
+    };
+    const effortWrap = document.createElement('span');
+    effortWrap.className = 'team-select';
+    effortWrap.append(effortPick);
+    effortRow.append(effortText, effortWrap);
+    elm.append(effortRow);
     elm.append(projectMcpBlock(team, elm));
     // Setup is shown, never typed — the maintainer's ruling (2026-08-26): a control the user
     // cannot answer correctly should not be a control. The server detects it from the

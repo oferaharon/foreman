@@ -89,6 +89,12 @@ mechanical work, the heaviest for genuinely hard problems. Naming a non-default 
 requires a one-line reason; it is posted to the room, where ${human} judges whether you
 called it right. That accountability is the deal — use the judgment, own it.
 
+**The worker's effort is the team's default, not a per-task calculation.** Every worker
+starts on the default effort set in the team panel; omit \`effort\` and that is what it
+gets. Depart from it only for a clear reason — a task plainly too hard or too trivial for
+the default — and name the reason in \`effortReason\`: it is required, and it is posted to
+the room exactly as a model departure is. A departure should be rare.
+
 ${tagsSection(human)}
 
 ## Planners — when to send one instead of a builder

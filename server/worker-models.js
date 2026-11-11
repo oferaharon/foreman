@@ -1,5 +1,6 @@
 /*
- * worker-models.js — the models a worker may be launched on, spelled once.
+ * worker-models.js — the models a worker may be launched on, and the effort levels it may
+ * be launched at, spelled once.
  *
  * A leaf module with no imports, deliberately. The list lived in `dispatch.js` and was
  * typed out a second time in `mcp/foreman.js`'s `task_dispatch` description, which is the
@@ -153,3 +154,68 @@ export const workerModelNames = (...extra) =>
   Object.fromEntries(
     [...WORKER_MODELS, ...extra.filter(Boolean).map(String)].map((id) => [id, modelLabel(id)]),
   );
+
+/*
+ * The effort a worker is launched at — the maintainer's ruling of 2026-11-10. Until then
+ * every worker inherited the global `effortLevel` in `~/.claude/settings.json`, which is
+ * `xhigh` for Opus 5.5 on this Mac, so every task ran at xhigh whatever it was. Now a team
+ * has a default (`defaultEffort` in team.json, a picker beside the worker model) and the
+ * lead may depart from it per task with a one-line reason the room shows — the model's
+ * pattern exactly, and in this file for the model's reason: `mcp/foreman.js` names the
+ * levels in `task_dispatch`'s description and must not import `dispatch.js`.
+ *
+ * It reaches the worker as `claude --effort <level>`. MEASURED on Claude Code v2.1.296 in
+ * the sandbox: the flag is session-only — `~/.claude/settings.json` hashed identical across
+ * every launch — every assistant record in the transcript carries the launched level as its
+ * `effort` (which is where the rail reads effort from, never the footer), the banner reads
+ * `Opus 5.5 with high effort`, and it survives `/clear`.
+ *
+ * Not the same list as the screen readers'. `EFFORT_RE` in `tmux.js` and the track in
+ * `effort.js` read what Claude Code *draws*, which includes `ultracode`; this is what the
+ * `--effort` flag *accepts*, which does not. Two contracts that share most of their words.
+ */
+
+/**
+ * What `--effort` accepts, in the CLI's own order (`claude --help`, v2.1.296). The wall
+ * between "the lead picks an effort" and "the lead picks launch flags", exactly as
+ * `WORKER_MODELS` is: a level not on it fails the dispatch before a worktree exists.
+ *
+ * It matters more here than for the model, because the CLI does **not** refuse a bad
+ * value — MEASURED: `--effort bogus` prints a warning above the banner, ignores the flag
+ * and starts on the global default (xhigh), exit 0. Unvalidated, a typo would launch the
+ * very effort this feature exists to stop being the default, and say nothing.
+ */
+export const WORKER_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+/**
+ * What a worker starts at when neither the lead nor team.json names one — and so what
+ * every team.json written before this existed reads as, through `withDefaults` (team.js).
+ * `high`, by the 2026-11-10 ruling: the point of the feature is that workers stop
+ * defaulting to xhigh.
+ */
+export const DEFAULT_WORKER_EFFORT = 'high';
+
+/** Is this a level the panel will put after `--effort`? Exact match — no case folding. */
+export const isKnownEffort = (level) => typeof level === 'string' && WORKER_EFFORTS.includes(level);
+
+/**
+ * Models that take no effort level at all. MEASURED on v2.1.296: Haiku 4.5 launched with
+ * `--effort max` (and `xhigh`, and `low`) starts normally, prints no warning, draws a banner
+ * with no effort in it, and writes **no `effort` field** on any transcript record — the flag
+ * is accepted and silently dropped. Every other model on `WORKER_MODELS` that was measured
+ * (Opus 5.5, Opus 5, Sonnet 5.5, Fable 5.1, at levels up to `max`) records exactly the level
+ * it was launched with.
+ *
+ * So a worker on one of these is launched *without* `--effort` and its task records `null`,
+ * because a record saying `high` for a session that ran at no effort would be a claim
+ * nothing on this Mac made true. A lead that names an effort for one is refused rather than
+ * humoured, for the same reason.
+ */
+export const MODELS_WITHOUT_EFFORT = ['claude-haiku-4-5-20251001'];
+
+/** Does this model id (a `[1m]` suffix allowed) take an effort level? */
+export function takesEffort(model) {
+  const raw = String(model ?? '');
+  const base = raw.endsWith('[1m]') ? raw.slice(0, -4) : raw;
+  return !MODELS_WITHOUT_EFFORT.includes(base);
+}

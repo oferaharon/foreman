@@ -128,7 +128,19 @@ and the names the picker draws, because `mcp/foreman.js` needs the same list for
 `task_dispatch` description and cannot import `dispatch.js` without dragging `tmux.js` and
 the pane parsers into a stdio MCP child; `dispatch.js` re-exports all of it. `claude-opus-5`
 stays on the list under its successor — task records and `team.json` files name it and must
-still validate. `room.js` the log, `watch.js`
+still validate. **Effort is the same shape, and rarer** (`resolveWorkerEffort`, the
+maintainer's ruling of 2026-11-10): every worker, builder or planner, launches with
+`claude --effort <level>` at the team's `defaultEffort` — **`high`** unless set, which is
+also what every older `team.json` reads as, because before it every worker inherited the
+global xhigh — a picker beside the worker model; a departure needs an `effortReason` and gets
+its own `event: 'effort'` room line; an unknown level fails the dispatch. It is *not* the
+lead calculating effort per task, which was rejected on 2026-09-25. The levels and the
+default sit in `worker-models.js` beside the models, for the same import reason. MEASURED on
+v2.1.296: `--effort` is session-only (`settings.json` byte-identical) and the transcript
+records the level; an unknown value is only warned about and launches on the global default,
+which is why the panel validates; and Haiku 4.5 accepts the flag and records **no** effort,
+so `MODELS_WITHOUT_EFFORT` launches it without one, records `null`, and refuses an explicit
+level. `room.js` the log, `watch.js`
 transitions + stuck + loop + the nudge, `conflicts.js` the path-overlap scan, `gc.js` boot
 housekeeping, `deployed.js` whether a merged task is actually running on this Mac.
 
@@ -1369,8 +1381,8 @@ stands, so no receipt-less sibling can be inferred onto it after a restart —
 (`system`, `conflict`) is a git-log row: a 2px gutter carries the colour a frame used to
 carry, keyed on `event` — green for a dispatch, amber for a conflict, dashed grey for a
 task merely `pending`, accent for a lead's own self-merge, plain `--ink-muted` for
-everything else, the four server-stamped events (`closed`, `pr`, `started`, `model`)
-included. Tier 2 (`chat`, `status`, `answer`, legacy `link`) is the panel's own rooms
+everything else, the server-stamped events (`closed`, `pr`, `started`, `model`,
+`effort`) included. Tier 2 (`chat`, `status`, `answer`, legacy `link`) is the panel's own rooms
 bubble, full column width, one `--peer-N` hue per speaker on the pill and nowhere else; the
 lead's line keeps the accent edge and 7% tint instead of a hue, and a `lead → [worker]`
 line draws the recipient as that worker's own pill, from the same `roomPill` function both

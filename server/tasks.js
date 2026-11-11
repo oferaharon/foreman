@@ -89,14 +89,24 @@ export class TaskStore {
         // Additive fields: every task on disk before planners existed is a build task,
         // and reads as one rather than as `undefined` deciding something later. Same for
         // the two the pending state added — a record written before them answers `null` —
-        // and for tags, where a record from before them is untagged.
+        // and for tags, where a record from before them is untagged. `effort` is `null` on
+        // every task dispatched before workers had one, which is true: those inherited
+        // whatever the global setting was, and the panel never knew which.
         //
         // The spread is also why this store keeps a field it has never heard of: a stored
         // key this build does not know rides `...t` into the Map and `#flush` writes it
         // back, so a rollback past a field loses nothing. The price is that an invalid
         // value is kept just as faithfully, which is why every reader of `tags` goes
         // through `readTags`/`whatTag` (`web/task-tags.js`) and never reads it raw.
-        this.tasks.set(id, { kind: DEFAULT_TASK_KIND, modelReason: null, startedBy: null, tags: [], ...t });
+        this.tasks.set(id, {
+          kind: DEFAULT_TASK_KIND,
+          modelReason: null,
+          effort: null,
+          effortReason: null,
+          startedBy: null,
+          tags: [],
+          ...t,
+        });
       }
     } catch {
       /* first run, or hand-edited into nonsense — start clean */
@@ -122,6 +132,7 @@ export class TaskStore {
    * @param {{id: string, repo: string, body: string, kind?: 'build'|'plan', source?: string,
    *          state?: string, branch?: string, worktree?: string, base?: string,
    *          staleBase?: boolean, model?: string, modelReason?: string,
+   *          effort?: string|null, effortReason?: string,
    *          startedBy?: string, planFile?: string, tags?: string[]}} t
    */
   create(t, { now = Date.now() } = {}) {
@@ -157,6 +168,12 @@ export class TaskStore {
       // departs from the team default, and kept because a pending task needs it *again*
       // at promotion, long after the sentence that justified it has left the room.
       modelReason: t.modelReason ?? null,
+      // The effort it was *launched* at, and why when it departs from the team default —
+      // the model's two fields again, for the same reasons. `null` on a dispatched task
+      // means its model takes no effort level; on a pending one, "the team default when it
+      // starts", exactly as `model` does.
+      effort: t.effort ?? null,
+      effortReason: t.effortReason ?? null,
       // Who said "start it" — stamped at promotion, null for anything dispatched
       // directly. Nothing writes it yet; it is here so the field exists on every record
       // rather than appearing halfway through the store's history.
