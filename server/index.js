@@ -162,6 +162,7 @@ import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
 import { findFiles } from './files.js';
 import { scanImages, readImage } from './images.js';
+import { scanAgents, agentList } from './agents.js';
 import { scanOutputs, readOutput, revealablePath, revealableFolder, OUTPUT_MEDIA } from './outputs.js';
 import { IMAGE_MEDIA } from './normalize.js';
 
@@ -1501,6 +1502,34 @@ app.get('/api/sessions/:id/image/:uuid/:index', async (req, res) => {
     res.end(found.buffer);
   } catch {
     res.status(404).end();
+  }
+});
+
+/**
+ * This session's subagents: the ones running now, with the terminal's own elapsed time and
+ * token count, and the ones that ran earlier — for the background line above the composer,
+ * which asks this only while it is unfolded (and once on open, to know whether there is an
+ * "earlier" at all).
+ *
+ * The running rows come from the last poll's scrape (`registry.agentPanel`), never from the
+ * roster: their numbers tick every poll and the roster is broadcast on a diff, so they are
+ * held beside it instead. The earlier half is a whole-transcript pass (`scanAgents`), for
+ * the reason the images and outputs routes give — a list built from the window a browser
+ * has loaded would be a subset that looks complete. The join between the two, and every
+ * measurement behind it, is in `server/agents.js`.
+ *
+ * Live sessions only. A sleeper has no composer and so no line to unfold; nothing here
+ * types, and nothing here opens `/tasks` — that would be typing into the session.
+ */
+app.get('/api/sessions/:id/agents', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Unknown session.' });
+  const panel = session.background ? registry.agentPanel(session.id) : null;
+  try {
+    const { runs, scan } = session.transcriptPath ? await scanAgents(session.transcriptPath) : { runs: [], scan: null };
+    res.json({ ...agentList(runs, panel), known: Boolean(session.background), scan });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

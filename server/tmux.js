@@ -443,21 +443,66 @@ function parseBypass(recent) {
  * list caps at five rows and says `↓ N more` for the rest, so the count is rows + N, never
  * rows alone — a parser counting `◯` reports five for a session running forty.
  *
+ * **And the rows themselves**, since the background line above the panel's composer unfolds
+ * into a list of them (`parseAgentRow`). Re-measured on v2.1.322 at 220×50 and 80×23
+ * (`pane-agents-2-v322{,-narrow}.txt`): the shape above is unchanged, and the title column
+ * is now the `description` the session gave the Agent call — on v2.1.257/280 it was often
+ * the subagent's current activity instead (`Running sleep 280 command`), which is why a
+ * title is matched to a transcript entry and never trusted as an id. The elapsed time is the
+ * subagent's own working time, not the wall clock: it stands still while one waits.
+ *
  * One neighbour has almost no slack left, and it is worth knowing before Claude Code ever
  * draws an eighth panel row: `parseGhost` reads its own `-pe` capture and looks for the
  * composer's lower rule within the bottom eleven lines. With the panel at its seven-line
  * maximum the rule is the eleventh line, and with the slot wrapped as above it is the
  * twelfth — so a suggestion reads as none there. Nothing, rather than something wrong.
  *
- * @returns {{ text: string, agents: number }}
+ * @returns {{ text: string, agents: number, rows: AgentRow[], more: number }}
  */
 const PANEL_HEAD_RE = /^\s*⏺\s+main\s*$/;
 const PANEL_ROW_RE = /^\s*◯\s+\S/;
 const PANEL_MORE_RE = /^\s*↓\s+(\d+)\s+more\s*$/;
 
+/*
+ * `12s · ↓ 37.3k tokens`, at the row's right-hand end. The elapsed part is the terminal's own
+ * `1h 2m` / `4m 5s` / `9s`; the word `tokens` is the first thing a narrow pane cuts
+ * (`26s · ↓ 37.9k` at 34 columns, `pane-agents-cut-narrow.txt`), so it is optional.
+ */
+const ROW_STAT_RE = /(?:^|\s)(\d+h(?:\s+\d+m)?|\d+m(?:\s+\d+s)?|\d+s)\s+·\s+↓\s+([\d.]+[kKmM]?)(?:\s+tokens?)?\s*$/;
+
+/**
+ * One `◯` row: `◯ general-purpose  Sleep agent one        12s · ↓ 37.3k tokens`.
+ *
+ * `type` is the first word after the glyph and `name` the rest up to the numbers, or `null`
+ * where a narrow pane dropped the title column altogether. A title the terminal truncated
+ * keeps its `…`, so a reader can tell a prefix from a whole description. `elapsed` and
+ * `tokens` are the terminal's strings, uninterpreted, and both tick — which is why they are
+ * kept off the roster (`sessions.js`).
+ *
+ * @typedef {{ type: string, name: string|null, elapsed: string|null, tokens: string|null }} AgentRow
+ * @returns {AgentRow|null}
+ */
+export function parseAgentRow(line) {
+  const m = /^\s*◯\s+(.*?)\s*$/.exec(line);
+  if (!m) return null;
+  let rest = m[1];
+  let elapsed = null;
+  let tokens = null;
+  const stat = ROW_STAT_RE.exec(rest);
+  if (stat) {
+    elapsed = stat[1];
+    tokens = stat[2];
+    rest = rest.slice(0, stat.index).trimEnd();
+  }
+  const [type] = rest.split(/\s+/);
+  if (!type) return null;
+  const name = rest.slice(type.length).trim();
+  return { type, name: name || null, elapsed, tokens };
+}
+
 export function stripAgentPanel(text) {
   const lines = text.split('\n');
-  const none = { text, agents: 0 };
+  const none = { text, agents: 0, rows: [], more: 0 };
   let i = lines.length - 1;
   const skipBlank = () => {
     while (i >= 0 && !lines[i].trim()) i -= 1;
@@ -472,13 +517,13 @@ export function stripAgentPanel(text) {
     skipBlank();
   }
 
-  let rows = 0;
+  const rows = [];
   while (i >= 0 && PANEL_ROW_RE.test(lines[i])) {
-    rows += 1;
+    rows.unshift(lines[i]);
     i -= 1;
     skipBlank();
   }
-  if (!rows || i < 0 || !PANEL_HEAD_RE.test(lines[i])) return none;
+  if (!rows.length || i < 0 || !PANEL_HEAD_RE.test(lines[i])) return none;
   const head = i;
 
   i -= 1;
@@ -489,7 +534,12 @@ export function stripAgentPanel(text) {
   }
   if (i < 0 || !/[⏵⏸]/.test(lines[i])) return none;
 
-  return { text: lines.slice(0, head).join('\n'), agents: rows + more };
+  return {
+    text: lines.slice(0, head).join('\n'),
+    agents: rows.length + more,
+    rows: rows.map(parseAgentRow).filter(Boolean),
+    more,
+  };
 }
 
 /**
@@ -515,25 +565,34 @@ export function stripAgentPanel(text) {
  * not "nothing running", the same distinction `parseBypass` draws. `sessions.js` drops it
  * rather than remembering it; see there.
  *
- * @returns {{ agents: number, shells: number, monitors: number } | null}
+ * `running` names the agents the panel listed — `{type, name}` and **nothing that ticks**.
+ * It rides the roster (the rail dot's tooltip reads it for every row), and the roster is
+ * broadcast on a diff of this whole object: the elapsed time and token count move every
+ * poll, so carrying them here would rebroadcast every busy session every two seconds. They
+ * stay on the scrape (`agentRows`) and reach a browser only through
+ * `GET /api/sessions/:id/agents`, which the line asks while it is unfolded.
+ *
+ * @returns {{ agents: number, shells: number, monitors: number, running: {type: string, name: string|null}[] } | null}
  */
 const COUNT_RE = /\b(\d+)\s+(shell|monitor)s?\b/g;
 
-function parseBackground(recent, agents) {
+function parseBackground(recent, panel) {
   const line = recent
     .slice(-5)
     .find(
       (l) => /[⏵⏸]/.test(l) && (/bypass(ing)? permissions/i.test(l) || MODES.some((m) => m.match.test(l))),
     );
   if (!line) return null;
-  const counts = { agents, shells: 0, monitors: 0 };
+  const counts = { agents: panel.agents, shells: 0, monitors: 0 };
   for (const [, n, noun] of line.matchAll(COUNT_RE)) counts[`${noun}s`] = Number(n);
+  counts.running = panel.rows.map(({ type, name }) => ({ type, name }));
   return counts;
 }
 
 export function parsePane(raw) {
   // Everything below reads the screen with the agent panel taken off — see `stripAgentPanel`.
-  const { text, agents } = stripAgentPanel(raw);
+  const panel = stripAgentPanel(raw);
+  const { text } = panel;
   const lines = text.split('\n');
   const nonEmpty = lines.filter((l) => l.trim());
   const recent = nonEmpty.slice(-14);
@@ -618,7 +677,10 @@ export function parsePane(raw) {
     question,
     mode: parseMode(recent),
     bypass: parseBypass(recent),
-    background: parseBackground(recent, agents),
+    background: parseBackground(recent, panel),
+    // The panel's rows with their ticking numbers, for the unfolded list only. Never on the
+    // roster — see `parseBackground` — and only meaningful while `background` is not null.
+    agentRows: panel.rows.length ? { rows: panel.rows, more: panel.more } : null,
   };
 }
 
@@ -640,6 +702,7 @@ export async function readPaneState(paneId) {
       mode: null,
       bypass: null,
       background: null,
+      agentRows: null,
     };
   }
 }

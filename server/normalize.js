@@ -222,6 +222,8 @@ function parseCommandOutput(text) {
 const TASK_NOTICE_RE = /^<task-notification>[\s\S]*<\/task-notification>$/;
 const NOTICE_TAGS = {
   taskId: /<task-id>([\s\S]*?)<\/task-id>/,
+  toolUseId: /<tool-use-id>([\s\S]*?)<\/tool-use-id>/,
+  status: /<status>([\s\S]*?)<\/status>/,
   summary: /<summary>([\s\S]*?)<\/summary>/,
   result: /<result>([\s\S]*?)<\/result>/,
   event: /<event>([\s\S]*?)<\/event>/,
@@ -238,6 +240,12 @@ function parseTaskNotice(rec, text) {
   return {
     summary: noticeTag(text, 'summary') || noticeTag(text, 'taskId'),
     text: noticeTag(text, 'result') || noticeTag(text, 'event'),
+    // Which task this is about, for `server/agents.js`: a subagent's notice carries its
+    // `agentId` as the task id and the Agent call's own id as `tool-use-id` (v2.1.322). Absent
+    // tags read as null, never as an empty string a reader could mistake for an id.
+    taskId: noticeTag(text, 'taskId') || null,
+    toolUseId: noticeTag(text, 'toolUseId') || null,
+    status: noticeTag(text, 'status') || null,
   };
 }
 
