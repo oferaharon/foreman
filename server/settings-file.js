@@ -96,7 +96,7 @@
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { DEFAULT_LAUNCH_MODEL, WORKER_MODELS, isKnownModel } from './worker-models.js';
+import { DEFAULT_LAUNCH_MODEL, WORKER_MODELS, isKnownModel, readStoredModel } from './worker-models.js';
 import { DEFAULT_HIBERNATE, HIBERNATE_CHOICES, isHibernateChoice } from '../web/hibernate-choices.js';
 
 /** What the panel binds when nothing says otherwise. Loopback: a stranger who installs
@@ -245,7 +245,9 @@ export const LAUNCH_MODEL_RULE =
  * setting was made to end.
  */
 export function resolveLaunchModel({ config = {}, file = 'config.json' } = {}) {
-  const raw = config?.launchModel;
+  // A stored retired model reads as its successor (worker-models.js); on read only — the
+  // file is never rewritten here, and a PATCH is validated raw in `validateConfigPatch`.
+  const raw = readStoredModel(config?.launchModel);
   if (raw === undefined) return { model: DEFAULT_LAUNCH_MODEL, source: 'default', error: null };
   if (!isKnownModel(raw)) {
     const shown = typeof raw === 'string' ? JSON.stringify(raw) : typeof raw;

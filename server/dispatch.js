@@ -6,6 +6,7 @@ import {
   WORKER_MODELS,
   DEFAULT_WORKER_MODEL,
   isKnownModel,
+  readStoredModel,
   WORKER_EFFORTS,
   DEFAULT_WORKER_EFFORT,
   isKnownEffort,
@@ -57,7 +58,8 @@ const validModel = (id) => isKnownModel(String(id));
  *          the room only hears about departures.
  */
 export function resolveWorkerModel(requested, teamDefault) {
-  const fallback = String(teamDefault ?? '').trim() || DEFAULT_WORKER_MODEL;
+  // A stored default naming a retired model reads as its successor (worker-models.js).
+  const fallback = readStoredModel(String(teamDefault ?? '').trim()) || DEFAULT_WORKER_MODEL;
   if (!validModel(fallback)) {
     throw new Error(
       `team.json's defaultModel "${fallback}" is not a model this panel knows — fix it in the team panel.`,

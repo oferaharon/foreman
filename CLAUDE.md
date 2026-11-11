@@ -126,9 +126,13 @@ when the lead called it wrong; an unknown id fails the dispatch, which is what k
 `worker-models.js` — a leaf with no imports, holding `WORKER_MODELS`, `DEFAULT_WORKER_MODEL`
 and the names the picker draws, because `mcp/foreman.js` needs the same list for its
 `task_dispatch` description and cannot import `dispatch.js` without dragging `tmux.js` and
-the pane parsers into a stdio MCP child; `dispatch.js` re-exports all of it. `claude-opus-5`
-stays on the list under its successor — task records and `team.json` files name it and must
-still validate. **Effort is the same shape, and rarer** (`resolveWorkerEffort`, the
+the pane parsers into a stdio MCP child; `dispatch.js` re-exports all of it. `claude-opus-5`,
+`claude-sonnet-5` and `claude-fable-5` are **retired** (the maintainer's ruling of 2026-11-10):
+display-only on `DISPLAY_MODEL_NAMES`, so old task records still draw them, but not launchable
+and refused when *named* — and a **stored** one (a `team.json`'s `defaultModel`, `launchModel`
+in `config.json`) is read as its successor (`RETIRED_MODEL_SUCCESSORS`, `readStoredModel`:
+`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-fable-5-2`, `[1m]` kept), on read only — no
+file on disk is rewritten for it. **Effort is the same shape, and rarer** (`resolveWorkerEffort`, the
 maintainer's ruling of 2026-11-10): every worker, builder or planner, launches with
 `claude --effort <level>` at the team's `defaultEffort` — **`high`** unless set, which is
 also what every older `team.json` reads as, because before it every worker inherited the
