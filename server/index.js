@@ -147,7 +147,7 @@ import {
   slugFor,
   uniqueSessionName,
 } from './launch.js';
-import { DEFAULT_LAUNCH_MODEL } from './worker-models.js';
+import { DEFAULT_LAUNCH_MODEL, readStoredModel } from './worker-models.js';
 import {
   launchModelArgs,
   standaloneArgs,
@@ -4796,7 +4796,7 @@ app.get('/api/config', (req, res) => {
     bindHost: typeof config.bindHost === 'string' ? config.bindHost : null,
     allowedOrigins: allowedOriginsFrom(config),
     sessionPrefix: typeof config.sessionPrefix === 'string' ? config.sessionPrefix : null,
-    launchModel: config.launchModel === undefined ? null : config.launchModel,
+    launchModel: config.launchModel === undefined ? null : readStoredModel(config.launchModel),
     defaults: { bindHost: DEFAULT_BIND_HOST, sessionPrefix: DEFAULT_SESSION_PREFIX, launchModel: DEFAULT_LAUNCH_MODEL },
     // What this panel is actually running on, and which rung answered for the host.
     // `launchModel` is `null` when the stored id is one no launch would accept.
@@ -4804,7 +4804,7 @@ app.get('/api/config', (req, res) => {
     // The picker's rows, from the one list a worker's dispatch also validates against, and
     // their names — with the stored id named too, so a hand-edited value still draws.
     launchModels: WORKER_MODELS,
-    launchModelNames: workerModelNames(typeof config.launchModel === 'string' ? config.launchModel : null),
+    launchModelNames: workerModelNames(typeof config.launchModel === 'string' ? readStoredModel(config.launchModel) : null),
     launchModelError: launch.error,
     // Hibernation: what the file holds (`null` when absent), what the loop is using, and the
     // picker's rows from the one list (`web/hibernate-choices.js`).

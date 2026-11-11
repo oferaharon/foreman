@@ -171,11 +171,11 @@ test('a named model is validated now and stored as it was asked for', async () =
     folder: repo,
     label: 'mechanical-sweep',
     body: 'rename a symbol everywhere',
-    model: 'claude-sonnet-5',
+    model: 'claude-sonnet-5-5',
     modelReason: 'wide and mechanical, nothing to judge',
   });
   assert.equal(res.status, 200);
-  assert.equal(res.body.task.model, 'claude-sonnet-5');
+  assert.equal(res.body.task.model, 'claude-sonnet-5-5');
   assert.equal(res.body.task.modelReason, 'wide and mechanical, nothing to judge');
 });
 
@@ -210,7 +210,7 @@ test('the same refusals as a dispatch, at the moment the idea is recorded', asyn
   assert.match(model.body.error, /Unknown model "gpt-9"/);
 
   const noReason = await api('POST', '/api/team/tasks', {
-    folder: repo, label: 'r', body: 'b', model: 'claude-fable-5',
+    folder: repo, label: 'r', body: 'b', model: 'claude-fable-5-2',
   });
   assert.equal(noReason.status, 400);
   assert.match(noReason.body.error, /needs a one-line modelReason/);
@@ -412,14 +412,14 @@ test('modelReason is stored on an ordinary dispatch, not only posted to the room
     folder: gitRepo,
     label: 'reasoned',
     body: 'mechanical',
-    model: 'claude-sonnet-5',
+    model: 'claude-sonnet-5-5',
     modelReason: 'wide and mechanical, nothing to judge',
   });
   assert.equal(res.status, 500, res.body.error);
   assert.match(res.body.error, /Setup failed/);
 
   const task = (await api('GET', '/api/team/tasks')).body.tasks.find((t) => t.id === 'reasoned');
-  assert.equal(task.model, 'claude-sonnet-5');
+  assert.equal(task.model, 'claude-sonnet-5-5');
   assert.equal(task.modelReason, 'wide and mechanical, nothing to judge');
   assert.equal(task.startedBy, null, 'nothing was promoted — this one was started directly');
 });

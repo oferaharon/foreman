@@ -26,10 +26,14 @@
  * on it fails the dispatch before a worktree exists. A `[1m]` suffix (the 1M-context
  * variant) is accepted on any of them.
  *
- * `claude-opus-5` stays on the list under `claude-opus-5-5`: task records and team.json
- * files written before 2026-09-22 name it, and every one of them must still validate.
- * Same reason `claude-sonnet-5` stays on the list under `claude-sonnet-5-5`, added
- * 2026-09-28: dropping it would fail every team.json and task record naming it.
+ * `claude-opus-5`, `claude-sonnet-5` and `claude-fable-5` are **retired**, by the
+ * maintainer's ruling of 2026-11-10 ("remove from worker model options old models like opus
+ * 5 fable 5 and sonnet 5"): off this list, so nothing can launch them and an explicit
+ * request for one is refused like any unknown id. Task records naming them still draw —
+ * they are on `DISPLAY_MODEL_NAMES` below — and a *stored* default that names one (a
+ * team.json's `defaultModel`, the panel's `launchModel`) is read as its successor, through
+ * `RETIRED_MODEL_SUCCESSORS` and `readStoredModel` below, rather than failing every
+ * dispatch in a team nobody has touched.
  *
  * Haiku is on the list because it is a real model id, but it cannot run auto mode
  * (measured, Wave 0) — a Haiku worker prompts on everything. The tool description
@@ -37,11 +41,8 @@
  */
 export const WORKER_MODELS = [
   'claude-opus-5-5',
-  'claude-opus-5',
   'claude-sonnet-5-5',
-  'claude-sonnet-5',
   'claude-fable-5-2',
-  'claude-fable-5',
   'claude-haiku-4-5-20251001',
 ];
 
@@ -74,6 +75,36 @@ export const DEFAULT_LAUNCH_MODEL = 'claude-opus-5-5';
  * suffix that selects the 1M-context variant. The one test, for the dispatch and for the
  * panel's own launch setting alike — it used to be a private helper in `dispatch.js`.
  */
+/**
+ * Retired id → the model a *stored* mention of it is read as, by the maintainer's ruling of
+ * 2026-11-10. Spelled once, here (`docs/traps/one-spelling.md`); `readStoredModel` is the
+ * only reader. A `[1m]` suffix rides along.
+ *
+ * For stored values only — a team.json's `defaultModel` and `launchModel` in `config.json`.
+ * An *explicit* request for a retired id (a lead's `model`, a PATCH) is refused like any
+ * unknown id: `isKnownModel` knows nothing about this map, on purpose.
+ */
+export const RETIRED_MODEL_SUCCESSORS = Object.freeze({
+  'claude-opus-5': 'claude-opus-5-5',
+  'claude-sonnet-5': 'claude-sonnet-5-5',
+  'claude-fable-5': 'claude-fable-5-2',
+});
+
+/**
+ * A stored model id as it is to be read: a retired id becomes its successor (keeping a
+ * `[1m]` suffix), anything else comes back untouched — including a non-string or an id
+ * nobody knows, which the caller's own `isKnownModel` still gets to refuse. **Maps on read
+ * and never writes**: nobody's team.json or config.json is rewritten for this; a later save
+ * from the panel simply stores the successor.
+ */
+export function readStoredModel(id) {
+  if (typeof id !== 'string') return id;
+  const wide = id.endsWith('[1m]');
+  const base = wide ? id.slice(0, -4) : id;
+  if (!Object.hasOwn(RETIRED_MODEL_SUCCESSORS, base)) return id;
+  return RETIRED_MODEL_SUCCESSORS[base] + (wide ? '[1m]' : '');
+}
+
 export function isKnownModel(id) {
   if (typeof id !== 'string') return false;
   const base = id.endsWith('[1m]') ? id.slice(0, -4) : id;
@@ -90,11 +121,8 @@ export function isKnownModel(id) {
  */
 export const WORKER_MODEL_NAMES = {
   'claude-opus-5-5': 'Opus 5.5',
-  'claude-opus-5': 'Opus 5',
   'claude-sonnet-5-5': 'Sonnet 5.5',
-  'claude-sonnet-5': 'Sonnet 5',
   'claude-fable-5-2': 'Fable 5.2',
-  'claude-fable-5': 'Fable 5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
 };
 
@@ -111,17 +139,23 @@ export const WORKER_MODEL_NAMES = {
  * names.test.js` pins both halves. (`claude-fable-5-1` made that move on 2026-10-14, by the
  * maintainer's ruling, and moved back on 2026-11-10 when Fable 5.2 replaced it — "we don't
  * need to keep 5.1" — so closed task records naming it still draw `Fable 5.1` and nothing can
- * launch it.)
+ * launch it. `claude-opus-5`, `claude-sonnet-5` and `claude-fable-5` made the same move on
+ * 2026-11-10 — "remove from worker model options old models like opus 5 fable 5 and sonnet
+ * 5" — with one difference: team.json files and `config.json` may still *store* one, so
+ * those read as their successor (`RETIRED_MODEL_SUCCESSORS`, above).)
  *
  * In this file rather than in `context-window.js` because `modelLabel` below is the one
  * spelling of "what a model is called", and a second table elsewhere would be the
  * `one-spelling` trap's sibling: a name added to one and not the other.
  */
 export const DISPLAY_MODEL_NAMES = Object.freeze({
+  'claude-fable-5': 'Fable 5',
   'claude-fable-5-1': 'Fable 5.1',
   'claude-haiku-5-5': 'Haiku 5.5',
   'claude-opus-4-6': 'Opus 4.6',
+  'claude-opus-5': 'Opus 5',
   'claude-sonnet-4-6': 'Sonnet 4.6',
+  'claude-sonnet-5': 'Sonnet 5',
 });
 
 /**

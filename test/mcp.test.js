@@ -866,13 +866,13 @@ test('a planner can be recorded pending too, and the model rides along', async (
       name: 'task_add',
       arguments: {
         label: 'shape-search', body: 'plan the index', kind: 'plan', what: FEATURE,
-        model: 'claude-sonnet-5', modelReason: 'mechanical survey',
+        model: 'claude-sonnet-5-5', modelReason: 'mechanical survey',
       },
     },
   });
   const sent = stubState.added.at(-1);
   assert.equal(sent.kind, 'plan');
-  assert.equal(sent.model, 'claude-sonnet-5');
+  assert.equal(sent.model, 'claude-sonnet-5-5');
   assert.equal(sent.modelReason, 'mechanical survey');
 });
 

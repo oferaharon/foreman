@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR } from './config.js';
-import { DEFAULT_WORKER_MODEL, DEFAULT_WORKER_EFFORT } from './worker-models.js';
+import { DEFAULT_WORKER_MODEL, DEFAULT_WORKER_EFFORT, readStoredModel } from './worker-models.js';
 import { mcpServerRule } from './project-mcp.js';
 
 /**
@@ -537,7 +537,11 @@ export function setSlate(repo, seq) {
 export function readTeam(repo) {
   try {
     const stored = JSON.parse(fs.readFileSync(path.join(teamDir(repo), 'team.json'), 'utf8'));
-    return withDefaults(repo, stored);
+    const team = withDefaults(repo, stored);
+    // A stored retired model reads as its successor (worker-models.js). On read only:
+    // `ensureTeam` merges from the raw file and nothing here rewrites it.
+    team.defaultModel = readStoredModel(team.defaultModel);
+    return team;
   } catch {
     return null;
   }

@@ -33,13 +33,13 @@ test('Opus 5.5 validates, plain and [1m]', () => {
   assert.equal(resolveWorkerModel(null, 'claude-opus-5-5[1m]').model, 'claude-opus-5-5[1m]');
 });
 
-test('Opus 5 stays on the list under its successor', () => {
-  // Task records and team.json files written before 2026-09-22 name it. Dropping it would
-  // fail the *stored default* check on the next dispatch of every team that has one —
-  // which is a dispatch refused for a file nobody edited.
-  assert.ok(WORKER_MODELS.includes('claude-opus-5'));
-  assert.equal(resolveWorkerModel('claude-opus-5', 'claude-opus-5-5').model, 'claude-opus-5');
-  assert.equal(resolveWorkerModel(null, 'claude-opus-5').model, 'claude-opus-5');
+test('Opus 5 is retired: a stored default reads as Opus 5.5, an explicit request is refused', () => {
+  // Retired 2026-11-10. A team.json that still stores it must not fail every default
+  // dispatch (a refusal for a file nobody edited), so the stored default reads as its
+  // successor; naming it in a request is refused. `test/model-names.test.js` has the rest.
+  assert.ok(!WORKER_MODELS.includes('claude-opus-5'));
+  assert.equal(resolveWorkerModel(null, 'claude-opus-5').model, 'claude-opus-5-5');
+  assert.throws(() => resolveWorkerModel('claude-opus-5', 'claude-opus-5-5'), /Unknown model/);
 });
 
 test('Sonnet 5.5 validates, plain and [1m]', () => {
@@ -49,21 +49,21 @@ test('Sonnet 5.5 validates, plain and [1m]', () => {
   assert.equal(resolveWorkerModel(null, 'claude-sonnet-5-5').model, 'claude-sonnet-5-5');
 });
 
-test('Sonnet 5 still validates alongside its successor', () => {
-  // Same reasoning as Opus 5 above: existing task records and team.json files name it.
-  assert.ok(WORKER_MODELS.includes('claude-sonnet-5'));
-  assert.equal(resolveWorkerModel('claude-sonnet-5', 'claude-sonnet-5-5').model, 'claude-sonnet-5');
+test('Sonnet 5 is retired the same way', () => {
+  assert.ok(!WORKER_MODELS.includes('claude-sonnet-5'));
+  assert.equal(resolveWorkerModel(null, 'claude-sonnet-5').model, 'claude-sonnet-5-5');
+  assert.throws(() => resolveWorkerModel('claude-sonnet-5', 'claude-sonnet-5-5'), /Unknown model/);
 });
 
 test('the team default fills in when the lead names nothing', () => {
-  const r = resolveWorkerModel('', 'claude-sonnet-5');
-  assert.equal(r.model, 'claude-sonnet-5');
+  const r = resolveWorkerModel('', 'claude-sonnet-5-5');
+  assert.equal(r.model, 'claude-sonnet-5-5');
   assert.equal(r.isDefault, true);
 });
 
 test('an explicit model wins, and is not the default', () => {
-  const r = resolveWorkerModel('claude-fable-5', 'claude-opus-5-5');
-  assert.equal(r.model, 'claude-fable-5');
+  const r = resolveWorkerModel('claude-sonnet-5-5', 'claude-opus-5-5');
+  assert.equal(r.model, 'claude-sonnet-5-5');
   assert.equal(r.defaultModel, 'claude-opus-5-5');
   assert.equal(r.isDefault, false, 'a departure — the room gets a line');
 });
@@ -83,16 +83,9 @@ test('naming the default explicitly is not a departure', () => {
   assert.equal(r.isDefault, true);
 });
 
-test('the superseded default is still a departure from the new one', () => {
-  // The one case the rename creates: a lead that keeps asking for `claude-opus-5` out of
-  // habit gets it, and the room says so — which is the whole point of the line.
-  const r = resolveWorkerModel('claude-opus-5', 'claude-opus-5-5');
-  assert.equal(r.isDefault, false);
-});
-
 test('the [1m] suffix rides on any known id', () => {
-  assert.equal(resolveWorkerModel('claude-fable-5[1m]', null).model, 'claude-fable-5[1m]');
-  assert.equal(resolveWorkerModel(null, 'claude-sonnet-5[1m]').model, 'claude-sonnet-5[1m]');
+  assert.equal(resolveWorkerModel('claude-fable-5-2[1m]', null).model, 'claude-fable-5-2[1m]');
+  assert.equal(resolveWorkerModel(null, 'claude-sonnet-5-5[1m]').model, 'claude-sonnet-5-5[1m]');
 });
 
 test('an unknown model fails the dispatch, naming the list', () => {
@@ -134,7 +127,7 @@ test('every id on the list has a name a human can read', () => {
     assert.notEqual(modelLabel(id), id, `${id} renders as its raw id`);
   }
   assert.equal(modelLabel('claude-opus-5-5'), 'Opus 5.5');
-  assert.equal(modelLabel('claude-opus-5'), 'Opus 5');
+  assert.equal(modelLabel('claude-opus-5'), 'Opus 5', 'a retired id still draws');
   assert.equal(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
 });
 
