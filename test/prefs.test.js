@@ -408,3 +408,24 @@ test('a store that throws, or none at all, still gives the Clear button its defa
     assert.doesNotThrow(() => clearPrep.set('y'));
   });
 });
+
+test('the agents list is unfolded with nothing stored, and when storage is denied', async () => {
+  await withStorage(fakeStore(), ({ agentsFolded }) => assert.equal(agentsFolded.on, false));
+  await withStorage(deniedStore, ({ agentsFolded }) => {
+    assert.equal(agentsFolded.on, false);
+    assert.equal(agentsFolded.set(true), true, 'a blocked window still folds for this visit');
+  });
+});
+
+test('a fold of the agents list is remembered, and unfolding flips it back', async () => {
+  const store = fakeStore();
+  await withStorage(store, ({ agentsFolded, AGENTS_FOLDED_KEY }) => {
+    agentsFolded.set(true);
+    assert.equal(store.map.get(AGENTS_FOLDED_KEY), '1');
+  });
+  await withStorage(store, ({ agentsFolded, AGENTS_FOLDED_KEY }) => {
+    assert.equal(agentsFolded.on, true, 'a fresh load reads the fold back');
+    agentsFolded.set(false);
+    assert.equal(store.map.get(AGENTS_FOLDED_KEY), '0');
+  });
+});

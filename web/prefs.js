@@ -166,6 +166,7 @@ export const FILES_VIEW_KEY = 'foreman.filesView';
 export const BOTS_FOLDED_KEY = 'foreman.botsFolded';
 export const CLEAR_PREP_KEY = 'foreman.clearPrep';
 export const RAIL_FILTER_KEY = 'foreman.railFilter';
+export const AGENTS_FOLDED_KEY = 'foreman.agentsFolded';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -237,6 +238,21 @@ export const roomFolded = flag(ROOM_FOLDED_KEY);
  * One answer for the whole browser, because there is one rail.
  */
 export const botsFolded = flag(BOTS_FOLDED_KEY);
+
+/**
+ * Whether the background line's list of a session's subagents is folded shut.
+ *
+ * Off — **unfolded** — by default (the maintainer's ruling of 2026-11-11): the list exists to
+ * answer "which agents are running", and having to click ▾ every time to see it defeated
+ * it. `flag()` answers `false` both for a browser never told anything and for one whose
+ * storage is blocked, and both are the right way round for the same reason as `asideFolded`.
+ *
+ * Only a *fold the maintainer made* is remembered, and it is one answer for the whole
+ * browser, never per session: switching session must not bring the list back. It covers the
+ * running rows; the `Earlier (N)` fold inside it is deliberately not a preference and
+ * starts folded on every session.
+ */
+export const agentsFolded = flag(AGENTS_FOLDED_KEY);
 
 /**
  * What the composer's Clear button sends on its first press — the message that asks a
