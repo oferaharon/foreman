@@ -77,6 +77,12 @@ test('the 4.6 models are 200k (measured), and [1m] still widens them', () => {
   assert.equal(contextOf([asst({}, { input_tokens: 100_000 }, 'claude-opus-4-6')]).pct, 50);
 });
 
+test('Fable 5.2 is 1M bare and with [1m] (measured on Claude Code 2.1.322)', () => {
+  assert.equal(windowFor('claude-fable-5-2', null), 1_000_000);
+  assert.equal(windowFor('claude-fable-5-2', 'claude-fable-5-2[1m]'), 1_000_000);
+  assert.equal(contextOf([asst({}, { input_tokens: 100_000 }, 'claude-fable-5-2')]).pct, 10);
+});
+
 test('a <synthetic>, error or unmetered record is skipped for the one before it', () => {
   const good = asst({}, { input_tokens: 1000 });
   for (const skip of [
