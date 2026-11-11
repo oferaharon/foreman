@@ -255,6 +255,44 @@ lower rule: the panel at its seven-line maximum puts that rule at the eleventh, 
 slot wrapped as well, the twelfth — so no suggestion is offered there. Nothing, not
 something wrong; but there is no slack left if Claude Code ever draws an eighth panel row.
 
+### The rows, and what their title is — MEASURED on v2.1.322
+
+The background line above the panel's composer unfolds into a list of these rows, so
+`stripAgentPanel` keeps them (`parseAgentRow`: type, title, elapsed, tokens) instead of only
+counting them. Re-measured on Claude Code **v2.1.322** in the sandbox's `alpha`, two background
+agents, one session created at 220×50 and one at 80×23 and never resized
+(`pane-agents-2-v322{,-narrow}.txt`): the panel's shape is unchanged from v2.1.280 — one blank
+row, `⏺ main`, `◯` rows — so the strip and its composer guarantee stand as they were.
+
+Four things the measurement found, each of which decides something:
+
+- **The title is the Agent call's `description` — until it isn't.** A minute or two into a
+  run it can become a progress summary (`Waiting out 100-second sleep`, for a call described
+  `Count test files`), and that summary is written **nowhere on disk**: not in the session's
+  transcript, not in the subagent's own `subagents/agent-<id>.jsonl` (whose tool calls were
+  described `Wait 100 seconds`), not in its output file. It came and went between runs. So a
+  title is never an id.
+- **The numbers are the join that survives it.** Every task notice carries `<usage>` with
+  `<subagent_tokens>` and `<duration_ms>`, the run's totals when it stopped, and they equal the
+  row's: 34614 → `34.6k tokens`, 143365 ms → `2m 23s`, on the same run at the same moment. The
+  elapsed time is the subagent's own working time, not the wall clock, so it stands still
+  while the agent waits — which is exactly when the summary titles appear. `server/agents.js`
+  joins on the title first and on these totals second, only when exactly one run fits.
+- **Every Agent call is async on v2.1.322**, including one asked to run in the foreground: the
+  result is `status: 'async_launched'` with an `agentId` at once, and the end is a task notice
+  whose `<task-id>` is that `agentId`. Most notices also carry `<tool-use-id>`; some do not,
+  so a notice is matched on either.
+- **A notice is not the end of a run.** An agent that stops with background work of its own
+  still going notifies (`<status>completed</status>`), stays in the panel, and notifies again
+  when it really finishes. Only the summary's prose says which — and prose is not read here —
+  so **the panel's list wins over a notice**: a listed agent is running, whatever the
+  transcript says. The bench caught the opposite: before the numbers join, a row titled with a
+  summary matched nothing and its still-running run was filed under "Earlier".
+
+And the elapsed time and tokens **never reach the roster** (`background.running` is `{type,
+name}`): the roster is broadcast on a diff, and two numbers that move every poll would
+rebroadcast every busy session every two seconds.
+
 ## The footer's rotating slot
 
 **The footer's right-hand slot rotates.** It shows `/rc`, "new task? /clear to save…",

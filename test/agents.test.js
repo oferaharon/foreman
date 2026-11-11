@@ -113,7 +113,7 @@ test('rows join to their calls; a finished call nothing is running is earlier', 
   );
 });
 
-test('a truncated title matches as a prefix; an unmatched row is kept with nothing to jump to', () => {
+test('a truncated title matches as a prefix; a row nothing fits is kept with nothing to jump to', () => {
   const runs = collectAgents([
     { kind: 'tool_use', name: 'Agent', toolUseId: 'a', input: { description: 'Waiting for background sleep command', subagent_type: 'general-purpose' }, ts: '1' },
     { kind: 'tool_use', name: 'Agent', toolUseId: 'b', input: { description: 'Sleep agent 1', subagent_type: 'general-purpose' }, ts: '2' },
@@ -128,8 +128,12 @@ test('a truncated title matches as a prefix; an unmatched row is kept with nothi
   });
   assert.equal(running[0].toolUseId, 'a');
   assert.equal(running[0].name, 'Waiting for background sleep command', 'the whole description, not the cut title');
-  assert.equal(running[1].toolUseId, null);
-  assert.equal(running[1].name, 'Running sleep 280 command');
+  assert.equal(running[0].activity, null, 'a cut description is not an activity');
+  // An activity title, and exactly one run left that its numbers fit: joined, the title kept.
+  assert.equal(running[1].toolUseId, 'b');
+  assert.equal(running[1].name, 'Sleep agent 1');
+  assert.equal(running[1].activity, 'Running sleep 280 command');
+  // …and the third row has nothing left to be.
   assert.equal(running[2].toolUseId, null);
   assert.equal(more, 2);
   assert.deepEqual(earlier, [], 'an unfinished call off screen is neither running nor earlier');
@@ -146,4 +150,48 @@ test('two calls with one title: the row claims the unfinished, newer one', () =>
   assert.deepEqual(list.earlier.map((r) => r.toolUseId), ['old']);
   // …and a row of another type never claims it.
   assert.equal(agentList(runs, { rows: [{ type: 'Explore', name: 'Sleep' }], more: 0 }).running[0].toolUseId, null);
+});
+
+/*
+ * MEASURED on v2.1.322, the bench run behind the screenshots: two background agents, "Count
+ * test files" and "Summarise the README". Two minutes in, the one row still listed was titled
+ * `Waiting out 100-second sleep` — a progress summary written nowhere on disk — and read
+ * `2m 23s · 34.6k tokens`, which are "Count test files"'s last notice's `<duration_ms>143365`
+ * and `<subagent_tokens>34614`. Before the numbers join, that row matched nothing and *both*
+ * runs were drawn under "Earlier (2)", one of them still running. The notices' totals below
+ * are the measured ones.
+ */
+test('a progress-summary title is joined on the notice totals, and never misfiled as earlier', () => {
+  const notice = (id, ts, tokens, durationMs) => ({ kind: 'task_notification', taskId: id, toolUseId: null, status: 'completed', tokens, durationMs, ts });
+  const runs = collectAgents([
+    { kind: 'tool_use', name: 'Agent', toolUseId: 'count', input: { description: 'Count test files', subagent_type: 'general-purpose' }, ts: '2026-11-11T08:19:25.866Z' },
+    { kind: 'tool_use', name: 'Agent', toolUseId: 'readme', input: { description: 'Summarise the README', subagent_type: 'general-purpose' }, ts: '2026-11-11T08:19:26.808Z' },
+    { kind: 'tool_result', toolUseId: 'count', agent: { id: 'ac', status: 'async_launched' }, ts: '2026-11-11T08:19:27Z' },
+    { kind: 'tool_result', toolUseId: 'readme', agent: { id: 'ar', status: 'async_launched' }, ts: '2026-11-11T08:19:27Z' },
+    notice('ac', '2026-11-11T08:19:35.050Z', 33745, 5398),
+    notice('ar', '2026-11-11T08:19:37.431Z', 33730, 5980),
+    notice('ar', '2026-11-11T08:21:26.977Z', 34325, 117341),
+    notice('ac', '2026-11-11T08:21:52.777Z', 34614, 143365),
+    notice('ar', '2026-11-11T08:22:29.381Z', 35146, 180322),
+  ]);
+  const row = { type: 'general-purpose', name: 'Waiting out 100-second sleep', elapsed: '2m 23s', tokens: '34.6k' };
+  const list = agentList(runs, { rows: [row], more: 0 });
+  assert.equal(list.running[0].toolUseId, 'count');
+  assert.equal(list.running[0].name, 'Count test files');
+  assert.equal(list.running[0].activity, 'Waiting out 100-second sleep');
+  assert.deepEqual(list.earlier.map((r) => r.name), ['Summarise the README']);
+
+  // Working again, past its last notice: the numbers only fit, but nothing else does.
+  const later = agentList(runs, { rows: [{ ...row, elapsed: '2m 40s', tokens: '34.9k' }], more: 0 });
+  assert.equal(later.running[0].toolUseId, 'count');
+
+  // Two runs the numbers both fit: no join, and neither is called finished.
+  const twin = collectAgents([
+    { kind: 'tool_use', name: 'Agent', toolUseId: 'x', input: { description: 'X', subagent_type: 'gp' }, ts: '1' },
+    { kind: 'tool_use', name: 'Agent', toolUseId: 'y', input: { description: 'Y', subagent_type: 'gp' }, ts: '2' },
+    notice(null, '3', 1000, 1000),
+  ].map((m, i) => (i === 2 ? { ...m, toolUseId: 'x' } : m)));
+  const doubt = agentList(twin, { rows: [{ type: 'gp', name: 'Busy', elapsed: '5s', tokens: '2.0k' }], more: 0 });
+  assert.equal(doubt.running[0].toolUseId, null);
+  assert.deepEqual(doubt.earlier, []);
 });

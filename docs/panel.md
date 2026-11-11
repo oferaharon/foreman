@@ -76,6 +76,32 @@ columns, where the footer's `/rc` slot can wrap onto a line of its own) the pane
 composer, called the session a `dialog` and queued every message sent to it. It is now
 stripped before anything else reads the pane — see the trap in `docs/traps/pane-parsers.md`.
 
+**The line unfolds into a list of the session's subagents** (the maintainer's design,
+approved 2026-11-11). A `▾` after the words opens it: one row per running agent — its
+description, its type, and the terminal's own running time and tokens — then a folded
+**Earlier (N) ▸** of the agents that finished, each with when it started and when it was
+last active, in `/tasks`'s own phrasing. A row jumps to that agent's Agent call in the
+conversation, loading earlier pages until it is in. With nothing running but agents that ran
+earlier, the line stays and says `nothing running · N earlier`; with neither, it is not
+drawn. The rail dot's tooltip names the running agents. Desktop only, and **the panel never
+opens `/tasks`** — that would be typing into the session.
+
+Where it comes from, and the one choice it forced. Running rows are the list under the
+composer, now kept rather than counted; earlier ones are the transcript's Agent calls and the
+task notices that end them (`server/agents.js`, one whole-file pass). The roster carries the
+running agents' **names only** (`background.running`): the elapsed time and tokens move every
+poll, and the roster is broadcast on a diff, so those stay beside it on the server and reach a
+browser through `GET /api/sessions/:id/agents`, which the line asks once on open, when an
+agent starts or stops, and every three seconds only while it is unfolded with something
+running. None of it is in `composerSig`, and a tick patches the numbers into the rows already
+drawn rather than rebuilding them.
+
+The join between a row and its call is the title — except that the title is sometimes a
+progress summary written nowhere on disk, and then it is the notice's `<usage>` totals, which
+equal the row's numbers. A row nothing fits is listed with nowhere to jump, and any run that
+*might* be it stays out of "earlier": a running agent filed as finished is the one mistake the
+list is built not to make. The trap file has the measurement.
+
 ### Rate-limit gauges
 
 Two thin bars for a subscription account's own usage: a five-hour window that refills

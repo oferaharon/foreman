@@ -24,11 +24,27 @@ import { normalizeRecord } from './normalize.js';
  *   transcripts answer a call synchronously with a result that is itself the end of the run,
  *   and that shape is read too.
  *
- * The join between them is the title. On v2.1.322 the row's title is the call's
- * `description`, cut with `…` when the pane is narrow; on v2.1.257/280 it was sometimes the
- * subagent's current activity instead. So a row is matched to a call by its type and its
- * title — whole, or as a prefix when it ends in `…` — and a row that matches nothing is
- * still listed, with nothing to jump to, rather than pinned to a guess.
+ * The join between them is the title first and the numbers second.
+ *
+ * **The title is not always the description — MEASURED on v2.1.322.** A row's title is the
+ * call's `description` (cut with `…` when the pane is narrow) until the subagent has been at
+ * work a while, and then it can become a progress summary — `Waiting out 100-second sleep`
+ * for a call described as `Count test files`. That summary is written **nowhere on disk**:
+ * not in the session's transcript, not in the subagent's own (`subagents/agent-<id>.jsonl`,
+ * whose tool calls were described `Wait 100 seconds`), not in its output file. So a title is
+ * matched — whole, or as a prefix when it ends in `…` — and when it matches nothing, the
+ * numbers are asked instead. Every notice carries `<usage>`: `<subagent_tokens>` and
+ * `<duration_ms>`, the run's totals when it stopped, and those are exactly the two numbers
+ * the row draws (34614 → `34.6k tokens`, 143365 ms → `2m 23s`, measured on the same run).
+ * They only ever grow, so a run whose last notice already has *more* tokens or time than a
+ * row shows cannot be that row; one whose numbers equal the row's is a run waiting on its
+ * own background work, which is the state the summary titles appear in. A row is joined on
+ * the numbers only when exactly one run fits; otherwise it is listed with nothing to jump
+ * to, and every run that *might* be it is kept out of "earlier" — a running agent filed as
+ * finished is the misfile this list must never make, and was the first thing the bench
+ * caught. The summary's own wording (`is waiting on its own background work` against
+ * `finished`) would settle it and is deliberately not read: it is Claude Code's prose, and
+ * `parseTaskNotice` reads tags.
  *
  * "Last active" is the latest record about the run in this transcript: its launch result,
  * and every notice since (a run that stopped with background work of its own still going
@@ -56,6 +72,7 @@ const AGENT_TOOLS = new Set(['Agent', 'Task']);
  * @typedef {{
  *   toolUseId: string, agentId: string|null, name: string|null, type: string|null,
  *   startedAt: string|null, lastActiveAt: string|null, done: boolean, status: string|null,
+ *   tokens: number|null, durationMs: number|null,
  * }} AgentRun
  */
 export function collectAgents(messages) {
@@ -78,6 +95,9 @@ export function collectAgents(messages) {
         lastActiveAt: m.ts || null,
         done: false,
         status: null,
+        // The totals from the latest notice's `<usage>`, for the numbers join in `agentList`.
+        tokens: null,
+        durationMs: null,
       });
     } else if (m.kind === 'tool_result' && byTool.has(m.toolUseId)) {
       const run = byTool.get(m.toolUseId);
@@ -97,6 +117,8 @@ export function collectAgents(messages) {
       touch(run, m.ts);
       run.done = true;
       run.status = m.status || run.status || 'completed';
+      if (Number.isFinite(m.tokens)) run.tokens = m.tokens;
+      if (Number.isFinite(m.durationMs)) run.durationMs = m.durationMs;
     }
   }
   return [...byTool.values()];
@@ -146,6 +168,43 @@ function titleMatches(title, name) {
   return false;
 }
 
+/** `9s`, `4m 5s`, `1h 2m` → seconds; `null` for anything else. */
+export function elapsedSeconds(text) {
+  const m = /^(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+)s)?$/.exec(String(text || '').trim());
+  if (!m || (!m[1] && !m[2] && !m[3])) return null;
+  return Number(m[1] || 0) * 3600 + Number(m[2] || 0) * 60 + Number(m[3] || 0);
+}
+
+/** `37.3k` → `[37250, 37350)`-ish as `{value, slack}`: the terminal rounds to one decimal. */
+function tokenCount(text) {
+  const m = /^([\d.]+)([kKmM]?)$/.exec(String(text || '').trim());
+  if (!m) return null;
+  const unit = /k/i.test(m[2]) ? 1e3 : /m/i.test(m[2]) ? 1e6 : 1;
+  const decimals = (m[1].split('.')[1] || '').length;
+  return { value: Number(m[1]) * unit, slack: (unit / 10 ** decimals) / 2 + 1 };
+}
+
+/**
+ * Whether a run's last-notice totals could be this row's numbers: `'exact'` when both equal
+ * the row (within the terminal's rounding), `'fits'` when neither exceeds it or either is
+ * unknown, `null` when the run already had more than the row shows.
+ */
+function numbersFit(row, run) {
+  const tok = tokenCount(row.tokens);
+  const sec = elapsedSeconds(row.elapsed);
+  const known = [];
+  if (tok && run.tokens != null) {
+    if (run.tokens > tok.value + tok.slack) return null;
+    known.push(Math.abs(run.tokens - tok.value) <= tok.slack);
+  }
+  if (sec != null && run.durationMs != null) {
+    const runSec = run.durationMs / 1000;
+    if (runSec > sec + 1) return null;
+    known.push(Math.abs(runSec - sec) <= 1);
+  }
+  return known.length === 2 && known.every(Boolean) ? 'exact' : 'fits';
+}
+
 /**
  * The list the line unfolds into: running rows joined to the calls they came from, and the
  * finished calls nothing on screen is running.
@@ -168,15 +227,44 @@ function titleMatches(title, name) {
  */
 export function agentList(runs, panel) {
   const claimed = new Set();
-  const running = (panel?.rows || []).map((row) => {
+  const sameType = (row, r) => !row.type || !r.type || r.type === row.type;
+  const rows = panel?.rows || [];
+
+  // Pass 1, by title — every row before any row is tried on numbers, so a row whose title
+  // does match is never beaten to its run by one that only fits.
+  const hits = rows.map((row) => {
     const candidates = runs
-      .filter((r) => !claimed.has(r) && (!row.type || !r.type || r.type === row.type) && titleMatches(row.name, r.name))
+      .filter((r) => !claimed.has(r) && sameType(row, r) && titleMatches(row.name, r.name))
       .sort((a, b) => Number(a.done) - Number(b.done) || String(b.startedAt).localeCompare(String(a.startedAt)));
     const hit = candidates[0] || null;
     if (hit) claimed.add(hit);
+    return hit;
+  });
+
+  // Pass 2, by the numbers, for the rows whose title is a progress summary. One run that
+  // fits is a join; several are a doubt, and a doubt keeps each of them out of "earlier".
+  const maybe = new Set();
+  rows.forEach((row, i) => {
+    if (hits[i]) return;
+    const fits = runs
+      .filter((r) => !claimed.has(r) && sameType(row, r))
+      .map((r) => ({ r, how: numbersFit(row, r) }))
+      .filter((f) => f.how);
+    const exact = fits.filter((f) => f.how === 'exact');
+    const pick = exact.length === 1 ? exact[0].r : fits.length === 1 ? fits[0].r : null;
+    if (pick) {
+      claimed.add(pick);
+      hits[i] = pick;
+    } else for (const f of fits) maybe.add(f.r);
+  });
+
+  const running = rows.map((row, i) => {
+    const hit = hits[i];
     return {
       type: row.type,
       name: hit?.name || row.name,
+      // What the terminal is saying the agent is doing, when that is not its description.
+      activity: hit && row.name && !titleMatches(row.name, hit.name) ? row.name : null,
       elapsed: row.elapsed,
       tokens: row.tokens,
       toolUseId: hit?.toolUseId || null,
@@ -184,7 +272,7 @@ export function agentList(runs, panel) {
     };
   });
   const earlier = runs
-    .filter((r) => !claimed.has(r) && r.done)
+    .filter((r) => !claimed.has(r) && !maybe.has(r) && r.done)
     .sort((a, b) => String(b.startedAt).localeCompare(String(a.startedAt)));
   return { running, more: panel?.more || 0, earlier };
 }

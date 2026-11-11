@@ -224,6 +224,8 @@ const NOTICE_TAGS = {
   taskId: /<task-id>([\s\S]*?)<\/task-id>/,
   toolUseId: /<tool-use-id>([\s\S]*?)<\/tool-use-id>/,
   status: /<status>([\s\S]*?)<\/status>/,
+  tokens: /<subagent_tokens>\s*(\d+)\s*<\/subagent_tokens>/,
+  durationMs: /<duration_ms>\s*(\d+)\s*<\/duration_ms>/,
   summary: /<summary>([\s\S]*?)<\/summary>/,
   result: /<result>([\s\S]*?)<\/result>/,
   event: /<event>([\s\S]*?)<\/event>/,
@@ -246,6 +248,11 @@ function parseTaskNotice(rec, text) {
     taskId: noticeTag(text, 'taskId') || null,
     toolUseId: noticeTag(text, 'toolUseId') || null,
     status: noticeTag(text, 'status') || null,
+    // The run's own totals when it stopped (`<usage>`, v2.1.322) — the same two numbers the
+    // terminal's agent panel draws on that run's row, which is how `agents.js` joins a row
+    // whose title is a progress summary rather than the call's description.
+    tokens: noticeTag(text, 'tokens') ? Number(noticeTag(text, 'tokens')) : null,
+    durationMs: noticeTag(text, 'durationMs') ? Number(noticeTag(text, 'durationMs')) : null,
   };
 }
 
