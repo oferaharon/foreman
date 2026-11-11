@@ -35,6 +35,7 @@ const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const text = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
 
 const SHOWN_ONLY = {
+  'claude-fable-5-1': 'Fable 5.1',
   'claude-haiku-5-5': 'Haiku 5.5',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-sonnet-4-6': 'Sonnet 4.6',
@@ -42,7 +43,7 @@ const SHOWN_ONLY = {
 
 /* ------------------------------------------------------------ the names --- */
 
-test('the three display-only ids have proper names, through the one `modelLabel`', () => {
+test('the display-only ids have proper names, through the one `modelLabel`', () => {
   assert.deepEqual({ ...DISPLAY_MODEL_NAMES }, SHOWN_ONLY);
   for (const [id, name] of Object.entries(SHOWN_ONLY)) {
     assert.equal(modelLabel(id), name, id);
@@ -50,7 +51,7 @@ test('the three display-only ids have proper names, through the one `modelLabel`
   }
   // The launchable names are untouched and still win.
   assert.equal(modelLabel('claude-sonnet-5-5'), 'Sonnet 5.5');
-  assert.equal(modelLabel('claude-fable-5-1'), 'Fable 5.1');
+  assert.equal(modelLabel('claude-fable-5-2'), 'Fable 5.2');
   assert.equal(modelLabel('claude-haiku-4-5-20251001'), 'Haiku 4.5');
   // An id nobody named is still drawn as itself, and an inherited key is not a name.
   assert.equal(modelLabel('claude-nonsense'), 'claude-nonsense');
@@ -119,11 +120,34 @@ test('neither picker offers one: the served name maps walk `WORKER_MODELS` alone
   assert.doesNotMatch(text('server/settings-file.js'), /DISPLAY_MODEL_NAMES/);
 });
 
-test('Fable 5.1 moved across by the maintainer\'s ruling of 2026-10-14: launchable, named, on the list', () => {
-  assert.ok(WORKER_MODELS.includes('claude-fable-5-1'));
-  assert.ok(WORKER_MODELS.includes('claude-fable-5'), 'its predecessor still validates');
-  assert.equal(WORKER_MODEL_NAMES['claude-fable-5-1'], 'Fable 5.1');
-  assert.ok(!Object.hasOwn(DISPLAY_MODEL_NAMES, 'claude-fable-5-1'));
-  assert.equal(isKnownModel('claude-fable-5-1'), true);
-  assert.equal(isKnownModel('claude-fable-5-1[1m]'), true);
+test('Fable 5.2 replaced Fable 5.1 by the maintainer\'s ruling of 2026-11-10: 5.2 launchable, 5.1 shown and never launched', () => {
+  assert.ok(WORKER_MODELS.includes('claude-fable-5-2'));
+  assert.ok(WORKER_MODELS.includes('claude-fable-5'), 'its older predecessor still validates');
+  assert.ok(!WORKER_MODELS.includes('claude-fable-5-1'));
+  assert.equal(WORKER_MODEL_NAMES['claude-fable-5-2'], 'Fable 5.2');
+  assert.equal(isKnownModel('claude-fable-5-2'), true);
+  assert.equal(isKnownModel('claude-fable-5-2[1m]'), true);
+  assert.equal(isKnownModel('claude-fable-5-1'), false);
+  assert.equal(isKnownModel('claude-fable-5-1[1m]'), false);
+  // Both pickers draw from the list, so 5.2 is offered and 5.1 is not.
+  assert.equal(workerModelNames()['claude-fable-5-2'], 'Fable 5.2');
+  assert.ok(!Object.hasOwn(workerModelNames(), 'claude-fable-5-1'));
+  assert.ok(resolveWorkerModel('claude-fable-5-2', null).model === 'claude-fable-5-2');
+});
+
+test('a closed task record that names Fable 5.1 still loads and still draws "Fable 5.1"', async () => {
+  const { TaskStore } = await import('../server/tasks.js');
+  const dir = fs.mkdtempSync(path.join(process.env.FOREMAN_STATE_DIR, 'tasks-'));
+  const file = path.join(dir, 'tasks.json');
+  fs.writeFileSync(file, JSON.stringify({ 'old-fable': {
+    id: 'old-fable', repo: '/tmp/alpha', label: 'old-fable', state: 'done', model: 'claude-fable-5-1',
+    modelReason: 'sized for the heaviest model', createdAt: 1, updatedAt: 2,
+  } }));
+  const store = new TaskStore(file);
+  clearInterval(store.timer);
+  const rec = store.get('old-fable');
+  assert.ok(rec, 'the record survives the load');
+  assert.equal(rec.model, 'claude-fable-5-1');
+  assert.equal(modelLabel(rec.model), 'Fable 5.1');
+  assert.equal(modelLabel('claude-fable-5-1[1m]'), 'Fable 5.1 (1M context)');
 });

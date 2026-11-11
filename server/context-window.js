@@ -39,6 +39,7 @@ export const CONTEXT_WINDOWS = {
   'claude-opus-5': 1_000_000,
   'claude-sonnet-5-5': 1_000_000,
   'claude-sonnet-5': 1_000_000,
+  'claude-fable-5-2': 200_000, // v2.1.296 does not know the id and assumes 200k bare; `[1m]` is 1M (WIDE_SUFFIX)
   'claude-fable-5-1': 1_000_000,
   'claude-fable-5': 1_000_000,
   'claude-haiku-5-5': 1_000_000,
