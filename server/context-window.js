@@ -30,7 +30,8 @@ import { modelLabel } from './worker-models.js';
 
 /**
  * Context window by `message.model`. Every entry was MEASURED — `claude -p --output-format
- * json`, `modelUsage[<model>].contextWindow`, Claude Code 2.1.296 — and the transcript's own
+ * json`, `modelUsage[<model>].contextWindow`, Claude Code 2.1.296 (`claude-fable-5-2` re-measured on
+ * 2.1.322, see its entry) — and the transcript's own
  * `cost-state` carries no `contextWindow`, so it cannot be read from the file: hence a
  * table. A model not here is `null`, never a guess.
  */
@@ -39,7 +40,10 @@ export const CONTEXT_WINDOWS = {
   'claude-opus-5': 1_000_000,
   'claude-sonnet-5-5': 1_000_000,
   'claude-sonnet-5': 1_000_000,
-  'claude-fable-5-2': 200_000, // v2.1.296 does not know the id and assumes 200k bare; `[1m]` is 1M (WIDE_SUFFIX)
+  // Bare is 1M on v2.1.322, which knows the id. v2.1.296 did not: it warned `unrecognized_model`
+  // and assumed 200k bare (the `[1m]` form was 1M on both), so a session still running an
+  // older binary reads low here rather than high.
+  'claude-fable-5-2': 1_000_000,
   'claude-fable-5-1': 1_000_000,
   'claude-fable-5': 1_000_000,
   'claude-haiku-5-5': 1_000_000,
