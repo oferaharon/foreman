@@ -40,7 +40,7 @@ export const WORKER_MODELS = [
   'claude-opus-5',
   'claude-sonnet-5-5',
   'claude-sonnet-5',
-  'claude-fable-5-1',
+  'claude-fable-5-2',
   'claude-fable-5',
   'claude-haiku-4-5-20251001',
 ];
@@ -93,7 +93,7 @@ export const WORKER_MODEL_NAMES = {
   'claude-opus-5': 'Opus 5',
   'claude-sonnet-5-5': 'Sonnet 5.5',
   'claude-sonnet-5': 'Sonnet 5',
-  'claude-fable-5-1': 'Fable 5.1',
+  'claude-fable-5-2': 'Fable 5.2',
   'claude-fable-5': 'Fable 5',
   'claude-haiku-4-5-20251001': 'Haiku 4.5',
 };
@@ -109,13 +109,16 @@ export const WORKER_MODEL_NAMES = {
  * `workerModelNames` walks `WORKER_MODELS`, never this map. Moving an id from here onto the
  * list above is a ruling about what the panel may start, not a naming fix; `test/model-
  * names.test.js` pins both halves. (`claude-fable-5-1` made that move on 2026-10-14, by the
- * maintainer's ruling.)
+ * maintainer's ruling, and moved back on 2026-11-10 when Fable 5.2 replaced it — "we don't
+ * need to keep 5.1" — so closed task records naming it still draw `Fable 5.1` and nothing can
+ * launch it.)
  *
  * In this file rather than in `context-window.js` because `modelLabel` below is the one
  * spelling of "what a model is called", and a second table elsewhere would be the
  * `one-spelling` trap's sibling: a name added to one and not the other.
  */
 export const DISPLAY_MODEL_NAMES = Object.freeze({
+  'claude-fable-5-1': 'Fable 5.1',
   'claude-haiku-5-5': 'Haiku 5.5',
   'claude-opus-4-6': 'Opus 4.6',
   'claude-sonnet-4-6': 'Sonnet 4.6',
@@ -203,8 +206,8 @@ export const isKnownEffort = (level) => typeof level === 'string' && WORKER_EFFO
  * `--effort max` (and `xhigh`, and `low`) starts normally, prints no warning, draws a banner
  * with no effort in it, and writes **no `effort` field** on any transcript record — the flag
  * is accepted and silently dropped. Every other model on `WORKER_MODELS` that was measured
- * (Opus 5.5, Opus 5, Sonnet 5.5, Fable 5.1, at levels up to `max`) records exactly the level
- * it was launched with.
+ * (Opus 5.5, Opus 5, Sonnet 5.5, Fable 5.1, and Fable 5.2 at every level `low` to `max`)
+ * records exactly the level it was launched with.
  *
  * So a worker on one of these is launched *without* `--effort` and its task records `null`,
  * because a record saying `high` for a session that ran at no effort would be a claim

@@ -68,11 +68,12 @@ test('an explicit model wins, and is not the default', () => {
   assert.equal(r.isDefault, false, 'a departure — the room gets a line');
 });
 
-test('Fable 5.1 is accepted, with and without [1m]', () => {
-  const r = resolveWorkerModel('claude-fable-5-1', 'claude-opus-5-5');
-  assert.equal(r.model, 'claude-fable-5-1');
+test('Fable 5.2 is accepted, with and without [1m]; Fable 5.1 is refused', () => {
+  const r = resolveWorkerModel('claude-fable-5-2', 'claude-opus-5-5');
+  assert.equal(r.model, 'claude-fable-5-2');
   assert.equal(r.isDefault, false);
-  assert.equal(resolveWorkerModel('claude-fable-5-1[1m]', null).model, 'claude-fable-5-1[1m]');
+  assert.equal(resolveWorkerModel('claude-fable-5-2[1m]', null).model, 'claude-fable-5-2[1m]');
+  assert.throws(() => resolveWorkerModel('claude-fable-5-1', null), /Unknown model/);
 });
 
 test('naming the default explicitly is not a departure', () => {
