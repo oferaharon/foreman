@@ -58,6 +58,7 @@ import { botsFolded } from './prefs.js';
 // What the composer's Clear button sends first — a browser preference, set in the settings box.
 import { clearPrep } from './prefs.js';
 import { railFilter } from './prefs.js';
+import { agentsFolded } from './prefs.js';
 import {
   filterLabel,
   filterTarget,
@@ -8403,8 +8404,7 @@ function createPane(slot, host) {
   const agentsView = {
     sessionId: null,
     list: null,
-    open: false,
-    earlierOpen: false,
+    earlierOpen: false, // the "Earlier" fold: per session, always starts folded
     rosterSig: null,
     inflight: false,
     again: false,
@@ -16420,7 +16420,8 @@ function createPane(slot, host) {
       return;
     }
 
-    const open = listable && agentsView.open;
+    // Unfolded unless the maintainer folded it — `agentsFolded` is per browser, not per session.
+    const open = listable && !agentsFolded.on;
     // The numbers tick only while somebody is looking at them, and only while something is
     // running — a folded line asks for nothing, and "Earlier" alone does not move.
     if (open && (Number(bg.agents) || 0) > 0) startAgentsTimer();
@@ -16477,8 +16478,8 @@ function createPane(slot, host) {
       toggle.setAttribute('aria-expanded', String(open));
       toggle.title = open ? 'Hide the agents' : 'Show the agents, running and earlier';
       toggle.onclick = () => {
-        agentsView.open = !agentsView.open;
-        if (agentsView.open) refreshAgents();
+        agentsFolded.set(!agentsFolded.on);
+        if (!agentsFolded.on) refreshAgents();
         renderBackgroundLine();
       };
       head.append(toggle);
@@ -16607,7 +16608,7 @@ function createPane(slot, host) {
   function syncAgents(s) {
     if (agentsView.sessionId !== s.id) {
       stopAgentsTimer();
-      Object.assign(agentsView, { sessionId: s.id, list: null, open: false, earlierOpen: false, rosterSig: null });
+      Object.assign(agentsView, { sessionId: s.id, list: null, earlierOpen: false, rosterSig: null });
     }
     const sig = JSON.stringify([s.background?.agents ?? null, s.background?.running ?? null]);
     if (sig !== agentsView.rosterSig) {
