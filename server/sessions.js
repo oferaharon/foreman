@@ -196,6 +196,13 @@ export class SessionRegistry extends EventEmitter {
     // stops being `idle`, because a stale suggestion is a stale *button*. `ghost.js` owns
     // both the parse and that rule.
     this.ghosts = new Map();
+    // sessionId -> the agent panel's rows *with* their ticking numbers (`agentRows` on the
+    // scrape), replaced whole every poll. Deliberately not on the roster: the roster is
+    // broadcast on a diff, and an elapsed time and a token count move every poll, so they
+    // would rebroadcast every busy session every two seconds. The roster carries the
+    // names (`background.running`); these reach a browser only through
+    // `GET /api/sessions/:id/agents`, which the background line asks while it is unfolded.
+    this.agentRows = new Map();
     // Set by index.js once the team watcher exists — the watcher takes the registry, so
     // it cannot be handed over at construction. Null until then, and a null reads as
     // "not stuck", which is the safe direction: a row nobody has judged yet is quiet.
@@ -247,6 +254,14 @@ export class SessionRegistry extends EventEmitter {
 
   get(sessionId) {
     return this.sessions.get(sessionId) || null;
+  }
+
+  /**
+   * The agent panel as the last poll read it — `{rows, more}` with each row's elapsed time
+   * and tokens — or `null` when there was none on screen, or a box hid it.
+   */
+  agentPanel(sessionId) {
+    return this.agentRows.get(sessionId) || null;
   }
 
   /** Find the session currently occupying a pane. */
@@ -623,12 +638,14 @@ export class SessionRegistry extends EventEmitter {
     // A pane with no transcript is a session you just opened and haven't spoken to.
     // It belongs in the rail — it's the one you're about to type into — but it must
     // not borrow someone else's history to get there.
+    const unboundScrapes = new Map();
     for (const pane of unboundPanes) {
       // tmux pane ids look like `%19`, and a `%` in a URL path is read as a
       // percent-escape, so the id has to survive routing without it.
       const id = `pane-${pane.paneId.replace('%', '')}`;
       const project = pane.cwd ? path.basename(pane.cwd) : 'unknown';
       const scrape = await readPaneState(pane.paneId);
+      unboundScrapes.set(id, scrape);
       const reason = unboundReason(pane, [...bySession.values()], sleeping);
       const footer = rememberFooter(this.footers, pane.paneId, scrape);
       const ghostEligible = scrape.state === 'idle';
@@ -687,6 +704,14 @@ export class SessionRegistry extends EventEmitter {
     const liveIds = new Set(next.keys());
     this.read.prune(liveIds);
     for (const id of this.replyLog.keys()) if (!liveIds.has(id)) this.replyLog.delete(id);
+
+    // The rows behind `background.running`, held off the roster; see the constructor. Read
+    // only while `background` is — a box hides the panel too, and a stale list of rows is
+    // the same stale claim the roster refuses to make.
+    const agentRows = new Map();
+    for (const [sid, sc] of scraped) if (sc?.background && sc.agentRows) agentRows.set(sid, sc.agentRows);
+    for (const [id, sc] of unboundScrapes) if (sc?.background && sc.agentRows) agentRows.set(id, sc.agentRows);
+    this.agentRows = agentRows;
 
     const changed = this.#diff(next);
     this.sessions = next;

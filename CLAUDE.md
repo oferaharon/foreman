@@ -67,7 +67,7 @@ There is no API. Everything is assembled from three places:
 
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
 panel side `binding.js`, `permission.js`, `question.js`, `plan.js`, `model.js`,
-`effort.js`, `ghost.js`, `exit-box.js`, `exit-session.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
+`effort.js`, `ghost.js`, `agents.js`, `exit-box.js`, `exit-session.js`, `queue.js`, `claim.js`, `status.js`, `settings-file.js`, `rooms.js`,
 `rooms-line.js`, `session-launch.js`, `briefs.js`, `bots.js`, `bot-subs.js`, `context-window.js`,
 `hibernate.js`, `hibernate-loop.js` and
 `parsePane` in `tmux.js`; on the team side `tasks.js`,
@@ -329,6 +329,13 @@ pane width every one of them depends on. Evidence:
   line.** Strip it first, anchored at both ends; `← 1 agent` is never a count; drop the
   counts behind a box, never hold them.
   [pane-parsers#the-agent-panel-below-the-composer](docs/traps/pane-parsers.md#the-agent-panel-below-the-composer)
+- `server/agents.js` (`agentList`, `collectAgents`) · `server/tmux.js` (`parseAgentRow`) ·
+  `server/normalize.js` (`parseTaskNotice`) · `web/app.js` (`renderBackgroundLine`) — **A
+  row's title is not an id: past the first minute it can be a progress summary written nowhere
+  on disk — MEASURED on v2.1.322.** Join on the title, then on the notice's `<usage>` totals,
+  which equal the row's numbers; a listed agent is running whatever a notice says; the
+  ticking numbers never ride the roster.
+  [pane-parsers#the-rows-and-what-their-title-is--measured-on-v21322](docs/traps/pane-parsers.md#the-rows-and-what-their-title-is--measured-on-v21322)
 - `server/transcript.js` (`effort`) · `server/sessions.js` · `server/tmux.js` (the footer
   scrape) — **The footer's right-hand slot rotates.** Read effort from the transcript, never by
   scraping; model and `ctx:` are stable in the footer and are read there.

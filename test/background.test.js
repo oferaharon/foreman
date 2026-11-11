@@ -4,7 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-import { backgroundWords } from '../web/background.js';
+import { backgroundWords, backgroundTitle, agoWords, hasAgentList } from '../web/background.js';
 import { needsKind } from '../web/notify.js';
 
 /*
@@ -144,4 +144,38 @@ test('background work never raises a notification', () => {
   const busy = { status: 'idle', background: { agents: 5, shells: 5, monitors: 2 } };
   assert.equal(needsKind(busy), null);
   assert.equal(needsKind({ ...busy, status: 'working' }), null);
+});
+
+test('the rail tooltip names the running agents and counts the hidden ones', () => {
+  const bg = {
+    agents: 7,
+    shells: 1,
+    monitors: 0,
+    running: [
+      { type: 'general-purpose', name: 'Sleep agent one' },
+      { type: 'Explore', name: null },
+    ],
+  };
+  assert.equal(backgroundTitle(bg), 'Background: 7 agents, 1 shell\nSleep agent one (general-purpose)\nExplore\n+5 more');
+  assert.equal(backgroundTitle({ agents: 0, shells: 2, monitors: 0, running: [] }), 'Background: 2 shells');
+  // A roster from before `running` existed still reads.
+  assert.equal(backgroundTitle({ agents: 2, shells: 0, monitors: 0 }), 'Background: 2 agents');
+  assert.equal(backgroundTitle(null), '');
+});
+
+test('ago, in /tasks\'s own shape', () => {
+  const now = Date.parse('2026-11-11T12:00:00Z');
+  assert.equal(agoWords('2026-11-11T11:59:30Z', now), 'just now');
+  assert.equal(agoWords('2026-11-11T11:45:00Z', now), '15m ago');
+  assert.equal(agoWords('2026-11-11T09:00:00Z', now), '3h ago');
+  assert.equal(agoWords('2026-11-09T12:00:00Z', now), '2d ago');
+  assert.equal(agoWords(null, now), '');
+  assert.equal(agoWords('not a time', now), '');
+});
+
+test('the line has a list when an agent runs now or ran earlier, and not for shells alone', () => {
+  assert.equal(hasAgentList({ agents: 0, shells: 3 }, null), false);
+  assert.equal(hasAgentList({ agents: 1 }, null), true);
+  assert.equal(hasAgentList({ agents: 0 }, { running: [], earlier: [{}] }), true);
+  assert.equal(hasAgentList(null, null), false);
 });

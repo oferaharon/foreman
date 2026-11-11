@@ -4669,11 +4669,21 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 .bg-line {
   display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  overflow: hidden;
+  flex-direction: column;
+  min-width: 0;
   font-size: 0.76rem;
   color: var(--working);
+}
+
+/* The line itself, which is all there is while folded: one row, a fixed height whatever it
+   says. The `▾` sits straight after the words rather than at the far edge, so it reads as
+   belonging to them. */
+.bg-line-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow: hidden;
 }
 
 /* The suggestion's tag, in this line's ink: same face, size and tracking, so the two read as
@@ -4688,11 +4698,117 @@ body.pin-reordering * { cursor: grabbing !important; }
 }
 
 .bg-line-text {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The fold, the earlier fold and the rows are buttons in this line's ink, not the panel's
+   button chrome: the line asks nothing of anybody, and unfolding it should not start to. */
+.bg-toggle,
+.bg-earlier,
+button.bg-agent {
+  font: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.bg-toggle { color: inherit; }
+
+.bg-toggle {
+  flex: none;
+  padding: 0 0.3rem;
+  border-radius: 4px;
+  line-height: 1.2;
+}
+
+.bg-toggle:hover,
+.bg-earlier:hover,
+button.bg-agent:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+
+.bg-toggle:focus-visible,
+.bg-earlier:focus-visible,
+button.bg-agent:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The unfolded list. Capped and scrolling on its own, so a session that has run forty
+   agents cannot push the textarea off the screen; `overscroll-behavior` keeps a fling at its
+   end from scrolling the transcript behind it. */
+.bg-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin-top: 0.25rem;
+  max-height: min(14rem, 30vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+}
+
+/* Name, type, numbers: the name takes what is left and ellipsises, the other two never
+   wrap, so every row is one line tall and a ticking number moves nothing. */
+.bg-agent {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  color: var(--ink);
+}
+
+/* Running in the line's own `working` ink, as the rail dot is; finished ones step back. */
+.bg-agent.running { color: var(--working); }
+.bg-agent.earlier { color: var(--ink-muted); }
+
+.bg-agent-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bg-agent-activity { color: var(--ink-muted); }
+
+.bg-agent.running .bg-agent-name::before {
+  content: '◯ ';
+  color: var(--working);
+}
+
+.bg-agent-type,
+.bg-agent-stat {
+  white-space: nowrap;
+  color: var(--ink-muted);
+}
+
+.bg-agent-stat { font-variant-numeric: tabular-nums; }
+
+.bg-earlier {
+  align-self: flex-start;
+  padding: 0.15rem 0.35rem;
+  border-radius: 4px;
+  color: var(--ink-muted);
+}
+
+.bg-note {
+  padding: 0.1rem 0.35rem;
+  color: var(--ink-muted);
+}
+
+/* Where a jump from the list lands: the Agent call's chip, flashed once. */
+@keyframes jump-flash {
+  from { background: color-mix(in srgb, var(--working) 28%, transparent); }
+  to { background: transparent; }
+}
+
+.jump-flash { animation: jump-flash 1.6s ease-out; border-radius: 6px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .jump-flash { animation: none; outline: 2px solid var(--working); outline-offset: 2px; }
 }
 
 /* ---- the merge queue ---- */

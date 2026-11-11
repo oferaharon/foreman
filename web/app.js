@@ -73,7 +73,7 @@ import { funnelIcon } from './funnel-icon.js';
 import { CLEAR_COMMAND, clearView, DEFAULT_CLEAR_PREP, startClear, stepClear } from './clear-phase.js';
 // What a session still has running behind its composer, in Claude Code's own words. Two
 // readers — the rail row's second dot and the line above the composer — and one answer.
-import { backgroundWords } from './background.js';
+import { backgroundWords, backgroundTitle, agoWords, hasAgentList } from './background.js';
 // What a closed side panel has room to say. The ninth pure module under `web/`, shipped by
 // item 1 of this feature with nothing wired to it; the lead's aside is the first half to
 // wear it. `asideStripFacts` reads the same `s.team` object `teamLine` reads, which is what
@@ -4383,7 +4383,9 @@ function backgroundDot(s) {
   if (!words) return null;
   const dot = document.createElement('span');
   dot.className = 'dot bg-dot';
-  dot.title = `Background: ${words}`;
+  // The counts, then the running agents by name (`background.running`, which carries nothing
+  // that ticks) — a hover, and nothing new drawn on the rail.
+  dot.title = backgroundTitle(s.background);
   return dot;
 }
 
@@ -8397,6 +8399,18 @@ function createPane(slot, host) {
 
   const chipNodes = new Map(); // toolUseId -> DOM node, so late results find their chip
   const current = () => state.sessions.find((s) => s.id === view.selected) || null;
+  // The background line's list — see `syncAgents`. Per pane, keyed by the session it was read for.
+  const agentsView = {
+    sessionId: null,
+    list: null,
+    open: false,
+    earlierOpen: false,
+    rosterSig: null,
+    inflight: false,
+    again: false,
+    timer: null,
+  };
+  const AGENTS_TICK_MS = 3000;
 
   let streamEl = null;
   let composerEl = null;
@@ -15272,7 +15286,7 @@ function createPane(slot, host) {
       btn.textContent = 'load earlier';
       btn.onclick = () => {
         btn.textContent = 'loading…';
-        send({ type: 'loadEarlier' });
+        send({ type: 'loadEarlier', slot });
       };
       frag.append(btn);
     }
@@ -15305,6 +15319,10 @@ function createPane(slot, host) {
 
   function appendMessages(messages) {
     view.messages.push(...messages);
+
+    // An agent started or finished: the background line's list is asked again, on this
+    // frame's clock rather than the next roster beat's (and never through `composerSig`).
+    if (agentsMoved(messages)) refreshAgents();
 
     /*
      * The files button's dot, before anything about *drawing* is decided — and that order
@@ -16387,39 +16405,301 @@ function createPane(slot, host) {
     const s = current();
     const { bgLine, above } = composerEl;
 
-    const words = s?.interactive ? backgroundWords(s.background) : '';
-    if (!words) {
+    if (s?.interactive) syncAgents(s);
+    const bg = s?.interactive ? s.background : null;
+    const words = backgroundWords(bg);
+    const list = s && agentsView.sessionId === s.id ? agentsView.list : null;
+    // `bg` null is a box hiding the mode line: the line goes, list and all, as it always did.
+    const listable = Boolean(bg) && hasAgentList(bg, list);
+    if (!words && !listable) {
       bgLine.replaceChildren();
+      delete bgLine.dataset.sig;
       bgLine.remove();
       above.classList.remove('has-bg');
+      stopAgentsTimer();
       return;
     }
-    // Nothing to repaint if it already says this — the line sits above a textarea somebody
-    // may be typing into, and the roster beat arrives every couple of seconds.
-    if (bgLine.dataset.sig === words && bgLine.parentNode === above) return;
-    bgLine.dataset.sig = words;
 
+    const open = listable && agentsView.open;
+    // The numbers tick only while somebody is looking at them, and only while something is
+    // running — a folded line asks for nothing, and "Earlier" alone does not move.
+    if (open && (Number(bg.agents) || 0) > 0) startAgentsTimer();
+    else stopAgentsTimer();
+
+    const earlierCount = list?.earlier?.length || 0;
+    const text = words || (earlierCount ? `nothing running · ${earlierCount} earlier` : 'nothing running');
+    const now = Date.now();
+    // Two signatures: the *shape* (which rows, which folds) rebuilds the line; the ticking
+    // numbers are patched into the nodes already there, so a row under the pointer is never
+    // swapped out between a press and its release.
+    const shape = JSON.stringify([
+      text,
+      listable,
+      open,
+      open && agentsView.earlierOpen,
+      open && list
+        ? [
+            list.running.map((r) => [r.name, r.activity, r.type, r.toolUseId]),
+            list.more,
+            earlierCount,
+            agentsView.earlierOpen ? list.earlier.map((r) => [r.name, r.type, r.toolUseId]) : 0,
+          ]
+        : 0,
+    ]);
+    if (bgLine.dataset.sig === shape && bgLine.parentNode === above) {
+      if (open && list) patchAgentNumbers(bgLine, list, now);
+      return;
+    }
+
+    // Measured before anything changes height, for `renderMergeQueue`'s reason: the line
+    // appearing, or the list unfolding, moves the transcript's bottom edge up under a reader.
+    const stream = streamEl?.stream;
+    const pinned =
+      stream && above.isConnected ? stream.scrollHeight - stream.scrollTop - stream.clientHeight < 40 : false;
+    const keepScroll = bgLine.querySelector('.bg-list')?.scrollTop ?? 0;
+    bgLine.dataset.sig = shape;
+
+    const head = document.createElement('div');
+    head.className = 'bg-line-head';
     const tag = document.createElement('span');
     tag.className = 'bg-line-tag';
     tag.textContent = 'background';
-
     const body = document.createElement('span');
     body.className = 'bg-line-text';
-    body.textContent = words;
-    body.title = words;
+    body.textContent = text;
+    body.title = text;
+    head.append(tag, body);
+    if (listable) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'bg-toggle';
+      toggle.textContent = open ? '▴' : '▾';
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.title = open ? 'Hide the agents' : 'Show the agents, running and earlier';
+      toggle.onclick = () => {
+        agentsView.open = !agentsView.open;
+        if (agentsView.open) refreshAgents();
+        renderBackgroundLine();
+      };
+      head.append(toggle);
+    }
+    const parts = [head];
 
-    bgLine.replaceChildren(tag, body);
+    if (open) {
+      const box = document.createElement('div');
+      box.className = 'bg-list';
+      if (!list) {
+        const wait = document.createElement('div');
+        wait.className = 'bg-note';
+        wait.textContent = 'reading…';
+        box.append(wait);
+      } else {
+        list.running.forEach((r, i) => box.append(agentRow(r, 'running', i, now)));
+        if (list.more) {
+          const more = document.createElement('div');
+          more.className = 'bg-note';
+          more.textContent = `+${list.more} more running — the terminal lists five`;
+          box.append(more);
+        }
+        if (earlierCount) {
+          const fold = document.createElement('button');
+          fold.type = 'button';
+          fold.className = 'bg-earlier';
+          fold.setAttribute('aria-expanded', String(agentsView.earlierOpen));
+          fold.textContent = `Earlier (${earlierCount}) ${agentsView.earlierOpen ? '▾' : '▸'}`;
+          fold.onclick = () => {
+            agentsView.earlierOpen = !agentsView.earlierOpen;
+            renderBackgroundLine();
+          };
+          box.append(fold);
+          if (agentsView.earlierOpen) list.earlier.forEach((r, i) => box.append(agentRow(r, 'earlier', i, now)));
+        }
+        if (!list.running.length && !earlierCount && !list.more) {
+          const none = document.createElement('div');
+          none.className = 'bg-note';
+          none.textContent = 'no agents yet — the count is the terminal’s, the list is still reading';
+          box.append(none);
+        }
+      }
+      parts.push(box);
+    }
 
+    bgLine.replaceChildren(...parts);
     if (bgLine.parentNode !== above) {
-      // Measured before the line goes in, for `renderMergeQueue`'s reason: this is the one
-      // moment the strip grows and the transcript's bottom edge moves up under a reader.
-      const stream = streamEl?.stream;
-      const pinned =
-        stream && above.isConnected ? stream.scrollHeight - stream.scrollTop - stream.clientHeight < 40 : false;
       above.prepend(bgLine);
       above.classList.add('has-bg');
-      if (pinned) stream.scrollTop = stream.scrollHeight;
     }
+    const box = bgLine.querySelector('.bg-list');
+    if (box) box.scrollTop = keepScroll;
+    if (pinned) stream.scrollTop = stream.scrollHeight;
+  }
+
+  /**
+   * One agent in the unfolded list. A row that was joined to its Agent call is a button that
+   * jumps to that call's chip in the conversation; one that was not (a title the transcript
+   * does not hold) is drawn the same and goes nowhere, rather than pretending.
+   */
+  function agentRow(r, kind, index, now) {
+    const row = document.createElement(r.toolUseId ? 'button' : 'div');
+    if (r.toolUseId) {
+      row.type = 'button';
+      row.title = 'Jump to this agent in the conversation';
+      row.onclick = () => jumpToAgent(r.toolUseId);
+    }
+    row.className = `bg-agent ${kind}${r.toolUseId ? '' : ' static'}`;
+    row.dataset.index = String(index);
+    const name = document.createElement('span');
+    name.className = 'bg-agent-name';
+    name.textContent = r.name || 'untitled agent';
+    // The terminal's progress summary, when it is showing one instead of the description.
+    if (r.activity) {
+      const act = document.createElement('span');
+      act.className = 'bg-agent-activity';
+      act.textContent = ` · ${r.activity}`;
+      name.append(act);
+    }
+    name.title = r.activity ? `${r.name} — ${r.activity}` : r.name || '';
+    const type = document.createElement('span');
+    type.className = 'bg-agent-type';
+    type.textContent = r.type || 'agent';
+    const stat = document.createElement('span');
+    stat.className = 'bg-agent-stat';
+    stat.textContent = agentStat(r, kind, now);
+    row.append(name, type, stat);
+    return row;
+  }
+
+  function agentStat(r, kind, now) {
+    if (kind === 'running') {
+      return [r.elapsed, r.tokens ? `${r.tokens} tokens` : null].filter(Boolean).join(' · ');
+    }
+    const started = agoWords(r.startedAt, now);
+    const active = agoWords(r.lastActiveAt, now);
+    return [started && `started ${started}`, active && `last active ${active}`].filter(Boolean).join(' · ');
+  }
+
+  /** The ticking half: new numbers into the rows already drawn, nothing rebuilt. */
+  function patchAgentNumbers(line, list, now) {
+    for (const node of line.querySelectorAll('.bg-agent')) {
+      const kind = node.classList.contains('running') ? 'running' : 'earlier';
+      const r = (kind === 'running' ? list.running : list.earlier)[Number(node.dataset.index)];
+      const stat = node.querySelector('.bg-agent-stat');
+      if (r && stat) {
+        const next = agentStat(r, kind, now);
+        if (stat.textContent !== next) stat.textContent = next;
+      }
+    }
+  }
+
+  /*
+   * The list behind the line, per pane and per session — `GET /api/sessions/:id/agents`.
+   *
+   * Asked once when a session's composer first paints (to know whether there is an "earlier"
+   * at all), again when the roster's running names change or a `messages` frame carries an
+   * Agent call or a task notice, and every few seconds while the list is unfolded with
+   * something running — the elapsed time and tokens are never on the roster (`sessions.js`),
+   * so that timer is the only thing that moves them, and it runs only while somebody looks.
+   * None of it is in `composerSig`, and nothing here opens `/tasks`: that would be typing
+   * into the session.
+   */
+  // `agentsView` and `AGENTS_TICK_MS` are declared at the top of the factory, before anything can paint.
+
+  function syncAgents(s) {
+    if (agentsView.sessionId !== s.id) {
+      stopAgentsTimer();
+      Object.assign(agentsView, { sessionId: s.id, list: null, open: false, earlierOpen: false, rosterSig: null });
+    }
+    const sig = JSON.stringify([s.background?.agents ?? null, s.background?.running ?? null]);
+    if (sig !== agentsView.rosterSig) {
+      agentsView.rosterSig = sig;
+      refreshAgents();
+    }
+  }
+
+  async function refreshAgents() {
+    const id = agentsView.sessionId;
+    if (!id) return;
+    if (agentsView.inflight) {
+      agentsView.again = true;
+      return;
+    }
+    agentsView.inflight = true;
+    try {
+      const res = await fetch(`/api/sessions/${encodeURIComponent(id)}/agents`);
+      if (res.ok && agentsView.sessionId === id) {
+        agentsView.list = await res.json();
+        renderBackgroundLine();
+      }
+    } catch {
+      // A failed read leaves the last list standing; the next beat asks again.
+    } finally {
+      agentsView.inflight = false;
+      if (agentsView.again) {
+        agentsView.again = false;
+        refreshAgents();
+      }
+    }
+  }
+
+  function startAgentsTimer() {
+    if (agentsView.timer) return;
+    agentsView.timer = setInterval(() => {
+      // A pane that stopped holding this session, or a composer torn down, stops the clock.
+      if (!composerEl?.bgLine?.isConnected || current()?.id !== agentsView.sessionId) return stopAgentsTimer();
+      refreshAgents();
+    }, AGENTS_TICK_MS);
+  }
+
+  function stopAgentsTimer() {
+    clearInterval(agentsView.timer);
+    agentsView.timer = null;
+  }
+
+  /** A `messages` frame that started or finished an agent moves the list; nothing else does. */
+  function agentsMoved(messages) {
+    return messages.some(
+      (m) => m.kind === 'task_notification' || (m.kind === 'tool_use' && (m.name === 'Agent' || m.name === 'Task')),
+    );
+  }
+
+  /**
+   * Jump to an agent's Agent call in the conversation — its chip, which is where the panel
+   * draws the run (and opens its own transcript). If the call is older than the loaded
+   * window, earlier pages are asked for one at a time until it is in (`continueAgentJump`,
+   * from the `earlier` frame), and given up quietly at the top of the file.
+   */
+  function jumpToAgent(toolUseId) {
+    if (!toolUseId || !streamEl) return;
+    const node = chipNodes.get(toolUseId);
+    if (node?.isConnected) {
+      view.pendingJump = null;
+      revealChip(node);
+      return;
+    }
+    if (!view.hasEarlier) return;
+    view.pendingJump = { id: toolUseId, pages: 0 };
+    send({ type: 'loadEarlier', slot });
+  }
+
+  function continueAgentJump() {
+    const pj = view.pendingJump;
+    if (!pj) return;
+    const node = chipNodes.get(pj.id);
+    if (node?.isConnected) {
+      view.pendingJump = null;
+      revealChip(node);
+    } else if (view.hasEarlier && pj.pages < 40) {
+      pj.pages += 1;
+      send({ type: 'loadEarlier', slot });
+    } else view.pendingJump = null;
+  }
+
+  function revealChip(node) {
+    node.scrollIntoView({ block: 'center' });
+    node.classList.remove('jump-flash');
+    void node.offsetWidth; // restart the animation on a second jump to the same chip
+    node.classList.add('jump-flash');
+    setTimeout(() => node.classList.remove('jump-flash'), 1800);
   }
 
   /**
@@ -18457,6 +18737,7 @@ function createPane(slot, host) {
         view.messages = msg.messages;
         view.hasEarlier = msg.hasEarlier;
         view.error = null;
+        view.pendingJump = null;
         renderMain();
         return;
       case 'messages':
@@ -18474,6 +18755,8 @@ function createPane(slot, host) {
         // and it rebuilds the composer, which takes a half-typed draft's textarea out from
         // under its cursor. The older messages land above; the one being read stays put.
         if (streamEl) holdFromBottom(streamEl.stream, renderStream);
+        // A row in the background list asked for an Agent call older than the window.
+        continueAgentJump();
         return;
       case 'rebound':
         // A session we were watching just earned its real id — follow it silently, and

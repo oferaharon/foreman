@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parsePane, stripAgentPanel } from '../server/tmux.js';
+import { parsePane, stripAgentPanel, parseAgentRow } from '../server/tmux.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 const fixture = (name) => fs.readFileSync(path.join(FIXTURES, name), 'utf8');
@@ -375,6 +375,9 @@ const AGENT_PANEL = [
   ['pane-agents-more-narrow.txt', 7, 4, 1], // was `dialog`
 ];
 
+/** The three counts, without the `running` names the line's list reads (tested below). */
+const counts = (bg) => (bg ? { agents: bg.agents, shells: bg.shells, monitors: bg.monitors } : bg);
+
 test('an agent panel under the composer no longer reads as a dialog', () => {
   for (const [file, agents, shells, monitors] of AGENT_PANEL) {
     const text = fixture(file);
@@ -386,7 +389,7 @@ test('an agent panel under the composer no longer reads as a dialog', () => {
     assert.equal(state.bypass, false, file);
     assert.equal(state.model, 'Sonnet 5', file);
     assert.equal(typeof state.contextPct, 'number', file);
-    assert.deepEqual(state.background, { agents, shells, monitors }, file);
+    assert.deepEqual(counts(state.background), { agents, shells, monitors }, file);
   }
 });
 
@@ -419,7 +422,7 @@ test('`← 1 agent` is not an agent count', () => {
   for (const file of ['pane-idle.txt', 'pane-bypass.txt', 'pane-working.txt', 'pane-working-elapsed.txt']) {
     const text = fixture(file);
     assert.match(text, /← 1 agent/, `${file} carries the hint`);
-    assert.deepEqual(parsePane(text).background, { agents: 0, shells: 0, monitors: 0 }, file);
+    assert.deepEqual(parsePane(text).background, { agents: 0, shells: 0, monitors: 0, running: [] }, file);
   }
   // …and with seven agents really running, it still reads 1 on the line itself.
   assert.match(fixture('pane-agents-more.txt'), /· ← 1 agent/);
@@ -431,7 +434,7 @@ test('shells and monitors come off the mode line by name', () => {
     ['pane-bg-monitor-narrow.txt', { agents: 0, shells: 0, monitors: 1 }],
     ['pane-bg-bypass.txt', { agents: 0, shells: 2, monitors: 1 }],
   ];
-  for (const [file, want] of cases) assert.deepEqual(parsePane(fixture(file)).background, want, file);
+  for (const [file, want] of cases) assert.deepEqual(counts(parsePane(fixture(file)).background), want, file);
 
   // The same counts under bypass, which is nine characters longer and so cut earlier.
   const bypass = parsePane(fixture('pane-bg-bypass.txt'));
@@ -454,7 +457,7 @@ test('a count cut off before its noun reads as absent', () => {
 
   const bypass = fixture('pane-bg-bypass-narrow.txt');
   assert.match(bypass, /⏵⏵ bypass permissions on · 2 shells, 1\s*$/m);
-  assert.deepEqual(parsePane(bypass).background, { agents: 0, shells: 2, monitors: 0 });
+  assert.deepEqual(parsePane(bypass).background, { agents: 0, shells: 2, monitors: 0, running: [] });
 });
 
 test('a box hides the mode line, and that is unknown rather than none', () => {
@@ -484,4 +487,78 @@ test('the panel is only stripped with the mode line directly above it', () => {
   // Nor is a line carrying the footer's `|`, which the slot never does.
   const footerShaped = real.replace(/^\s+\/rc\s*$/m, '  alpha (main) | Sonnet 5');
   assert.equal(stripAgentPanel(footerShaped).agents, 0);
+});
+
+/*
+ * The rows themselves, for the background line's unfolded list. Re-measured on Claude Code
+ * v2.1.322 in the sandbox's `alpha`, two background subagents, one session created at 220×50
+ * and one at 80×23, neither resized: the panel's shape is unchanged from v2.1.280, and the
+ * title column is the `description` the Agent call was given.
+ */
+test('v2.1.322: the panel still strips at both widths, and its rows are read', () => {
+  for (const file of ['pane-agents-2-v322.txt', 'pane-agents-2-v322-narrow.txt']) {
+    const state = parsePane(fixture(file));
+    assert.equal(state.state, 'idle', file);
+    assert.equal(state.dialog, null, file);
+    assert.equal(state.mode, 'auto', file);
+    assert.equal(state.model, 'Opus 5.5', file);
+    assert.deepEqual(counts(state.background), { agents: 2, shells: 2, monitors: 0 }, file);
+    assert.deepEqual(
+      state.background.running,
+      [
+        { type: 'general-purpose', name: 'Sleep agent one' },
+        { type: 'general-purpose', name: 'Sleep agent two' },
+      ],
+      file,
+    );
+    assert.equal(state.agentRows.more, 0, file);
+    for (const row of state.agentRows.rows) {
+      assert.match(row.elapsed, /^\d+s$/, file);
+      assert.match(row.tokens, /^\d+\.\dk$/, file);
+    }
+  }
+});
+
+test('the roster half of a row carries nothing that ticks', () => {
+  const state = parsePane(fixture('pane-agents-more.txt'));
+  assert.equal(state.background.running.length, 5, 'the five rows drawn, never the hidden two');
+  assert.equal(state.agentRows.more, 2);
+  for (const r of state.background.running) assert.deepEqual(Object.keys(r).sort(), ['name', 'type']);
+});
+
+test('a row: wide, truncated, and with its title column cut away', () => {
+  assert.deepEqual(parseAgentRow('  ◯ general-purpose  Sleep agent one        12s · ↓ 37.3k tokens'), {
+    type: 'general-purpose',
+    name: 'Sleep agent one',
+    elapsed: '12s',
+    tokens: '37.3k',
+  });
+  // One space before the numbers once the title is cut, and the `…` is kept.
+  assert.deepEqual(parseAgentRow('  ◯ general-purpose  Running /bin/sleep 240 in backgr… 2m 51s · ↓ 39.6k tokens'), {
+    type: 'general-purpose',
+    name: 'Running /bin/sleep 240 in backgr…',
+    elapsed: '2m 51s',
+    tokens: '39.6k',
+  });
+  // 34 columns: no title, and the word `tokens` is gone.
+  const cut = parsePane(fixture('pane-agents-cut-narrow.txt')).agentRows.rows;
+  assert.equal(cut.length, 5);
+  assert.deepEqual(cut[0], { type: 'general-purpose', name: null, elapsed: '26s', tokens: '37.9k' });
+  // A title that is itself shaped like numbers stays a title when no numbers follow.
+  assert.deepEqual(parseAgentRow('  ◯ Explore  Count the 3s'), { type: 'Explore', name: 'Count the 3s', elapsed: null, tokens: null });
+});
+
+test('a reply that reads `⏺ main` over `◯` rows is still not a panel, and reads no rows', () => {
+  // The transcript's reply glyph is `⏺` too: a reply mid-screen with the composer below it
+  // is not the last thing on screen, so nothing is stripped and no row is invented.
+  const real = fixture('pane-agents-2-v322.txt');
+  const lines = real.trimEnd().split('\n');
+  const head = lines.findIndex((l) => /^\s*⏺ main\s*$/.test(l));
+  const panel = lines.slice(head);
+  const moved = [...lines.slice(0, 3), ...panel, ...lines.slice(3, head)].join('\n');
+  const strip = stripAgentPanel(moved);
+  assert.equal(strip.agents, 0);
+  assert.deepEqual(strip.rows, []);
+  assert.equal(strip.text, moved);
+  assert.equal(parsePane(moved).agentRows, null);
 });

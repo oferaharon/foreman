@@ -1,0 +1,23 @@
+
+✻ Waiting for 1 background agent to finish
+
+⏺ Agent "Sleep agent two" is waiting on its own background work · 12s
+
+⏺ Sleep agent two has done the same thing, so neither agent has reported yet;
+  both are waiting for their sleeps to end. I'll pass on whatever they say when
+  they finish.
+
+✻ Worked for 21s · done 12:05 AM · 2 shells still running
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────
+  alpha (main) | Opus 5.5 | ctx: 5%                                        /rc
+  ⏵⏵ auto mode on · 2 shells · ← 2 agents
+
+  ⏺ main
+  ◯ general-purpose  Sleep agent one                       8s · ↓ 33.9k tokens
+  ◯ general-purpose  Sleep agent two                      12s · ↓ 37.3k tokens
+
+
+

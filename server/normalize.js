@@ -222,6 +222,10 @@ function parseCommandOutput(text) {
 const TASK_NOTICE_RE = /^<task-notification>[\s\S]*<\/task-notification>$/;
 const NOTICE_TAGS = {
   taskId: /<task-id>([\s\S]*?)<\/task-id>/,
+  toolUseId: /<tool-use-id>([\s\S]*?)<\/tool-use-id>/,
+  status: /<status>([\s\S]*?)<\/status>/,
+  tokens: /<subagent_tokens>\s*(\d+)\s*<\/subagent_tokens>/,
+  durationMs: /<duration_ms>\s*(\d+)\s*<\/duration_ms>/,
   summary: /<summary>([\s\S]*?)<\/summary>/,
   result: /<result>([\s\S]*?)<\/result>/,
   event: /<event>([\s\S]*?)<\/event>/,
@@ -238,6 +242,17 @@ function parseTaskNotice(rec, text) {
   return {
     summary: noticeTag(text, 'summary') || noticeTag(text, 'taskId'),
     text: noticeTag(text, 'result') || noticeTag(text, 'event'),
+    // Which task this is about, for `server/agents.js`: a subagent's notice carries its
+    // `agentId` as the task id and the Agent call's own id as `tool-use-id` (v2.1.322). Absent
+    // tags read as null, never as an empty string a reader could mistake for an id.
+    taskId: noticeTag(text, 'taskId') || null,
+    toolUseId: noticeTag(text, 'toolUseId') || null,
+    status: noticeTag(text, 'status') || null,
+    // The run's own totals when it stopped (`<usage>`, v2.1.322) — the same two numbers the
+    // terminal's agent panel draws on that run's row, which is how `agents.js` joins a row
+    // whose title is a progress summary rather than the call's description.
+    tokens: noticeTag(text, 'tokens') ? Number(noticeTag(text, 'tokens')) : null,
+    durationMs: noticeTag(text, 'durationMs') ? Number(noticeTag(text, 'durationMs')) : null,
   };
 }
 
