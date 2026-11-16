@@ -167,6 +167,7 @@ export const BOTS_FOLDED_KEY = 'foreman.botsFolded';
 export const CLEAR_PREP_KEY = 'foreman.clearPrep';
 export const RAIL_FILTER_KEY = 'foreman.railFilter';
 export const AGENTS_FOLDED_KEY = 'foreman.agentsFolded';
+export const AWAKE_ONLY_KEY = 'foreman.awakeOnly';
 
 /**
  * Whether "use" on a ghost-text suggestion sends it, or only writes it into the box.
@@ -273,6 +274,19 @@ export const clearPrep = text(CLEAR_PREP_KEY, DEFAULT_CLEAR_PREP);
  * reads nothing about groups.
  */
 export const railFilter = text(RAIL_FILTER_KEY, '');
+
+/**
+ * Whether the desktop rail hides its sleeping (hibernated) rows — the rail head's "awake
+ * only" toggle (`web/rail-awake.js`).
+ *
+ * Off by default, and for `asideFolded`'s reason: `flag()` answers `false` both for a
+ * browser never told anything and for one whose storage is blocked, and a rail that hid rows
+ * on a preference nobody set, in a window that cannot remember being told to show them,
+ * would be a rail that had quietly lost sessions. A `flag` beside `railFilter` rather than a
+ * third value of it, because the two are independent and both can hold at once. Drawing
+ * only: no pin, collapse or sleep record is written. Desktop only.
+ */
+export const awakeOnly = flag(AWAKE_ONLY_KEY);
 
 /**
  * The three tabs of the phone's home screen, in the order they are drawn.

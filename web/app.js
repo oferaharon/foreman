@@ -59,6 +59,9 @@ import { botsFolded } from './prefs.js';
 import { clearPrep } from './prefs.js';
 import { railFilter } from './prefs.js';
 import { agentsFolded } from './prefs.js';
+// Whether the rail hides its sleepers — the rail head's awake-only toggle, per browser.
+import { awakeOnly } from './prefs.js';
+import { awakeToggleFace, funnelHolds, hiddenSleepers, railShown } from './rail-awake.js';
 import {
   filterLabel,
   filterTarget,
@@ -496,6 +499,7 @@ const el = {
   flatRail: document.getElementById('flatRail'),
   railFilter: document.getElementById('railFilter'),
   railFilterCount: document.getElementById('railFilterCount'),
+  awakeOnly: document.getElementById('awakeOnly'),
   railJump: document.getElementById('railJump'),
   railQuota: document.getElementById('railQuota'),
   railList: document.getElementById('railList'),
@@ -1662,8 +1666,9 @@ function pinGrip(s) {
     if (pinDrag) return;
     // One place among the pins that are *drawn* — with the rail filtered to a group or a
     // room, the others are off screen and are not stepped past (`mergeFilteredOrder`).
-    const filter = railFilterNow();
-    const order = pinnedRows().filter((x) => inFilter(x, filter, keptLeads(state.sessions, filter))).map(pinKey);
+    // And with sleepers hidden (`awakeOnly`), a hidden pinned sleeper is not stepped past
+    // either — the same slot rule, one predicate for both (`railRowShown`).
+    const order = pinnedRows().filter(railRowShown()).map(pinKey);
     const from = order.indexOf(pinKey(s));
     const next = fullPinOrder(movedPinOrder(order, from, e.key === 'ArrowUp' ? from - 1 : from + 2));
     if (next) savePinOrder(next);
@@ -5120,7 +5125,13 @@ function renderRail() {
   const filter = railFilterNow();
   if (railFilter.value && !filter && rosterSeen) return void setRailFilter('');
   const filterLeads = keptLeads(state.sessions, filter);
-  const shown = (s) => inFilter(s, filter, filterLeads);
+  const inFunnel = (s) => inFilter(s, filter, filterLeads);
+  // And the awake-only toggle (`web/rail-awake.js`), on top of the funnel and independent of
+  // it: with it on, no sleeper reaches any list below — pinned, folders, groups, `recent` —
+  // so a folder or group holding only sleepers has nothing to draw and the empty-heading
+  // rule drops it, unchanged. Its own stored flag, never a value of the funnel's.
+  const shown = railShown(inFunnel, awakeOnly.on);
+  paintAwakeOnly(hiddenSleepers(sleepers, inFunnel, awakeOnly.on));
 
   const pinned = pinnedRows(sleepers).filter(shown);
   // A worker that wants something is its *lead's* to deal with first: its permission prompt
@@ -5196,7 +5207,11 @@ function renderRail() {
   // A filter over a group or a room with nothing left to draw anywhere — every session in it
   // closed, filed elsewhere or removed from the room — would leave a blank rail with a toggle
   // in its head. It lets go instead.
-  if (filter && rosterSeen && !pinned.length && !rest.length) return void setRailFilter('');
+  //
+  // Asked of the funnel alone, sleepers included, never of what is drawn: a group or room
+  // whose only sessions are asleep, with sleepers hidden, is a funnel the awake-only toggle
+  // emptied — not one that emptied itself — and turning the toggle off must hand it back.
+  if (filter && rosterSeen && !funnelHolds(state.sessions, sleepers, inFunnel)) return void setRailFilter('');
   /** Only the rows that are running — what the collapsed group's dot may be lit by. */
   const awake = (list) => list.filter((s) => !s.asleep);
 
@@ -19783,6 +19798,40 @@ function railFilterNow() {
     sessions: state.sessions,
     asleep: state.asleep,
   });
+}
+
+/** The rail's `shown` predicate as `renderRail` builds it — the funnel and the awake-only
+ *  toggle both — for the readers outside it that must agree with it about which pins are
+ *  drawn: the pinned grip's arrows. */
+function railRowShown(filter = railFilterNow()) {
+  const leads = keptLeads(state.sessions, filter);
+  return railShown((s) => inFilter(s, filter, leads), awakeOnly.on);
+}
+
+/**
+ * The awake-only toggle's face: pressed while sleepers are hidden, and a title saying what a
+ * click will do — naming how many it is hiding, since the rail no longer shows them.
+ */
+function paintAwakeOnly(hidden) {
+  const btn = el.awakeOnly;
+  if (!btn) return;
+  const face = awakeToggleFace(awakeOnly.on, hidden);
+  btn.setAttribute('aria-pressed', String(face.pressed));
+  btn.title = face.title;
+  btn.setAttribute('aria-label', face.label);
+}
+
+/**
+ * Hide or show the rail's sleepers. Per browser (`web/prefs.js`), drawing only: nothing is
+ * written anywhere but this browser's own storage — not a pin, not a group's collapse, not a
+ * sleep record — so turning it off draws exactly the rail it found. A pane already showing a
+ * sleeper keeps showing it; this is about the rail, not about what is open.
+ */
+if (el.awakeOnly) {
+  el.awakeOnly.onclick = () => {
+    awakeOnly.set(!awakeOnly.on);
+    renderRail();
+  };
 }
 
 /**

@@ -770,8 +770,9 @@ fact; the front end's own cascade traps are here too. Evidence:
   before benching anything.
   [rail-and-groups#a-static-copy-of-web](docs/traps/rail-and-groups.md#a-static-copy-of-web)
 - `web/styles.css` (`.rail-actions`, `--rail`, `.rail-filter`) · `web/index.html` (the rail
-  head) — **A fifth button does not fit the rail head at the default width.** Now six fit, the
-  sixth a 21px icon with an out-of-flow count and 5px to spare; a seventh is a second line.
+  head) — **A fifth button does not fit the rail head at the default width.** Now seven fit —
+  the awake-only toggle bought with a 0.2rem gap and 0.25rem text-button padding, icons
+  untouched, 6.3px to spare, MEASURED; an eighth is a second line.
   [rail-and-groups#a-fifth-button-in-the-rail-head](docs/traps/rail-and-groups.md#a-fifth-button-in-the-rail-head)
 - `web/m/index.html` · `web/m/m.css` · `web/m/lead.css` (`.m-tab`, `.m-nav-*`) — **The phone
   loads five stylesheets into one `<head>`, so a class the shell shares with a screen is a
@@ -1365,7 +1366,9 @@ reply, with something typed in its terminal, open in a browser, or set to keep a
 every rule in `sleepVerdict`, in words, and every doubt a no. **Sleepers ride beside the
 roster, never in it**: an `asleep` sibling on the frame, the `rooms`/`bots` precedent, so the
 needs-you stripes, notifications, the queue, pins, snapshot, relaunch, `/exit` and read state are never
-handed one. The rail draws each greyed in place; clicking opens the conversation read-only
+handed one. The rail draws each greyed in place — or hides them all behind the rail head's
+**awake only** toggle (`web/rail-awake.js`, per browser, drawing only, composed with the
+funnel rather than a value of it); clicking opens the conversation read-only
 with **Wake**, which is `wakeSleeper` → `startEntries` — the restore half of `relaunchBench` — on `--resume`
 of the same conversation, under the same name and role, on the **launch model**, re-pinned
 where it is drawn. A sleeper can be pinned, unpinned and dragged like any row (*Pinning*

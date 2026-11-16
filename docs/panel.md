@@ -602,6 +602,16 @@ asleep, never wears a needs-you stripe, never counts as unread, and doesn't ligh
 dot. A folder whose sessions are all asleep keeps its heading. The rail's stat line gains
 `asleep N` once hibernation is on or anything is asleep.
 
+**Awake only.** A moon struck through, in the rail head between `recent` and settings, hides
+every sleeping row — in folders, groups, the pinned group and `recent` — and with them any
+folder or group left with nothing to draw. Its title says how many it is hiding; the stat
+line's `asleep N` still counts them all. It combines with the group or room funnel (both
+apply at once, and a funnel whose only rows are asleep is kept, not let go), and a collapsed
+group's summary and dot already ignore sleepers, so nothing there changes. Per browser,
+drawing only: it writes no pin, no group's collapse and no sleep record, and a pin dragged
+while sleepers are hidden writes the whole order with each hidden sleeper left in the slot it
+held. Desktop only.
+
 **A sleeper's pin is live.** Its star pins and unpins it like any row's — a pin goes to the
 bottom of the pinned group, an unpin sends it back among its folder's rows — and a pinned
 sleeper has the same grip as a live one: drag it, or `↑` / `↓` on the focused grip, to any

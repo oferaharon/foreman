@@ -471,6 +471,17 @@ sixth at the ordinary icon width leaves **half a pixel**, and the toggle's count
 its glyph wrapped `settings` to a second line. It ships at 21.4px (tighter side padding) with
 the count as an out-of-flow badge, 5px to spare. A seventh control there is a second line.
 
+**And then a seventh, by tightening rather than shrinking** (the awake-only toggle, the
+maintainer's ask of 2026-11-16). Measured on a scratch panel at the default width with every
+control drawn — `+ new` 48.6, `snapshot` 68.9, `briefs` 55.4, the clear toggle 21.4, and
+`recent`, awake-only and `settings` at 26.2 each — the old 0.4rem gap and 0.4rem text padding
+came to **311.3px against 284**, and `settings` wrapped. Two numbers buy it back without
+touching an icon: `.rail-actions`' gap to **0.2rem**, and `.new-session`'s side padding to
+**0.25rem** (the three text buttons only; `.icon-only` and `.rail-filter` set their own). That
+is **277.7px, 6.3px to spare**, all seven on one line; 0.25rem of gap was tried first and left
+1.5px, too thin to trust across fonts. An eighth control there is a second line, and the next
+thing to give is not padding — it is a button. `test/rail-awake.test.js` pins both numbers.
+
 Which is why the needs-you **jump count** is not there. It sits on the brand line instead,
 right-aligned after the connection dot, where everything right of the wordmark was empty —
 measured on the bench at the default width with the filter toggle drawn as well: `.rail-actions`
