@@ -356,7 +356,10 @@ test('the rail and the grip read one resolution, rooms and sleepers included', (
     assert.ok(now.includes(k), `railFilterNow hands over ${k}`);
   }
   assert.match(fn('renderRail'), /const filter = railFilterNow\(\);/);
-  assert.match(fn('pinGrip'), /const filter = railFilterNow\(\);/);
+  // The grip asks the rail's own combined predicate (funnel + awake-only), which resolves
+  // through the same `railFilterNow`.
+  assert.match(fn('pinGrip'), /pinnedRows\(\)\.filter\(railRowShown\(\)\)/);
+  assert.match(fn('railRowShown'), /function railRowShown\(filter = railFilterNow\(\)\)/);
   assert.ok(!/filterFolders\(/.test(app), 'no reader resolves a group on its own any more');
 });
 

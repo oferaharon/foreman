@@ -269,7 +269,12 @@ body.row-dragging * { cursor: row-resize !important; }
    without crowding the title line. */
 .rail-actions {
   display: flex;
-  gap: 0.4rem;
+  /* 0.2rem, and the text buttons' side padding 0.25rem (`.new-session`), are what buy the
+     seventh control (the awake-only toggle) one line at the default `--rail: 20rem` —
+     MEASURED on a scratch panel with every control drawn: 277.7px of 284, 6.3px to spare,
+     where 0.4rem and 0.4rem were 311.3px and wrapped `settings`. No icon button shrank
+     (rail-and-groups#a-fifth-button-in-the-rail-head). */
+  gap: 0.2rem;
   margin-top: 0.15rem;
   /* The rail's width is yours to set, and at the floor these four no longer fit on one
      line. Wrapping is the honest answer: without it they shrink past their own labels and
@@ -293,7 +298,9 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink-muted);
   border: 1px solid var(--rule-strong);
   border-radius: 3px;
-  padding: 0.15rem 0.4rem;
+  /* 0.25rem a side, not 0.4: the rail head's width budget, measured — see `.rail-actions`.
+     `.icon-only` and `.rail-filter` set their own and are untouched by this. */
+  padding: 0.15rem 0.25rem;
 }
 
 .new-session:hover { color: var(--accent); border-color: var(--accent); }
@@ -311,6 +318,9 @@ body.row-dragging * { cursor: row-resize !important; }
 /* Off on its own at the right end: the other two *do* something, this one changes how the
    rail reads, and a view switch sitting flush against them would invite a stray click. */
 .rail-toggle { margin-left: auto; }
+/* Two toggles side by side (`recent`, then awake-only): only the first takes the push, or the
+   free space would be split and open a gap between the pair. */
+.rail-toggle + .rail-toggle { margin-left: 0; }
 
 /* The clear-filter toggle takes over the push to the right end while it is drawn, so it
    sits flush against `recent` — each of the two changes how the rail reads — and `recent`
@@ -325,7 +335,8 @@ body.row-dragging * { cursor: row-resize !important; }
    a second line. Measured on the scratch panel (rail-and-groups#a-fifth-button-in-the-
    rail-head). So the side padding is a little tighter than `.icon-only`'s (21.4px, 5px to
    spare), and the count is a badge over the top-right corner, out of flow, the snapshot's
-   drift dot's own trick. */
+   drift dot's own trick.Since then the awake-only toggle made it seven, paid for by `.rail-actions`' gap and the
+   text buttons' padding rather than by any icon — see `.rail-actions`. */
 /* `.new-session.` for the weight to beat `.new-session.icon-only`'s padding. */
 .new-session.rail-filter {
   margin-left: auto;
