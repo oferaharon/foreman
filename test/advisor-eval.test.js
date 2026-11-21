@@ -237,6 +237,8 @@ test('replay end to end: rows, a nameless summary, a repo key, a resume that mak
   assert.match(summary, /Would risk/);
   assert.match(summary, /unscored/);
   assert.match(summary, /held-out set only/);
+  // beta-runner-fix ran on Sonnet, the stub advised Opus, and it was reworked.
+  assert.match(summary, /\| Sonnet \| Opus \| 1 \| 100% \|/);
   for (const line of lines) for (const t of tasks) assert.ok(!line.includes(t.id), 'stdout names a task');
   const key = JSON.parse(fs.readFileSync(path.join(out, 'repo-key.json'), 'utf8'));
   assert.deepEqual(Object.values(key).sort(), Object.values(REPOS).sort());
@@ -304,4 +306,16 @@ test('live mode joins advice.jsonl with task records and outcomes, per team', ()
   assert.match(page, /Advisor calls: 3 \(1 failed\)/);
   for (const t of tasks) assert.ok(!page.includes(t.id));
   assert.ok(!page.includes('alpha'));
+});
+
+test('pairTable groups by family, skips unscored rows, and reads retired ids', () => {
+  const t = ev.pairTable([
+    { ok: true, outcome: 'clean', ran: 'claude-opus-5', model: 'claude-sonnet-5-5' },
+    { ok: true, outcome: 'struggled', ran: 'claude-opus-5-5', model: 'claude-sonnet-5-5' },
+    { ok: true, outcome: 'abandoned', ran: 'claude-opus-5-5', model: 'claude-sonnet-5-5' },
+    { ok: false, outcome: 'clean', ran: 'claude-opus-5-5', model: null },
+    { ok: true, outcome: 'clean', ran: null, model: 'claude-opus-5-5' },
+  ]);
+  assert.match(t, /\| Opus \| Sonnet \| 2 \| 50% \|/);
+  assert.equal(t.trim().split('\n').length, 3);
 });

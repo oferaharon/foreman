@@ -484,6 +484,24 @@ function spreadTable(rows, keyLabel, keyOf) {
   return lines.join('\n');
 }
 
+/** Ran-on × advised, with how often each pairing went less than clean. */
+export function pairTable(rows) {
+  const g = new Map();
+  for (const r of rows) {
+    if (!r.ok || !SCORED.has(r.outcome) || !family(r.ran) || !family(r.model)) continue;
+    const k = `${family(r.ran)}\u0000${family(r.model)}`;
+    if (!g.has(k)) g.set(k, { ran: family(r.ran), adv: family(r.model), n: 0, bad: 0 });
+    const e = g.get(k);
+    e.n++;
+    if (r.outcome !== 'clean') e.bad++;
+  }
+  const cap = (f) => f[0].toUpperCase() + f.slice(1);
+  const list = [...g.values()].sort((a, b) => FAMILY_RANK[a.ran] - FAMILY_RANK[b.ran] || FAMILY_RANK[a.adv] - FAMILY_RANK[b.adv]);
+  const l = ['| ran on | advisor said | tasks | went less than clean |', '| --- | --- | ---: | ---: |'];
+  for (const e of list) l.push(`| ${cap(e.ran)} | ${cap(e.adv)} | ${e.n} | ${pct(e.bad, e.n)} |`);
+  return l.join('\n');
+}
+
 /** The one page. Takes rows and run metadata; names nothing but hashes and model names. */
 export function renderSummary(rows, meta = {}) {
   const first = (model, split) => rows.filter((r) => r.advisorModel === model && r.run === 1 && (!split || r.split === split));
@@ -513,6 +531,12 @@ export function renderSummary(rows, meta = {}) {
   sec.push(
     '**Would risk** is the number that matters most: a task the advisor would have put on a smaller model, which then struggled even on the larger one. **Read "would save" with care**: past Sonnet tasks were picked by a lead *because* they looked small, so "the advisor says Sonnet and the task went clean on Opus" does not prove Sonnet would have managed — only a real re-run, or the live trial, can show that. Tasks with no recorded model (the earliest, which ran on whatever the machine default was) are left out of every comparison.',
   );
+
+  sec.push('## Does it tell hard tasks from easy ones?');
+  sec.push(
+    'How often a task went less than clean (reworked or struggled), split by what it ran on and what the advisor said. If the advisor reads difficulty, the rows where it says "heavier" should go wrong more often than the rows where it agrees.',
+  );
+  sec.push(pairTable(main));
 
   const sa = selfAgreement(rows.filter((r) => r.advisorModel === ADVISOR_MODEL));
   sec.push('## Does it agree with itself?');
@@ -575,7 +599,7 @@ export function renderSummary(rows, meta = {}) {
   }
   sec.push(cl.join('\n'));
   const extras = [];
-  if (meta.wallMs) extras.push(`Wall time ${Math.round(meta.wallMs / 60000)} min.`);
+  if (meta.startedAt && meta.finishedAt) extras.push(`Elapsed from first start to finish: ${Math.round((meta.finishedAt - meta.startedAt) / 60000)} min, three calls at a time.`);
   if (meta.stopped) extras.push('**The run was stopped early by its token budget; the numbers above cover only the calls made.**');
   if (meta.rail) {
     extras.push(
