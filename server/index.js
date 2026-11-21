@@ -124,8 +124,8 @@ import { BotSubs } from './bot-subs.js';
 import {
   callerMember,
   memberFor,
+  deliveryFor,
   memberLabel,
-  mentionsIn,
   resolveMembers,
   roomHumanLine,
   roomPeerLine,
@@ -3905,12 +3905,14 @@ app.get('/api/rooms/:id', (req, res) => {
  * name is **asleep** is handed one too — `state: 'held'`, reason `asleep` — and its copy
  * waits in the hibernation store until the maintainer wakes it; the word stays `handed`.
  *
- * **`@name` is parsed here and changes nothing about who gets a copy.** `mentionsIn` reads
- * the body against the room's own membership and the two envelope functions say something
- * different to a named member than to everybody else — that is the whole of the feature.
- * The loop below is untouched by it: no branch on `to`, no member skipped, no second
- * destination. Anyone tempted to make a mention *deliver* should read the maintainer's
- * ruling in `rooms-line.js`'s header first; it was asked for and refused.
+ * **`@name` decides who gets a copy** — the maintainer's ruling of 2026-11-20, reversing
+ * their ruling of 2026-09-05 that a mention was a signal only. `deliveryFor` reads the body
+ * against the room's own membership once: a post naming members is typed to those members
+ * only, a post naming nobody — or saying `@all` — to every other member, and the log entry
+ * records every post either way, with `handed` saying who was typed a copy and `narrowedTo`
+ * saying the post was narrowed. The reasoning is in `rooms-line.js`'s header, part three.
+ * Narrowing only ever *removes* members from the loop: it never adds a destination, and every
+ * copy still goes through the same guarded path.
  */
 app.post('/api/rooms/:id/post', async (req, res) => {
   const { id } = req.params;
@@ -3969,17 +3971,19 @@ app.post('/api/rooms/:id/post', async (req, res) => {
        * which is how a member ends up recorded against a row that had already gone.
        */
       /*
-       * Who the post named, parsed **once, here** — not in the browser and not in the MCP
-       * process, so the maintainer typing `@beta-main` into the room pane and a session
-       * posting the same words through `group_post` get identical treatment. The browser's
-       * autocomplete only helps somebody type it.
+       * Who the post named and who it is typed to, parsed **once, here** — not in the browser
+       * and not in the MCP process, so the maintainer typing `@beta-main` into the room pane
+       * and a session posting the same words through `group_post` get identical treatment.
+       * The browser's autocomplete only helps somebody type it.
        *
-       * A **signal and nothing else**: nothing below this line reads `to` to decide who
-       * gets a copy. That is the maintainer's ruling — every member still hears everything,
-       * because the room is the shared record and a question two members cannot see is a
-       * side conversation nobody can catch up on.
+       * `only` is the narrowed list, or `null` for everyone (`deliveryFor`). The author's
+       * own label is passed so a post naming only its author narrows nothing.
        */
-      const to = mentionsIn(text, room.members);
+      const { to, only } = deliveryFor(text, room.members, {
+        author: author ? memberLabel(author.member) : '',
+      });
+      // The arrow says who got a copy: the narrowed list, or `→ all`.
+      const arrow = only ?? [];
 
       const resolved = resolveMembers(room.members, sessions);
       const from = author ? memberName(author.member, author.row) : 'panel';
@@ -3992,10 +3996,10 @@ app.post('/api/rooms/:id/post', async (req, res) => {
        * shared: the body, the sender and the room.
        */
       try {
-        // `you` is deliberately omitted: that composes the *unaddressed* variant, which
-        // names every addressee and is therefore the one that would find a bad name in `to`.
-        if (by === null) roomHumanLine({ room, body: text, to });
-        else roomPeerLine({ room, from, body: text, to });
+        // `you` is deliberately omitted: that composes the variant naming every recipient,
+        // which is therefore the one that would find a bad name in the list.
+        if (by === null) roomHumanLine({ room, body: text, to: arrow });
+        else roomPeerLine({ room, from, body: text, to: arrow });
       } catch (err) {
         return res.status(400).json({ error: err.message });
       }
@@ -4007,6 +4011,14 @@ app.post('/api/rooms/:id/post', async (req, res) => {
         // row the author resolved to rather than on its index, so no member — however the
         // file came to hold it — can route the post back into the pane that wrote it.
         if (author && entry.row && entry.row.paneId === author.row.paneId) continue;
+        /*
+         * A narrowed post is typed to the members it names and nobody else. Tested on
+         * `memberLabel` — the stored label the parse matched — and never on the live row's
+         * name, or a member renamed by a relaunch would be named and then skipped. A member
+         * skipped here is not in `handed`: the list is who a copy was handed to, and the log
+         * entry itself is how everybody else can read the post.
+         */
+        if (only && !only.includes(memberLabel(entry.member))) continue;
 
         const mark = {
           name: memberName(entry.member, entry.row),
@@ -4048,8 +4060,8 @@ app.post('/api/rooms/:id/post', async (req, res) => {
           const you = memberLabel(entry.member);
           line =
             by === null
-              ? roomHumanLine({ room, body: text, human, to, you })
-              : roomPeerLine({ room, from, body: text, human, to, you });
+              ? roomHumanLine({ room, body: text, human, to: arrow, you })
+              : roomPeerLine({ room, from, body: text, human, to: arrow, you });
         } catch {
           // Only the per-folder name can differ from the composition above, so this is one
           // member's miss and not the post's refusal.
@@ -4083,7 +4095,17 @@ app.post('/api/rooms/:id/post', async (req, res) => {
           id,
           // `to` only when there is one: an old entry carries none, and a new entry naming
           // nobody should be spelled the same way rather than carrying an empty list.
-          { from, kind: by === null ? 'human' : 'peer', text, ...(to.length ? { to } : {}), handed },
+          // `narrowedTo` likewise, and only on a post typed to its named members alone — an
+          // entry carrying `to` without it went to everyone, which is what every entry
+          // written before 2026-11-20 did, so an old line reads correctly with no rewrite.
+          {
+            from,
+            kind: by === null ? 'human' : 'peer',
+            text,
+            ...(to.length ? { to } : {}),
+            ...(only ? { narrowedTo: only } : {}),
+            handed,
+          },
           { by },
         );
       } catch (err) {

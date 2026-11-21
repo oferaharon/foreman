@@ -218,19 +218,54 @@ not defensive noise: it is the only thing standing between these two fields. Whe
 anything to either node, anchor on that node's **own** class prefix (`group-time`,
 `shared-time`) rather than on the shape they share, and read back which one you edited.
 
-## `@name` in a room is a signal
+## `@name` in a room decides who gets a copy
 
-**`@name` in a room is a signal, and the ruling that makes it one is easy to optimise away.**
-Every member still receives a copy of every post; a mention changes only *what each recipient
-is told* — the addressee is told to answer in the room, everybody else is told it is theirs to
-know rather than to answer. Typing only into the named sessions was asked for and **refused**:
-the room is the shared record, and a question two members cannot see is a side conversation
-nobody can catch up on. So the fan-out in `POST /api/rooms/:id/post` has no branch on `to` at
-all, and the composer's `@` menu is not the retired peer-message picker in disguise — that one
-*chose a destination* and lifted the token back out of the text, this one types a name **into**
-the body and the send still carries `{text}` and nothing else. Two details behind it: the parse
-matches the **stored** member label (`memberLabel`), never the live row's name, because the
-endpoint's per-copy "is this recipient an addressee" test asks the same function and two
-spellings would address a post to a member no copy is ever told about; and it is
-**longest-name-first**, or a room holding both `alpha` and `alpha-main` reads `@alpha-main` as
-`@alpha`. A name nobody in the room answers to is plain text, never an error.
+**`@name` in a room decides who gets a copy — the maintainer's ruling of 2026-11-20, which
+reversed their ruling of 2026-09-05 — and the log, not the copies, is the shared record.** A
+post naming one or more members is typed into those members' terminals only; a post naming
+nobody, or saying `@all`, goes to every other member; `@all` beside a name is still everyone;
+a name nobody answers to is plain text and narrows nothing. The author's own pane never gets
+a copy, and an author naming only itself narrows nothing either, rather than typing its post
+to nobody. The 2026-09-05 ruling had refused exactly this — the room was the shared record,
+and a question two members could not see was a side conversation nobody could catch up on.
+What reversed it is the cost on the other side: **every copy typed into a terminal is an
+interruption and a turn for the session receiving it**, and a room of eight paid that seven
+times for a question meant for one. The shared record never needed the copies: the room's
+log keeps every post whoever it was typed to, `group_read` reads it, and the entry says who
+was handed one (`handed`) and that it was narrowed (`narrowedTo`). So a narrowed post is
+**not private**, and every brief says so.
+
+What reasoning gets wrong about it, and every one of these is load-bearing:
+
+- **One parse, one decision.** `addressing` in `server/rooms-line.js` is the only reader of
+  what counts as a mention, `@all` included, and `deliveryFor` the only decision built on it;
+  `mentionsIn` is `addressing(...).to`. A second spelling of `@all` — in the browser, in the
+  MCP process — would be a room where one side thinks a post went to everyone.
+- **`all` is a word of the parse, never a member.** A member whose stored label is literally
+  `all` cannot be named alone; `@all` means everyone even then. Longest-first is what keeps
+  `@all-hands` a member and not `@all`.
+- **The parse matches the *stored* member label (`memberLabel`), never the live row's name**,
+  and the fan-out's "is this member on the list" test asks the same function. Two spellings
+  would name a member and then skip it — a relaunch under a changed label is enough.
+- **Longest-name-first**, or a room holding both `alpha` and `alpha-main` reads `@alpha-main`
+  as `@alpha` — which is now a post typed to the wrong session, not a wrong label.
+- **Narrowing only removes members from the loop.** It never adds a destination, and every
+  copy still goes `sendOrHold` → `sendOrQueue` → `PaneLock` → `assertNotBlocked`; a sleeping
+  named member is held exactly as before. Check → fan out → append and the word `handed` are
+  untouched (above).
+- **A member left out is not in `handed`.** The list is who a copy was handed to; listing the
+  others as `unreachable` would dress a decision as a failure.
+- **The arrow says who got a copy, not who was named.** A narrowed copy reads `→ you` or
+  `→ you and gamma-master`; everything else reads `→ all`, including `@all` beside a name.
+  The old fourth arrow, `→ beta-main (not you — for your information)`, is never composed —
+  `arrowFor` refuses a copy for a member a narrowed post does not name — and is still **read**
+  by `readRoomDelivery`, because transcripts on this Mac hold it. Do not loosen `HEAD_RE` or
+  drop `NOT_YOU` while tidying: the header is one of the two witnesses
+  ([the transcript trap](transcript.md#a-room-delivery-leaves-the-same-record-a-typed-message-leaves)).
+- **An old entry with `to` and no `narrowedTo` went to everyone**, because before 2026-11-20
+  every post did. The pane reads it that way (`to beta-main`, against `only to beta-main` for
+  a narrowed one), and the append-only log is never rewritten to say otherwise.
+
+The composer's `@` menu still types a name **into** the body and the send still carries
+`{text}` and nothing else — the server's parse of that body is what narrows. It is not the
+retired peer-message picker, which chose a destination client-side and lifted the token out.

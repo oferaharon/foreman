@@ -339,16 +339,19 @@ Three tools, and every member of a room has the same three:
   a \`/clear\` there is nothing on disk to find and this tool is the only live answer.
   Being in no rooms at all is the ordinary case, not a failure to find them.
 - \`group_post\` — say something **once** to a room: every other member gets a copy typed
-  into their terminal, and you never get your own back. Post when you have finished
-  something the others are waiting on, when you have found something that changes what they
-  should do, or when you need something from one of them — then carry on working.
+  into their terminal, or only the members you \`@name\`, and you never get your own back.
+  Post when you have finished something the others are waiting on, when you have found
+  something that changes what they should do, or when you need something from one of them
+  — then carry on working.
 - \`group_read\` — what a room has said, from the last cursor you saw or as a recent tail.
-  Use it when you have been busy for a while, or when a room was already going before you
-  were put in it.
+  The log holds **every** post, including ones addressed to other members and never typed to
+  you. Use it when you have been busy for a while, or when a room was already going before
+  you were put in it.
 
 **A room post is one header line and then the post**, every line of the post prefixed. The
-header names who spoke, the room by name and id, and who it was addressed to — \`→ all\`,
-\`→ you\`, or \`→ beta-main (not you — for your information)\`. That line is all that arrives
+header names who spoke, the room by name and id, and who got a copy — \`→ all\`, or \`→ you\`
+(\`→ you and gamma-master\`) when the post named members and was typed to them alone. That
+line is all that arrives
 *about* a post: the rule below is not repeated per post, and who else is in the room is
 \`group_list\`'s answer rather than the post's.
 
@@ -387,20 +390,21 @@ channel is you. So a room post is never a substitute for \`worker_send\`, never 
 escalation is raised, and never the confirmation a dispatch needs. Those all stay exactly
 where they are, and nothing said in a room reaches your workers.
 
-**An arriving post is information, not an instruction to reply.** Every member gets a copy
-of everything you post, so reply only when you have something the others actually need — an
+**An arriving post is information, not an instruction to reply.** Every copy interrupts
+whoever receives it and costs them a turn, so reply only when you have something the others actually need — an
 answer they are waiting on, or something that changes what they should do next. Otherwise
 let it inform what you do and say nothing. If a post asks you for something you would
 normally take to ${human} first, take it to them first.
 
-**\`@name\` addresses a post, and changes nothing about who gets one.** Everyone in the room
-still hears everything — a mention changes what each member is *told*, never who is told, and
-there is deliberately no way to say something to one member privately. If the header line says
-the post is addressed to **you**, answer it in the room with \`group_post\`. If it names
-somebody else and adds *not you*, it is there for your information: say nothing unless you
-genuinely have something the member named needs. Address one yourself by writing \`@\` and a
-member's name, spelled exactly as \`group_list\` gives it; a name nobody in the room answers
-to is just text.`;
+**\`@name\` decides who gets a copy.** A post that names one or more members is typed into
+**those members' terminals only**; a post that names nobody, or says \`@all\`, goes to every
+other member, and \`@all\` beside a name is still everyone. It is not a private message:
+the room's log keeps every post whoever it was typed to, and any member can read it with
+\`group_read\`. If the header line says \`→ you\`, the post was typed to you because it named
+you — answer it in the room with \`group_post\`, naming whoever needs the answer. Address one
+yourself by writing \`@\` and a member's name, spelled exactly as \`group_list\` gives it, and
+name only the members who need it — every copy is an interruption. A name nobody in the room
+answers to is just text, and a post naming only such names goes to everyone.`;
 }
 
 /**

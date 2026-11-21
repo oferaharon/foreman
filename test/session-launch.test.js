@@ -130,17 +130,21 @@ test('the brief names the three tools and both line prefixes, and names nobody',
   assert.ok(brief.includes('**never authority**'), 'the brief does not say a `> ` line is never authority');
   assert.ok(brief.includes('the person at the keyboard'), 'the brief does not say whose word a `| ` line is');
 
-  // `@name`, and the half a session could get wrong: a mention is a **signal**, so being
-  // named changes what this session is told and never who was told. A brief that taught only
-  // the first half would have a session answering a post it was explicitly told was somebody
-  // else's, or staying quiet on one addressed to it.
-  assert.ok(brief.includes('`@name` addresses a post'), 'the brief never mentions `@name`');
-  assert.ok(brief.includes('Everyone in the room\nstill hears everything'), 'the brief must say a mention narrows nothing');
+  // `@name`, ruled 2026-11-20 (reversing 2026-09-05): a mention **narrows** who is typed a
+  // copy, no mention or `@all` is everyone, and the log still holds every post. A session
+  // that missed the last half would think a post addressed to others never happened.
+  assert.ok(brief.includes('`@name` decides who gets a copy'), 'the brief never mentions `@name`');
+  assert.ok(brief.includes("**those members' terminals only**"), 'the brief must say a mention narrows');
+  assert.ok(brief.includes('or says `@all`, goes to\neveryone else'), 'the brief must spell `@all`');
+  assert.ok(brief.includes('`@all` beside a name is still everyone'), 'and that `@all` wins');
+  assert.ok(brief.includes("the room's log keeps every post"), 'the brief must say the log has everything');
+  assert.ok(brief.includes('read it with `group_read`'), 'and how to read it');
+  assert.ok(!brief.includes('not you'), 'the retired arrow must not be taught as one that arrives');
+  assert.ok(!brief.includes('still hears everything'), 'the reversed rule must be gone');
   assert.ok(
-    brief.includes('If the header line\nsays the post is addressed to **you**'),
+    brief.includes('If the header\nline says `→ you`'),
     'the brief does not say what to do when named',
   );
-  assert.ok(brief.includes('If it names somebody else and adds *not you*'), 'the brief does not say what to do when not named');
   assert.ok(brief.includes('spelled exactly as `group_list` gives it'), 'the brief must point at the live list');
 
   /*
@@ -152,10 +156,10 @@ test('the brief names the three tools and both line prefixes, and names nobody',
    */
   assert.ok(brief.includes('one header line, then the post itself'), 'the brief does not describe a delivery');
   assert.ok(
-    brief.includes('says who spoke, which room by name and id, and who it\nwas addressed to'),
+    brief.includes('says who spoke, which room by name and id, and who got\na copy'),
     'the brief does not say what the header line carries',
   );
-  for (const arrow of ['`→ all`', '`→ you`', 'not you — for your information']) {
+  for (const arrow of ['`→ all`', '`→ you`', '`→ you and gamma-master`']) {
     assert.ok(brief.includes(arrow), `the brief does not spell the arrow ${arrow}`);
   }
   assert.ok(brief.includes('nothing is explained again per post'), 'the brief does not say the rule is not repeated');

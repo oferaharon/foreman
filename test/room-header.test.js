@@ -54,7 +54,7 @@ test('the roster and the tool reminders are gone from the line entirely', () => 
   }
 });
 
-test('the arrow says who was addressed, relative to the reader', () => {
+test('the arrow says who got a copy, relative to the reader', () => {
   const head = (over) => peerHead({ room: ROOM, from: 'alpha-main', ...over });
   const arrow = (over) => head(over).split(' → ')[1].split(' · ')[0];
 
@@ -64,16 +64,33 @@ test('the arrow says who was addressed, relative to the reader', () => {
   assert.equal(arrow({ to: ['beta-main'], you: 'beta-main' }), 'you');
   // Named along with somebody else: you first, then who else was named.
   assert.equal(arrow({ to: ['beta-main', 'gamma-master'], you: 'beta-main' }), 'you and gamma-master');
-  // Named, and it is not you — you still get the whole post, and are told it is not yours
-  // to answer. That sentence is the brief's; this clause is the fact.
-  assert.equal(arrow({ to: ['beta-main'], you: 'gamma-master' }), 'beta-main (not you — for your information)');
-  assert.equal(
-    arrow({ to: ['beta-main', 'gamma-master'], you: 'alpha-main' }),
-    'beta-main and gamma-master (not you — for your information)',
-  );
-  // No `you` at all composes the variant naming every addressee — what the endpoint's
+  // Named, and it is not you — since 2026-11-20 that copy is never typed, so composing a
+  // header for it is refused rather than written in words that would read as meant for you.
+  assert.throws(() => arrow({ to: ['beta-main'], you: 'gamma-master' }), /typed to those members only/);
+  assert.throws(() => arrow({ to: ['beta-main', 'gamma-master'], you: 'alpha-main' }), /typed to those members only/);
+  // No `you` at all composes the variant naming every recipient — what the endpoint's
   // pre-flight composition wants, because it is the one that would find a bad name in `to`.
-  assert.equal(arrow({ to: ['beta-main', 'gamma-master'] }), 'beta-main and gamma-master (not you — for your information)');
+  assert.equal(arrow({ to: ['beta-main', 'gamma-master'] }), 'beta-main and gamma-master');
+  // And the retired aside is never composed by anything any more.
+  for (const over of [{}, { to: ['beta-main'] }, { to: ['beta-main'], you: 'beta-main' }]) {
+    assert.doesNotMatch(head(over), /not you/);
+  }
+});
+
+test('the old `not you` header, still in transcripts on this Mac, is read as a delivery', () => {
+  // Spelled out literally rather than composed: nothing composes it any more, and the reader
+  // must go on recognising every header the panel ever wrote.
+  const old = (arrowText, prefix, note) => `alpha-main in "the release" (room-3) → ${arrowText} · ${note}\n${prefix}x`;
+  const peer = readRoomDelivery(old('beta-main (not you — for your information)', LEAD_PREFIX, PEER_NOTE));
+  assert.ok(peer, 'the old peer header still reads');
+  assert.equal(peer.to, 'beta-main', 'with the aside taken off');
+  assert.equal(peer.speaker, 'peer');
+  assert.equal(peer.roomId, 'room-3');
+  const two = readRoomDelivery(old('beta-main and gamma-master (not you — for your information)', HUMAN_PREFIX, HUMAN_NOTE));
+  assert.equal(two.to, 'beta-main and gamma-master');
+  assert.equal(two.speaker, 'human');
+  // Both witnesses still hold it: the same old header over a line with no prefix is not one.
+  assert.equal(readRoomDelivery(`alpha-main in "the release" (room-3) → beta-main (not you — for your information) · ${PEER_NOTE}\nx`), null);
 });
 
 test('every interpolated part is refused for a control character, never stripped', () => {
@@ -125,8 +142,6 @@ test('the addressing clause comes back as a mark, with the aside taken off', () 
   assert.equal(read({}), null, 'a post naming nobody carries no mark');
   assert.equal(read({ to: ['beta-main'], you: 'beta-main' }), 'you');
   assert.equal(read({ to: ['beta-main', 'gamma-master'], you: 'beta-main' }), 'you and gamma-master');
-  assert.equal(read({ to: ['beta-main'], you: 'gamma-master' }), 'beta-main');
-  assert.equal(read({ to: ['beta-main', 'gamma-master'], you: 'alpha-main' }), 'beta-main and gamma-master');
 });
 
 test('the speaker is read off the note clause, never off the prefix alone', () => {

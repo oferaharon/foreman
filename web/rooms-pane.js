@@ -45,10 +45,11 @@
  *
  * **`@name` is typed here and parsed nowhere here.** The four mention helpers below are the
  * composer's affordance and the bubble's quiet label, and not one of them decides anything:
- * `mentionsIn` in `server/rooms-line.js` is the single parse, the endpoint runs it on every
- * post whoever wrote it, and what a bubble shows comes off the entry's own `to` rather than
- * from re-reading the text. So the one thing that could drift — *which member did this post
- * name* — has exactly one implementation, and the browser never asks the question.
+ * `addressing` in `server/rooms-line.js` is the single parse, the endpoint runs it on every
+ * post whoever wrote it, and what a bubble shows comes off the entry's own `to` and
+ * `narrowedTo` rather than from re-reading the text. So the two things that could drift —
+ * *which member did this post name*, and *who was it typed to* — have exactly one
+ * implementation, and the browser never asks either question.
  *
  * `mentionQuery` does share one small rule with the server, the character class that
  * continues a name, and that is on purpose rather than an oversight: it decides when a
@@ -426,19 +427,49 @@ export function addressedNames(entry) {
 }
 
 /**
- * The quiet line a bubble carries when its post named somebody, or `null`.
+ * Who a **narrowed** post was typed to, off the entry's own `narrowedTo` — `[]` for a post
+ * that went to every member.
+ *
+ * Since the maintainer's ruling of 2026-11-20 a post naming members is typed to those members
+ * only, and the server writes `narrowedTo` on exactly those entries. Every entry written
+ * before it carries none, which is right: back then a mention narrowed nothing, and the log is
+ * append-only, so an old `to` must go on reading as "named, and everyone got a copy".
+ */
+export function narrowedNames(entry) {
+  const list = Array.isArray(entry?.narrowedTo) ? entry.narrowedTo : [];
+  return list.map(str).filter(Boolean);
+}
+
+const andList = (names) =>
+  names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/**
+ * The quiet line a bubble carries when its post named somebody, or `null`: `only to beta-main`
+ * when the post was typed to the named alone, `to beta-main` when it named somebody and still
+ * went to everyone (`@all` beside the name, or an entry from before 2026-11-20).
  *
  * Deliberately not an inline highlight of the `@` tokens in the body: that would need the
  * server's match rule spelled a second time in the browser, on the one question this file's
  * header says the browser must never ask. A muted label beside the timestamp says the same
- * fact off the field the server already wrote down.
+ * fact off the fields the server already wrote down.
  */
 export function addressedText(entry) {
+  const only = narrowedNames(entry);
+  if (only.length) return `only to ${andList(only)}`;
   const names = addressedNames(entry);
   if (!names.length) return null;
-  const list =
-    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `to ${list}`;
+  return `to ${andList(names)}`;
+}
+
+/** The label's tooltip — one spelling for the desktop pane and the phone, which both draw it. */
+export function addressedTitle(entry) {
+  if (narrowedNames(entry).length) {
+    return (
+      'Typed only to the members it named with @name — nobody else got a copy. It is in the ' +
+      'room’s log, so every member can still read it.'
+    );
+  }
+  return 'Named with @name, and typed to every member all the same — @all was in it, or it was posted before a mention narrowed who got a copy.';
 }
 
 /**

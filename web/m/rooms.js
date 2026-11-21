@@ -100,6 +100,7 @@ import {
   addReason,
   addableSessions,
   addressedText,
+  addressedTitle,
   handedText,
   handedWaiting,
   insertMention,
@@ -107,6 +108,7 @@ import {
   memberName,
   memberRow,
   mentionMatches,
+  narrowedNames,
   mentionQuery,
   roomOrdered,
 } from '../rooms-pane.js';
@@ -706,9 +708,9 @@ function build(host) {
   /*
    * The `@name` menu, built once and shown or hidden.
    *
-   * It changes nothing about who gets a copy — every member still hears everything, which
-   * is the maintainer's own ruling — and the parse is server-side either way (`mentionsIn`
-   * in `server/rooms-line.js`, the single implementation). This is an aid to spelling a
+   * A name it inserts decides who gets a copy (the maintainer's ruling of 2026-11-20), but
+   * the menu decides nothing itself: the send is still `{text}`, and the parse is
+   * server-side (`addressing` in `server/rooms-line.js`, the single implementation). This is an aid to spelling a
    * name correctly with a thumb, which is exactly the device where that is worth having.
    *
    * Absolutely placed above the row, so it opens *over* the log rather than pushing the
@@ -752,15 +754,15 @@ function build(host) {
    * the desktop's composer makes the same claim in the same words, because the envelope
    * makes exactly this claim on the way out. Both halves matter: it carries the
    * maintainer's own authority (the `| ` prefix, which no session's body can reach), and it
-   * reaches everybody (a room fans out to every other member, so it is never a quiet word
-   * to one of them).
+   * reaches every member, or only the ones an `@name` in it names — and even then it is in
+   * the room's log for everybody, so it is never private.
    */
   el.say = document.createElement('div');
   el.say.className = 'm-room-say';
-  el.say.textContent = 'your own words, to every member';
+  el.say.textContent = 'your own words, to every member or to the @named';
   el.say.title =
-    'This goes out as your own line, prefixed so no session can forge it, and a copy is ' +
-    'typed into every member’s terminal.';
+    'This goes out as your own line, prefixed so no session can forge it. A copy is typed ' +
+    'into every member’s terminal — or, if you @name members, into theirs only.';
 
   el.composer.append(el.err, el.menu, row, el.say);
 
@@ -1012,10 +1014,9 @@ function entryNode(e) {
   if (addressed) {
     const to = document.createElement('span');
     to.className = 'm-room-to';
+    if (narrowedNames(e).length) to.classList.add('m-room-to-narrowed');
     to.textContent = addressed;
-    to.title =
-      'Addressed with @name. Every member still got a copy — a mention changes what each ' +
-      'one was told, not who was told.';
+    to.title = addressedTitle(e);
     meta.append(to);
   }
 

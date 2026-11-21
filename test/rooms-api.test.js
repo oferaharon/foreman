@@ -757,6 +757,151 @@ test('a restarted member — new pane, same tmux session — still lists, posts,
   await freshPanes(['alpha-main', 'beta-main']);
 });
 
+/* ------------------------------------------------ who a mention reaches --- */
+
+/*
+ * The maintainer's ruling of 2026-11-20, reversing 2026-09-05: a post naming members is typed
+ * into those members' terminals only, no mention or `@all` reaches every other member, and
+ * the log records every post with who it was handed to. Each assertion reads the scratch
+ * panes themselves, not only the entry, because "nobody else got a copy" is a fact about a
+ * terminal.
+ */
+
+/** The names a post was handed to, sorted, off the entry the endpoint answered. */
+const handedTo = (res) => res.body.entry.handed.map((h) => h.name).sort();
+
+/**
+ * Wait for a pane to show something. Posts here follow each other inside the beat
+ * `PaneLock` holds a pane after a delivery, so a copy can be `queued` and typed by the
+ * flusher a moment later — handed either way, and on screen only once it is typed.
+ */
+async function shows(read, label, re, deadline = Date.now() + 10_000) {
+  for (;;) {
+    if (re.test(read(label))) return true;
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+test('a session’s @name reaches only the members it names, and the log still has it', async (t) => {
+  if (!bench) return t.skip('no scratch tmux bench on this machine');
+  assert.ok(await freshPanes(['alpha-main', 'beta-main', 'gamma-master']));
+  const room = await makeRoom('narrowed', ['alpha-main', 'beta-main', 'gamma-master']);
+
+  // One name.
+  const one = await api('POST', `/api/rooms/${room.id}/post`, {
+    text: '@beta-main PROBE-ONE is the total off?',
+    paneId: panes.get('alpha-main'),
+  });
+  assert.equal(one.status, 200, JSON.stringify(one.body));
+  assert.deepEqual(handedTo(one), ['beta-main']);
+  assert.equal(one.body.entry.handed[0].state, 'typed');
+  assert.deepEqual(one.body.entry.to, ['beta-main']);
+  assert.deepEqual(one.body.entry.narrowedTo, ['beta-main']);
+  assert.ok(await shows(screenOf, 'beta-main', /> @beta-main PROBE-ONE is the total off\?/));
+  assert.ok(await shows(flat, 'beta-main', new RegExp(`alpha-main in "narrowed" \\(${room.id}\\) → you · `)));
+  assert.doesNotMatch(screenOf('gamma-master'), /PROBE-ONE/, 'a member it did not name got no copy');
+  assert.doesNotMatch(screenOf('alpha-main'), /PROBE-ONE/, 'the author got no copy');
+
+  // Two names, from another member.
+  const two = await api('POST', `/api/rooms/${room.id}/post`, {
+    text: '@gamma-master and @alpha-main PROBE-TWO together please',
+    paneId: panes.get('beta-main'),
+  });
+  assert.equal(two.status, 200, JSON.stringify(two.body));
+  assert.deepEqual(handedTo(two), ['alpha-main', 'gamma-master']);
+  assert.deepEqual(two.body.entry.narrowedTo, ['alpha-main', 'gamma-master'], 'in the room’s order');
+  assert.ok(await shows(flat, 'alpha-main', / → you and gamma-master · .*PROBE-TWO/));
+  assert.ok(await shows(flat, 'gamma-master', / → you and alpha-main · .*PROBE-TWO/));
+  assert.doesNotMatch(screenOf('beta-main'), /PROBE-TWO/, 'the author got no copy');
+
+  // An unknown name is text: everyone.
+  const stranger = await api('POST', `/api/rooms/${room.id}/post`, {
+    text: '@delta-main PROBE-STRANGER are you in here?',
+    paneId: panes.get('gamma-master'),
+  });
+  assert.equal(stranger.status, 200, JSON.stringify(stranger.body));
+  assert.deepEqual(handedTo(stranger), ['alpha-main', 'beta-main']);
+  assert.equal(stranger.body.entry.to, undefined, 'a name nobody answers to is not recorded as one');
+  assert.equal(stranger.body.entry.narrowedTo, undefined);
+  for (const label of ['alpha-main', 'beta-main']) {
+    assert.ok(await shows(flat, label, / → all · .*PROBE-STRANGER/), `${label} got it, addressed to all`);
+  }
+
+  // The log has every post, with its recipients, whoever it was typed to.
+  const log = (await api('GET', `/api/rooms/${room.id}`)).body.entries;
+  assert.deepEqual(
+    log.map((e) => [e.text.match(/PROBE-\w+/)[0], e.handed.map((h) => h.name).sort(), e.narrowedTo ?? null]),
+    [
+      ['PROBE-ONE', ['beta-main'], ['beta-main']],
+      ['PROBE-TWO', ['alpha-main', 'gamma-master'], ['alpha-main', 'gamma-master']],
+      ['PROBE-STRANGER', ['alpha-main', 'beta-main'], null],
+    ],
+  );
+});
+
+test('@all is everyone, and wins over a name beside it — from the maintainer too', async (t) => {
+  if (!bench) return t.skip('no scratch tmux bench on this machine');
+  assert.ok(await freshPanes(['alpha-main', 'beta-main', 'gamma-master']));
+  const room = await makeRoom('everyone', ['alpha-main', 'beta-main', 'gamma-master']);
+
+  const all = await api('POST', `/api/rooms/${room.id}/post`, {
+    text: '@all PROBE-ALL the build is red',
+    paneId: panes.get('alpha-main'),
+  });
+  assert.equal(all.status, 200, JSON.stringify(all.body));
+  assert.deepEqual(handedTo(all), ['beta-main', 'gamma-master']);
+  assert.equal(all.body.entry.narrowedTo, undefined);
+  for (const label of ['beta-main', 'gamma-master']) assert.ok(await shows(flat, label, / → all · .*PROBE-ALL/));
+
+  // The maintainer, mixing `@all` with a name: everyone, and the name is still recorded.
+  const mixed = await api('POST', `/api/rooms/${room.id}/post`, { text: '@all and @beta-main PROBE-MIX ship it' });
+  assert.equal(mixed.status, 200, JSON.stringify(mixed.body));
+  assert.deepEqual(handedTo(mixed), ['alpha-main', 'beta-main', 'gamma-master']);
+  assert.deepEqual(mixed.body.entry.to, ['beta-main']);
+  assert.equal(mixed.body.entry.narrowedTo, undefined);
+  for (const label of ['alpha-main', 'beta-main', 'gamma-master']) {
+    assert.ok(await shows(screenOf, label, /\| @all and @beta-main PROBE-MIX ship it/), `${label} got the maintainer’s line`);
+  }
+
+  // The maintainer naming one member: only that member, on the human prefix.
+  const human = await api('POST', `/api/rooms/${room.id}/post`, { text: '@gamma-master PROBE-HUMAN-ONE land it' });
+  assert.equal(human.status, 200, JSON.stringify(human.body));
+  assert.deepEqual(handedTo(human), ['gamma-master']);
+  assert.deepEqual(human.body.entry.narrowedTo, ['gamma-master']);
+  assert.ok(await shows(screenOf, 'gamma-master', /\| @gamma-master PROBE-HUMAN-ONE land it/));
+  assert.ok(await shows(flat, 'gamma-master', / → you · their own words.*PROBE-HUMAN-ONE/));
+  for (const label of ['alpha-main', 'beta-main']) {
+    assert.doesNotMatch(screenOf(label), /PROBE-HUMAN-ONE/, `${label} was not named and got no copy`);
+  }
+});
+
+test('the author is never typed its own post, and naming only itself narrows nothing', async (t) => {
+  if (!bench) return t.skip('no scratch tmux bench on this machine');
+  assert.ok(await freshPanes(['alpha-main', 'beta-main', 'gamma-master']));
+  const room = await makeRoom('self', ['alpha-main', 'beta-main', 'gamma-master']);
+
+  const plus = await api('POST', `/api/rooms/${room.id}/post`, {
+    text: '@alpha-main and @gamma-master PROBE-SELFPLUS pair on it',
+    paneId: panes.get('alpha-main'),
+  });
+  assert.equal(plus.status, 200, JSON.stringify(plus.body));
+  assert.deepEqual(handedTo(plus), ['gamma-master']);
+  assert.deepEqual(plus.body.entry.narrowedTo, ['gamma-master'], 'the author is not on the list');
+  assert.deepEqual(plus.body.entry.to, ['alpha-main', 'gamma-master'], 'though it is recorded as named');
+  assert.doesNotMatch(screenOf('alpha-main'), /PROBE-SELFPLUS/);
+  assert.doesNotMatch(screenOf('beta-main'), /PROBE-SELFPLUS/);
+
+  const self = await api('POST', `/api/rooms/${room.id}/post`, {
+    text: '@beta-main PROBE-SELF will take this one',
+    paneId: panes.get('beta-main'),
+  });
+  assert.equal(self.status, 200, JSON.stringify(self.body));
+  assert.deepEqual(handedTo(self), ['alpha-main', 'gamma-master'], 'a self-mention goes to everyone');
+  assert.equal(self.body.entry.narrowedTo, undefined);
+  assert.doesNotMatch(screenOf('beta-main'), /> @beta-main PROBE-SELF/, 'and never back to the author');
+});
+
 /* ------------------------------------------------------------ the frame --- */
 
 test('the roster frame carries `rooms`, and an empty array is the ordinary answer', async () => {

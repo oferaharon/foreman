@@ -43,10 +43,14 @@ import { unwrapPasted } from './pasted-content.js';
  *   - **which room**, by *both* name and id — the name is what a human called it and the
  *     id is what `group_read` takes, and a session told only the pretty name has been told
  *     something it cannot act on;
- *   - **who it was addressed to**, relative to the reader: `all`, `you`, `you and
- *     gamma-master`, or `beta-main (not you — for your information)`. This is the whole of
- *     what `@name` changes on the wire. The brief teaches what being named *means*; only
- *     the line can say whether this post named you;
+ *   - **who got a copy**, relative to the reader: `all`, or — when the post named members
+ *     and was typed to those members only — `you` or `you and gamma-master`. The brief
+ *     teaches what each means; only the line can say whether this copy is one of a few.
+ *     Since the maintainer's ruling of 2026-11-20 a named post is typed **only** to the
+ *     members it names, so the fourth arrow this line used to carry, `beta-main (not you —
+ *     for your information)`, is never composed any more — and is still **read**, because
+ *     transcripts on this Mac hold it and the reader below must go on recognising every
+ *     header the panel ever wrote;
  *   - **which of the two speakers this is**, in a fixed clause per speaker.
  *
  * ## The note clause is a constant, and that is load-bearing twice over
@@ -120,7 +124,11 @@ const NOTE = Object.freeze({ lead: PEER_NOTE, human: HUMAN_NOTE });
 /** What the arrow says when a post named nobody, which is the ordinary case. */
 const EVERYONE = 'all';
 
-/** What a copy for somebody who was *not* named is told, after the names that were. */
+/**
+ * What a copy for somebody who was *not* named used to be told, after the names that were.
+ * Never composed since 2026-11-20 — a named post is typed to nobody else — and kept for the
+ * reader alone, which takes it off old headers still sitting in transcripts.
+ */
 const NOT_YOU = '(not you — for your information)';
 
 /** `a`, `a and b`, `a, b and c` — the panel's copy voice, no serial comma. */
@@ -150,12 +158,15 @@ function nameRoom(room) {
 }
 
 /**
- * The addressing clause, relative to the reader — the whole of what `@name` changes on the
- * wire, in the words the brief teaches.
+ * The addressing clause, relative to the reader — who got a copy, in the words the brief
+ * teaches.
  *
- * `you` absent composes the variant that names **every** addressee, which is what the
- * endpoint's pre-flight composition wants: it is the one that would find a bad name in
- * `to` before a single copy has been typed.
+ * `to` is who a **narrowed** post is typed to, and empty when it went to everyone. `you`
+ * absent composes the variant that names every recipient, which is what the endpoint's
+ * pre-flight composition wants: it is the one that would find a bad name in `to` before a
+ * single copy has been typed. `you` present and not among them is refused outright — since
+ * 2026-11-20 that copy is never typed, and a header for it would read as though it had been
+ * meant for its reader.
  *
  * The names are asserted here as well as in `nameRoom`, because `to` is a parameter and
  * lands at column 0 exactly as the rest of the header does.
@@ -166,13 +177,13 @@ function arrowFor(to, you) {
   if (!names.length) return EVERYONE;
 
   const me = String(you ?? '').trim();
-  if (me) assertClean(me, 'A room recipient', { oneLine: true });
-
-  if (me && names.includes(me)) {
-    const others = names.filter((n) => n !== me);
-    return others.length ? `you and ${andList(others)}` : 'you';
+  if (!me) return andList(names);
+  assertClean(me, 'A room recipient', { oneLine: true });
+  if (!names.includes(me)) {
+    throw new Error('A post that names members is typed to those members only.');
   }
-  return `${andList(names)} ${NOT_YOU}`;
+  const others = names.filter((n) => n !== me);
+  return others.length ? `you and ${andList(others)}` : 'you';
 }
 
 /** The line, once the four parts are known. The only place the separators are spelled. */
@@ -189,7 +200,8 @@ function head({ from, room, to, you, speaker }) {
  * @param {object} opts
  * @param {{id: string, name: string}} opts.room
  * @param {string} opts.from  who posted, as the room names them
- * @param {string[]} [opts.to] who the post named with `@`, from `mentionsIn`
+ * @param {string[]} [opts.to] who a narrowed post is typed to (`deliveryFor`'s `only`), or
+ *   nothing when it went to everyone
  * @param {string} [opts.you]  the member this copy is for, as `memberLabel` names them
  */
 export const peerHead = ({ room, from, to = [], you = '' } = {}) =>
@@ -239,7 +251,8 @@ const HEAD_RE = new RegExp(
  * @returns {{from: string, room: string, roomId: string, speaker: 'peer'|'human',
  *            to: string|null, text: string} | null}
  *   `to` is the addressing clause with the `(not you …)` tail taken off — `you`,
- *   `you and gamma-master`, `beta-main` — or `null` when the post named nobody. `text` is
+ *   `you and gamma-master`, or, off a header written before 2026-11-20, `beta-main` — or
+ *   `null` when the copy went to everyone. `text` is
  *   the body with the prefix stripped from each line, which is what a reader wants to read;
  *   the prefixes themselves are the trust model and stay in the record the chip opens on.
  */
