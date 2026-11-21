@@ -10,6 +10,7 @@ import {
   addReason,
   addressedNames,
   addressedText,
+  addressedTitle,
   entryKey,
   handedText,
   handedWaiting,
@@ -19,6 +20,7 @@ import {
   memberRow,
   mentionMatches,
   mentionQuery,
+  narrowedNames,
   roomOrdered,
 } from '../web/rooms-pane.js';
 
@@ -553,9 +555,10 @@ test('the composer has one destination — no target, no chip, no picker', () =>
   /*
    * `@name` arrived after this test did, and it did **not** make the composer a picker. The
    * shared room's `@` chooses who a message is *sent* to and lifts the token back out of the
-   * text; this one types a name into the body and changes nothing about delivery. So the
-   * things forbidden here are the ones that would mean a second destination, and the menu is
-   * not among them — the send below is what actually pins it.
+   * text; this one types a name into the body, and the *server's* parse of that body decides
+   * who gets a copy (2026-11-20). So the browser still sends only `{text}` — the things
+   * forbidden here are the ones that would mean a second destination chosen client-side, and
+   * the menu is not among them — the send below is what actually pins it.
    */
   const build = strip(fn('buildGroupComposer'));
   for (const gone of ['sharedPick', 'groupTarget', 'sharedTarget', 'chooseSharedTarget']) {
@@ -567,7 +570,7 @@ test('the composer has one destination — no target, no chip, no picker', () =>
 
 test('the standing sentence says both halves of what a line typed here is', () => {
   const build = fn('buildGroupComposer');
-  assert.match(build, /hint\.textContent = 'your own words, to every member — they may act on them';/);
+  assert.match(build, /hint\.textContent = 'your own words, to every member or to the @named — they may act on them';/);
   assert.match(build, /prefixed so no session can forge it/);
 });
 
@@ -866,6 +869,36 @@ test('who a post named is read off the entry, never by re-reading its text', () 
   assert.equal(addressedText(entry({ text: '@beta-main and @gamma-master' })), null);
   assert.equal(addressedText(entry({ to: [] })), null);
   assert.equal(addressedText(null), null);
+});
+
+test('a narrowed post reads as narrowed, and an old or `@all` one as named-to-everyone', () => {
+  // Since 2026-11-20 a post naming members is typed to them alone, and the server writes
+  // `narrowedTo` on exactly those entries.
+  const narrowed = entry({ to: ['beta-main'], narrowedTo: ['beta-main'] });
+  assert.deepEqual(narrowedNames(narrowed), ['beta-main']);
+  assert.equal(addressedText(narrowed), 'only to beta-main');
+  assert.equal(
+    addressedText(entry({ to: ['alpha-main', 'beta-main'], narrowedTo: ['beta-main', 'gamma-master'] })),
+    'only to beta-main and gamma-master',
+    'the narrowed list, not the raw mentions, is who it reached',
+  );
+  assert.match(addressedTitle(narrowed), /nobody else got a copy/);
+  assert.match(addressedTitle(narrowed), /room’s log/);
+
+  // An entry from before the ruling, or `@all` beside a name: named, and everyone got it.
+  const old = entry({ to: ['beta-main'] });
+  assert.deepEqual(narrowedNames(old), []);
+  assert.equal(addressedText(old), 'to beta-main');
+  assert.match(addressedTitle(old), /typed to every member/);
+  assert.deepEqual(narrowedNames(entry({ narrowedTo: 'beta-main' })), [], 'only an array is a list');
+});
+
+test('both panes mark a narrowed label, off the same field', () => {
+  assert.match(fn('groupEntryNode'), /if \(narrowedNames\(e\)\.length\) el\.classList\.add\('is-narrowed'\);/);
+  assert.match(fn('groupEntryNode'), /el\.title = addressedTitle\(e\);/);
+  const rule = styles.match(/\.group-to\.is-narrowed \{[^}]*\}/);
+  assert.ok(rule, 'a narrowed label is styled');
+  assert.ok(!/--accent/.test(rule[0]), 'and still never takes the accent');
 });
 
 test('the label is drawn off `to` in the meta line, quiet, and never from the body', () => {

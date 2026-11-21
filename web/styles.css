@@ -6732,8 +6732,9 @@ button.bg-agent:focus-visible { outline: 2px solid var(--accent); outline-offset
 .group-time { color: var(--ink-faint); font-size: 0.64rem; font-family: var(--mono); flex: none; }
 
 /* Who a post named, when it named anybody. The maintainer's condition on every quiet mark in
-   this pane applies here too: muted ink, no accent, no motion — a mention is a signal about
-   what each member was told, not an alarm. It sits in the meta line beside the timestamp
+   this pane applies here too: muted ink, no accent, no motion — a mention says who a post was
+   typed to, not an alarm. A narrowed post (`only to …`) takes one step darker ink, so it is
+   visible as narrowed without borrowing the accent. It sits in the meta line beside the timestamp
    rather than in the bubble, so a post that named nobody draws byte-identically to before. */
 .group-to {
   color: var(--ink-faint);
@@ -6743,6 +6744,9 @@ button.bg-agent:focus-visible { outline: 2px solid var(--accent); outline-offset
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 16rem;
+}
+.group-to.is-narrowed {
+  color: var(--ink-muted);
 }
 
 .group-bubble {

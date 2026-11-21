@@ -84,32 +84,51 @@ import { humanHead, peerHead } from './room-header.js';
  * to carry is in every session's standing brief (`session-launch.js`, `lead-brief.js`), and
  * a rule repeated per post is a rule a reader skips.
  *
- * ## Part three: `@name`, which is a **signal and not a delivery**
+ * ## Part three: `@name` decides who gets a copy
  *
- * The maintainer's ruling, and it is the whole shape of `mentionsIn` below: *everyone in the
- * room still hears everything*. A mention changes **what each recipient is told**, never who
- * receives a copy. Typing only into the named sessions was asked for and refused — the room
- * is the shared record, and a question two members cannot see is a side conversation nobody
- * can catch up on. So nothing here touches the fan-out: `to` is composed into the envelope
- * and written onto the log entry, and `resolveMembers` above is untouched.
+ * The maintainer's ruling of 2026-11-20, which **reverses** their ruling of 2026-09-05. The
+ * old rule was that a mention is a signal and every member still receives every post: the
+ * room was to be the shared record, and a question two members could not see a side
+ * conversation nobody could catch up on. What that cost turned out to be the larger fact —
+ * every copy typed into a terminal is an interruption and a turn for the session that
+ * receives it, and a room of eight paid that seven times for a question meant for one. The
+ * shared record does not need the copies: the room's **log** keeps every post, whoever it was
+ * typed to, and `group_read` reads it. So now:
+ *
+ *   - a post that names one or more members is typed into **those members only** — never the
+ *     author's own pane, as before;
+ *   - a post that names nobody goes to **every other member**, as it always did;
+ *   - **`@all`** is the explicit form of that, and wins: `@all` beside `@beta-main` is still
+ *     everyone. `all` is a word of this parse, not a member — a member whose own label is
+ *     literally `all` cannot be named alone, and `@all` means everyone even then. Rather that
+ *     than a mention whose meaning depends on who happens to be in the room;
+ *   - an author naming **only itself** narrows nothing, because the only member it would
+ *     narrow to is the one pane that never gets a copy. That post goes to everyone, rather
+ *     than being typed to nobody on a technicality.
+ *
+ * `addressing` below is the one parse and `deliveryFor` the one decision built on it, so
+ * the endpoint, the header and the log all read the same answer.
  *
  * Three things about the parse that reasoning would get wrong:
  *
- * **It matches the *stored* member label, never the live row's name.** `memberLabel` is the
+ * **It matches the *stored* member label, never the live row's name.** `memberLabel` is
  * the name `group_list` gives a member back, the name the header's addressing clause writes
- * when a post names one, and the name the endpoint tests each copy's recipient against. The
- * live row's name (`rowName`) is today's answer and can differ from it — a relaunch under a
- * changed label — and a parse that used one while the recipient test used the other would
- * address a post to a member that no copy is ever told about. One name, asked twice.
+ * when a post names one, and the name the endpoint tests each recipient against when it
+ * decides who gets a copy. The live row's name (`rowName`) is today's answer and can differ
+ * from it — a relaunch under a changed label — and a parse that used one while the recipient
+ * test used the other would address a post to a member that is then never typed it. One
+ * name, asked twice.
  *
  * **Longest name first, or a room holding both `alpha` and `alpha-main` reads `@alpha-main`
  * as `@alpha`.** The tail class (`NAME_TAIL`) deliberately excludes `.`, so `@alpha-main.`
  * at the end of a sentence still matches — which is only safe *because* longest-first
- * already settles a member whose own name contains a dot.
+ * already settles a member whose own name contains a dot. The same rule is what keeps
+ * `@all-hands` a member and not `@all`.
  *
- * **A name nobody in the room answers to is plain text, never an error.** A post is a
- * message to people, and `@` is a character people type. Refusing one would make an ordinary
- * sentence unsendable to say nothing useful.
+ * **A name nobody in the room answers to is plain text, never an error** — and narrows
+ * nothing, so a post naming only strangers goes to everyone. A post is a message to people,
+ * and `@` is a character people type. Refusing one would make an ordinary sentence
+ * unsendable to say nothing useful.
  */
 
 /* -------------------------------------------------------------------------- */
@@ -299,28 +318,37 @@ export const memberLabel = (m) => str(m?.name) || str(m?.tmuxSession) || str(m?.
 const NAME_TAIL = /[A-Za-z0-9_-]/;
 
 /**
- * The members this post addresses, in the room's own order.
+ * The word that means every other member. A word of the parse, never a member: see part
+ * three of the header for why a member labelled `all` cannot be named alone.
+ */
+export const ALL_MENTION = 'all';
+
+/**
+ * Who this post names — **the one parse** of what counts as a mention, `@all` included.
  *
- * A **signal**, never a delivery: see part three of the header, and note that nothing in
- * this function is reachable from the fan-out. It answers `[]` for a body naming nobody,
- * which is the ordinary case.
+ * `to` is the members named, in the room's own order, deduplicated; `all` is whether `@all`
+ * appears as a mention in its own right. Both empty is the ordinary case, a body naming
+ * nobody.
  *
  * The match is exact, including case. One rule with no second spelling beats a forgiving
  * one that the browser's own highlight would then have to mirror — and the composer's
- * autocomplete is the affordance that gets the spelling right.
+ * autocomplete is the affordance that gets the spelling right. So `@All` is text.
  *
  * @param {string} text the post, as it was written
  * @param {Array<object>} members the room's membership, as `rooms.js` stores it
- * @returns {string[]} member labels, deduplicated, in the room's order
+ * @returns {{to: string[], all: boolean}}
  */
-export function mentionsIn(text, members = []) {
+export function addressing(text, members = []) {
   const body = typeof text === 'string' ? text : '';
-  const labels = (Array.isArray(members) ? members : []).map(memberLabel).filter(Boolean);
-  if (!body.includes('@') || !labels.length) return [];
+  // `all` is the parse's own word and never a member's, even a member labelled `all`.
+  const labels = (Array.isArray(members) ? members : [])
+    .map(memberLabel)
+    .filter((n) => n && n !== ALL_MENTION);
+  if (!body.includes('@')) return { to: [], all: false };
 
   // Longest first, so a room holding both `alpha` and `alpha-main` never reads the longer
-  // mention as the shorter one.
-  const byLength = [...new Set(labels)].sort((a, b) => b.length - a.length);
+  // mention as the shorter one — and `@all-hands`, a member, is never read as `@all`.
+  const byLength = [...new Set([...labels, ALL_MENTION])].sort((a, b) => b.length - a.length);
 
   const found = new Set();
   for (let at = body.indexOf('@'); at !== -1; at = body.indexOf('@', at + 1)) {
@@ -336,9 +364,39 @@ export function mentionsIn(text, members = []) {
   }
   // Room order rather than the order they were typed: `group_list` answers the membership
   // in that order, and one order for both is one thing for a reader to hold.
-  return labels.filter((n, i) => labels.indexOf(n) === i && found.has(n));
+  const to = labels.filter((n, i) => labels.indexOf(n) === i && found.has(n));
+  return { to, all: found.has(ALL_MENTION) };
 }
 
+/**
+ * The members this post names, in the room's own order — `addressing(...).to`, kept as its
+ * own export because the log entry's `to` is exactly this and nothing else.
+ *
+ * @returns {string[]} member labels, deduplicated, in the room's order
+ */
+export const mentionsIn = (text, members = []) => addressing(text, members).to;
+
+/**
+ * Who a post is **typed to** — the one decision the fan-out reads, built on `addressing`.
+ *
+ * `only` is the list of member labels the post is narrowed to, or `null` when it goes to
+ * every other member. It is `null` for a post naming nobody, for `@all` with or without
+ * names beside it, and for a post whose only names are the author's own (part three of the
+ * header). The author is never in `only` — its pane never gets a copy anyway, and a list
+ * naming it would read on the log as though it had.
+ *
+ * @param {string} text the post, as it was written
+ * @param {Array<object>} members the room's membership, as `rooms.js` stores it
+ * @param {object} [opts]
+ * @param {string} [opts.author] the author's `memberLabel`, or nothing for the maintainer
+ * @returns {{to: string[], all: boolean, only: string[]|null}}
+ */
+export function deliveryFor(text, members = [], { author = '' } = {}) {
+  const { to, all } = addressing(text, members);
+  const me = str(author);
+  const named = to.filter((n) => n !== me);
+  return { to, all, only: !all && named.length ? named : null };
+}
 
 /* -------------------------------------------------------------------------- */
 /* Part two: the two lines a member's terminal receives.                      */
@@ -367,9 +425,12 @@ export function mentionsIn(text, members = []) {
  *   the line now that the rule paragraph has gone, and still accepted and refused: the
  *   endpoint passes a per-folder name to both variants off one call site, and a parameter
  *   that silently stopped being checked is a parameter that comes back uncheckable.
- * @param {string[]} [opts.to]  who the post named with `@`, from `mentionsIn`
- * @param {string} [opts.you]   the member this copy is for, as `memberLabel` names them —
- *   the whole of what makes an addressee's copy differ from everybody else's
+ * @param {string[]} [opts.to]  who the post is typed to when it was narrowed — `deliveryFor`'s
+ *   `only` — or nothing when it went to everyone. Not the raw mentions: the arrow says who
+ *   got a copy, so `@all` beside a name is `→ all`
+ * @param {string} [opts.you]   the member this copy is for, as `memberLabel` names them. On a
+ *   narrowed post it must be one of `to` — a copy for anybody else is refused, because since
+ *   2026-11-20 nobody else is ever typed one
  */
 export function roomPeerLine({ room, from, body, human = HUMAN_FALLBACK, to = [], you = '' } = {}) {
   prefixFor(PEER_SPEAKER); // refuse before anything is composed

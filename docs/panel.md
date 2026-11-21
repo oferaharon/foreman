@@ -1566,26 +1566,32 @@ lock, then three live reads of the pane, then the composer. Never `send-keys`, n
 the author, and never into a pane holding a permission prompt, a plan box, a question or the
 startup trust gate: that copy is queued instead.
 
-**`@name` addresses a post, and changes nothing about who gets one.** Write an `@` in front of
-a member's name — spelled the way the room lists it — and the copy that reaches **them** says
-it is addressed to them and to answer in the room, while the copy that reaches everybody else
-says who it was for and that it is theirs to know rather than to answer. Both carry the whole
-post: a mention changes what each member is *told*, never who is told, and there is
-deliberately no way to say something to one member privately, because the room is the shared
-record and a question two members cannot see is a side conversation nobody can catch up on.
-It reads as a clause on the header line — `→ you`, `→ you and gamma-master`, or
-`→ beta-main (not you — for your information)`. The parse is the server's, so a session
-writing `@beta-main` through `group_post` and you typing it in the composer are treated
-identically; a name nobody in the room answers to is just text, not an error. In the room pane, typing `@` offers the members (arrows to move,
-Enter or Tab to take one, Escape to dismiss) and a post that named somebody carries a muted
-`to beta-main` beside its timestamp.
+**`@name` decides who gets a copy** (the maintainer's ruling of 2026-11-20, reversing the
+2026-09-05 one that a mention changed nothing). Write an `@` in front of a member's name —
+spelled the way the room lists it — and the post is typed into **those members' terminals
+only**; write `@all`, or no name at all, and every other member gets a copy, and `@all` beside
+a name is still everyone. The author never gets its own copy, and an author naming only itself
+narrows nothing. What made it worth reversing: every copy is an interruption and a turn for the
+session that receives it, and the room's **log** is the shared record anyway — it keeps every
+post whoever it was typed to, so any member can catch up with `group_read`, and nothing in a
+room is private. The header line says who got a copy: `→ all`, or `→ you` / `→ you and
+gamma-master` on a narrowed post. (Transcripts from before the ruling also hold
+`→ beta-main (not you — for your information)`; the panel still reads those as deliveries,
+and never writes one again.) The parse is the server's, so a session writing `@beta-main`
+through `group_post` and you typing it in the composer are treated identically; a name nobody
+in the room answers to is just text, not an error, and narrows nothing. In the room pane,
+typing `@` offers the members (arrows to move, Enter or Tab to take one, Escape to dismiss); a
+narrowed post carries `only to beta-main` beside its timestamp, a step darker than the muted
+`to beta-main` a post wears when it named somebody and still went to everyone (`@all` beside
+the name, or anything posted before the ruling). The `handed` line under it names exactly who
+was typed a copy.
 
 **The three tools a member gets**, and nothing else:
 
 - `group_list` — which rooms this session is in, who else is in each, and when each last
   carried a message. No arguments. Being in none is the ordinary case, not a failure.
-- `group_post` — `{id, text}`. Say it once; everyone else gets a copy, and you never get your
-  own back. `@name` in the text addresses it without narrowing who gets a copy.
+- `group_post` — `{id, text}`. Say it once; everyone else gets a copy — or only the members an
+  `@name` in the text names — and you never get your own back.
 - `group_read` — `{id, since?}`. Everything after a cursor (capped at 200), or roughly the
   last 20 entries with `since` omitted. Archived rooms stay readable.
 

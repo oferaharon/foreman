@@ -17,6 +17,9 @@ const {
   UNKNOWN,
   callerMember,
   memberFor,
+  ALL_MENTION,
+  addressing,
+  deliveryFor,
   memberLabel,
   mentionsIn,
   resolveMember,
@@ -320,11 +323,11 @@ test('a member stored without a tmux session is matched on its pane and name tog
 /* -------------------------------------------------------------------------- */
 
 /*
- * The parse is a **signal**, and the tests below are as much about what it does not do.
- * The maintainer's ruling: everyone in a room still hears everything, so nothing about a
- * mention may narrow a fan-out. What it can do is get a *name* wrong, and every way it can
- * is here — a room holding a name and a longer name that starts with it, a hyphen, a
- * sentence's own punctuation, and a name nobody answers to.
+ * The parse, and since the maintainer's ruling of 2026-11-20 the decision built on it: a post
+ * naming members is typed to those members only, no mention or `@all` is everyone. What the
+ * parse can get wrong is a *name* — a room holding a name and a longer name that starts with
+ * it, a hyphen, a sentence's own punctuation, a name nobody answers to — and every way it can
+ * is here, followed by `deliveryFor`'s cases.
  */
 
 const MEMBERS = [member(ALPHA), member(BETA), member(GAMMA)];
@@ -383,6 +386,67 @@ test('mentionsIn is total: rubbish in, an empty list out', () => {
   assert.deepEqual(mentionsIn(null, MEMBERS), []);
   assert.deepEqual(mentionsIn('@beta-main', null), []);
   assert.deepEqual(mentionsIn(undefined, undefined), []);
+});
+
+/* `@all`, and who a post is typed to — the ruling of 2026-11-20. */
+
+test('`@all` is a word of the one parse, never a member', () => {
+  assert.equal(ALL_MENTION, 'all');
+  assert.deepEqual(addressing('@all the build is red', MEMBERS), { to: [], all: true });
+  assert.deepEqual(addressing('@all and @beta-main', MEMBERS), { to: ['beta-main'], all: true });
+  assert.deepEqual(addressing('no mention', MEMBERS), { to: [], all: false });
+  // The same boundary rules as a name: not out of a word, exact case, the sentence's own
+  // punctuation allowed.
+  assert.equal(addressing('me@all', MEMBERS).all, false);
+  assert.equal(addressing('@All', MEMBERS).all, false);
+  assert.equal(addressing('over to @all.', MEMBERS).all, true);
+  // Longest-first keeps a member starting with the word a member.
+  const hands = [{ name: 'all-hands' }, member(BETA)];
+  assert.deepEqual(addressing('@all-hands please', hands), { to: ['all-hands'], all: false });
+  // A member whose own label is literally `all` cannot be named alone: `@all` is everyone.
+  const literal = [{ name: 'all' }, member(BETA)];
+  assert.deepEqual(addressing('@all hello', literal), { to: [], all: true });
+  assert.deepEqual(mentionsIn('@all hello', literal), []);
+});
+
+test('one name narrows the post to that member', () => {
+  const d = deliveryFor('@beta-main is the total off?', MEMBERS, { author: 'alpha-main' });
+  assert.deepEqual(d.only, ['beta-main']);
+  assert.deepEqual(d.to, ['beta-main']);
+});
+
+test('two names narrow it to both, in the room’s order', () => {
+  const d = deliveryFor('@gamma-master and @beta-main', MEMBERS, { author: 'alpha-main' });
+  assert.deepEqual(d.only, ['beta-main', 'gamma-master']);
+});
+
+test('no mention, `@all`, and `@all` beside a name all mean everyone', () => {
+  assert.equal(deliveryFor('plain post', MEMBERS, { author: 'alpha-main' }).only, null);
+  assert.equal(deliveryFor('@all the build is red', MEMBERS, { author: 'alpha-main' }).only, null);
+  const mixed = deliveryFor('@all — and @beta-main especially', MEMBERS, { author: 'alpha-main' });
+  assert.equal(mixed.only, null, '@all wins');
+  assert.deepEqual(mixed.to, ['beta-main'], 'and the name is still recorded as named');
+});
+
+test('a name nobody in the room answers to narrows nothing', () => {
+  assert.equal(deliveryFor('@delta-main are you there?', MEMBERS, { author: 'alpha-main' }).only, null);
+  // Beside a real name it is simply text, and the real name narrows.
+  assert.deepEqual(deliveryFor('@delta-main and @beta-main', MEMBERS, { author: 'alpha-main' }).only, ['beta-main']);
+});
+
+test('the author is never on the list, and naming only itself narrows nothing', () => {
+  assert.deepEqual(
+    deliveryFor('@alpha-main and @beta-main', MEMBERS, { author: 'alpha-main' }).only,
+    ['beta-main'],
+  );
+  assert.equal(deliveryFor('@alpha-main will take this', MEMBERS, { author: 'alpha-main' }).only, null);
+  // The maintainer is no member, so nothing is excluded for them.
+  assert.deepEqual(deliveryFor('@alpha-main ship it', MEMBERS).only, ['alpha-main']);
+});
+
+test('deliveryFor is total: rubbish in, everyone out', () => {
+  assert.deepEqual(deliveryFor(null, MEMBERS), { to: [], all: false, only: null });
+  assert.deepEqual(deliveryFor('@beta-main', null), { to: [], all: false, only: null });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -447,22 +511,22 @@ test('with no name configured the maintainer’s line reads correctly on the fal
   assert.ok(!roomPeerLine({ room: ROOM, from: 'alpha-main', body: 'hi' }).includes(FALLBACK));
 });
 
-test('an addressee and everybody else get the same post and different clauses', () => {
+test('a narrowed post composes only for the members it names', () => {
   const to = ['beta-main'];
   const mine = roomPeerLine({ room: ROOM, from: 'alpha-main', body: 'is the total off?', to, you: 'beta-main' });
-  const theirs = roomPeerLine({ room: ROOM, from: 'alpha-main', body: 'is the total off?', to, you: 'gamma-master' });
 
   assert.match(mine.split('\n')[0], / → you · /);
-  assert.match(theirs.split('\n')[0], / → beta-main \(not you — for your information\) · /);
-  // Both carry the whole post: a mention changes what each member is *told*, never who is
-  // told, and a member told the post is not theirs is not a member told less of it.
+  // Since 2026-11-20 nobody else is typed a copy, so composing one for them is refused.
+  assert.throws(
+    () => roomPeerLine({ room: ROOM, from: 'alpha-main', body: 'is the total off?', to, you: 'gamma-master' }),
+    /typed to those members only/,
+  );
   assert.ok(mine.endsWith(`${LEAD_PREFIX}is the total off?`));
-  assert.ok(theirs.endsWith(`${LEAD_PREFIX}is the total off?`));
 
   const human = roomHumanLine({ room: ROOM, body: 'ship it', human: 'jdoe', to, you: 'beta-main' });
   assert.match(human.split('\n')[0], /^jdoe in "the release" \(room-3\) → you · /);
-  // Being told the words were meant for somebody else must not make them weigh any less:
-  // the authority clause is on the same line and is the same clause.
+  // A narrowed copy of the maintainer's words weighs exactly what any other does: the
+  // authority clause is on the same line and is the same clause.
   assert.match(human.split('\n')[0], /carry their authority/);
 });
 

@@ -188,7 +188,21 @@ test.before(async () => {
     path.join(stateDir, 'rooms.json'),
     JSON.stringify({
       seq: 1,
-      rooms: [{ id: 'room-1', name: 'night shift', members: [{ tmuxSession: LEAD, name: 'delta-lead', paneId: '%97', addedAt: 1 }], createdAt: 1 }],
+      seq: 2,
+      rooms: [
+        { id: 'room-1', name: 'night shift', members: [{ tmuxSession: LEAD, name: 'delta-lead', paneId: '%97', addedAt: 1 }], createdAt: 1 },
+        // A second room, where the sleeper sits beside a member with no session at all, so a
+        // post naming the sleeper can be seen to reach nobody else (2026-11-20).
+        {
+          id: 'room-2',
+          name: 'day shift',
+          members: [
+            { tmuxSession: LEAD, name: 'delta-lead', paneId: '%97', addedAt: 1 },
+            { tmuxSession: 'foreman-echo-main', name: 'echo-main', paneId: '%98', addedAt: 1 },
+          ],
+          createdAt: 1,
+        },
+      ],
     }),
   );
   fs.writeFileSync(
@@ -294,19 +308,39 @@ test('a group-room post to a sleeping member is handed, held, and marked asleep'
   assert.equal(await waiting(), 3);
 });
 
+test('a post naming a sleeping member is held for it alone', async () => {
+  const res = await api('POST', '/api/rooms/room-2/post', { text: '@delta-lead the nightly is green again' });
+  assert.equal(res.status, 200, JSON.stringify(res.body));
+  // Narrowed: the other member is not even recorded as missed, because it was never meant one.
+  assert.deepEqual(
+    res.body.handed.map((m) => [m.tmuxSession, m.state, m.reason]),
+    [[LEAD, 'held', 'asleep']],
+  );
+  assert.deepEqual(res.body.entry.narrowedTo, ['delta-lead']);
+  assert.equal(await waiting(), 4);
+
+  // And with no mention the same room hands it to both — the unreachable one recorded as such.
+  const plain = await api('POST', '/api/rooms/room-2/post', { text: 'PROBE-PLAIN not held' });
+  assert.deepEqual(
+    plain.body.handed.map((m) => [m.name, m.state]),
+    [['delta-lead', 'held'], ['echo-main', 'unreachable']],
+  );
+  assert.equal(await waiting(), 5);
+});
+
 test('the team room nudges a sleeping lead once, however many events arrive', async () => {
   for (let i = 0; i < 3; i += 1) {
     const res = await api('POST', '/api/team/room', { folder: repo, from: 'one-fix', kind: 'status', text: `update ${i}` });
     assert.equal(res.status, 200);
   }
-  assert.equal(await waiting(), 4);
+  assert.equal(await waiting(), 6);
 });
 
 test('the send box refuses a sleeper outright, and holds nothing', async () => {
   const res = await api('POST', `/api/sessions/${LEAD_ID}/send`, { text: 'hello?' });
   assert.equal(res.status, 409);
   assert.equal(res.body.error, 'This session is asleep — wake it.');
-  assert.equal(await waiting(), 4);
+  assert.equal(await waiting(), 6);
 });
 
 test('Wake hands everything that waited to the new pane, in the order it arrived', async (t) => {
@@ -314,13 +348,13 @@ test('Wake hands everything that waited to the new pane, in the order it arrived
   const res = await api('POST', `/api/asleep/${LEAD}/wake`);
   assert.equal(res.status, 200, JSON.stringify(res.body));
   assert.equal(res.body.name, LEAD);
-  assert.equal(res.body.queued, 4);
+  assert.equal(res.body.queued, 6);
   assert.ok(fs.readFileSync(argsFile, 'utf8').includes(`--resume ${LEAD_ID}`));
 
   // The flusher types the first as soon as the pane reads idle; the rest wait behind it.
   // Whatever has been typed is on screen, whatever has not is still in the queue, and read
   // together the two must be the arrival order.
-  const order = [PHRASE, 'merge', 'the nightly build is red', '[room]'];
+  const order = [PHRASE, 'merge', 'the nightly build is red', 'the nightly is green again', 'PROBE-PLAIN', '[room]'];
   const screen = await until(() => {
     const s = tmux('capture-pane', '-p', '-J', '-t', res.body.paneId, '-S', '-200');
     return s.includes(PHRASE) ? s : null;

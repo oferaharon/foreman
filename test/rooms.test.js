@@ -615,7 +615,7 @@ test('a session may not post twice inside the floor, and the refusal says so', (
   store.post(room.id, { from: 'alpha-main', text: 'one' }, { by: ALPHA.tmuxSession, now: t0 });
   assert.throws(
     () => store.post(room.id, { from: 'alpha-main', text: 'again' }, { by: ALPHA.tmuxSession, now: t0 + 4000 }),
-    (e) => e.code === 'rate-limited' && /already said this to everyone/.test(e.message),
+    (e) => e.code === 'rate-limited' && /what you said is already in the room/.test(e.message),
   );
   assert.deepEqual(store.read(room.id).entries.map((e) => e.text), ['one'], 'refused, never silently dropped');
 

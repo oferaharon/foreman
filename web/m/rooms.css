@@ -417,7 +417,8 @@
 }
 
 /* Who this post named, when it named anybody. Muted, no accent and no motion: it is a fact
-   to read rather than something to act on, and every member got a copy either way. */
+   to read rather than something to act on. `only to …` — typed to the named alone — takes
+   one step darker ink. */
 .m-room-to {
   font-family: var(--mono);
   font-size: 0.62rem;
@@ -426,6 +427,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.m-room-to-narrowed {
+  color: var(--ink-muted);
 }
 
 .m-room-bubble {

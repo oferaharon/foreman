@@ -914,11 +914,12 @@ clamp, how a member is resolved, and what `@name` does and does not change. Evid
   different things one pane apart, and both are built by near-identical functions in one
   file.** Anchor on the node's own class prefix, never on the shape the two share.
   [rooms#to-means-two-different-things-one-pane-apart](docs/traps/rooms.md#to-means-two-different-things-one-pane-apart)
-- `server/rooms-line.js` (`mentionsIn`, `memberLabel`) · `POST /api/rooms/:id/post` ·
-  `web/app.js` (the composer's `@` menu) — **`@name` in a room is a signal, and the ruling
-  that makes it one is easy to optimise away.** The fan-out has no branch on `to` at all: a
-  mention changes what each recipient is told, never who gets a copy.
-  [rooms#name-in-a-room-is-a-signal](docs/traps/rooms.md#name-in-a-room-is-a-signal)
+- `server/rooms-line.js` (`addressing`, `deliveryFor`, `memberLabel`) · `server/room-header.js`
+  (`readRoomDelivery`) · `POST /api/rooms/:id/post` — **`@name` in a room decides who gets a
+  copy, reversing the 2026-09-05 ruling that it was a signal, and the log is the shared
+  record.** Named members only, `@all` or no mention is everyone, one parse for both; the old
+  `not you` header is never typed and must still be read.
+  [rooms#name-in-a-room-decides-who-gets-a-copy](docs/traps/rooms.md#name-in-a-room-decides-who-gets-a-copy)
 
 ### Bots
 
@@ -1450,11 +1451,14 @@ append-only, never rewritten. And **nothing about rooms joins `composerSig`**, b
 message landing in a room would otherwise take the textarea out from under whoever is typing.
 Archiving closes a room to posts and deletes nothing; the rail band folds archived ones away
 and its head is deliberately outside the `has-rooms` gate, since `+ room` is the only way to
-make the first one. **`@name` addresses a post and narrows nothing** — `mentionsIn` is the one
-parse, both writers go through it, and the two envelopes say something different to a named
-member than to everybody else; the trap above is what stops that becoming a delivery. **A
+make the first one. **`@name` decides who gets a copy** (the maintainer's ruling of 2026-11-20,
+reversing 2026-09-05's "narrows nothing") — a post naming members is typed to those members
+only, no mention or `@all` is everyone, and the log keeps every post with who it was handed to
+(`narrowedTo` on a narrowed one), so nothing in a room is private. `addressing` is the one
+parse and `deliveryFor` the one decision, both writers go through them, and narrowing only
+ever removes members from the guarded fan-out; the trap above has the rest. **A
 delivery is one line and a body** (`server/room-header.js`): the header names who spoke, the
-room by name *and* id, who it was addressed to relative to this reader, and which of the two
+room by name *and* id, who got a copy relative to this reader, and which of the two
 speakers it is — and nothing else, because the roster is `group_list`'s answer and the rule is
 the standing brief's, and repeating either per post cost a reader a paragraph a turn. In the
 recipient's own transcript it draws as a folded chip, the notice chip's register; how it is

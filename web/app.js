@@ -211,6 +211,7 @@ import {
   addableSessions,
   addReason,
   addressedText,
+  addressedTitle,
   asleepMembers,
   entryKey,
   handedText,
@@ -222,6 +223,7 @@ import {
   memberKey,
   memberName,
   memberRow,
+  narrowedNames,
   mentionMatches,
   mentionQuery,
   roomKeepAwake,
@@ -10652,7 +10654,8 @@ function createPane(slot, host) {
       who.style.borderColor = 'currentColor';
       who.title = name;
     } else {
-      who.title = 'You, from this room in the panel — every member gets a copy carrying your authority.';
+      who.title =
+        'You, from this room in the panel — every member, or only the ones you @named, got a copy carrying your authority.';
     }
     meta.append(who);
 
@@ -10667,9 +10670,11 @@ function createPane(slot, host) {
 
     /*
      * Who this post named, when it named anybody — muted, beside the timestamp, no accent
-     * and no motion, because it is a fact to read rather than something to act on.
+     * and no motion, because it is a fact to read rather than something to act on. A post
+     * typed to its named members alone (`narrowedTo`, since 2026-11-20) reads `only to …` in
+     * a step darker ink, so a narrowed post is visible as narrowed.
      *
-     * Read off the entry's own `to`, never by re-scanning `e.text` for `@` tokens: the parse
+     * Read off the entry's own `to` and `narrowedTo`, never by re-scanning `e.text` for `@` tokens: the parse
      * lives in `server/rooms-line.js` and running a second one here is the one thing
      * `web/rooms-pane.js`'s header refuses. An entry written before mentions existed carries
      * no `to`, draws no line, and is right not to — the log is append-only and nothing goes
@@ -10685,10 +10690,9 @@ function createPane(slot, host) {
     if (addressed) {
       const el = document.createElement('span');
       el.className = 'group-to';
+      if (narrowedNames(e).length) el.classList.add('is-narrowed');
       el.textContent = addressed;
-      el.title =
-        'Addressed with @name. Every member still got a copy — a mention changes what each ' +
-        'one was told, not who was told.';
+      el.title = addressedTitle(e);
       meta.append(el);
     }
     wrap.append(meta);
@@ -10890,15 +10894,17 @@ function createPane(slot, host) {
      * What a line typed here *is*, in the panel's own voice — said every time rather than in a
      * tooltip nobody opens, because the envelope makes exactly this claim on the way out. It
      * says **both** halves and neither is decoration: it carries the maintainer's authority
-     * (the `| ` prefix, which no session's body can reach), and it reaches everybody (a room
-     * fans out to every other member, so this is never a quiet word to one of them).
+     * (the `| ` prefix, which no session's body can reach), and who it reaches — every member,
+     * or only the ones an `@name` in it names (the maintainer's ruling of 2026-11-20). Even a
+     * narrowed post is in the room's log for every member to read, so it is never private.
      */
     const hint = document.createElement('span');
     hint.className = 'group-composer-hint';
-    hint.textContent = 'your own words, to every member — they may act on them';
+    hint.textContent = 'your own words, to every member or to the @named — they may act on them';
     hint.title =
-      'This goes out as your own line, prefixed so no session can forge it, and a copy is ' +
-      'typed into every member’s terminal.';
+      'This goes out as your own line, prefixed so no session can forge it. A copy is typed ' +
+      'into every member’s terminal — or, if you @name members, into theirs only. The room’s ' +
+      'log keeps it either way.';
 
     const btn = document.createElement('button');
     btn.className = 'send-btn';

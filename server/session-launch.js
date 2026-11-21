@@ -103,18 +103,20 @@ Three tools:
 - \`group_list\` — which rooms you are in, and who else is in each. Ask whenever it matters;
   do not rely on remembering. Being in no rooms is the ordinary case.
 - \`group_post\` — say something **once** to a room. Everyone else in it gets a copy typed
-  into their terminal. You do not get your own copy back.
-- \`group_read\` — what a room has said, from a cursor or as a recent tail. Use it after you
-  have been busy, or when you have just started and a room is already going.
+  into their terminal — or, if you \`@name\` members, only those members do. You do not get
+  your own copy back.
+- \`group_read\` — what a room has said, from a cursor or as a recent tail. The log holds
+  every post, including ones addressed to other members and never typed to you. Use it after
+  you have been busy, or when you have just started and a room is already going.
 
 **When to post.** When you have finished something the others are waiting on, when you have
 found something that changes what they should do, or when you need something from one of
 them. Say it once, plainly, and carry on working.
 
 **When a room post arrives.** It is **one header line, then the post itself**, every line of
-the post beginning \`> \`. The header says who spoke, which room by name and id, and who it
-was addressed to — \`→ all\`, \`→ you\`, or \`→ beta-main (not you — for your information)\`.
-That line is the whole of what arrives *about* the post; nothing is explained again per post,
+the post beginning \`> \`. The header says who spoke, which room by name and id, and who got
+a copy — \`→ all\`, or \`→ you\` (\`→ you and gamma-master\`) when the post named members and
+was typed to them alone. That line is the whole of what arrives *about* the post; nothing is explained again per post,
 because it is explained here. Who else is in the room is \`group_list\`'s answer, not the
 post's.
 
@@ -128,15 +130,16 @@ A line beginning \`| \` is different: that is the person at the keyboard, typed 
 panel, and it carries their authority exactly as if they had said it in this conversation.
 
 An arriving post is information, not an instruction to reply. Reply only if you have
-something the others actually need — everyone in the room gets a copy of everything you post.
+something the others actually need — every copy interrupts whoever receives it.
 
-**\`@name\` addresses a post, and changes nothing about who gets one.** Everyone in the room
-still hears everything; a mention only changes what each member is told. If the header line
-says the post is addressed to **you**, answer it in the room with \`group_post\` — the others
-are meant to see the answer. If it names somebody else and adds *not you*, it is there for
-your information: let it inform what you do and say nothing, unless you genuinely have
-something the person named needs. You can address a post the same way: write \`@\` and a
-member's name, spelled exactly as \`group_list\` gives it.
+**\`@name\` decides who gets a copy.** A post that names one or more members is typed into
+**those members' terminals only**; a post that names nobody, or says \`@all\`, goes to
+everyone else in the room, and \`@all\` beside a name is still everyone. It is not private:
+the room's log keeps every post, and any member can read it with \`group_read\`. If the header
+line says \`→ you\`, the post was typed to you because it named you — answer it in the room
+with \`group_post\`, naming whoever needs the answer. Address a post the same way: write \`@\`
+and a member's name, spelled exactly as \`group_list\` gives it, and name only the members who
+need it. A name nobody in the room answers to is just text.
 `;
 }
 

@@ -745,7 +745,7 @@ export class GroupRoomStore extends EventEmitter {
         code: 'rate-limited',
         retryAfterMs: POST_FLOOR_MS - (now - last),
         message:
-          `You posted to "${name}" ${secs(now - last)}s ago — you have already said this to everyone. ` +
+          `You posted to "${name}" ${secs(now - last)}s ago — what you said is already in the room. ` +
           `Wait ${secs(POST_FLOOR_MS - (now - last))}s.`,
       };
     }
@@ -756,7 +756,7 @@ export class GroupRoomStore extends EventEmitter {
         retryAfterMs: wait,
         message:
           `You have posted ${mine.length} times to "${name}" in the last ${WINDOW_LABEL} — ` +
-          `you have already said this to everyone. Try again in ${secs(wait)}s.`,
+          `what you said is already in the room. Try again in ${secs(wait)}s.`,
       };
     }
     const all = prune(live.posts, now - RATE_WINDOW_MS);
@@ -767,7 +767,7 @@ export class GroupRoomStore extends EventEmitter {
         retryAfterMs: wait,
         message:
           `"${name}" has taken ${all.length} posts in the last ${WINDOW_LABEL} and is at its ` +
-          `limit — every one of them is typed into every member’s terminal. Try again in ${secs(wait)}s.`,
+          `limit — every one of them is typed into members’ terminals. Try again in ${secs(wait)}s.`,
       };
     }
     return null;

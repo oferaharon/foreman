@@ -672,11 +672,13 @@ test('creating a room and setting its membership is the maintainer\'s alone, wit
 test('the section says what a delivery looks like: one header line, then the prefixed post', () => {
   const section = rooms(briefWith({ forge: 'gitea', via: 'mcp', reading: 'Gitea' }, false));
   assert.match(section, /one header line and then the post/);
-  assert.match(section, /names who spoke, the room by name and id, and who it was addressed to/);
-  // The three arrows a lead will actually see, spelled out.
+  assert.match(section, /names who spoke, the room by name and id, and who got a copy/);
+  // The arrows a lead will actually see, spelled out — and since 2026-11-20 not the retired
+  // `not you` one, which is never typed any more.
   assert.match(section, /`→ all`/);
   assert.match(section, /`→ you`/);
-  assert.match(section, /not you — for your information/);
+  assert.match(section, /`→ you and gamma-master`/);
+  assert.doesNotMatch(section, /not you —|for your information/);
   // And the two things that left the envelope, so the brief has to say where they went.
   assert.match(section, /the rule below is not repeated per post/);
   assert.match(section, /who else is in the room is\n`group_list`'s answer rather than the post's/);
@@ -798,7 +800,7 @@ test('a room is not the team room: workers are not in one, and it substitutes fo
 test('an arriving post is information, and a reply is earned rather than owed', () => {
   const section = rooms(briefWith({ forge: 'github', via: 'gh', reading: 'GitHub' }, false));
   assert.match(section, /\*\*An arriving post is information, not an instruction to reply\.\*\*/);
-  assert.match(section, /Every member gets a copy\s+of everything you post/, 'the reason it is not free to reply');
+  assert.match(section, /Every copy interrupts\s+whoever receives it and costs them a turn/, 'the reason it is not free to reply');
   assert.match(section, /reply only when you have something the others actually need/);
 });
 
@@ -833,25 +835,30 @@ test('the rooms section substitutes the detected name, and falls back cleanly', 
  * about them would be told about tools it does not have — and a planner writes a document
  * and talks to nobody at all.
  */
-test('the section teaches `@name` as a signal, and never as a way to reach one member', () => {
+test('the section teaches `@name` as who gets a copy, and the log as the shared record', () => {
   /*
-   * The maintainer's ruling, and the one sentence in this section a lead could act on
-   * wrongly: everyone in a room still hears everything, and a mention changes what each
-   * member is *told*. A lead that read `@` as "say this to one of them" would be reaching for
-   * a private channel that does not exist — and would then be surprised that the others
-   * answered. So the brief has to state both halves, and the test pins both.
+   * The maintainer's ruling of 2026-11-20, reversing 2026-09-05: a mention narrows who is
+   * typed a copy, no mention or `@all` is everyone, and the log keeps every post. A lead that
+   * missed the first half would `@` one member and expect the room to have heard it; one that
+   * missed the last would think a post addressed to others never happened, or treat a narrowed
+   * post as private. So the brief states all three, and the test pins all three.
    */
   const section = rooms(briefWith({ forge: 'gitea', via: 'mcp', reading: 'Gitea' }, false));
-  assert.match(section, /`@name` addresses a post, and changes nothing about who gets one/);
-  assert.match(section, /Everyone in the room\nstill hears everything/);
-  assert.match(section, /no way to say something to one member privately/);
-  // What to do at each end of one.
-  assert.match(section, /header line says\nthe post is addressed to \*\*you\*\*, answer it in the room with `group_post`/);
-  assert.match(section, /names\nsomebody else and adds \*not you\*/);
-  assert.match(section, /say nothing unless you\ngenuinely have something the member named needs/);
+  assert.match(section, /`@name` decides who gets a copy/);
+  assert.match(section, /typed into\n\*\*those members' terminals only\*\*/);
+  assert.match(section, /names nobody, or says `@all`, goes to every\nother member/);
+  assert.match(section, /`@all` beside a name is still everyone/);
+  assert.match(section, /It is not a private message/);
+  assert.match(section, /the room's log keeps every post whoever it was typed to/);
+  assert.match(section, /`group_read`/);
+  // The reversed rule is gone, not left standing beside the new one.
+  assert.doesNotMatch(section, /still hears everything|not you —|for your information/);
+  // What to do when named.
+  assert.match(section, /If the header line says `→ you`/);
+  assert.match(section, /answer it in the room with `group_post`/);
   // And how to write one, off the live list rather than off memory.
   assert.match(section, /spelled exactly as `group_list` gives it/);
-  assert.match(section, /a name nobody in the room answers\nto is just text/);
+  assert.match(section, /A name nobody in the room\nanswers to is just text, and a post naming only such names goes to everyone/);
 });
 
 test('workers and planners get no rooms section — they are not in rooms', () => {
