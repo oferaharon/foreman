@@ -239,14 +239,20 @@ export async function pool(items, n, fn, shouldStop = () => false) {
 const rowKey = (r) => `${r.task}\u0000${r.advisorModel}\u0000${r.run}`;
 const totalIn = (t) => (t ? t.input + t.cacheRead + t.cacheWrite : 0);
 
-/** The call list: held-out first (both models), then train — so a stopped run is still useful. */
+/**
+ * The call list, in the order a stopped run is still most useful: the advisor on the
+ * held-out set, then on the rest, then the second model on the held-out set one run at a
+ * time. The second model goes last because it is the slow half — Haiku 4.5 takes no effort
+ * level and thinks at length, ~20-35 s a call against Sonnet's ~3 s (measured on the first
+ * smoke run).
+ */
 export function plannedCalls(items, { secondModel = SECOND_MODEL } = {}) {
   const calls = [];
   const held = items.filter((i) => i.split === 'held-out');
   const train = items.filter((i) => i.split === 'train');
   for (const it of held) for (let run = 1; run <= RUNS; run++) calls.push({ it, model: ADVISOR_MODEL, run });
-  if (secondModel) for (const it of held) for (let run = 1; run <= RUNS; run++) calls.push({ it, model: secondModel, run });
   for (const it of train) for (let run = 1; run <= RUNS; run++) calls.push({ it, model: ADVISOR_MODEL, run });
+  if (secondModel) for (let run = 1; run <= RUNS; run++) for (const it of held) calls.push({ it, model: secondModel, run });
   return calls;
 }
 
@@ -490,7 +496,7 @@ export function renderSummary(rows, meta = {}) {
     `The advisor read **${tasks.size}** past worker briefs — the brief only, plus whether it was a build or a plan and its tag — and said which model it would have run each on. Its answers are compared with what each task actually ran on and how it went. Advisor version ${ADVISOR_VERSION}, running on ${name(ADVISOR_MODEL)} at \`${ADVISOR_EFFORT}\`. Every brief was asked twice.`,
   );
   sec.push(
-    `How a task "went" is read from the team room: **clean** (done, one done report, nothing after), **reworked** (sent back or reported twice), **struggled** (a stuck or loop alert, an interrupt, or the worker escalating a question). Tasks closed unfinished (${outcomes.abandoned ?? 0}), still open (${outcomes.open ?? 0}) or with no done report on record (${outcomes.unclear ?? 0}) are not scored. Of the rest: ${outcomes.clean ?? 0} clean, ${outcomes.reworked ?? 0} reworked, ${outcomes.struggled ?? 0} struggled.`,
+    `Fable 5.2 is counted as heavier than Opus 5.5, as the advisor's own instructions describe it. How a task "went" is read from the team room: **clean** (done, one done report, nothing after), **reworked** (sent back or reported twice), **struggled** (a stuck or loop alert, an interrupt, or the worker escalating a question). Tasks closed unfinished (${outcomes.abandoned ?? 0}), still open (${outcomes.open ?? 0}) or with no done report on record (${outcomes.unclear ?? 0}) are not scored. Of the rest: ${outcomes.clean ?? 0} clean, ${outcomes.reworked ?? 0} reworked, ${outcomes.struggled ?? 0} struggled.`,
   );
 
   sec.push('## The headline');

@@ -136,9 +136,12 @@ test('replayItems takes dispatched tasks only, oldest first, newest 30% held out
   assert.deepEqual(items.map((i) => i.split), ['train', 'train', 'train', 'train', 'train', 'train', 'held-out', 'held-out', 'held-out']);
   assert.ok(items.every((a, i) => i === 0 || items[i - 1].at <= a.at));
   const calls = ev.plannedCalls(items);
-  // held-out first, both models, then train on Sonnet; every brief twice.
+  // Sonnet on held-out, Sonnet on train, then the second model on held-out; every brief twice.
   assert.equal(calls.length, 3 * 2 * 2 + 6 * 2);
-  assert.ok(calls.slice(0, 12).every((c) => c.it.split === 'held-out'));
+  assert.ok(calls.slice(0, 6).every((c) => c.it.split === 'held-out' && c.model === 'claude-sonnet-5-5'));
+  assert.ok(calls.slice(6, 18).every((c) => c.it.split === 'train'));
+  assert.ok(calls.slice(18).every((c) => c.model === ev.SECOND_MODEL));
+  assert.deepEqual(calls.slice(18).map((c) => c.run), [1, 1, 1, 2, 2, 2]);
   assert.ok(calls.filter((c) => c.model === ev.SECOND_MODEL).every((c) => c.it.split === 'held-out'));
   assert.equal(ev.plannedCalls(items, { secondModel: null }).length, 9 * 2);
 });
