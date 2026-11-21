@@ -52,8 +52,13 @@ import {
 import { WORKER_EFFORTS, modelLabel } from '../server/worker-models.js';
 import { teamKey } from '../server/team.js';
 
-/** The second advisor model tried on the held-out set (plan Q2, the maintainer's ruling). */
-export const SECOND_MODEL = 'claude-haiku-4-5-20251001';
+/**
+ * The second advisor model tried on the held-out set (plan Q2). Haiku 5.5, by the
+ * maintainer's change of 2026-11-21 — Haiku 4.5 is a generation behind and no fair test of
+ * a cheap advisor. Not a worker model (`ADVISOR_ONLY_MODELS` in server/advisor.js), and it
+ * takes `--effort`, so it runs at `low` like the main advisor.
+ */
+export const SECOND_MODEL = 'claude-haiku-5-5';
 export const HELD_OUT_SHARE = 0.3;
 export const RUNS = 2;
 
@@ -242,9 +247,7 @@ const totalIn = (t) => (t ? t.input + t.cacheRead + t.cacheWrite : 0);
 /**
  * The call list, in the order a stopped run is still most useful: the advisor on the
  * held-out set, then on the rest, then the second model on the held-out set one run at a
- * time. The second model goes last because it is the slow half — Haiku 4.5 takes no effort
- * level and thinks at length, ~20-35 s a call against Sonnet's ~3 s (measured on the first
- * smoke run).
+ * time — the comparison is the part that can be cut if a run has to stop.
  */
 export function plannedCalls(items, { secondModel = SECOND_MODEL } = {}) {
   const calls = [];
@@ -526,7 +529,9 @@ export function renderSummary(rows, meta = {}) {
   sec.push(spreadTable(okMain, 'tag', (r) => r.tag ?? 'none'));
   sec.push(spreadTable(okMain, 'advised model', (r) => name(r.model)));
 
-  const second = [...new Set(rows.map((r) => r.advisorModel))].filter((m) => m !== ADVISOR_MODEL);
+  // Only the current second model is compared: rows from any other advisor model (an earlier
+  // choice of comparison) are kept on disk and left off the page.
+  const second = rows.some((r) => r.advisorModel === SECOND_MODEL) ? [SECOND_MODEL] : [];
   for (const m of second) {
     const a = score(first(ADVISOR_MODEL, 'held-out'));
     const b = score(first(m, 'held-out'));
@@ -549,7 +554,7 @@ export function renderSummary(rows, meta = {}) {
       ]),
     );
     sec.push(
-      `Agrees with itself on the model: ${name(ADVISOR_MODEL)} ${pct(saA.model, saA.pairs)}, ${name(m)} ${pct(saB.model, saB.pairs)}. The two advisors picked the same model on ${pct(agree, pairs.length)} of ${pairs.length} briefs. Median time per call: ${(cA.medianMs / 1000).toFixed(1)} s against ${(cB.medianMs / 1000).toFixed(1)} s; failed calls: ${cA.failed} against ${cB.failed}. ${name(m)} takes no effort level, so its effort picks are the model's own and are not compared.`,
+      `Agrees with itself on the model: ${name(ADVISOR_MODEL)} ${pct(saA.model, saA.pairs)}, ${name(m)} ${pct(saB.model, saB.pairs)}. The two advisors picked the same model on ${pct(agree, pairs.length)} of ${pairs.length} briefs. Median time per call: ${(cA.medianMs / 1000).toFixed(1)} s against ${(cB.medianMs / 1000).toFixed(1)} s; failed calls: ${cA.failed} against ${cB.failed}. Both ran at \`${ADVISOR_EFFORT}\`.`,
     );
   }
 

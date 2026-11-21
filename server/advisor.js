@@ -42,6 +42,18 @@ export const ADVISOR_VERSION = 1;
 export const ADVISOR_MODEL = 'claude-sonnet-5-5';
 export const ADVISOR_EFFORT = 'low';
 
+/**
+ * Models the advisor may *itself* run on that are not worker models. `claude-haiku-5-5` is
+ * display-only on `worker-models.js` by the 2026-10-13 ruling and must never join
+ * `WORKER_MODELS`: the advisor's own model is not a worker model, so it is allowed here and
+ * nowhere else. It is the cheap advisor the replay compares against (the maintainer's
+ * change of 2026-11-21, replacing Haiku 4.5 as a generation behind). MEASURED on v2.1.322:
+ * unlike Haiku 4.5 it takes `--effort` and records it — `low` answered in 177 output tokens
+ * and `max` in 2,834 on one brief, the transcripts carrying `effort: low` / `max`, and an
+ * unknown level warns — so `takesEffort` is right to say yes and it runs at `low`.
+ */
+export const ADVISOR_ONLY_MODELS = Object.freeze(['claude-haiku-5-5']);
+
 /** Longest reason kept, in characters. A reason is one sentence for a room line. */
 export const MAX_REASON = 400;
 
@@ -126,7 +138,9 @@ export function adviceSchema() {
  * level (Haiku, `MODELS_WITHOUT_EFFORT`) is launched without `--effort`.
  */
 export function adviceArgv({ model = ADVISOR_MODEL, effort = ADVISOR_EFFORT } = {}) {
-  if (!WORKER_MODELS.includes(model)) throw new Error(`Not a model the advisor can run on: ${model}`);
+  if (!WORKER_MODELS.includes(model) && !ADVISOR_ONLY_MODELS.includes(model)) {
+    throw new Error(`Not a model the advisor can run on: ${model}`);
+  }
   if (!WORKER_EFFORTS.includes(effort)) throw new Error(`Not an effort level: ${effort}`);
   const argv = [
     '-p',

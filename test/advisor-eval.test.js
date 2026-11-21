@@ -203,11 +203,13 @@ test('replay end to end: rows, a nameless summary, a repo key, a resume that mak
   const { rows, meta } = await ev.replay(opts);
   assert.equal(rows.length, 9 * 2 + 3 * 2);
   assert.ok(rows.every((r) => r.ok));
-  // Haiku only ever ran on the held-out set, and without --effort.
+  // The second model is Haiku 5.5, only ever on the held-out set, at low like the advisor.
+  assert.equal(ev.SECOND_MODEL, 'claude-haiku-5-5');
   const calls = fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  const haiku = calls.filter((c) => c.args.includes('claude-haiku-4-5-20251001'));
+  const haiku = calls.filter((c) => c.args.includes('claude-haiku-5-5'));
   assert.equal(haiku.length, 6);
-  assert.ok(haiku.every((c) => !c.args.includes('--effort')));
+  assert.ok(haiku.every((c) => c.args[c.args.indexOf('--effort') + 1] === 'low'));
+  assert.ok(!calls.some((c) => c.args.includes('claude-haiku-4-5-20251001')));
   assert.equal(meta.rail.newWithInput, 0);
   assert.equal(meta.rail.advisorFolder, false);
   assert.equal(meta.advisorCwdEmpty, true);
@@ -242,6 +244,13 @@ test('replay end to end: rows, a nameless summary, a repo key, a resume that mak
 
   // Nothing written outside advisor/ and advisor-eval/.
   assert.deepEqual(fs.readdirSync(stateDir).sort(), ['advisor', 'advisor-eval', 'tasks.json', 'teams']);
+
+  // A row from an earlier comparison model stays on disk and off the page.
+  const stale = { ...rows.find((r) => r.split === 'held-out'), advisorModel: 'claude-haiku-4-5-20251001' };
+  const page = ev.renderSummary([...rows, stale], meta);
+  assert.ok(!page.includes('Haiku 4.5'));
+  assert.ok(page.includes('Haiku 5.5'));
+  assert.equal(ev.headline([...rows, stale]), ev.headline(rows));
 
   const n = fs.readFileSync(log, 'utf8').split('\n').length;
   await ev.replay(opts);

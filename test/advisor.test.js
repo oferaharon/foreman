@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   ADVISABLE_MODELS,
+  ADVISOR_ONLY_MODELS,
   ADVISOR_EFFORT,
   ADVISOR_MODEL,
   ADVISOR_VERSION,
@@ -78,7 +79,17 @@ test('the argv carries every measured flag, no --bare, and no input', () => {
   assert.equal(argv.at(-2), '--effort');
 });
 
-test('a Haiku advisor is launched without --effort, and an unknown model or effort is refused', () => {
+test('Haiku 5.5 may run the advisor, at an effort, and is still never a worker model or advice', () => {
+  assert.deepEqual([...ADVISOR_ONLY_MODELS], ['claude-haiku-5-5']);
+  assert.ok(!WORKER_MODELS.includes('claude-haiku-5-5'), 'display-only by the 2026-10-13 ruling');
+  const argv = adviceArgv({ model: 'claude-haiku-5-5' });
+  assert.equal(argv[argv.indexOf('--model') + 1], 'claude-haiku-5-5');
+  assert.equal(argv[argv.indexOf('--effort') + 1], 'low');
+  assert.ok(!adviceSchema().properties.model.enum.includes('claude-haiku-5-5'));
+  assert.equal(readAdvice(answer({ model: 'claude-haiku-5-5', effort: 'low', reason: 'r' })).ok, false);
+});
+
+test('a Haiku 4.5 advisor is launched without --effort, and an unknown model or effort is refused', () => {
   const argv = adviceArgv({ model: 'claude-haiku-4-5-20251001' });
   assert.ok(!argv.includes('--effort'));
   assert.equal(argv[argv.indexOf('--model') + 1], 'claude-haiku-4-5-20251001');
