@@ -1005,8 +1005,12 @@ setting and not a warning.
 A second Claude account on one Mac runs through `CLAUDE_CONFIG_DIR` (an alias such as
 `claude-work` pointing it at `~/.claude-work`), and nothing in a session's terminal or
 transcript says which account it is on. So every session wears a small **account tag** in its
-pane header and at the end of its rail row's second line — inside that line, never a new one,
-so a team row stays three lines and every other row two. Desktop only; a sleeping row has no
+pane header and in its rail card's **bottom-right corner** — right-aligned at the end of the
+card's *last* line: the second line on an ordinary row, the third (`lead · N tasks`,
+`worker · agent/<id>`) on a team row. It rides inside a line that exists, never a new one, so a
+team row stays three lines and every other row two (heights measured unchanged). It is the one
+thing that gives way: it ellipsises before the model or a branch name loses a character, down
+to nothing on the second line and to about seven characters on the third. Desktop only; a sleeping row has no
 process and no tag, and a bot has none.
 
 `server/account.js` reads it off the process: the pane's `claude` (a child of the `-ilc` login

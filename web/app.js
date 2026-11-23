@@ -6120,18 +6120,19 @@ function sessionRow(s, fold = null) {
   // How the pane and the transcript were paired is the padlock under the dot now — the
   // word here said the same thing twice, and only for one of the three cases.
 
-  // Which Claude account it runs on, last on the line and the one item that may shrink: on a
-  // narrow rail it ellipsizes rather than pushing the model off, and it never adds a line —
-  // a team row is three lines and every other row two (rail-and-groups#a-team-row-is-three-lines-tall).
+  // Which Claude account it runs on, in the card's bottom-right corner: the end of the card's
+  // *last* line, so the meta line on an ordinary row and the third line on a team row
+  // (`teamLine` takes it). It rides inside a line that already exists and never adds one
+  // (rail-and-groups#a-team-row-is-three-lines-tall), and it is the one thing that shrinks.
   const acct = accountTagEl(document, s.account);
-  if (acct) meta.append(acct);
+  if (acct && !s.team) meta.append(acct);
 
   btn.append(meta);
 
   // The third line, on team sessions only. Every other row in the rail stays two lines —
   // that is the whole reason this shape was chosen over a stripe or another badge, so
   // don't generalise it to rows that have nothing to say here.
-  if (s.team) btn.append(teamLine(s.team, s));
+  if (s.team) btn.append(teamLine(s.team, s, acct));
 
   row.append(btn);
 
@@ -6492,7 +6493,7 @@ function confirmForget(s) {
  * not wide — so it, and only it, ellipsises; the chip and the row's own controls never get
  * squeezed by it.
  */
-function teamLine(team, s) {
+function teamLine(team, s, acct = null) {
   const line = document.createElement('span');
   line.className = 'session-team';
 
@@ -6543,6 +6544,8 @@ function teamLine(team, s) {
 
   line.append(fact);
   if (after) line.append(after);
+  // The row's last line holds the account tag, so a team row's corner is this one.
+  if (acct) line.append(acct);
   return line;
 }
 

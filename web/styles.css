@@ -3479,14 +3479,17 @@ body.pin-reordering * { cursor: grabbing !important; }
 
 /* Which Claude account a session runs on (`web/account-tag.js`). A hairline chip in the
    meta line's own grey, so it reads as a fact about the row rather than a state of it. In
-   the rail it is the one item allowed to shrink: `min-width: 0` lets it ellipsize instead of
-   the line clipping the model off, and it never wraps onto a line of its own. A folder-name
-   fallback (no nickname set) is drawn dashed, so "unnamed" is visible without a word. */
+   the rail it sits in the bottom-right corner of the card — `margin-left: auto` on the end
+   of the card's last line (the meta line, or the third line of a team row) — and is the one
+   item allowed to shrink: a high `flex-shrink` makes it give way first, before the model or
+   a branch name loses any. It never wraps onto a line of its own. A folder-name fallback (no
+   nickname set) is drawn dashed, so "unnamed" is visible without a word. */
 .account-tag {
   display: inline-block;
   min-width: 0;
   max-width: 14ch;
-  flex-shrink: 1;
+  flex-shrink: 100;
+  margin-left: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3498,8 +3501,13 @@ body.pin-reordering * { cursor: grabbing !important; }
   line-height: 1.25;
   font-size: 0.9em;
 }
+/* On a team row's third line the fact ellipsises beside it, so the tag keeps a readable floor
+   (about seven characters). On the meta line nothing else can shrink, so there it may go to
+   nothing rather than hang off the card's edge — measured, with a model, effort and ctx
+   beside it at the narrowest rail. */
+.session-team .account-tag { min-width: 7ch; }
 .account-tag.is-folder { border-style: dashed; color: var(--ink-faint); }
-.head-account { max-width: 18ch; }
+.head-account { max-width: 18ch; margin-left: 0; flex-shrink: 1; min-width: 0; }
 .head-dialog { color: var(--accent); }
 
 .head-meta {

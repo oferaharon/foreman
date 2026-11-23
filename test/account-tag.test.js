@@ -52,11 +52,19 @@ test('unknown draws nothing', () => {
   assert.equal(accountTag({ folder: '' }), null);
 });
 
-test('the account never joins composerSig, and the tag rides the meta line, not a new one', () => {
+test('the account never joins composerSig, and the tag rides the card\'s last line, not a new one', () => {
   const app = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'app.js'), 'utf8');
   const sig = app.slice(app.indexOf('const composerSig = (s) =>'), app.indexOf('let lastComposerSig'));
   assert.ok(sig.length > 100);
   assert.doesNotMatch(sig, /account/);
-  // In the rail it is appended to `meta`, the row's second line.
-  assert.match(app, /const acct = accountTagEl\(document, s\.account\);\n\s*if \(acct\) meta\.append\(acct\);/);
+  // In the rail it is the end of the card's last line: `meta` on an ordinary row, the third
+  // line on a team row — appended to one or the other, never both and never to a new line.
+  assert.match(app, /const acct = accountTagEl\(document, s\.account\);\n\s*if \(acct && !s\.team\) meta\.append\(acct\);/);
+  assert.match(app, /btn\.append\(teamLine\(s\.team, s, acct\)\)/);
+  assert.match(app, /if \(acct\) line\.append\(acct\);/);
+  // …pushed to the right edge by the stylesheet, and shrinking before anything beside it.
+  const css = fs.readFileSync(path.join(import.meta.dirname, '..', 'web', 'styles.css'), 'utf8');
+  const rule = /\n\.account-tag \{([^}]*)\}/.exec(css)?.[1] || '';
+  assert.match(rule, /margin-left:\s*auto/);
+  assert.match(rule, /flex-shrink:\s*100/);
 });
