@@ -1,0 +1,13 @@
+    1     0 /sbin/launchd
+  401     1 /usr/sbin/cfprefsd
+ 9001     1 tmux
+ 9002  9001 -zsh
+ 9010  9001 zsh
+ 9011  9010 claude
+ 9020  9001 zsh
+ 9021  9020 claude
+ 9022  9021 /bin/zsh
+ 9030  9001 claude
+ 9040  9001 zsh
+ 9041  9040 node
+ 9050  9001 /Applications/Some App.app/Contents/MacOS/Some App

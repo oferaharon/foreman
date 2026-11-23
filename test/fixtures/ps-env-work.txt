@@ -1,0 +1,1 @@
+claude --name beta-main AI_AGENT=claude-code_2-1-322_agent CLAUDE_CONFIG_DIR=/Users/tester/.claude-work COLORTERM=truecolor HOME=/Users/tester LANG=en_US.UTF-8 PATH=/opt/homebrew/bin:/usr/bin:/bin SHELL=/bin/zsh TERM=tmux-256color TMUX_PANE=%1 USER=tester

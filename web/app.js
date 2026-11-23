@@ -235,6 +235,7 @@ import {
 // the bots band needed it, because a bot's `ctx` has to look exactly like a dev session's and
 // the band is a pure module that cannot import this one.
 import { ctxEl, ctxFor } from './ctx.js';
+import { accountTagEl } from './account-tag.js';
 // The bots band and the bot pane's conversation list: the order, the two lines of a row, the
 // in-place patch, and the settings list's facts. Pure and node-tested like `rooms-band.js`,
 // whose `place` it imports — a row already in place is never moved.
@@ -2547,6 +2548,58 @@ async function openSettings() {
   haSec.append(haCap, haRow, haHint);
   body.append(haSec);
 
+  /*
+   * Account tags: the nickname each Claude account's sessions wear in their header and rail
+   * row (`web/account-tag.js`). One row per account the roster has seen signed in, plus any
+   * the file names that are not running now, so a stale one can still be cleared. Blank
+   * means the config folder's name. Keyed by account uuid on the server, so a re-login into
+   * the same account keeps its name. Not exposure — not locked for a LAN browser, like the
+   * launch model — and it applies at once, at the next roster beat.
+   *
+   * The row's text is the folder and the plan; the email is its hover and nothing else,
+   * the same rule as the tag itself.
+   */
+  const acSec = document.createElement('section');
+  acSec.className = 'settings-sec settings-accounts';
+  const acCap = document.createElement('h3');
+  acCap.textContent = 'Account tags';
+  acSec.append(acCap);
+  const acInputs = [];
+  const acAccounts = Array.isArray(cfg.accounts) ? cfg.accounts : [];
+  for (const a of acAccounts) {
+    const r = document.createElement('label');
+    r.className = 'settings-model settings-account';
+    const t = document.createElement('span');
+    t.className = 'settings-account-name';
+    t.textContent = a.live
+      ? `${a.folder || 'account'}${a.plan ? ` · ${a.plan}` : ''}`
+      : `${String(a.uuid).slice(0, 8)}… · not running now`;
+    t.title = [a.email, a.plan, a.configDir].filter(Boolean).join(' · ') || a.uuid;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.maxLength = Number(cfg.nicknameMax) || 24;
+    input.value = a.nickname || '';
+    input.placeholder = a.folder || 'nickname';
+    input.setAttribute('aria-label', `Nickname for the account in ${a.folder || 'this folder'}`);
+    input.oninput = () => say('');
+    const wrap = document.createElement('span');
+    wrap.className = 'settings-add settings-account-input';
+    wrap.append(input);
+    r.append(t, wrap);
+    acSec.append(r);
+    acInputs.push({ uuid: a.uuid, input, shown: a.nickname || '' });
+  }
+  const acHint = document.createElement('p');
+  acHint.className = 'settings-flag';
+  acHint.textContent = acAccounts.length
+    ? 'The tag every session on that account wears in its header and rail row. Blank shows the ' +
+      'config folder’s name instead (default is ~/.claude). Follows the account, not the folder, ' +
+      'so it survives a re-login. Applies at once; the email is only ever in the hover.'
+    : 'No signed-in Claude account is running in a session right now. Sessions show their config ' +
+      'folder’s name as a tag; once one is running, its account can be named here.';
+  acSec.append(acHint);
+  body.append(acSec);
+
   /* ────────────────────────────────────────────────────────────── notifications ── */
 
   /*
@@ -2803,8 +2856,19 @@ async function openSettings() {
     const lmFixes = Boolean(cfg.launchModelError) && (cfg.launchModels || []).includes(lmPick.value);
     if (lmPick.value && (lmPick.value !== lmShown || lmFixes)) patch.launchModel = lmPick.value;
     if (haPick.value && haPick.value !== haShown) patch.hibernateAfter = haPick.value;
+    // Only the names that moved: the server merges a delta, so an untouched row is left alone.
+    const nickDelta = {};
+    for (const a of acInputs) {
+      const v = a.input.value.trim();
+      if (v !== a.shown) nickDelta[a.uuid] = v;
+    }
+    if (Object.keys(nickDelta).length) patch.accountNicknames = nickDelta;
     if (!Object.keys(patch).length) {
-      say('Nothing to save from here — only the launch model and hibernation can be changed from this browser.');
+      say(
+        canEdit
+          ? 'Nothing to save.'
+          : 'Nothing to save from here — only the launch model, hibernation and account tags can be changed from this browser.',
+      );
       return;
     }
     saving = true;
@@ -2826,8 +2890,16 @@ async function openSettings() {
       haStored = typeof out.hibernateAfter === 'string' ? out.hibernateAfter : null;
       haShown = HIBERNATE_CHOICES.includes(haStored) ? haStored : DEFAULT_HIBERNATE;
       haPick.value = haShown;
+      // Re-seat the names from what is on disk now.
+      for (const a of acInputs) {
+        const back = (out.accounts || []).find((x) => x.uuid === a.uuid);
+        a.shown = back?.nickname || '';
+        a.input.value = a.shown;
+      }
       saving = false;
       save.disabled = false;
+      const nickMoved = out.changed?.includes('accountNicknames');
+      const nickSaid = nickMoved ? ' Account tags update in a moment.' : '';
       const modelMoved = out.changed?.includes('launchModel');
       const sleepMoved = out.changed?.includes('hibernateAfter');
       const sleepSaid = sleepMoved
@@ -2839,11 +2911,12 @@ async function openSettings() {
         out.restartRequired
           ? `Saved. Takes effect at the next restart (npm run restart-panel) — ${out.restartReason}.` +
               (modelMoved ? ' The launch model applies from the next launch.' : '') +
-              sleepSaid
+              sleepSaid +
+              nickSaid
           : modelMoved
-            ? `Saved. The next session the panel starts uses it.${sleepSaid}`
-            : sleepMoved
-              ? `Saved.${sleepSaid}`
+            ? `Saved. The next session the panel starts uses it.${sleepSaid}${nickSaid}`
+            : sleepMoved || nickMoved
+              ? `Saved.${sleepSaid}${nickSaid}`
               : 'Saved. Nothing changed.',
       );
     } catch (err) {
@@ -6046,6 +6119,12 @@ function sessionRow(s, fold = null) {
   if (s.contextPct != null) meta.append(ctxEl(s.contextPct));
   // How the pane and the transcript were paired is the padlock under the dot now — the
   // word here said the same thing twice, and only for one of the three cases.
+
+  // Which Claude account it runs on, last on the line and the one item that may shrink: on a
+  // narrow rail it ellipsizes rather than pushing the model off, and it never adds a line —
+  // a team row is three lines and every other row two (rail-and-groups#a-team-row-is-three-lines-tall).
+  const acct = accountTagEl(document, s.account);
+  if (acct) meta.append(acct);
 
   btn.append(meta);
 
@@ -14798,6 +14877,11 @@ function createPane(slot, host) {
     // While a dialog owns the terminal there is no footer to read a model out of, so this
     // is the only thing the header can honestly say about the session.
     if (s.status === 'dialog') parts.push(text(`${s.dialog || 'dialog'} open`, 'head-dialog'));
+    // Which Claude account, ahead of the model: the two answer "what is this running as", and
+    // the account is the one that decides whose quota it spends. Repainted on every roster
+    // beat from here — never `composerSig`, which would rebuild the textarea for a nickname.
+    const acct = accountTagEl(document, s.account, 'account-tag head-account');
+    if (acct) parts.push(acct);
     if (s.model) parts.push(text(shortModel(s.model)));
     if (s.contextPct != null) {
       const wrap = document.createElement('span');

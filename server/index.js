@@ -106,7 +106,11 @@ import {
   resolveLaunchModel,
   resolveHibernateAfter,
   HIBERNATE_RULE,
+  readNicknames,
+  NICKNAME_MAX,
+  NICKNAME_RULE,
 } from './settings-file.js';
+import { AccountReader } from './account.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
@@ -235,6 +239,16 @@ const hibernation = new HibernateStore();
 // Every sleeper's transcript is claimed from inference — a receipt-less sibling was handed one
 // after a restart (binding.md). Read per poll, so wake and forget release it at once.
 registry.sleepers = () => hibernation.asleep();
+
+/*
+ * Which Claude account each pane runs on (`account.js`), and the nicknames the tag reads.
+ * The nicknames are read at boot and replaced by the settings write, the `hibernateAfter`
+ * shape — never per roster poll, which would put a file read in every poll forever.
+ */
+const accountReader = new AccountReader();
+let accountNicknames = readNicknames(readConfigFile(CONFIG_FILE).config);
+registry.accounts = accountReader;
+registry.nicknames = () => accountNicknames;
 
 /** The sleepers' names — what every launch passes as `reserved`, except a wake. */
 const asleepNames = () => hibernation.names();
@@ -4826,6 +4840,26 @@ app.post('/api/sessions/:id/exit', async (req, res) => {
  *  order to show its exposure controls disabled with the reason. What it exposes is the
  *  allowlist and the bind host, which anything that has already reached this port can
  *  infer from the fact that it reached this port. */
+/** The settings box's account list: live signed-in accounts first, then nicknamed ones that
+ *  are not running now. The email is there for the row's hover, never its text. */
+function accountsForSettings(nicknames) {
+  const rows = accountReader.known().map((a) => ({
+    uuid: a.uuid,
+    email: a.email,
+    plan: a.plan,
+    folder: a.folder,
+    configDir: a.configDir,
+    nickname: nicknames[a.uuid] ?? null,
+    live: true,
+  }));
+  for (const [uuid, nickname] of Object.entries(nicknames)) {
+    if (!rows.some((r) => r.uuid === uuid)) {
+      rows.push({ uuid, email: null, plan: null, folder: null, configDir: null, nickname, live: false });
+    }
+  }
+  return rows;
+}
+
 app.get('/api/config', (req, res) => {
   const { config, notes, exists } = readConfigFile(CONFIG_FILE);
   // Read at launch rather than boot, so this is the model the *next* launch would use — and
@@ -4862,6 +4896,11 @@ app.get('/api/config', (req, res) => {
     hibernateAfter: config.hibernateAfter === undefined ? null : config.hibernateAfter,
     hibernateChoices: HIBERNATE_CHOICES,
     hibernateRule: HIBERNATE_RULE,
+    // Accounts the roster has seen signed in, plus any the file names a nickname for that
+    // are not running now — so a nickname can be cleared for an account that has gone.
+    accounts: accountsForSettings(readNicknames(config)),
+    nicknameMax: NICKNAME_MAX,
+    nicknameRule: NICKNAME_RULE,
     // Whether *this* request could have written the exposure keys. The modal disables its
     // controls on it; the PATCH re-decides it server-side, so a disabled control that
     // somebody re-enables by hand still gets the 403.
@@ -4905,7 +4944,7 @@ app.patch('/api/config', (req, res) => {
   const check = validateConfigPatch(body, { normalizeOrigin });
   if (!check.ok) return res.status(check.status).json({ error: check.error });
   if (!Object.keys(check.patch).length) {
-    return res.status(400).json({ error: 'Nothing to change — send bindHost, allowedOrigins, launchModel or hibernateAfter.' });
+    return res.status(400).json({ error: 'Nothing to change — send bindHost, allowedOrigins, launchModel, hibernateAfter or accountNicknames.' });
   }
 
   const written = writeConfigFile(CONFIG_FILE, check.patch);
@@ -4932,6 +4971,10 @@ app.patch('/api/config', (req, res) => {
     hibernateAfter = resolveHibernateAfter({ config: written.config });
     broadcastRoster();
   }
+  // A nickname changes every tag on that account at once; the poll re-decorates the rows
+  // and its diff broadcasts them.
+  accountNicknames = readNicknames(written.config);
+  if (written.changed.includes('accountNicknames')) registry.refresh().catch(() => {});
   const reasons = [];
   if (written.changed.includes('bindHost')) reasons.push('the bind host is read when the panel starts');
   if (written.changed.includes('allowedOrigins')) reasons.push('the origin allowlist is read when the panel starts');
@@ -4951,6 +4994,7 @@ app.patch('/api/config', (req, res) => {
       hibernateAfter: resolveHibernateAfter({ config: written.config }),
     },
     hibernateAfter: written.config.hibernateAfter === undefined ? null : written.config.hibernateAfter,
+    accounts: accountsForSettings(readNicknames(written.config)),
     changed: written.changed,
     restartRequired,
     restartReason: reasons.join('; '),

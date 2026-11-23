@@ -1000,6 +1000,38 @@ hints (`/rc`, "new task? /clear to save…"), so scraping it would report `unkno
 of the time. It's shown as a quiet scale rather than in green/amber/red, since it is a
 setting and not a warning.
 
+### Which account a session runs on
+
+A second Claude account on one Mac runs through `CLAUDE_CONFIG_DIR` (an alias such as
+`claude-work` pointing it at `~/.claude-work`), and nothing in a session's terminal or
+transcript says which account it is on. So every session wears a small **account tag** in its
+pane header and at the end of its rail row's second line — inside that line, never a new one,
+so a team row stays three lines and every other row two. Desktop only; a sleeping row has no
+process and no tag, and a bot has none.
+
+`server/account.js` reads it off the process: the pane's `claude` (a child of the `-ilc` login
+shell, or the pane process itself when the shell `exec`ed it) → its environment
+(`ps -E -ww -p <pid>`) → `CLAUDE_CONFIG_DIR`, absent meaning `~/.claude` → that dir's account
+file → `oauthAccount`. **Where the account file is was measured on v2.1.322:** without the
+variable it is `~/.claude.json`, in the home directory beside `~/.claude/`; with it,
+`$CLAUDE_CONFIG_DIR/.claude.json`. A dir nobody has logged into has that file but no
+`oauthAccount`, and reads as *not signed in* with its folder name. Anything unreadable is
+`null` and draws nothing. A process's environment never changes, so the dir is read once per
+`claude` pid; the process table is read only when a pane's cached `claude` has died; the
+account file is re-stat'ed at most every five seconds and parsed only when it moved — a quiet
+poll runs no subprocess for this.
+
+The tag (`web/account-tag.js`) is the account's **nickname** if one is set, else the config
+folder's name — `default` for `~/.claude`, `.claude-work` and so on, drawn dashed. **Never the
+email**: the email, the plan and the config folder are the hover. Nicknames live in
+`config.json` as `accountNicknames`, keyed by the account's `accountUuid` (a re-login into the
+same account keeps its name; a folder re-logged into a different one does not inherit it), and
+are set from the settings box's **Account tags** section, which lists every signed-in account
+running in a session. A `PATCH /api/config` carries a delta — `{"accountNicknames": {"<uuid>":
+"Personal"}}`, an empty string removes one — merged inside the atomic write; 1–24 characters of
+plain text, at most 32 kept. It is a label, not an exposure key, so a LAN browser may set it,
+and it applies at the next roster beat with no restart. It never joins `composerSig`.
+
 ### Context pressure
 
 The context percentage is coloured on one shared rule, used by both the rail and the

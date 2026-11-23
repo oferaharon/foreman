@@ -345,8 +345,9 @@ export const EXPOSURE_KEYS = ['bindHost', 'allowedOrigins'];
  *  `launchModel` is here and *not* in `EXPOSURE_KEYS`: it decides what a session starts
  *  on, never who can reach the panel. `hibernateAfter` is the same, by the hibernation
  *  plan's rule: a LAN peer can already `/exit` any session with the bin, and this setting
- *  hands it strictly less — idle, eligible sessions only, every one of which can be woken. */
-export const WRITABLE_KEYS = ['bindHost', 'allowedOrigins', 'launchModel', 'hibernateAfter'];
+ *  hands it strictly less — idle, eligible sessions only, every one of which can be woken.
+ *  `accountNicknames` is a label on a tag and decides nothing at all. */
+export const WRITABLE_KEYS = ['bindHost', 'allowedOrigins', 'launchModel', 'hibernateAfter', 'accountNicknames'];
 
 /** The writable keys the running panel reads only once, at boot — a change to one of these
  *  is what a restart notice is for. `launchModel` is not among them: it is read at launch. */
@@ -536,6 +537,12 @@ export function validateConfigPatch(body, { normalizeOrigin } = {}) {
     patch.hibernateAfter = raw;
   }
 
+  if ('accountNicknames' in body) {
+    const nick = validateNicknames(body.accountNicknames);
+    if (!nick.ok) return { ok: false, status: 400, error: nick.error };
+    patch.accountNicknames = nick.delta;
+  }
+
   return { ok: true, patch };
 }
 
@@ -544,6 +551,92 @@ export function validateConfigPatch(body, { normalizeOrigin } = {}) {
 export function touchesExposure(body) {
   if (!body || typeof body !== 'object') return false;
   return EXPOSURE_KEYS.some((key) => key in body);
+}
+
+/* ─────────────────────────────────────────────────────────── account nicknames ─── */
+
+/*
+ * `accountNicknames`: `{ <accountUuid>: "<nickname>" }` — what the account tag on a session
+ * reads instead of its config folder's name (`server/account.js`, `web/account-tag.js`).
+ * Keyed on the account's own uuid, never on the folder: a re-login into the same account
+ * keeps its name, and a folder re-logged into a *different* account does not inherit one.
+ *
+ * A PATCH carries a **delta**, not the whole map — `{uuid: "Work"}` sets one, `{uuid: ""}` or
+ * `{uuid: null}` removes one, and every other entry on disk is left alone. The merge happens
+ * inside `writeConfigFile`'s own read, so two browsers naming two accounts at once cannot
+ * drop each other's. Not exposure, so a LAN peer may write it, like `launchModel`.
+ */
+
+/** A Claude account uuid, as `oauthAccount.accountUuid` spells it. */
+export const ACCOUNT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** Long enough for "Personal", "Work", "Client X"; short enough to sit in a rail row. */
+export const NICKNAME_MAX = 24;
+/** No machine needs more, and a map that grows without bound is a file that does. */
+export const NICKNAMES_MAX = 32;
+export const NICKNAME_RULE =
+  `A nickname is plain text of 1–${NICKNAME_MAX} characters, keyed by an account uuid; ` +
+  `an empty one removes it. At most ${NICKNAMES_MAX} are kept.`;
+
+const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+
+/** One nickname, trimmed, or `null` when it is not one this file would store. */
+function cleanNickname(value) {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (!v || v.length > NICKNAME_MAX || CONTROL_RE.test(v)) return null;
+  return v;
+}
+
+/**
+ * The stored map, with anything that would not pass the validator dropped — a hand edit
+ * that put a number or a 200-character string in it reads as no nickname, not as a tag
+ * that breaks the rail. Never throws.
+ */
+export function readNicknames(config = {}) {
+  const raw = config?.accountNicknames;
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [uuid, value] of Object.entries(raw)) {
+    const v = cleanNickname(value);
+    if (ACCOUNT_UUID_RE.test(uuid) && v) out[uuid.toLowerCase()] = v;
+  }
+  return out;
+}
+
+/** Validate a PATCH's delta. `{ok, delta}` — `null` in the delta means "remove". */
+function validateNicknames(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return { ok: false, error: `accountNicknames must be an object of {accountUuid: nickname}. ${NICKNAME_RULE}` };
+  }
+  const entries = Object.entries(body);
+  if (entries.length > NICKNAMES_MAX) return { ok: false, error: `Too many nicknames in one change. ${NICKNAME_RULE}` };
+  const delta = {};
+  for (const [uuid, value] of entries) {
+    if (!ACCOUNT_UUID_RE.test(uuid)) {
+      return { ok: false, error: `${JSON.stringify(uuid)} is not an account uuid. ${NICKNAME_RULE}` };
+    }
+    if (value === null || (typeof value === 'string' && value.trim() === '')) {
+      delta[uuid.toLowerCase()] = null;
+      continue;
+    }
+    const v = cleanNickname(value);
+    if (!v) {
+      const shown = typeof value === 'string' ? JSON.stringify(value) : typeof value;
+      return { ok: false, error: `Nickname ${shown} was refused. ${NICKNAME_RULE}` };
+    }
+    delta[uuid.toLowerCase()] = v;
+  }
+  return { ok: true, delta };
+}
+
+/** The map on disk with a delta applied. */
+export function mergeNicknames(config, delta = {}) {
+  const next = readNicknames(config);
+  for (const [uuid, v] of Object.entries(delta)) {
+    if (v == null) delete next[uuid];
+    else next[uuid] = v;
+  }
+  return next;
 }
 
 /* ───────────────────────────────────────────────────────────────── the write ─── */
@@ -585,6 +678,16 @@ export function writeConfigFile(file, patch = {}) {
         `${file} could not be read as JSON, so nothing was written — merging into it would ` +
         `discard whatever is in it. Fix or move the file and try again. (${notes[0]})`,
     };
+  }
+
+  // A nickname delta becomes the whole merged map here, inside this one read, so a
+  // concurrent writer's entry is never lost to a map that was read a moment earlier.
+  if ('accountNicknames' in patch) {
+    const merged = mergeNicknames(config, patch.accountNicknames);
+    if (Object.keys(merged).length > NICKNAMES_MAX) {
+      return { ok: false, status: 400, error: `That would keep more than ${NICKNAMES_MAX} nicknames. ${NICKNAME_RULE}` };
+    }
+    patch = { ...patch, accountNicknames: merged };
   }
 
   const changed = [];
