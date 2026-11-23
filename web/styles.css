@@ -1010,6 +1010,12 @@ body.row-dragging * { cursor: row-resize !important; }
 
 .settings-add .ghost-btn { flex: none; }
 
+/* One row per Claude account: its folder and plan on the left (the email is the hover),
+   the nickname field on the right. */
+.settings-account + .settings-account { margin-top: 0.35rem; }
+.settings-account-name { flex: none; color: var(--ink-muted); cursor: help; }
+.settings-account-input { flex: 0 1 14rem; }
+
 /* The launch model: a label and the team panel's own select wrapper, so the two pickers
    that draw from one model list also look like one control. */
 .settings-model {
@@ -3470,6 +3476,30 @@ body.pin-reordering * { cursor: grabbing !important; }
 }
 
 .head-status .sep { color: var(--ink-faint); opacity: 0.6; }
+
+/* Which Claude account a session runs on (`web/account-tag.js`). A hairline chip in the
+   meta line's own grey, so it reads as a fact about the row rather than a state of it. In
+   the rail it is the one item allowed to shrink: `min-width: 0` lets it ellipsize instead of
+   the line clipping the model off, and it never wraps onto a line of its own. A folder-name
+   fallback (no nickname set) is drawn dashed, so "unnamed" is visible without a word. */
+.account-tag {
+  display: inline-block;
+  min-width: 0;
+  max-width: 12ch;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+  color: var(--ink-muted);
+  border: 1px solid var(--rule-strong);
+  border-radius: 2px;
+  padding: 0 0.24rem;
+  line-height: 1.25;
+  font-size: 0.9em;
+}
+.account-tag.is-folder { border-style: dashed; color: var(--ink-faint); }
+.head-account { max-width: 18ch; }
 .head-dialog { color: var(--accent); }
 
 .head-meta {

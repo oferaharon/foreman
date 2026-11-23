@@ -11,6 +11,7 @@ import { slugFor, isLeadName } from './launch.js';
 import { OPEN_STATES } from './tasks.js';
 import { rememberGhost } from './ghost.js';
 import { forgeSummary } from './forge.js';
+import { withNickname } from './account.js';
 
 /*
  * A lead is recognised by the naming contract, not by a stored flag — `isLeadName` in
@@ -207,6 +208,11 @@ export class SessionRegistry extends EventEmitter {
     // it cannot be handed over at construction. Null until then, and a null reads as
     // "not stuck", which is the safe direction: a row nobody has judged yet is quiet.
     this.stuckFor = null;
+    // Which Claude account each pane runs on (`server/account.js`), and the nicknames to
+    // label them with — both set by index.js. Without a reader every row's `account` is
+    // `null`, which draws no tag.
+    this.accounts = null;
+    this.nicknames = () => ({});
     this.timer = null;
   }
 
@@ -459,6 +465,10 @@ export class SessionRegistry extends EventEmitter {
       forgesFor(panes.map((p) => p.cwd)),
     ]);
 
+    // Per pane, cached per process inside the reader — a quiet poll runs no subprocess here.
+    const accountOf = this.accounts ? await this.accounts.forPanes(panes).catch(() => new Map()) : new Map();
+    const nicknames = this.nicknames() || {};
+
     const sleeping = this.sleepers() || [];
     const { bound: paneOf, unbound: unboundPanes } = bindPanes({
       panes,
@@ -624,6 +634,9 @@ export class SessionRegistry extends EventEmitter {
         isLead: team?.role === 'lead',
         workerOf: team?.role === 'worker' ? team.repo : null,
         team,
+        // Which Claude account it runs on, for the tag in its header and rail row — `null`
+        // when that could not be read, which draws nothing.
+        account: withNickname(accountOf.get(bind.pane.paneId), nicknames),
         // The inbox: blocked on you, or it replied and you haven't looked. A question
         // Claude is asking counts as blocked — it cannot go on without an answer.
         needsYou:
@@ -696,6 +709,7 @@ export class SessionRegistry extends EventEmitter {
         isLead: team?.role === 'lead',
         workerOf: team?.role === 'worker' ? team.repo : null,
         team,
+        account: withNickname(accountOf.get(pane.paneId), nicknames),
         needsYou: Boolean(scrape.prompt) || Boolean(scrape.plan) || Boolean(scrape.question),
         lastActivity: pane.createdMs || Date.now(),
       });
@@ -774,6 +788,9 @@ export class SessionRegistry extends EventEmitter {
         // the header's open-a-Terminal button and the composer's copy beside interrupt are
         // both drawn from it, so without this neither noticed until something else moved.
         prev.attached !== s.attached ||
+        // A nickname set from the settings box, or a session re-logged into another account,
+        // changes the tag and nothing else on the row.
+        JSON.stringify(prev.account) !== JSON.stringify(s.account) ||
         prev.transcriptPath !== s.transcriptPath
       ) {
         return true;
