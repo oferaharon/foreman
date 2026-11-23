@@ -3485,7 +3485,7 @@ body.pin-reordering * { cursor: grabbing !important; }
 .account-tag {
   display: inline-block;
   min-width: 0;
-  max-width: 12ch;
+  max-width: 14ch;
   flex-shrink: 1;
   overflow: hidden;
   text-overflow: ellipsis;
