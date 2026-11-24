@@ -114,6 +114,7 @@ test('a signed-in account file gives uuid, email, plan and the folder', () => {
   assert.deepEqual(a, {
     configDir: '~/.claude',
     folder: 'default',
+    explicit: false,
     uuid: UUID_A,
     email: 'alpha@example.com',
     plan: 'Max 5x',
@@ -132,6 +133,7 @@ test('a dir nobody has logged into reads as not signed in, with its folder name'
   assert.deepEqual(a, {
     configDir: '~/.claude-work',
     folder: '.claude-work',
+    explicit: true,
     uuid: null,
     email: null,
     plan: null,
