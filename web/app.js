@@ -6889,9 +6889,16 @@ async function confirmClose(s) {
   if (closeBoxOpening || restarting.has(s.tmuxSession)) return;
   closeBoxOpening = true;
   let offer = null;
+  let moveOffer = null;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(s.id)}/relaunch`);
+    // Both asked before the box is drawn, so nothing moves under the pointer on its way to
+    // `close it`. A move's answer failing costs only the move section.
+    const [res, mv] = await Promise.all([
+      fetch(`/api/sessions/${encodeURIComponent(s.id)}/relaunch`),
+      fetch(`/api/sessions/${encodeURIComponent(s.id)}/move`).catch(() => null),
+    ]);
     if (res.ok) offer = await res.json().catch(() => null);
+    if (mv?.ok) moveOffer = await mv.json().catch(() => null);
   } catch {
     /* a close is still a close — the box opens without the restart choices */
   } finally {
@@ -6982,6 +6989,36 @@ async function confirmClose(s) {
     box.append(why);
   }
 
+  /* ---- move to another account: only when there is another signed-in one ---- */
+  // `targets` is empty when there is no other signed-in account, and then nothing is drawn —
+  // not even a refusal, because there was never a choice to refuse. A worker row gets none.
+  if (moveOffer?.targets?.length && moveOffer.targets.some((t) => t.why !== 'worker')) {
+    const sec = document.createElement('div');
+    sec.className = 'restart-choices move-choices';
+    for (const t of moveOffer.targets) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'restart-choice';
+      const l = document.createElement('span');
+      l.className = 'restart-choice-label';
+      l.textContent = `move to ${t.label}…`;
+      const d = document.createElement('span');
+      d.className = 'restart-choice-hint';
+      d.textContent = t.ok
+        ? `Close it here and carry on with the same conversation on ${t.label}’s account.`
+        : t.reason;
+      b.append(l, d);
+      b.disabled = !t.ok;
+      b.onclick = () => {
+        close();
+        confirmMove(s, t, moveOffer);
+      };
+      choices.push(b);
+      sec.append(b);
+    }
+    box.append(sec);
+  }
+
   const note = document.createElement('p');
   note.className = 'modal-note';
   box.append(note);
@@ -7014,9 +7051,10 @@ async function confirmClose(s) {
     if (e.target === back) close();
   };
 
+  const refusedMoves = new Set(choices.filter((b) => b.disabled));
   const lock = (on) => {
-    for (const b of [go, cancel, ...choices]) b.disabled = on;
-    if (!on && choices[0] && !offer.resumable) choices[0].disabled = true;
+    for (const b of [go, cancel, ...choices]) b.disabled = on || refusedMoves.has(b);
+    if (!on && offered && choices[0] && !offer.resumable) choices[0].disabled = true;
   };
 
   go.onclick = async () => {
@@ -7104,6 +7142,166 @@ async function confirmClose(s) {
   back.append(box);
   document.body.append(back);
   // Cancel takes the focus, not a button that ends a session.
+  cancel.focus();
+}
+
+/**
+ * **Move to <account>…** — the confirm, opened from the bin's box, and the only place a move
+ * is started (desktop only; the phone has no bin box).
+ *
+ * It says plainly what happens and, as plainly, what does **not** travel — the plan's item 8
+ * list, every line of it measured or named there: the old account's per-folder memory,
+ * `/rewind` checkpoints, its settings, permissions and plugins (T12), and folder trust (T4).
+ * Then the one press, held busy the way a restart is (`restarting`, by name), with the answer
+ * landing in the box — a session that closed and then stopped part-way must be reported to
+ * somebody, and the server's message says exactly where it stopped.
+ */
+function confirmMove(s, target, moveOffer) {
+  if (restarting.has(s.tmuxSession)) return;
+  const from = moveOffer?.from || 'this account';
+  const to = target.label;
+
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  const box = document.createElement('div');
+  box.className = 'modal move-modal';
+
+  const h = document.createElement('h2');
+  h.textContent = `Move to ${to}?`;
+  box.append(h);
+
+  const what = document.createElement('p');
+  what.className = 'field-hint';
+  what.style.fontSize = '0.8rem';
+  what.style.color = 'var(--ink)';
+  what.textContent = s.title;
+  box.append(what);
+
+  const where = document.createElement('p');
+  where.className = 'field-hint';
+  where.textContent = [s.paneCwd || s.cwd || '', s.tmuxSession || ''].filter(Boolean).join('  ·  ');
+  box.append(where);
+
+  const para = (text, cls = 'field-hint') => {
+    const p = document.createElement('p');
+    p.className = cls;
+    p.textContent = text;
+    box.append(p);
+    return p;
+  };
+
+  const kept = ['same folder', 'same name'];
+  if (s.pinned) kept.push('still pinned');
+  para(
+    `It closes here and opens again straight away on ${to}, with its conversation — ${kept.join(', ')}. ` +
+      'Anything it is running in the background is stopped first.',
+  );
+  if (s.status === 'working') {
+    para(`It is working right now${s.activity ? ` (${s.activity}…)` : ''} — moving it will cut that off.`).style.color =
+      'var(--decision)';
+  }
+  para(`The original stays on ${from}, untouched: the conversation is copied, never moved, so it can still be resumed there.`);
+
+  const head = para('What does not come with it:', 'field-hint move-head');
+  head.style.color = 'var(--ink)';
+  const list = document.createElement('ul');
+  list.className = 'move-list';
+  const items = [
+    `${from}’s memory for this folder — ${to} keeps its own.`,
+    '/rewind checkpoints — it can’t step back past the move.',
+    `${from}’s settings, permissions and plugins — from now on it runs with ${to}’s, so it may ask for permissions it didn’t before.`,
+    `Folder trust — if ${to} has never opened this folder, it stops once to ask whether to trust it.`,
+  ];
+  if (moveOffer?.lead) items.push(`It is a team lead: its team, tasks and room stay as they are, and running workers stay on ${from}.`);
+  items.push(`It can’t be moved straight back — the original left on ${from} would be overwritten, and a move never does that.`);
+  for (const text of items) {
+    const li = document.createElement('li');
+    li.textContent = text;
+    list.append(li);
+  }
+  box.append(list);
+
+  const note = document.createElement('p');
+  note.className = 'modal-note';
+  box.append(note);
+
+  const row = document.createElement('div');
+  row.className = 'modal-row';
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost-btn';
+  cancel.textContent = 'cancel';
+  const go = document.createElement('button');
+  go.className = 'ghost-btn primary';
+  go.textContent = `move to ${to}`;
+  row.append(cancel, go);
+  box.append(row);
+
+  let busy = false;
+  const close = () => {
+    if (busy) return;
+    back.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  function onKey(e) {
+    if (e.key === 'Escape') close();
+  }
+  document.addEventListener('keydown', onKey, true);
+  cancel.onclick = close;
+  back.onmousedown = (e) => {
+    if (e.target === back) close();
+  };
+
+  go.onclick = async () => {
+    // Which panes were showing it, taken now — `restart`'s reason: the old row leaves the
+    // roster mid-move and every pane on it adopts somebody else.
+    const showing = panes.filter((p) => p.selected() === s.id);
+    busy = true;
+    go.disabled = true;
+    cancel.disabled = true;
+    go.classList.add('is-busy');
+    restarting.add(s.tmuxSession);
+    renderRail();
+    note.className = 'modal-note';
+    note.textContent = `Closing it, copying the conversation, starting it on ${to} — a few seconds.`;
+
+    let res;
+    let out = {};
+    try {
+      res = await fetch(`/api/sessions/${encodeURIComponent(s.id)}/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account: target.key }),
+      });
+      out = await res.json().catch(() => ({}));
+    } catch (err) {
+      out = { error: `The panel did not answer (${err.message}). Check the rail for whether it is still running.` };
+    } finally {
+      busy = false;
+      restarting.delete(s.tmuxSession);
+      go.classList.remove('is-busy');
+      renderRail();
+    }
+
+    if (res?.ok) {
+      const id = out.sessionId || s.id;
+      for (const p of showing) p.open(id);
+      close();
+      toast(`${out.name} moved to ${out.to} — it remembers the conversation.`);
+      return;
+    }
+    note.className = 'modal-note err';
+    note.textContent = out.error || `That didn't take (${res?.status ?? 'no answer'}).`;
+    if (res && res.status < 500) {
+      go.disabled = false; // refused, and still running as it was
+      cancel.disabled = false;
+    } else {
+      cancel.disabled = false;
+      cancel.textContent = 'ok';
+    }
+  };
+
+  back.append(box);
+  document.body.append(back);
   cancel.focus();
 }
 
