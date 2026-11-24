@@ -75,7 +75,7 @@ export function installConfirmLines(row) {
   ];
   if (!row.isDefault) {
     lines.push(
-      'The usage bars are one set for now, so once this account’s sessions post they show whichever account spoke last, until the bars are split per account.',
+      'Its usage bars are its own: once its sessions post, a second pair appears in the rail head while it has sessions running, and the default account’s bars are never fed from it.',
     );
   }
   return lines;
