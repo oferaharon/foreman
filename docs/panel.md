@@ -1104,6 +1104,48 @@ writing the borrowed command in. From a shell the same is `npm run install-hook 
 --config-dir <dir>`); `setup` stays default-only. Once installed, a second account's status line
 feeds **its own** [usage bars](#rate-limit-gauges), never the default's.
 
+#### Starting a session on an account, and keeping it there
+
+Every way the panel starts a session keeps the account it was on. **`+ new`** grows an
+**Account** picker when the panel has seen a second signed-in account on a live pane
+(`GET /api/launch/accounts`: the default dir first, then each other known, signed-in dir by
+nickname, else folder name); it starts on the default every time, Team lead included, and the
+box sends back a **key** into the panel's own detected list — never a path, because the panel
+is reachable on the LAN without authentication and a request must not name the folder Claude
+Code starts on. A one-account Mac never sees the picker. **`⧉`** copies the source row's
+account; **restart one** and **relaunch all** take it off the live row; a **wake** off the
+sleep record; a **snapshot restore** off the saved entry; a lead through every one of those.
+
+The account is one field on every launch record — snapshot entries, relaunch entries, sleep
+records — called `configDir`, **`null` meaning the default dir**, so a record written before
+it existed reads as the default, which is what that build launched. A live row's dir comes off
+its process (`account.dir`, absolute — the `~`-shortened `configDir` beside it is display
+only), or off its bound transcript's root when the process could not be read
+(`rowConfigDir`, `server/account.js`). At launch it is a `CLAUDE_CONFIG_DIR='<dir>'` prefix on
+the `zsh -ilc` body, still the bare word `claude` (`claudeCommand`, `server/launch.js`); a
+default launch's string is byte-identical to before, pinned by test.
+
+Three refusals come with it, all made before anything is ended:
+
+- **A dir the panel did not detect.** `createSession` starts only on a dir in
+  `KnownConfigDirs` — the default plus every other dir seen on a live pane.
+- **A resume onto the wrong account.** `claude --resume` on an account whose `projects/` does
+  not hold the conversation prints "No conversation found" and exits, after a relaunch has
+  already `/exit`ed the session. So a resume whose transcript is filed under another root than
+  the one it would start on is refused by restart-one, skipped by relaunch-all, refused as a
+  sleep (it could never wake), and refused again by `restoreSessions` as the backstop.
+- **A bypass session onto an account that never accepted bypass mode.** Measured on v2.1.331:
+  on a dir whose `settings.json` lacks `skipDangerousModePermissionPrompt`, a
+  `--dangerously-skip-permissions` launch stops on a *Bypass Permissions mode* warning before
+  the composer, cursor on `No, exit`. The panel neither answers it nor writes the key into
+  another account's settings (the maintainer's ruling); `⧉`, restart-one, relaunch-all, a
+  sleep and a restore of such a row say why instead.
+
+Trust is per account too: a folder trusted on one account is new to the other, so the first
+launch there on the second account lands on the trust gate — the ordinary gate, handled the
+ordinary way, but recorded in that account's own `.claude.json`. Workers are not here yet: a
+dispatch still starts every worker on the default account.
+
 ### Context pressure
 
 The context percentage is coloured on one shared rule, used by both the rail and the

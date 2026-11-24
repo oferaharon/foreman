@@ -480,6 +480,7 @@ test('the sleep record keeps paneCwd as the folder, and the shape the wake needs
     idleSince: NOW - 2 * HOUR,
     lastActivity: NOW - 2 * HOUR,
     model: 'Opus 5.5',
+    configDir: null,
   });
   assert.equal(sleepRecord(row({ tmuxSession: `${P}alpha-lead` })).lead, true);
 });

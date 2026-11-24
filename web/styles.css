@@ -737,7 +737,14 @@ body.row-dragging * { cursor: row-resize !important; }
   cursor: pointer;
 }
 
-.field-cap input[type='text'] {
+/* `+ new`'s Account picker is a `.field-cap` that starts hidden and appears only on a Mac with
+   a second signed-in account — and `.field-cap`'s `display: flex` beats the `[hidden]` UA
+   default, the `.files-grid` trap again (docs/traps/files-and-images.md). */
+.field-cap[hidden] { display: none; }
+.field-cap.new-account { margin-top: 0.9rem; }
+
+.field-cap input[type='text'],
+.field-cap select {
   font-family: var(--mono);
   font-size: 0.75rem;
   color: var(--ink);
@@ -747,7 +754,8 @@ body.row-dragging * { cursor: row-resize !important; }
   padding: 0.35rem 0.45rem;
 }
 
-.field-cap input[type='text']:focus { outline: none; border-color: var(--accent); }
+.field-cap input[type='text']:focus,
+.field-cap select:focus { outline: none; border-color: var(--accent); }
 
 .field-hint {
   font-family: var(--mono);
