@@ -413,6 +413,12 @@ for an API-key account, or before a session's first reply, so on those the gauge
 never appear — see [Rate-limit gauges](panel.md#rate-limit-gauges) for what "never appear"
 looks like versus a real gap.
 
+**A second Claude account** (a config folder started with `CLAUDE_CONFIG_DIR`) keeps its own
+`settings.json`, so none of the above reaches it until you press **Install** for it in the
+panel's settings, under *Account tags* — or run `npm run install-hook -- --config-dir <dir>`
+and `npm run install-statusline -- --config-dir <dir>` yourself. Nothing installs on its own.
+See [Accounts](panel.md#accounts).
+
 ## Backing up state
 
 Everything the panel depends on that isn't in git — the state dir, the hook

@@ -262,12 +262,6 @@ transcript really lives in, and the hook receipts that overrule every heuristic.
   `/hook` now parses any content-type, and the installer sends the header and replaces an
   entry it wrote before rather than skipping the event.
   [binding#the-hook-posts-json-without-saying-so](docs/traps/binding.md#the-hook-posts-json-without-saying-so)
-- `server/install-hook.js` · `server/hook-settings.js` · `server/account-install.js` —
-  **`server/install-hook.js` called `install()` at module scope, so nothing could import it — an
-  endpoint or a test that loaded it would have rewritten the default account's
-  `~/.claude/settings.json` as a side effect.** Split like the status line's pair, guarded by
-  `invokedDirectly()`, the default dir byte-identical.
-  [binding#install-hookjs-installed-at-import](docs/traps/binding.md#install-hookjs-installed-at-import)
 - `server/install-hook.js` (`X-Tmux-Socket`) · `server/tmux.js` (`tmuxSocketPath`) ·
   `server/status.js` (`ingest`) — **A pane id is only meaningful relative to one tmux
   server, and the hook used not to say which — so a bench's scratch session owned the real
@@ -282,13 +276,6 @@ transcript really lives in, and the hook receipts that overrule every heuristic.
   `~/.claude/projects/<cwd with each slash as a dash>`, which is named at launch and never
   rewritten.
   [binding#a-transcripts-cwd-moves](docs/traps/binding.md#a-transcripts-cwd-moves)
-- `server/binding.js` (`sameAccount`) · `server/account.js` (`KnownConfigDirs`,
-  `configDirOfTranscript`) · `server/sessions.js` (`#scanTranscripts`) — **A second account
-  files its transcripts under its own `<dir>/projects/`, and rule 3 bound a lone
-  second-account pane to a main-account `-p` run — FIXED, MEASURED on v2.1.331.** Every known
-  root is scanned and every rule but a hook binds a pane only within its own root; unknown is
-  the default root. The scan never ships without the fence.
-  [binding#a-second-accounts-pane-was-bound-to-the-other-accounts-file](docs/traps/binding.md#a-second-accounts-pane-was-bound-to-the-other-accounts-file)
 - `server/binding.js` · `web/asleep.js` (`wokenSession`) · `web/m/asleep.js` (`wokenRow`) —
   **A sleeper's `/exit` record makes its transcript the newest file in its folder, so after a
   panel restart a sibling pane with no hook receipt was bound to it by inference — FIXED,
@@ -535,23 +522,6 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   whose trust was never recorded lands on the trust gate.** Three sessions answering their
   gates at once can lose one to the last writer.
   [launch#a-relaunch-into-a-folder-whose-trust-was-never-recorded](docs/traps/launch.md#a-relaunch-into-a-folder-whose-trust-was-never-recorded)
-- `server/snapshot.js` (`SnapshotStore#load`, `save`) · `server/account.js`
-  (`recordConfigDir`) — **A snapshot entry is rebuilt from a field list, twice, so a
-  `configDir` missing from either restores a second-account session on the default
-  account.** Absent means the default; a rollback drops it on its next save.
-  [launch#a-snapshot-entry-is-rebuilt-from-a-field-list-twice](docs/traps/launch.md#a-snapshot-entry-is-rebuilt-from-a-field-list-twice)
-- `server/account.js` (`bypassConfirmProblem`, `resumeRootProblem`) · `server/launch.js`
-  (`claudeCommand`, `createSession`) · `test/fixtures/dialog-bypass-confirm*.txt` — **Bypass
-  onto another account stops on a startup warning the panel will not answer, and a resume onto
-  the wrong account finds nothing — both MEASURED on v2.1.331.** Refused before anything ends;
-  the key is never written; trust is per account too, so the gate comes back once per folder.
-  [launch#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer](docs/traps/launch.md#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer)
-- `server/move-session.js` (`planMove`, `copyConversation`, `moveSession`) ·
-  `POST /api/sessions/:id/move` — **A move to another account is one-way, and the original is
-  final only after `/exit`.** The original is never touched and a move never overwrites, so the
-  return trip is refused by construction; hash the original after the name leaves tmux, and
-  every copied file is `wx`, fresh-mtime, verified, and reported rather than deleted on failure.
-  [launch#a-move-to-another-account-is-one-way](docs/traps/launch.md#a-move-to-another-account-is-one-way-and-the-original-is-final-only-after-exit)
 - `server/launch.js` (`sessionName`, `slugFor`, `isLeadName`, `uniqueSessionName`) — **The
   name a launch mints is a contract, so `launch.js` is a port and not a rewrite.** `-ilc`,
   not `-lc`, and the bare word `claude`, never an exec of the resolved path — and the prefix
@@ -1222,6 +1192,41 @@ own fields mean, and what is deliberately never kept out of it. Evidence:
   ever kept.** Enforced by what the store's `ingest` reads out of the body, not by a filter on
   the route — the endpoint hands the whole payload through unfiltered on purpose.
   [rate-limits#the-dollar-figure-is-never-kept](docs/traps/rate-limits.md#the-dollar-figure-is-never-kept)
+
+### Accounts
+
+A second Claude account on the same Mac — a config dir started with `CLAUDE_CONFIG_DIR` — and
+everything that had to learn about it: where its conversations and settings live, how a pane is
+bound to the right one, how the hook and status line get into it, whose usage a gauge shows, what
+a launch, a worker and a move carry across, and the startup boxes it raises. Evidence:
+[`docs/traps/accounts.md`](docs/traps/accounts.md), which also lists the account traps filed in
+`binding.md`, `launch.md` and `rate-limits.md` — indexed here, under one heading, rather than
+under their files' own.
+
+- `server/account.js` (`projectsDirOf`, `configDirOfTranscript`, `peersDirOf`, `plansDirOf`,
+  `KnownConfigDirs`) · `server/peers.js` · `server/commands.js` · `server/index.js` (plan-file) —
+  **A second account files everything under its own config dir and reads none of
+  `~/.claude/settings.json` — MEASURED on v2.1.331.** Every reader that assumed `~/.claude` gave
+  a wrong answer rather than a blank one; `server/account.js` is the one spelling of a root,
+  and the roster's `~`-shortened `configDir` is display only.
+  [accounts#a-second-account-keeps-everything-in-its-own-folder-and-reads-none-of-the-defaults](docs/traps/accounts.md#a-second-account-keeps-everything-in-its-own-folder-and-reads-none-of-the-defaults)
+- `server/launch.js` (`claudeCommand`) · `server/account.js` (`AccountReader`) — **The account is
+  a `CLAUDE_CONFIG_DIR` prefix on the `zsh -ilc` string, and it survives the `claude`
+  function — MEASURED (M5).** Bare word `claude`, never `tmux -e`, never "unset it first" on a
+  default launch, which stays byte-identical.
+  [accounts#the-account-is-a-prefix-on-the-launch-string-and-it-survives-the-claude-function](docs/traps/accounts.md#the-account-is-a-prefix-on-the-launch-string-and-it-survives-the-claude-function)
+- `server/rate-limits.js` (`ingest`) · `server/status.js` (`ingest`) · `server/account.js`
+  (`accountOfPayload`) — **A hook or status-line payload names its account only by its
+  `transcript_path`, whose root is the config dir — MEASURED (M6).** A payload without one is
+  ignored, never folded into the default.
+  [accounts#a-payload-names-its-account-only-by-its-transcript-path](docs/traps/accounts.md#a-payload-names-its-account-only-by-its-transcript-path)
+- `server/binding.js` (`sameAccount`) · `server/account.js` (`KnownConfigDirs`,
+  `configDirOfTranscript`) · `server/sessions.js` (`#scanTranscripts`) — **A second account
+  files its transcripts under its own `<dir>/projects/`, and rule 3 bound a lone
+  second-account pane to a main-account `-p` run — FIXED, MEASURED on v2.1.331.** Every known
+  root is scanned and every rule but a hook binds a pane only within its own root; unknown is
+  the default root. The scan never ships without the fence.
+  [binding#a-second-accounts-pane-was-bound-to-the-other-accounts-file](docs/traps/binding.md#a-second-accounts-pane-was-bound-to-the-other-accounts-file)
 - `server/rate-limits.js` (`witness`, `ingest`) · `server/account.js` (`accountOfPayload`,
   `accountForDir`) · `web/quota.js` (`accountRows`) — **A moved session keeps its
   `session_id`, so one witness memory across accounts would read its first post on the other
@@ -1229,12 +1234,54 @@ own fields mean, and what is deliberately never kept out of it. Evidence:
   the only account witness a payload has.** No resolvable account is ignored, never folded
   into the default; the default's record stays top-level for a rollback.
   [rate-limits#a-moved-session-keeps-its-id](docs/traps/rate-limits.md#a-moved-session-keeps-its-id)
+- `server/install-hook.js` · `server/hook-settings.js` · `server/account-install.js` —
+  **`server/install-hook.js` called `install()` at module scope, so nothing could import it — an
+  endpoint or a test that loaded it would have rewritten the default account's
+  `~/.claude/settings.json` as a side effect.** Split like the status line's pair, guarded by
+  `invokedDirectly()`, the default dir byte-identical.
+  [binding#install-hookjs-installed-at-import](docs/traps/binding.md#install-hookjs-installed-at-import)
 - `server/statusline.js` (`looksLikeAWrapper`, `wrapperNameIn`, `configDirSuffix`) ·
   `server/account-install.js` — **`looksLikeAWrapper` matched exactly `statusline-wrapper.sh`,
   so the day a second config dir got `statusline-wrapper-<folder>.sh` it would have wrapped
   another dir's wrapper.** Both forms are read, the suffix drops dots, and two folders that
   clean up alike are refused rather than sharing a record.
   [rate-limits#a-second-config-dirs-wrapper-must-read-as-a-wrapper](docs/traps/rate-limits.md#a-second-config-dirs-wrapper-must-read-as-a-wrapper)
+- `server/account-install.js` · `POST /api/accounts/:key/install` · `web/app.js` (Account tags) —
+  **An Install reaches the account's *running* sessions within seconds — MEASURED (M7) — so it
+  is a human press, backed up first, and a bench demonstrates it on a scratch config dir.**
+  Never auto-installed, never a path from the request.
+  [accounts#an-install-reaches-the-accounts-running-sessions-within-seconds](docs/traps/accounts.md#an-install-reaches-the-accounts-running-sessions-within-seconds)
+- `server/snapshot.js` (`SnapshotStore#load`, `save`) · `server/account.js`
+  (`recordConfigDir`) — **A snapshot entry is rebuilt from a field list, twice, so a
+  `configDir` missing from either restores a second-account session on the default
+  account.** Absent means the default; a rollback drops it on its next save.
+  [launch#a-snapshot-entry-is-rebuilt-from-a-field-list-twice](docs/traps/launch.md#a-snapshot-entry-is-rebuilt-from-a-field-list-twice)
+- `server/account.js` (`resumeRootProblem`) · `server/snapshot.js` · `server/hibernate.js` —
+  **`--resume` on an account whose `projects/` lacks the conversation exits after the session
+  was already `/exit`ed — MEASURED (M9).** The root is checked before anything ends.
+  [accounts#a-resume-on-the-wrong-account-fails-after-the-exit](docs/traps/accounts.md#a-resume-on-the-wrong-account-fails-after-the-exit)
+- `server/account.js` (`bypassConfirmProblem`, `resumeRootProblem`) · `server/launch.js`
+  (`claudeCommand`, `createSession`) · `test/fixtures/dialog-bypass-confirm*.txt` — **Bypass
+  onto another account stops on a startup warning the panel will not answer, and a resume onto
+  the wrong account finds nothing — both MEASURED on v2.1.331.** Refused before anything ends;
+  the key is never written; trust is per account too, so the gate comes back once per folder.
+  [launch#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer](docs/traps/launch.md#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer)
+- `server/launch.js` (`createSession`) · `server/snapshot.js` (`restoreSessions`) ·
+  `server/dispatch.js` — **Trust is per account — MEASURED on v2.1.331 — so every folder, and
+  every new worktree, lands on the trust gate once on a second account, in that account's own
+  `.claude.json`.** The ordinary gate, answered the ordinary way; the last-writer race now has
+  a second file.
+  [accounts#trust-is-per-account-and-a-move-can-land-on-the-gate](docs/traps/accounts.md#trust-is-per-account-and-a-move-can-land-on-the-gate)
+- `server/move-session.js` (`planMove`, `copyConversation`, `moveSession`) ·
+  `POST /api/sessions/:id/move` — **A move to another account is one-way, and the original is
+  final only after `/exit`.** The original is never touched and a move never overwrites, so the
+  return trip is refused by construction; hash the original after the name leaves tmux, and
+  every copied file is `wx`, fresh-mtime, verified, and reported rather than deleted on failure.
+  [launch#a-move-to-another-account-is-one-way](docs/traps/launch.md#a-move-to-another-account-is-one-way-and-the-original-is-final-only-after-exit)
+- `server/hibernate.js` (`sleepVerdict`) — **A sleep that does not happen on a second-account
+  session is usually the `unread` rule, which holds on every account — MEASURED live.** Read the
+  verdict's reason before blaming the account.
+  [accounts#a-held-sleep-on-a-second-account-was-the-unread-rule-by-design](docs/traps/accounts.md#a-held-sleep-on-a-second-account-was-the-unread-rule-by-design)
 
 ### MCP and naming
 
@@ -1460,6 +1507,26 @@ from `config.json` at each launch, so no restart, defaulting to `DEFAULT_LAUNCH_
 (Opus 5.5) and refusing an id `worker-models.js` does not list, aliases included. It is not
 an exposure key: a LAN peer may change it, as it may launch a session. Workers keep their own
 `--model` from `resolveWorkerModel`. The snapshot deliberately saves no per-session model.
+
+**More than one Claude account** (`docs/panel.md`'s "Accounts" has the shape,
+`docs/traps/accounts.md` the measurements). The panel reads **every known config dir** — the
+default `~/.claude` plus each `CLAUDE_CONFIG_DIR` seen on a live pane, detected and never typed
+in, `server/account.js` the one spelling of each — for transcripts, the peer registry, plan files
+and the `/` menu, and tags every session with its account (a nickname, else the folder; never
+the email). Six rules hold it together. **A pane binds only transcripts under its own account's
+root**, and the scan never ships without that fence. **The hook and status line are installed per
+config dir by a human press and never by themselves**, because an install reaches that
+account's running sessions within seconds. **The gauges are one pair per account**, keyed off the
+payload's `transcript_path`, and a payload with no resolvable account is ignored. **Every launch
+carries its account** (`configDir`, `null` the default) through `+ new`'s picker, `⧉`, restart,
+relaunch-all, wake and restore, refuses a resume onto an account that lacks the conversation
+and a bypass launch onto one that never accepted bypass mode, and leaves a default launch
+byte-identical. **A worker runs on its lead's account**, read live at dispatch, and a dispatch
+onto an account with no panel hook is refused with nothing created. **A move to another account
+copies and never touches the original, so the return trip is refused.** And every endpoint
+takes a position in the *detected* list, never a path, because the panel answers the LAN with no
+auth; an account choice is a launch input and not an exposure key, and the panel writes nothing
+into a config dir but its own two Install entries.
 
 **Row and header controls**: `⧉` duplicates a session into the same folder, the bin `/exit`s
 one behind a confirmation, a folder icon opens the project in Finder, and `recent` drops the
