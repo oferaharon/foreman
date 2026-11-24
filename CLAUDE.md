@@ -1434,7 +1434,7 @@ stands, so no receipt-less sibling can be inferred onto it after a restart —
 carry, keyed on `event` — green for a dispatch, amber for a conflict, dashed grey for a
 task merely `pending`, accent for a lead's own self-merge, plain `--ink-muted` for
 everything else, the server-stamped events (`closed`, `pr`, `started`, `model`,
-`effort`) included. Tier 2 (`chat`, `status`, `answer`, legacy `link`) is the panel's own rooms
+`effort`, `account`) included. Tier 2 (`chat`, `status`, `answer`, legacy `link`) is the panel's own rooms
 bubble, full column width, one `--peer-N` hue per speaker on the pill and nowhere else; the
 lead's line keeps the accent edge and 7% tint instead of a hue, and a `lead → [worker]`
 line draws the recipient as that worker's own pill, from the same `roomPill` function both

@@ -103,6 +103,7 @@ export class TaskStore {
           modelReason: null,
           effort: null,
           effortReason: null,
+          configDir: null,
           startedBy: null,
           tags: [],
           ...t,
@@ -132,7 +133,7 @@ export class TaskStore {
    * @param {{id: string, repo: string, body: string, kind?: 'build'|'plan', source?: string,
    *          state?: string, branch?: string, worktree?: string, base?: string,
    *          staleBase?: boolean, model?: string, modelReason?: string,
-   *          effort?: string|null, effortReason?: string,
+   *          effort?: string|null, effortReason?: string, configDir?: string|null,
    *          startedBy?: string, planFile?: string, tags?: string[]}} t
    */
   create(t, { now = Date.now() } = {}) {
@@ -174,6 +175,10 @@ export class TaskStore {
       // starts", exactly as `model` does.
       effort: t.effort ?? null,
       effortReason: t.effortReason ?? null,
+      // The Claude config dir the worker launched on — its lead's account, read at dispatch
+      // (`resolveWorkerAccount`, `dispatch.js`). Absolute; `null` is the default account, and a
+      // record from before accounts reads as that. Never an email or an id: just where it ran.
+      configDir: t.configDir ?? null,
       // Who said "start it" — stamped at promotion, null for anything dispatched
       // directly. Nothing writes it yet; it is here so the field exists on every record
       // rather than appearing halfway through the store's history.

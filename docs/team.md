@@ -107,6 +107,13 @@ that session only and writes nothing to your own Claude Code settings. Before th
 every worker inherited your global effort — xhigh, for Opus — whatever the task was. Haiku
 4.5 takes no effort level at all, so a Haiku worker starts without one and its task says so.
 
+**A worker runs on its lead's Claude account** — read off the lead's row at dispatch, so a lead
+started on a second subscription dispatches workers that spend that subscription, and there is
+no setting to disagree with it. It is said in the room (`runs on the <account> account`) when it
+is not the default, and a dispatch is refused, with nothing created, if that account has no panel
+status hook installed (settings → Account tags → Install) — a worker there would report nothing.
+`docs/panel.md`'s "Starting a session on an account" has the rest.
+
 A worker outlives its PR. When it finishes it stays idle in the rail until the PR is
 merged or closed, because the first thing that happens to a PR is somebody wanting a
 change, and the worker that wrote it still holds every bit of context about why.

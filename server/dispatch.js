@@ -15,6 +15,7 @@ import {
 } from './worker-models.js';
 import { capturePane, confirmGateOption, gatePrompt } from './tmux.js';
 import { mcpServerRule } from './project-mcp.js';
+import { checkedLaunchDir, rowConfigDir, sameConfigDir } from './account.js';
 
 /**
  * The pieces of dispatching a worker that aren't worktree or task bookkeeping: the
@@ -120,6 +121,95 @@ export function resolveWorkerEffort(requested, teamDefault, model = null) {
   }
   const effort = asked || fallback;
   return { effort, defaultEffort: fallback, isDefault: effort === fallback };
+}
+
+/**
+ * Which Claude account a worker runs on: its lead's, read live off the lead's roster row at
+ * dispatch (the maintainer's ruling, Q3 of the multi-account plan — not a team setting and
+ * not a per-task choice, so nothing can disagree with the running lead).
+ *
+ * `leads` is every lead row in the repo's folder (`leadRowsFor`), `knownDirs` the panel's
+ * `KnownConfigDirs` list, and `hookOf(dir)` the status-hook state of one config dir
+ * (`installStatus(...).hook`). Answers one of:
+ *
+ *   `{configDir: null}`                      — the default account. Byte-identical to a dispatch
+ *                                              before accounts existed: no field, no line.
+ *   `{configDir: '/abs/dir', name}`          — another account; `name` is its nickname, else its
+ *                                              folder name, **never an email or uuid**.
+ *   `{configDir: null, note}`                — no lead row at all (a dispatch with no lead
+ *                                              running, from the API or a test): there is no
+ *                                              account to inherit, so the default — which is
+ *                                              what every dispatch did — and a line saying so,
+ *                                              but only once the panel knows of another
+ *                                              account, because with one there is nothing to
+ *                                              be wrong about.
+ *   `{error, status}`                        — refused, before any worktree exists.
+ *
+ * **The safer side wins where the answer is not known.** A lead positively on another account
+ * whose dir cannot be read, two lead rows that disagree, or a dir the panel never saw a live
+ * pane on is *refused*: defaulting would quietly spend the other subscription's quota on a
+ * worker the maintainer thinks is on the lead's. "No lead row" is the one default, because
+ * it is not a doubt about an account — there is no account in question.
+ *
+ * **The status hook is required.** A session on a config dir whose `settings.json` lacks the
+ * panel's hook reports nothing — no transitions, no stuck detection, no exact binding — which
+ * for a worker nobody is watching in a terminal is a worker that looks idle forever. So the
+ * dispatch refuses and says which button fixes it. `outdated` is refused too: its entry
+ * posts to a port nothing listens on.
+ */
+export function resolveWorkerAccount({ leads = [], knownDirs = [], hookOf, home } = {}) {
+  if (!leads.length) {
+    return {
+      configDir: null,
+      note: knownDirs.length > 1
+        ? 'No lead row was found for this folder, so the worker started on the default Claude account.'
+        : null,
+    };
+  }
+  const dirs = leads.map((row) => rowConfigDir(row, home));
+  if (dirs.some((d) => d === undefined)) {
+    return {
+      status: 409,
+      error: 'The lead runs on another Claude account, and which one can’t be read — the worker was not started. Nothing was created.',
+    };
+  }
+  if (dirs.some((d) => (d === null) !== (dirs[0] === null) || (d && !sameConfigDir(d, dirs[0])))) {
+    return {
+      status: 409,
+      error: 'More than one lead is running in this folder and they are not on the same Claude account, so the worker has no account to follow. Nothing was created.',
+    };
+  }
+  const dir = dirs[0];
+  if (dir === null) return { configDir: null };
+
+  let checked;
+  try {
+    checked = checkedLaunchDir(dir, knownDirs, home);
+  } catch (err) {
+    return { status: 409, error: `${err.message} The worker was not started. Nothing was created.` };
+  }
+  const row = leads.find((r) => r?.account?.nickname);
+  const name = row?.account?.nickname || path.basename(checked);
+  const hook = typeof hookOf === 'function' ? hookOf(checked) : 'missing';
+  if (hook !== 'installed') {
+    return {
+      status: 409,
+      error:
+        `The lead runs on the ${name} account, and that account's settings ${hook === 'outdated' ? 'carry an out-of-date' : 'have no'} ` +
+        'panel status hook — a worker there would report nothing (no status, no stuck detection). ' +
+        'Press Install in settings → Account tags, then dispatch again. Nothing was created.',
+    };
+  }
+  return { configDir: checked, name };
+}
+
+/** Every lead row in `repo`'s folder — all of them, so a doubt about two can be told apart from none. */
+export function leadRowsFor(sessions, repo) {
+  if (typeof repo !== 'string' || !path.isAbsolute(repo) || !Array.isArray(sessions)) return [];
+  const want = path.resolve(repo);
+  return sessions.filter(
+    (s) => s && s.isLead && typeof s.paneCwd === 'string' && path.isAbsolute(s.paneCwd) && path.resolve(s.paneCwd) === want,
+  );
 }
 
 /**
