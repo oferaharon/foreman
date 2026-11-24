@@ -546,6 +546,12 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   the wrong account finds nothing — both MEASURED on v2.1.331.** Refused before anything ends;
   the key is never written; trust is per account too, so the gate comes back once per folder.
   [launch#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer](docs/traps/launch.md#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer)
+- `server/move-session.js` (`planMove`, `copyConversation`, `moveSession`) ·
+  `POST /api/sessions/:id/move` — **A move to another account is one-way, and the original is
+  final only after `/exit`.** The original is never touched and a move never overwrites, so the
+  return trip is refused by construction; hash the original after the name leaves tmux, and
+  every copied file is `wx`, fresh-mtime, verified, and reported rather than deleted on failure.
+  [launch#a-move-to-another-account-is-one-way](docs/traps/launch.md#a-move-to-another-account-is-one-way-and-the-original-is-final-only-after-exit)
 - `server/launch.js` (`sessionName`, `slugFor`, `isLeadName`, `uniqueSessionName`) — **The
   name a launch mints is a contract, so `launch.js` is a port and not a rewrite.** `-ilc`,
   not `-lc`, and the bare word `claude`, never an exec of the resolved path — and the prefix

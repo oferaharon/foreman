@@ -1146,6 +1146,43 @@ launch there on the second account lands on the trust gate — the ordinary gate
 ordinary way, but recorded in that account's own `.claude.json`. Workers are not here yet: a
 dispatch still starts every worker on the default account.
 
+#### Moving a session to another account
+
+The bin's box on a row grows **move to <account>…** — one choice per other signed-in account,
+by nickname, else folder name — when the panel has seen one (`GET /api/sessions/:id/move`,
+asked before the box is drawn, so nothing moves under the pointer). A worker row gets none: a
+worker runs on its lead's account. A choice the server would refuse is drawn disabled with its
+reason as the hint. Desktop only; the phone has no bin box.
+
+Pressing it opens a confirm that says what happens — it closes and opens again straight away on
+the other account with its conversation, same folder, same name, same pin, background work
+stopped first — that the original stays on the old account untouched, and what does **not**
+come with it: the old account's memory for that folder (`projects/<folder>/memory/`), `/rewind`
+checkpoints, the old account's settings, permissions and plugins (it may ask for permissions it
+did not before), folder trust (it may stop once on the trust gate), and the return trip.
+
+`POST /api/sessions/:id/move` takes a **key** into the detected dirs, never a path, and hands
+`moveSession` (`server/move-session.js`) the panel's own machinery, in this order: the pinned
+group read by name; `/exit` through `exitAndWait`, which answers the background-work box by
+label; the name gone from tmux (the transcript is final only then); `<id>.jsonl` and any `<id>/`
+folder (subagents, tool results) copied into the target's `projects/<same folder>/`, each file
+created exclusively and written fresh so the copy is the newer one; every copied file hashed
+against its original; `startEntries` on the target account resuming that copy; the pin put
+back; and a line saying so — in the team room for a lead, in the panel's log otherwise.
+
+Refused before anything ends, each in words: a worker, a sleeper (wake it first), a pane
+holding something, a row with no saved conversation, the account it already runs on, an account
+that can't be read, a name the panel could not give back, a bypass row onto an account that
+never accepted bypass mode, and a target that **already holds this conversation** — a move never
+overwrites one. That last one is what makes a move one-way: the original left behind is exactly
+where the return trip would write
+([launch#a-move-to-another-account-is-one-way](traps/launch.md#a-move-to-another-account-is-one-way-and-the-original-is-final-only-after-exit)).
+
+A failure after the `/exit` stops there and says where — the exit, the copy or the start — with
+the `claude --resume <id>` that brings it back on the old account, whose copy is untouched. A
+partial copy is named and left, never deleted. A lead may be moved; its team, tasks and room
+are keyed by repo and stay put, and its running workers stay on the account they started on.
+
 ### Context pressure
 
 The context percentage is coloured on one shared rule, used by both the rail and the

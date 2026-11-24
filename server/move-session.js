@@ -41,9 +41,10 @@ import { SESSION_ID_RE, UNKNOWN_ACCOUNT_WHY, isLeadEntry, relaunchOne } from './
  *
  *   **The original is never touched** (the maintainer's answer to the plan's Q2). Nothing
  *   here opens a source file for writing, renames one or deletes one. The scan already prefers
- *   the newer of one id seen under two roots, and the copy is written fresh — not
- *   `fs.copyFile`, which on macOS goes through `copyfile(3)` and carries the source's mtime
- *   over — so the new copy is the newer one from the first poll.
+ *   the newer of one id seen under two roots, and the copy is written fresh, so its mtime is
+ *   the moment of the move and it is the newer one from the first poll. (MEASURED on node 26
+ *   on this Mac: `fs.copyFile` and plain `cp` both give a fresh mtime too; `cp -p`, or a
+ *   `utimes` "to be faithful", would hand the old account's copy the win — don't add one.)
  *
  *   **Never overwrite.** A target that already holds `<id>.jsonl` or `<id>/` is refused
  *   before anything ends, and every file is created with `wx` so a target that appeared since
@@ -187,8 +188,8 @@ export function planMove(session, { targetDir, targetLabel, live = null, asleep 
     return refuse(
       409,
       'exists',
-      `${toLabel} already has a copy of this conversation (${shortPath(exists(files.file.to) ? files.file.to : files.sibling.to, home)}), ` +
-        'and a move never overwrites one. That happens when it was moved from there before — the copy there is the older one.',
+      `${toLabel} already has a copy of this conversation, and a move never overwrites one. That happens when it ` +
+        'was moved from there before: the copy left there is the older one, so it can’t be moved straight back.',
     );
   }
 
