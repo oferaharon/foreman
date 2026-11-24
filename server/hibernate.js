@@ -4,7 +4,7 @@ import { EventEmitter } from 'node:events';
 import { STATE_DIR } from './config.js';
 import { isLeadName, slugFor } from './launch.js';
 import { MAX_PER_PANE } from './queue.js';
-import { OTHER_ACCOUNT_WHY, onOtherAccount } from './account.js';
+import { rowConfigDir } from './account.js';
 import { SESSION_ID_RE, heldBy, isBenchRow, relaunchOne } from './snapshot.js';
 
 export { HIBERNATE_CHOICES, DEFAULT_HIBERNATE, hibernateMs, isHibernateChoice } from '../web/hibernate-choices.js';
@@ -61,11 +61,6 @@ export function sleepVerdict(row, ctx = {}) {
   // (a) Never a worker — `isBenchRow`, the allow-list, and nothing written beside it.
   if (!isBenchRow(row)) return no('worker', 'it is a worker');
 
-  // The account fence: a wake is a plain `claude --resume`, which would look for this
-  // conversation in the default account's folder and not find it. Known-other only; an
-  // unknown account is judged as before.
-  if (onOtherAccount(row)) return no('account', OTHER_ACCOUNT_WHY);
-
   // (b) A lead with a live worker. Rows, not task records: a pending task has no session,
   // and a worker whose task closed under it is still a worker in this lead's repo.
   if (row.team?.role === 'lead') {
@@ -83,6 +78,10 @@ export function sleepVerdict(row, ctx = {}) {
 
   // † The name can be given back — the exact test restart-one makes, not a second one.
   const back = relaunchOne(row, { mode: 'resume' });
+  // Its account: a wake resumes on the account in the record, so anything restart-one would
+  // refuse about the account (a resume that finds nothing there, a bypass warning nothing
+  // answers, a dir that can't be read) is a sleep that could never wake.
+  if (back.why === 'account') return no('account', back.reason);
   if (!back.entry) {
     const why =
       back.why === 'name'
@@ -482,7 +481,9 @@ let tmpCounter = 0;
  *
  * `folder` is `paneCwd`, never `cwd` — the transcript's `cwd` moves when a session changes
  * directory, and a wake into it would put the row under another heading. `model` is for
- * display only: a wake launches on the panel's `launchModel`, by ruling.
+ * display only: a wake launches on the panel's `launchModel`, by ruling. `configDir` is the
+ * account it wakes on (`null` the default, `rowConfigDir`); a record from before the field
+ * has none and is read by `recordConfigDir` — its transcript's root, then the default.
  */
 export function sleepRecord(row, { now = Date.now(), idleSince: since = null, pinned = false, pinAfter = null } = {}) {
   const folder = row.paneCwd || null;
@@ -504,6 +505,7 @@ export function sleepRecord(row, { now = Date.now(), idleSince: since = null, pi
     idleSince: since,
     lastActivity: row.lastActivity ?? null,
     model: row.model ?? null,
+    configDir: rowConfigDir(row) ?? null,
   };
 }
 

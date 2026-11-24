@@ -4,7 +4,7 @@ import { STATE_DIR } from './config.js';
 import { WORKTREES_DIR } from './worktree.js';
 import { isLeadName, slugFor, uniqueSessionName } from './launch.js';
 import { isTrustGate } from '../web/trust-gate.js';
-import { OTHER_ACCOUNT_WHY, onOtherAccount } from './account.js';
+import { bypassConfirmProblem, launchConfigDir, recordConfigDir, resumeRootProblem, rowConfigDir } from './account.js';
 
 const FILE = path.join(STATE_DIR, 'snapshot.json');
 
@@ -179,13 +179,20 @@ export function relaunchEntries(sessions = [], { resume = false } = {}) {
   const live = new Map();
   for (const s of sessions || []) if (s?.tmuxSession) live.set(s.tmuxSession, s);
 
-  return entriesOf(sessions, { fenced: true }).map((entry) => {
+  return entriesOf(sessions, { relaunch: true }).map((entry) => {
     const s = entry.tmuxSession ? live.get(entry.tmuxSession) : null;
     // `transcriptPath` is the witness that this row has a history at all; the id shape is
     // the witness that what we hold is a session id rather than a `pane-19`. Both, because
     // either alone has been wrong in this file's history.
     const id = s?.transcriptPath && SESSION_ID_RE.test(String(s.id || '')) ? s.id : null;
-    return { ...entry, paneId: s?.paneId ?? null, resume: resume ? id : null };
+    const out = { ...entry, paneId: s?.paneId ?? null, resume: resume ? id : null };
+    if (!out.resume) return out;
+    // The account check a resume needs, made *here* — before anything is `/exit`ed — and not
+    // only at launch, where the session it was putting back would already be gone.
+    // `restoreSessions` asks the same question again as the backstop.
+    out.transcriptPath = s.transcriptPath;
+    const wrong = out.skip ? null : resumeRootProblem(s.transcriptPath, out.configDir);
+    return wrong ? { ...out, skip: wrong } : out;
   });
 }
 
@@ -262,14 +269,15 @@ export function relaunchOne(session, { mode, live = null } = {}) {
         'Its lead dispatches a new one.',
     );
   }
-  // The account fence: nothing has been ended, and nothing will be. Before `relaunchEntries`
-  // so the entry it would build for this row is never in hand to be started by mistake.
-  if (onOtherAccount(session)) {
-    return refuse(409, 'account', `Not restarted: ${OTHER_ACCOUNT_WHY}. It was left as it is.`);
-  }
-
   const [entry] = relaunchEntries([session], { resume: mode === 'resume' });
   if (!entry) return refuse(400, 'folder', 'There is no folder to start it again in.');
+  // Its account, checked before anything is ended: a resume that would find nothing on the
+  // account it starts on, a bypass launch that would stop on a warning, or a row on another
+  // account whose dir can't be read. `relaunchEntries` marks the entry; one row means a
+  // refusal rather than a skip.
+  if (entry.skip) {
+    return { ...refuse(409, 'account', `Not restarted: ${entry.skip}. It was left as it is.`), reason: entry.skip };
+  }
 
   const name = entry.slug
     ? uniqueSessionName(path.basename(entry.folder), entry.slug, new Set())
@@ -298,29 +306,36 @@ export function relaunchOne(session, { mode, live = null } = {}) {
  * directory mid-conversation, and relaunching into where a session wandered to would put
  * it under a different rail heading — and so out of the group you filed it under.
  *
- * **A row on another Claude account is left out** (`onOtherAccount`, the account fence): a
- * save replays plain `claude`, which would start it fresh on the default account under the
- * old name. Nothing is lost by the omission that the save could have kept — the session
- * itself is untouched and still running.
+ * **Each entry carries its account** (`configDir`, `null` for the default — `rowConfigDir`),
+ * so a restore, a relaunch and a restart start it where it was. A row positively on another
+ * account whose dir cannot be read is the one left out of a save: saved without it, it would
+ * come back fresh on the default account under the old name.
  */
-export const benchEntries = (sessions = []) => entriesOf(sessions, { fenced: false });
+export const benchEntries = (sessions = []) => entriesOf(sessions, { relaunch: false });
+
+/** Why a relaunch leaves a row on another account alone when which one can't be said. */
+export const UNKNOWN_ACCOUNT_WHY = 'it runs on another Claude account, and which one can’t be read';
 
 /**
- * The one walk behind `benchEntries` and `relaunchEntries`. `fenced` keeps the rows the
- * account fence refuses, each carrying `skip` — the reason, in words — so a relaunch can
+ * The one walk behind `benchEntries` and `relaunchEntries`. A relaunch (`relaunch: true`)
+ * keeps the rows it must not end, each carrying `skip` — the reason, in words — so it can
  * *report* them like any other row it leaves alone rather than dropping them silently; a
- * save passes `false` and never sees them.
+ * save never sees them.
  */
-function entriesOf(sessions, { fenced }) {
+function entriesOf(sessions, { relaunch }) {
   const out = [];
   for (const s of sessions) {
     const folder = s?.paneCwd;
     if (!folder) continue; // nothing to relaunch into
     if (!isBenchRow(s)) continue;
-    const other = onOtherAccount(s);
-    if (other && !fenced) continue;
+    const configDir = rowConfigDir(s);
+    let skip = configDir === undefined ? UNKNOWN_ACCOUNT_WHY : null;
+    if (skip && !relaunch) continue;
+    // A bypass session on an account that never accepted bypass mode would come back on the
+    // startup warning (the plan's Q6, measured): the relaunch leaves it running instead.
+    if (!skip && relaunch && s.bypass) skip = bypassConfirmProblem(configDir);
     out.push({
-      ...(other ? { skip: OTHER_ACCOUNT_WHY } : {}),
+      ...(skip ? { skip } : {}),
       folder,
       slug: slugFor(s.tmuxSession, folder),
       tmuxSession: s.tmuxSession || null,
@@ -328,6 +343,7 @@ function entriesOf(sessions, { fenced }) {
       // the live answer, and the two only ever differ if you cycled out of it.
       skipPermissions: Boolean(s.bypass),
       pinned: Boolean(s.pinned),
+      configDir: configDir ?? null,
     });
   }
   return out;
@@ -371,15 +387,24 @@ export const isLeadEntry = (entry) =>
  * second positional for exactly that reason: an options bag would be a general channel
  * from a stored entry to the lead's launch flags, and this is not one.
  *
- * `entry.resume` is only ever set by `relaunchEntries` — a snapshot read off disk carries
- * no such field, so restoring the saved bench stays what it has always been: fresh
+ * `entry.resume` is only ever set by `relaunchEntries` and a wake — a snapshot read off disk
+ * carries no such field, so restoring the saved bench stays what it has always been: fresh
  * sessions, no history, as `SnapshotStore` documents at the top of this file.
+ *
+ * `entry.configDir` is the account (`null` the default) and reaches both launchers — a third
+ * positional for `startLead`, for the same no-options-bag reason as `resume`: it is one
+ * validated dir, never a channel for flags. **A resume is checked against it first**
+ * (`resumeRootProblem`): a conversation filed under one account's `projects/` resumed on
+ * another finds nothing, so the entry fails with the reason and nothing is launched. The
+ * callers check the same thing before they `/exit` anything; this is the backstop, and the
+ * only check a wake has.
  *
  * @param {Array<object>} entries        what was saved
  * @param {object}  deps
  * @param {string[]} deps.liveNames      tmux sessions already up; those entries are skipped
  * @param {(o: object) => Promise<object>} deps.startSession  ordinary launch
- * @param {(folder: string, resume: string|null) => Promise<object>} deps.startLead  the lead launch
+ * @param {(folder: string, resume: string|null, configDir: string|null) => Promise<object>} deps.startLead
+ *        the lead launch
  * @param {(step: object, entry: object) => void} [deps.onStep] per-entry progress
  * @param {Iterable<string>} [deps.reserved] sleepers' names: skipped, never started —
  *        starting one would mint the name its sleeper is waiting to come back under. A wake
@@ -415,13 +440,17 @@ export async function restoreSessions(
       done = { ...step, state: 'skipped', reason: ASLEEP_SKIP };
     } else {
       try {
+        const configDir = launchConfigDir(entry.configDir);
+        const wrong = resume ? resumeRootProblem(entry.transcriptPath, configDir) : null;
+        if (wrong) throw new Error(`Not resumed: ${wrong}`);
         const made = lead
-          ? await startLead(entry.folder, resume)
+          ? await startLead(entry.folder, resume, configDir)
           : await startSession({
               folder: entry.folder,
               label: entry.slug,
               skipPermissions: Boolean(entry.skipPermissions),
               resume,
+              configDir,
             });
         if (made?.name) live.add(made.name);
         done = {
@@ -465,6 +494,7 @@ export function sleeperEntries(records = []) {
       tmuxSession: r.name,
       skipPermissions: Boolean(r.bypass),
       pinned: Boolean(r.pinned),
+      configDir: recordConfigDir(r),
     }));
 }
 
@@ -472,7 +502,14 @@ export class SnapshotStore {
   /** @param {string} [file] override the store location (tests) */
   constructor(file = FILE) {
     this.file = file;
-    this.snap = null; // { savedAt, sessions: [{ folder, slug, tmuxSession, skipPermissions, pinned }] }
+    // { savedAt, sessions: [{ folder, slug, tmuxSession, skipPermissions, pinned, configDir }] }
+    //
+    // **Both field lists below are whitelists** — `#load` and `save` each rebuild an entry
+    // from the fields they name, so a field added to one and not the other is silently
+    // dropped, and a `configDir` dropped means a restore that lands on the default account.
+    // A rollback build drops it on its next save the same way: a bench saved after a
+    // rollback restores on the default account.
+    this.snap = null;
     this.dirty = false;
     this.#load();
 
@@ -492,6 +529,8 @@ export class SnapshotStore {
           tmuxSession: typeof e.tmuxSession === 'string' ? e.tmuxSession : null,
           skipPermissions: Boolean(e.skipPermissions),
           pinned: Boolean(e.pinned),
+          // Absent (a file from before accounts) is the default; so is anything not absolute.
+          configDir: launchConfigDir(e.configDir),
         }));
       this.snap = { savedAt: raw.savedAt, sessions };
     } catch {
@@ -534,6 +573,7 @@ export class SnapshotStore {
           tmuxSession: e.tmuxSession || null,
           skipPermissions: Boolean(e.skipPermissions),
           pinned: Boolean(e.pinned),
+          configDir: launchConfigDir(e.configDir),
         })),
     };
     this.dirty = true;
@@ -570,10 +610,10 @@ export class SnapshotStore {
     // `extra` and the rail's drift dot stays lit for as long as a team is working — which
     // would turn "your snapshot has gone stale" into background noise exactly when the
     // panel is busiest.
-    // …and without the rows a save leaves out (`onOtherAccount`), or a session on another
-    // account would read as `extra` for as long as it ran and keep the dot lit.
+    // …and without the rows a save leaves out (another account it can't name), or such a
+    // session would read as `extra` for as long as it ran and keep the dot lit.
     const live = new Set(
-      sessions.filter((s) => isBenchRow(s) && !onOtherAccount(s)).map((s) => s.tmuxSession).filter(Boolean),
+      sessions.filter((s) => isBenchRow(s) && rowConfigDir(s) !== undefined).map((s) => s.tmuxSession).filter(Boolean),
     );
     for (const name of asleep) if (name) live.add(name);
     const saved = new Set(this.snap.sessions.map((e) => e.tmuxSession).filter(Boolean));

@@ -110,7 +110,7 @@ import {
   NICKNAME_MAX,
   NICKNAME_RULE,
 } from './settings-file.js';
-import { AccountReader, KnownConfigDirs } from './account.js';
+import { AccountReader, KnownConfigDirs, launchAccountChoices, recordConfigDir, rowConfigDir } from './account.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
@@ -1262,7 +1262,7 @@ app.post('/api/launch/folder', async (req, res) => {
  * that name would leave the sleeper nothing to come back as. Only a wake passes an empty set,
  * since the name it is starting is the sleeper's own.
  */
-async function launchLead(folder, { terminal, resume = null, reserved = asleepNames() }) {
+async function launchLead(folder, { terminal, resume = null, reserved = asleepNames(), configDir = null }) {
   // A lead without git is a lead whose every dispatch fails — workers branch from main.
   // Found by the maintainer's first real launch attempt (a folder not yet in git), so the
   // tick refuses up front with the fix in the message rather than letting the lead discover
@@ -1367,6 +1367,10 @@ async function launchLead(folder, { terminal, resume = null, reserved = asleepNa
     terminal,
     resume,
     reserved,
+    // The Claude account it runs on — `+ new`'s picker, or the account a restart, relaunch,
+    // wake or restore found it on. Checked against the known dirs inside `createSession`.
+    configDir,
+    knownDirs: registry.configDirs.list(),
     // skipPermissions deliberately not plumbed — a bypass lead is not a thing.
     extraArgs: [
       '--append-system-prompt-file', briefFile,
@@ -1396,12 +1400,42 @@ async function launchLead(folder, { terminal, resume = null, reserved = asleepNa
   return { created, config, forge: effective, base, notes };
 }
 
+/* ----------------------------------------------------- launch: the account --- */
+
+/**
+ * The `+ new` box's **Account** picker: the default dir, then every other known dir that is
+ * signed in, by nickname (`launchAccountChoices`, `account.js`). The box shows it only when
+ * there is more than one, and starts on the default (the plan's Q7).
+ */
+app.get('/api/launch/accounts', async (_req, res) => {
+  res.json({ accounts: await launchAccountChoices(registry.configDirs.list(), { nicknames: accountNicknames }) });
+});
+
+/**
+ * The config dir a `+ new` asked for, by **key** — an index into the known dirs, never a
+ * path: the panel is LAN-reachable with no authentication, so a request must not be able to
+ * name a folder to start Claude Code on. Absent is the default dir (Q7). A key that is not a
+ * signed-in choice is refused.
+ */
+async function launchDirFor(key) {
+  if (key === undefined || key === null || key === '' || Number(key) === 0) return null;
+  const dirs = registry.configDirs.list();
+  const choice = (await launchAccountChoices(dirs, { nicknames: accountNicknames })).find((c) => c.key === Number(key));
+  if (!choice) {
+    const err = new Error('That account isn’t one the panel can start a session on — reopen the box and pick again.');
+    err.status = 400;
+    throw err;
+  }
+  return dirs[choice.key];
+}
+
 app.post('/api/launch', async (req, res) => {
   try {
+    const configDir = await launchDirFor(req.body?.account);
     if (req.body?.lead) {
       const folder = String(req.body?.folder || '').trim();
       if (!folder) return res.status(400).json({ error: 'Which folder?' });
-      const { created, forge, base, notes } = await launchLead(folder, { terminal: req.body?.terminal !== false });
+      const { created, forge, base, notes } = await launchLead(folder, { terminal: req.body?.terminal !== false, configDir });
       await registry.refresh().catch(() => {});
       const session = created.paneId ? registry.byPane(created.paneId) : null;
       // The notes are already in the room (`launchLead` posts them, for every way a lead
@@ -1427,6 +1461,8 @@ app.post('/api/launch', async (req, res) => {
       // A sleeper's name is not free, although tmux says it is.
       reserved: asleepNames(),
       extraArgs: await standaloneArgs(),
+      configDir,
+      knownDirs: registry.configDirs.list(),
     });
     // The pane exists now; the roster is up to two seconds behind it.
     await registry.refresh().catch(() => {});
@@ -1756,6 +1792,12 @@ app.post('/api/sessions/:id/duplicate', async (req, res) => {
   const session = registry.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
   if (!session.paneCwd) return res.status(400).json({ error: 'No folder to duplicate into.' });
+  // The copy runs on the source's account, for the bypass reasoning above: a copy that
+  // quietly spent a different subscription would be a different session.
+  const configDir = rowConfigDir(session);
+  if (configDir === undefined) {
+    return res.status(409).json({ error: 'It runs on another Claude account, and which one can’t be read — not duplicated.' });
+  }
 
   try {
     const created = await createSession({
@@ -1763,6 +1805,8 @@ app.post('/api/sessions/:id/duplicate', async (req, res) => {
       label: slugFor(session.tmuxSession, session.paneCwd),
       skipPermissions: Boolean(session.bypass),
       reserved: asleepNames(),
+      configDir,
+      knownDirs: registry.configDirs.list(),
       // A copy that behaved differently from its original would be worse than no button —
       // which is the reasoning above about bypass, and it holds for the rooms brief too.
       extraArgs: await standaloneArgs(),
@@ -5155,7 +5199,8 @@ app.post('/api/snapshot/restore', async (req, res) => {
       // The same flags `/api/launch` gives a session opened by hand, for the same reason a
       // lead goes through `launchLead` below: a restored session must be *this* panel's
       // session, not a replay of what one looked like before the feature existed.
-      startSession: async (opts) => createSession({ ...opts, terminal, reserved, extraArgs: await standaloneArgs() }),
+      startSession: async (opts) =>
+        createSession({ ...opts, terminal, reserved, extraArgs: await standaloneArgs(), knownDirs: registry.configDirs.list() }),
       // A lead is not `createSession` with a different label. The brief, the `foreman` tools
       // and the permission stance are launch flags and files under `teams/`, so a saved
       // lead started the ordinary way comes back as an ordinary session that happens to be
@@ -5167,7 +5212,8 @@ app.post('/api/snapshot/restore', async (req, res) => {
       // not an accident of reuse — a restored lead should be *this* lead, not a replay of
       // the one that was running before the reboot. It is also where the git check and the
       // one-lead-per-project refusal live, which is why neither is repeated here.
-      startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume, reserved })).created,
+      startLead: async (folder, resume, configDir) =>
+        (await launchLead(folder, { terminal, resume, reserved, configDir })).created,
       onStep: (done, entry) => {
         // Pins: the lead is pinned from birth by `launchLead`, whatever the snapshot
         // says, so only the ordinary rows need replaying here.
@@ -5255,8 +5301,10 @@ async function startEntries(entries, { terminal, pinOrder, reserved, onStep = ()
     // A relaunch is the control for "I updated Claude Code" or "I changed a setting", so
     // it is also the control that hands a session today's brief — the flags are regenerated
     // here, not replayed from whatever the session was launched with an hour ago.
-    startSession: async (opts) => createSession({ ...opts, terminal, reserved, extraArgs: await standaloneArgs() }),
-    startLead: async (folder, resume) => (await launchLead(folder, { terminal, resume, reserved })).created,
+    startSession: async (opts) =>
+      createSession({ ...opts, terminal, reserved, extraArgs: await standaloneArgs(), knownDirs: registry.configDirs.list() }),
+    startLead: async (folder, resume, configDir) =>
+      (await launchLead(folder, { terminal, resume, reserved, configDir })).created,
     onStep: (done, entry) => {
       if (done.state === 'started' && done.paneId && entry.pinned && !done.lead) toPin.push(done.paneId);
       if (done.state === 'started' && done.paneId) startedAs.set(done.paneId, entry.tmuxSession || null);
@@ -5321,8 +5369,9 @@ async function relaunchBench(entries, { terminal, emit = () => {} }) {
   const exiting = [];
   for (const entry of entries) {
     const step = { folder: entry.folder, slug: entry.slug, name: entry.tmuxSession, phase: 'exit' };
-    // The account fence (`relaunchEntries` marks the rows): left alone before anything is
-    // read or typed. It is still running, so `restoreSessions` skips its live name below.
+    // Its account (`relaunchEntries` marks the rows): a resume its account would not find, a
+    // bypass warning nothing answers, or an account it can't name — left alone before
+    // anything is read or typed. It is still running, so `restoreSessions` skips its live name below.
     if (entry.skip) {
       skipped.set(entry.tmuxSession, entry.skip);
       emit({ ...step, state: 'skipped', reason: entry.skip });
@@ -5737,6 +5786,9 @@ async function wakeSleeper(name) {
       skipPermissions: Boolean(record.bypass),
       pinned: Boolean(record.pinned),
       resume: record.sessionId,
+      // The account it slept on, and the file `restoreSessions` checks the resume against.
+      configDir: recordConfigDir(record),
+      transcriptPath: record.transcriptPath ?? null,
     };
     // The group as drawn, this sleeper included: `carryPinOrder` puts the woken pin back
     // below the live row nearest above where it is drawn now, which is exactly that place.

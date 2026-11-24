@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SESSION_PREFIX } from './config.js';
 import { TMUX_ENV, tmuxPath } from './tmux.js';
+import { bypassConfirmProblem, checkedLaunchDir, launchConfigDir } from './account.js';
 
 const run = promisify(execFile);
 
@@ -375,7 +376,7 @@ const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
  * worker). A `--model` after `--resume` is measured to win over the resumed transcript's
  * model on v2.1.288; see `docs/traps/launch.md`.
  */
-export function claudeCommand({ skipPermissions = false, resume = null, extraArgs = [] } = {}) {
+export function claudeCommand({ skipPermissions = false, resume = null, extraArgs = [], configDir = null } = {}) {
   const flags = [
     ...(skipPermissions ? ['--dangerously-skip-permissions'] : []),
     // Before the caller's own flags, so a `--resume` can never be read as the value of a
@@ -383,7 +384,14 @@ export function claudeCommand({ skipPermissions = false, resume = null, extraArg
     ...(resume ? ['--resume', shq(resume)] : []),
     ...extraArgs.map(shq),
   ];
-  return ['claude', ...flags].join(' ');
+  // Another Claude account rides as a `VAR=value` prefix on the same body — still the bare
+  // word `claude`, still inside `-ilc`, so the `claude()` shell function applies and the
+  // variable reaches the process (MEASURED on v2.1.331, `ps -E` on the child). Not
+  // `tmux new-session -e`, which would also leak into everything run later in that pane's
+  // shell. Unset or the default dir, there is no prefix at all — the string is byte-identical
+  // to what it was before accounts existed, and there is deliberately no "unset it first".
+  const dir = launchConfigDir(configDir);
+  return [...(dir ? [`CLAUDE_CONFIG_DIR=${shq(dir)}`] : []), 'claude', ...flags].join(' ');
 }
 
 /**
@@ -425,9 +433,17 @@ export function claudeCommand({ skipPermissions = false, resume = null, extraArg
  * It is a separate set rather than a change to `liveSessionNames`, because that one is
  * also what relaunch waits on to see a name go.
  *
+ * `configDir` is the Claude account to start on — `null` (or the default dir) for the
+ * default, else one of `knownDirs` (`KnownConfigDirs#list`), checked here rather than by
+ * each caller, because the panel is reachable on the LAN and a dir a request merely named is
+ * not one to start a session on. A bypass launch onto another account that has never
+ * accepted bypass mode is refused here too (`bypassConfirmProblem`): it would stop on a
+ * startup warning nothing in the panel answers.
+ *
  * @param {{folder: string, label?: string, skipPermissions?: boolean, terminal?: boolean,
  *          nameComponent?: string|null, extraArgs?: string[], resume?: string|null,
- *          reserved?: Iterable<string>|null}} opts
+ *          reserved?: Iterable<string>|null, configDir?: string|null,
+ *          knownDirs?: string[]|null}} opts
  * @returns {Promise<{name: string, paneId: string|null, folder: string}>}
  */
 export async function createSession({
@@ -439,11 +455,19 @@ export async function createSession({
   extraArgs = [],
   resume = null,
   reserved = null,
+  configDir = null,
+  knownDirs = null,
 }) {
   const dir = String(folder || '').trim();
   if (!dir) throw new Error('Which folder?');
   const stat = await fsp.stat(dir).catch(() => null);
   if (!stat?.isDirectory()) throw new Error(`Not a folder: ${dir}`);
+
+  const account = checkedLaunchDir(configDir, knownDirs);
+  if (account && skipPermissions) {
+    const why = bypassConfirmProblem(account);
+    if (why) throw new Error(`Not started: ${why}.`);
+  }
 
   if (!(await resolveClaudePath())) {
     throw new Error(
@@ -462,7 +486,7 @@ export async function createSession({
   //     `claude()` wrapper in ~/.zshrc apply, and that wrapper is what passes
   //     `--name "<repo>-<branch>"`. Exec the binary and the session is unnamed everywhere.
   //   • the flag composes with the wrapper's own arguments, since it forwards "$@".
-  const cmd = claudeCommand({ skipPermissions, resume, extraArgs });
+  const cmd = claudeCommand({ skipPermissions, resume, extraArgs, configDir: account });
   await tmux([
     'new-session', '-d', '-s', name, '-c', dir,
     '-x', '220', '-y', '50',

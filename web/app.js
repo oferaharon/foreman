@@ -1954,6 +1954,34 @@ function openNewSession() {
     'Distinguishes several sessions in one folder, and names the session. Blank auto-numbers.';
   box.append(hint);
 
+  // Which Claude account the session runs on. Drawn only on a Mac with a second signed-in
+  // account (`GET /api/launch/accounts`), so a one-account panel looks exactly as it did; it
+  // starts on the default every time (the plan's Q7 — `⧉` is how you say "same as that one"),
+  // applies to Team lead too, and sends back a key into the panel's own list, never a path.
+  const accountCap = document.createElement('label');
+  accountCap.className = 'field-cap new-account';
+  accountCap.hidden = true;
+  accountCap.textContent = 'Account';
+  const account = document.createElement('select');
+  accountCap.append(account);
+  box.append(accountCap);
+  fetch('/api/launch/accounts')
+    .then((r) => (r.ok ? r.json() : { accounts: [] }))
+    .then(({ accounts = [] }) => {
+      if (accounts.length < 2) return;
+      for (const a of accounts) {
+        const opt = document.createElement('option');
+        opt.value = String(a.key);
+        const name = a.nickname || (a.default ? 'default' : a.folder);
+        opt.textContent = a.plan ? `${name} · ${a.plan}` : name;
+        opt.title = a.configDir;
+        account.append(opt);
+      }
+      account.value = String(accounts.find((a) => a.default)?.key ?? accounts[0].key);
+      accountCap.hidden = false;
+    })
+    .catch(() => {});
+
   // A lead is not a variant of a session — it is a different thing wearing the same
   // launcher. Ticking this hands the folder a team: the label is forced to `lead` (one
   // per project, refused server-side), bypass is off the table, and the session arrives
@@ -2063,6 +2091,8 @@ function openNewSession() {
         skipPermissions: skip.checked,
         terminal: term.checked,
         lead: lead.checked,
+        // Absent is the default dir; a key, never a path.
+        ...(accountCap.hidden ? {} : { account: Number(account.value) }),
       });
       close();
       // Show it straight away. A brand-new pane has no transcript yet, so it arrives as a
@@ -3263,7 +3293,8 @@ async function openSnapshot() {
       // nothing to resume, and comes back empty whichever button you press.
       st.textContent = entry.resumable ? '' : 'no history';
       if (!entry.resumable) st.title = 'No transcript bound to this pane — it comes back fresh either way.';
-      // The account fence: the server names a row it will leave running, and why.
+      // Its account: the server names a row it will leave running, and why (a resume that
+      // account would not find, a bypass warning nothing answers).
       if (entry.skip) {
         st.textContent = 'stays running';
         st.title = `Left alone: ${entry.skip}.`;

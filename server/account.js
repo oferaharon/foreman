@@ -97,7 +97,7 @@ export function configDirOfTranscript(file) {
  * Is this `configDirFromPs` answer another account's folder rather than the default one?
  * An explicit `CLAUDE_CONFIG_DIR` that *is* `~/.claude` is not: its conversations are the
  * default's. The one spelling of "non-default dir" — the roster's `account.explicit` (what
- * `onOtherAccount` reads) and the known-dirs list are both this.
+ * `rowConfigDir` reads) and the known-dirs list are both this.
  */
 export function isOtherConfigDir({ configDir, explicit } = {}, home = os.homedir()) {
   return Boolean(explicit) && Boolean(configDir) && !sameConfigDir(configDir, defaultConfigDirFor(home));
@@ -182,32 +182,6 @@ export function configDirFromPs(output, home = os.homedir()) {
   return { configDir: path.resolve(dir), explicit: true };
 }
 
-/**
- * Why a row on another account is left alone by every path that would start it again.
- * One sentence, spelled once: restart-one's refusal, relaunch-all's skip and hibernation's
- * verdict all say it, and the rail shows it.
- */
-export const OTHER_ACCOUNT_WHY = 'it runs on another Claude account; the panel can’t start it there yet';
-
-/**
- * **The account fence.** Is this roster row positively known to run on a config dir other
- * than the default one?
- *
- * Every launch path here starts plain `claude`, which is the default account, and a
- * `--resume` of a conversation that lives in another account's folder fails with "No
- * conversation found" after the old session has already been `/exit`ed — the session is
- * gone (measured, see `docs/traps/accounts.md`). So anything that would end a session in
- * order to start it again asks this first. It is one predicate so there is one spelling of
- * "another account" (`docs/traps/one-spelling.md`); the day launches carry an account it is
- * lifted from here and from nowhere else.
- *
- * Only a *known* answer fires it. `account: null` — `ps` failed, the process is gone, the
- * environment was unreadable — behaves exactly as it did before the fence existed: unknown
- * is not "another account", and a fence that fired on a doubt would refuse every session
- * the moment `ps` hiccupped.
- */
-export const onOtherAccount = (row) => row?.account?.explicit === true;
-
 /** Where that config dir's account record lives — measured, see the header. */
 export function accountFileFor({ configDir, explicit }, home = os.homedir()) {
   return explicit ? path.join(configDir, '.claude.json') : path.join(home, '.claude.json');
@@ -257,7 +231,7 @@ export function readAccount(text, { configDir, explicit }, home = os.homedir()) 
     dir: configDir,
     configDir: shortPath(configDir, home),
     folder: explicit ? path.basename(configDir) : 'default',
-    // Another account's folder, as against the default one — what `onOtherAccount` reads. An
+    // Another account's folder, as against the default one — what `rowConfigDir` reads. An
     // explicit `CLAUDE_CONFIG_DIR` that *is* `~/.claude` is not another folder: its
     // conversations are the default's, so a plain `claude --resume` finds them.
     explicit: isOtherConfigDir({ configDir, explicit }, home),
@@ -538,4 +512,169 @@ export class KnownConfigDirs {
       /* the list is still right in memory; the next new dir tries again */
     }
   }
+}
+
+/* ------------------------------------------------------------ launching on an account --- */
+
+/*
+ * **Every way the panel starts a session keeps the account it was on** — `+ new`, `⧉`,
+ * restart-one, relaunch-all, a wake and a snapshot restore. The account rides as one field,
+ * `configDir`, on every launch record (snapshot entries, relaunch entries, sleep records),
+ * and it is spelled the same way everywhere: **`null` is the default dir**, anything else is
+ * an absolute other-account dir. A record written before this field existed has no
+ * `configDir` at all and reads as the default — exactly what such a build launched.
+ *
+ * At launch it becomes a `CLAUDE_CONFIG_DIR=<dir>` prefix on the `zsh -ilc` body
+ * (`claudeCommand`, `launch.js`), measured to survive a `claude()` shell function on
+ * v2.1.331; a default launch is byte-identical to the string before this existed.
+ */
+
+/** A record's spelling of a config dir: `null` for unset or the default dir, else absolute. */
+export function launchConfigDir(dir, home = os.homedir()) {
+  if (typeof dir !== 'string' || !dir || !path.isAbsolute(dir)) return null;
+  const abs = path.resolve(dir);
+  return sameConfigDir(abs, defaultConfigDirFor(home)) ? null : abs;
+}
+
+/**
+ * Which config dir a live roster row's session runs on, as a launch needs it: `null` for the
+ * default, an absolute dir for another account, or **`undefined` when the row is positively
+ * on another account but which one cannot be said** — a launch must refuse that rather than
+ * start it on the default.
+ *
+ * The process is the witness (`account.dir`, absolute — never the `~`-shortened `configDir`,
+ * which is display only). Where the process could not be read (`account: null`) the bound
+ * transcript's own root answers instead: a conversation filed under another account's
+ * `projects/` can only be resumed there, and a fresh start belongs there too. Neither known
+ * is the default, which is what every launch did before accounts existed.
+ */
+export function rowConfigDir(row, home = os.homedir()) {
+  const a = row?.account;
+  if (a?.explicit) {
+    const dir = launchConfigDir(a.dir, home) ?? launchConfigDir(configDirOfTranscript(row?.transcriptPath), home);
+    return dir ?? undefined;
+  }
+  if (a) return null;
+  return launchConfigDir(configDirOfTranscript(row?.transcriptPath), home);
+}
+
+/**
+ * A stored record's config dir (a sleeper, a snapshot entry): the field when it is there —
+ * `null` included, which says "the default" — else the root its transcript is filed under,
+ * else the default. The fallback is for a record written by a build that had no field; such
+ * a build never slept or saved another account's session, so it lands on the default.
+ */
+export function recordConfigDir(record, home = os.homedir()) {
+  if (record && Object.prototype.hasOwnProperty.call(record, 'configDir')) return launchConfigDir(record.configDir, home);
+  return launchConfigDir(configDirOfTranscript(record?.transcriptPath), home);
+}
+
+/**
+ * Why a `--resume` of this transcript on this config dir would find nothing, or `null`.
+ *
+ * MEASURED on v2.1.331: `CLAUDE_CONFIG_DIR=<other> claude --resume <an id filed under the
+ * default dir>` prints "No conversation found with session ID" and exits — after a relaunch
+ * has already `/exit`ed the session it was putting back. So every resume asks this first,
+ * and a mismatch is a refusal before anything ends, not a session that does not come back.
+ */
+export function resumeRootProblem(transcriptPath, configDir, home = os.homedir()) {
+  const root = configDirOfTranscript(transcriptPath);
+  // A path under no `projects/` folder is not one Claude Code filed, and says nothing about
+  // an account either way — so it refuses nothing. Every transcript the roster binds is
+  // under one; the refusal is for the measured case, a known root that is the wrong one.
+  if (!root) return null;
+  const target = configDir || defaultConfigDirFor(home);
+  if (sameConfigDir(root, target)) return null;
+  return (
+    `its conversation is filed under ${shortPath(root, home)}, but it would start on ` +
+    `${shortPath(target, home)}, where a resume finds nothing`
+  );
+}
+
+/**
+ * Why a `--dangerously-skip-permissions` launch on this config dir would stop at startup, or
+ * `null`.
+ *
+ * MEASURED on v2.1.331, in the sandbox: on a dir whose `settings.json` lacks
+ * `skipDangerousModePermissionPrompt`, Claude Code opens a "WARNING: Claude Code running in
+ * Bypass Permissions mode" box before the composer, cursor on `No, exit` — it parses as a
+ * `dialog` with no prompt (`test/fixtures/dialog-bypass-confirm{,-narrow}.txt`), so nothing
+ * here answers it and the session would sit there. By the maintainer's ruling (the plan's
+ * Q6) the panel neither answers that box nor writes the key into another account's settings:
+ * it refuses the launch and says why. The default dir is never asked — its launches are
+ * unchanged, and the key is set there globally.
+ *
+ * Only the dir's own `settings.json` is read: the key in any other settings layer would
+ * also silence the box, and missing it makes this refuse a launch that would have worked —
+ * the safe direction.
+ */
+export function bypassConfirmProblem(configDir, { readFile = (f) => fs.readFileSync(f, 'utf8') } = {}) {
+  if (!configDir) return null;
+  let json = null;
+  try {
+    json = JSON.parse(readFile(path.join(configDir, 'settings.json')));
+  } catch {
+    json = null;
+  }
+  if (json && json.skipDangerousModePermissionPrompt === true) return null;
+  return BYPASS_CONFIRM_WHY;
+}
+
+/** The words of that refusal, spelled once: ⧉, restart-one, relaunch-all and a wake say it. */
+export const BYPASS_CONFIRM_WHY =
+  'it skips permission prompts, and that account has never accepted bypass mode, so it would ' +
+  'stop on Claude Code’s bypass-mode warning, which the panel does not answer';
+
+/**
+ * A launch's config dir, checked: `null` for the default, the absolute dir when it is one of
+ * the **known** dirs (`KnownConfigDirs#list`), and a thrown error otherwise. The panel is
+ * reachable on the LAN with no authentication, by ruling, so a launch must never start on a
+ * dir a request merely named — only on one the panel itself detected on a live pane.
+ */
+export function checkedLaunchDir(configDir, knownDirs, home = os.homedir()) {
+  if (configDir == null || configDir === '') return null;
+  if (typeof configDir !== 'string' || !path.isAbsolute(configDir)) {
+    throw new Error('Which account? A config dir must be an absolute path.');
+  }
+  const dir = launchConfigDir(configDir, home);
+  if (!dir) return null;
+  if (!(knownDirs || []).some((d) => sameConfigDir(d, dir))) {
+    throw new Error(`Not an account this panel has seen a session on: ${shortPath(dir, home)}.`);
+  }
+  return dir;
+}
+
+/**
+ * The `+ new` box's **Account** choices: the default dir always, first, then every other
+ * known dir that is signed in. `key` is the dir's index in `dirs` (`KnownConfigDirs#list`,
+ * append-only, so a key stays good while the box is open), and is the only thing the box
+ * sends back — never a path (a LAN peer would otherwise name any folder on the disk).
+ *
+ * No email: it is a hover on a tag, never a label, and this is a label.
+ */
+export async function launchAccountChoices(
+  dirs,
+  { nicknames = {}, readFile = (f) => fsp.readFile(f, 'utf8'), home = os.homedir() } = {},
+) {
+  const out = [];
+  for (const [key, configDir] of (dirs || []).entries()) {
+    const explicit = key > 0;
+    let account = null;
+    try {
+      account = readAccount(await readFile(accountFileFor({ configDir, explicit }, home)), { configDir, explicit }, home);
+    } catch {
+      account = null;
+    }
+    if (explicit && !account?.signedIn) continue;
+    const named = withNickname(account, nicknames);
+    out.push({
+      key,
+      default: !explicit,
+      folder: explicit ? path.basename(configDir) : 'default',
+      configDir: shortPath(configDir, home),
+      nickname: named?.nickname ?? null,
+      plan: account?.plan ?? null,
+    });
+  }
+  return out;
 }

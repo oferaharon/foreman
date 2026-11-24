@@ -58,6 +58,7 @@ test('a snapshot survives the trip to disk and back', () => {
     tmuxSession: `${P}alpha-main`,
     skipPermissions: true,
     pinned: true,
+    configDir: null,
   });
   assert.equal(snap.sessions[1].skipPermissions, false, 'absent flags read as off');
   assert.equal(snap.sessions[1].pinned, false);
@@ -177,8 +178,8 @@ test('a save includes the sleepers, in the shape the bench saves', () => {
       { name: null, folder: '/Users/x/Code/gamma' },
     ]),
     [
-      { folder: '/Users/x/Code/alpha', slug: 'main', tmuxSession: `${P}alpha-main`, skipPermissions: true, pinned: true },
-      { folder: '/Users/x/Code/beta', slug: 'lead', tmuxSession: `${P}beta-lead`, skipPermissions: false, pinned: false },
+      { folder: '/Users/x/Code/alpha', slug: 'main', tmuxSession: `${P}alpha-main`, skipPermissions: true, pinned: true, configDir: null },
+      { folder: '/Users/x/Code/beta', slug: 'lead', tmuxSession: `${P}beta-lead`, skipPermissions: false, pinned: false, configDir: null },
     ],
   );
 });
@@ -292,6 +293,7 @@ test('what a saved row records is the live pane, not the launch flags', () => {
     tmuxSession: `${P}alpha-main`,
     skipPermissions: true,
     pinned: true,
+    configDir: null,
   });
 });
 
