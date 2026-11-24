@@ -1,8 +1,8 @@
 import fsp from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { BACKFILL_BYTES, PEER_SESSIONS_DIR } from './config.js';
+import { BACKFILL_BYTES } from './config.js';
 import { normalizeRecord } from './normalize.js';
-import { readPeer, guessTmuxSession } from './peers.js';
+import { readPeer, guessTmuxSession, DEFAULT_PEER_DIRS } from './peers.js';
 import { readRange } from './transcript.js';
 
 /**
@@ -109,11 +109,13 @@ const roleOf = (row) => row?.team?.role ?? null;
  *
  * @returns {{row: object|null, fromSource: 'registry'|'name'|'unknown'}}
  */
-export function resolveSender(peer, sessions, { peersDir = PEER_SESSIONS_DIR } = {}) {
+export function resolveSender(peer, sessions, { peersDirs = DEFAULT_PEER_DIRS } = {}) {
   const rows = Array.isArray(sessions) ? sessions : [];
 
   if (peer.fromPid != null) {
-    const reg = readPeer(peer.fromPid, peersDir);
+    // `peersDirs` may be a function so the list is asked afresh: a config dir noted since
+    // construction (a second account's first session) must be read the next time it speaks.
+    const reg = readPeer(peer.fromPid, typeof peersDirs === 'function' ? peersDirs() : peersDirs);
     if (reg) {
       const row =
         (reg.paneId && rows.find((s) => s.paneId === reg.paneId)) ||
@@ -164,7 +166,8 @@ export class Observer {
    * @param {object}   opts
    * @param {object}   opts.store    a `SharedRoomStore`
    * @param {Function} [opts.roster] answers the current roster; the sweep also takes one
-   * @param {string}   [opts.peersDir]
+   * @param {string[]|Function} [opts.peersDirs] every known config dir's registry folder
+   *   (`peersDirOf`), or a function answering that list — one registry per account
    * @param {number}   [opts.tailBytes] the first read of a file reaches back this far
    * @param {number}   [opts.retryMs]   the hook path's one retry
    * @param {Function} [opts.now]       injected so tests need no clock
@@ -172,7 +175,7 @@ export class Observer {
   constructor({
     store,
     roster = () => [],
-    peersDir = PEER_SESSIONS_DIR,
+    peersDirs = DEFAULT_PEER_DIRS,
     tailBytes = BACKFILL_BYTES,
     retryMs = HOOK_RETRY_MS,
     maxAgeMs = MAX_AGE_MS,
@@ -180,7 +183,7 @@ export class Observer {
   }) {
     this.store = store;
     this.roster = roster;
-    this.peersDir = peersDir;
+    this.peersDirs = peersDirs;
     this.tailBytes = tailBytes;
     this.retryMs = retryMs;
     this.maxAgeMs = maxAgeMs;
@@ -266,7 +269,7 @@ export class Observer {
     const [msg] = normalizeRecord(rec);
     if (!msg || msg.kind !== 'peer_message') return null;
 
-    const { row: sender, fromSource } = resolveSender(msg, sessions, { peersDir: this.peersDir });
+    const { row: sender, fromSource } = resolveSender(msg, sessions, { peersDirs: this.peersDirs });
     if (fromSource === 'unknown') return null;
 
     // The message's own timestamp, not the moment the panel noticed it. The boot sweep can
