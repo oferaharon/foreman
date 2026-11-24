@@ -4,7 +4,7 @@ import { STATE_DIR } from './config.js';
 
 const FILE = path.join(STATE_DIR, 'rate-limits.json');
 
-/** Sessions whose last reading is remembered; far above how many are ever open at once. */
+/** Sessions whose last reading is remembered, per account; far above how many are ever open at once. */
 const MAX_SESSIONS = 256;
 /** A `session_id` is a uuid; anything this long is not one and is not kept. */
 const MAX_ID = 200;
@@ -50,7 +50,7 @@ const MAX_ID = 200;
  *   re-post repeats itself byte for byte and cannot forge one. That replaced "the higher
  *   percentage wins", which assumed usage only climbs inside a window and was wrong: a
  *   manual usage reset lowers it without minting a new `resetsAt`. See `fresher` and
- *   `#witness`.
+ *   `witness`.
  * - **`used_percentage`, falling back to `utilization`.** The capture says
  *   `used_percentage`. The binary's string table puts `utilization` next to `five_hour`
  *   and every internal telemetry name is `priorFiveHourUtilization`, so one `??` is cheap
@@ -64,7 +64,18 @@ const MAX_ID = 200;
  * meaningless here, so it is never extracted, never stored and never sent. The one thing
  * besides the windows this module reads out of a payload is `session_id`, and only as the
  * key to that session's own last window readings, **in memory** — never in the file, never
- * in the record the roster carries. See `#witness` for why memory is enough.
+ * in the record the roster carries. See `witness` for why memory is enough.
+ *
+ * **One quota per account, and every rule above holds per account.** Two Claude
+ * subscriptions on one Mac are two quotas, and before this split the gauge showed whichever
+ * account spoke last. A payload names no account (MEASURED on v2.1.331, the plan's M6); what
+ * it does carry, on every render, is `transcript_path`, filed under its own config dir — so
+ * the route resolves that dir to its signed-in account uuid (`AccountReader#accountForDir`)
+ * and hands it to `ingest`. **A payload whose account cannot be resolved is ignored**, never
+ * folded into the default: blank gauges are the safe direction, and a Claude Code that one
+ * day drops `transcript_path` makes every gauge go blank rather than wrong (T13). The
+ * default dir's account is still written top-level as `{windows, at}`, so a rollback reads
+ * the main gauge unchanged; the others ride beside it in `accounts`.
  *
  * `ingest` answers whether anything a *reader* would see changed, so the caller can decide
  * whether to broadcast. A re-post of the same numbers answers false even though `at` has
@@ -83,21 +94,43 @@ const MAX_ID = 200;
  * hours.
  */
 export class RateLimitStore {
-  #seen;
+  /**
+   * One account's own gauges and its own witness memory, keyed by account uuid.
+   *
+   * **Per account, every piece of it** (the multi-account plan, item 7). Two subscriptions on
+   * one Mac are two quotas, and a single record let whichever account spoke last own the
+   * gauge. And the witness memory has to be split too, not just the windows (T10): a session
+   * moved to the other account keeps its `session_id` (MEASURED, M10), so one `#seen` map
+   * across accounts would compare its first post on the new account against its readings on
+   * the old one, call it `fresh`, and move the new account's bar on numbers from a
+   * different quota. Per account, that post is a `first` — a baseline, which moves nothing.
+   *
+   * @type {Map<string, {record: {windows: Record<string, {usedPercentage: number|null, resetsAt: number|null}>, at: number}|null, seen: Map<string, Record<string, {usedPercentage: number|null, resetsAt: number|null}>>, folder: string|null}>}
+   */
+  #accounts;
 
   /** @param {string} [file] override the store location (tests) */
   constructor(file = FILE) {
     this.file = file;
-    /** @type {{windows: Record<string, {usedPercentage: number|null, resetsAt: number|null}>, at: number}|null} */
-    this.record = null;
-    this.dirty = false;
+    this.#accounts = new Map();
     /**
-     * Each session's own last reading, keyed by `session_id`, oldest first — a `Map` keeps
-     * insertion order, and `#witness` re-inserts on every post, so the first key is the one
-     * to evict. Readings only (`windowsFrom` builds them), never the payload.
-     * @type {Map<string, Record<string, {usedPercentage: number|null, resetsAt: number|null}>>}
+     * The uuid of the account the **default** config dir is signed into, as of its last post
+     * — whose record is also written top-level, so a rollback build reads it unchanged.
+     * Persisted, because the roster's "the default row always shows" has to know which row
+     * that is before anything has posted since a restart.
+     * @type {string|null}
      */
-    this.#seen = new Map();
+    this.defaultUuid = null;
+    /**
+     * A top-level `{windows, at}` read from a file with **no `accounts`** — written by a build
+     * from before this split (or a rollback to one), so whose it is cannot be known. It is
+     * drawn as the default row's, which is what the old single gauge showed, and adopted as
+     * the default account's record by the first default-dir post for an account that has
+     * none yet. Never handed to a non-default account: that is the folding this split exists
+     * to end.
+     */
+    this.legacy = null;
+    this.dirty = false;
     this.#load();
 
     this.timer = setInterval(() => this.#flush(), 2000);
@@ -107,21 +140,42 @@ export class RateLimitStore {
   #load() {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
-      if (!isPlainObject(raw) || !Number.isFinite(raw.at)) return;
+      if (!isPlainObject(raw)) return;
       // Re-coerced rather than trusted: this file is ours, but a hand-edit is a hand-edit
       // and a `NaN%` on the rail is worse than no rail.
-      this.record = { windows: windowsFrom(raw.windows, storedWindow), at: raw.at };
+      const top = Number.isFinite(raw.at) ? { windows: windowsFrom(raw.windows, storedWindow), at: raw.at } : null;
+      if (!isPlainObject(raw.accounts)) {
+        this.legacy = top;
+        return;
+      }
+      for (const [uuid, rec] of Object.entries(raw.accounts)) {
+        if (!validUuid(uuid) || !isPlainObject(rec) || !Number.isFinite(rec.at)) continue;
+        this.#accounts.set(uuid, { record: { windows: windowsFrom(rec.windows, storedWindow), at: rec.at }, seen: new Map(), folder: null });
+      }
+      if (validUuid(raw.defaultAccount)) this.defaultUuid = raw.defaultAccount;
     } catch {
       /* first run, or hand-edited into nonsense — start clean */
     }
   }
 
+  /**
+   * `{windows, at}` top-level for the default dir's account — the shape every older build
+   * reads, so a rollback still draws the main gauge — plus `defaultAccount` and
+   * `accounts: {<uuid>: {windows, at}}` beside it. **A rollback drops `accounts` and
+   * `defaultAccount` on its next write** (it rewrites the file from its one record); both are
+   * transient, the next post per account rebuilds them, and that is accepted rather than
+   * guarded against.
+   */
   #flush() {
     if (!this.dirty) return;
     this.dirty = false;
     try {
+      const accounts = {};
+      for (const [uuid, a] of this.#accounts) if (a.record) accounts[uuid] = a.record;
+      const top = this.get();
+      const out = { ...(top ?? {}), ...(this.defaultUuid ? { defaultAccount: this.defaultUuid } : {}), accounts };
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file, JSON.stringify(this.record, null, 2));
+      fs.writeFileSync(this.file, JSON.stringify(out, null, 2));
     } catch {
       /* best-effort */
     }
@@ -132,9 +186,35 @@ export class RateLimitStore {
     this.#flush();
   }
 
-  /** The whole record, or null if nothing has ever arrived. Rides the roster frame. */
+  /**
+   * The default dir's account's record, or null if nothing has arrived for it. Rides the
+   * roster frame as `rateLimits`, unchanged in shape, because old tabs read it.
+   */
   get() {
-    return this.record;
+    const own = this.defaultUuid ? this.#accounts.get(this.defaultUuid)?.record : null;
+    return own ?? this.legacy ?? null;
+  }
+
+  /** Read-only alias kept for callers (and tests) that read the record as a field. */
+  get record() {
+    return this.get();
+  }
+
+  /**
+   * Every account's record: `[{uuid, folder, default, windows, at}]`, the default first. A
+   * legacy record with nobody to own it yet stands in as the default row with `uuid: null`.
+   * The roster adds `nickname` and `live`; this store knows neither.
+   */
+  byAccount() {
+    const out = [];
+    for (const [uuid, a] of this.#accounts) {
+      if (!a.record) continue;
+      out.push({ uuid, folder: a.folder, default: uuid === this.defaultUuid, windows: a.record.windows, at: a.record.at });
+    }
+    if (!out.some((r) => r.default) && this.legacy) {
+      out.push({ uuid: null, folder: null, default: true, windows: this.legacy.windows, at: this.legacy.at });
+    }
+    return out.sort((a, b) => Number(b.default) - Number(a.default));
   }
 
   /**
@@ -142,82 +222,117 @@ export class RateLimitStore {
    *
    * @param {any} payload the whole JSON body, unfiltered
    * @param {number} [now] server clock, in **milliseconds** — both the record's `at` and the
-   *   expiry every window is measured against. Two sessions posting in the same second need
-   *   no reconciling: it is one account-wide number and they agree, and where they disagree
-   *   it is because one of them is asleep, which is what `mergeWindows` is for.
+   *   expiry every window is measured against. Two sessions of one account posting in the
+   *   same second need no reconciling: it is one account-wide number and they agree, and
+   *   where they disagree it is because one of them is asleep, which is what `mergeWindows`
+   *   is for.
+   * @param {{uuid?: string|null, explicit?: boolean, folder?: string}|null} [account] the
+   *   account this payload's session runs on — `AccountReader#accountForDir` on the config
+   *   dir its `transcript_path` sits under (M6, T13: the only account witness a payload
+   *   carries). **No uuid → the payload is ignored**, never folded into the default: a
+   *   gauge that is blank is the panel showing nothing, and one fed another account's
+   *   quota is the panel showing something wrong. `explicit: false` is the default dir.
    * @returns {boolean} whether anything a reader would see changed
    */
-  ingest(payload, now = Date.now()) {
+  ingest(payload, now = Date.now(), account = null) {
     const raw = isPlainObject(payload) ? payload.rate_limits : null;
     if (!isPlainObject(raw)) return false; // a payload without the key says nothing — see the header
+    const uuid = validUuid(account?.uuid) ? account.uuid : null;
+    if (uuid === null) return false;
+
+    let changed = false;
+    const isDefault = account.explicit === false;
+    if (isDefault && this.defaultUuid !== uuid) {
+      this.defaultUuid = uuid;
+      changed = true;
+    }
+
+    let entry = this.#accounts.get(uuid);
+    if (!entry) {
+      entry = { record: null, seen: new Map(), folder: null };
+      // The one hand-over of a pre-split record: to the default dir's account, once.
+      if (isDefault && this.legacy) {
+        entry.record = this.legacy;
+        this.legacy = null;
+      }
+      this.#accounts.set(uuid, entry);
+    }
+    if (typeof account.folder === 'string') entry.folder = account.folder;
 
     const incoming = windowsFrom(raw, payloadWindow);
-    const source = this.#witness(payload.session_id, incoming);
-    const windows = mergeWindows(this.record?.windows, incoming, now, source);
-    const changed = signature(windows) !== signature(this.record?.windows);
-    this.record = { windows, at: now };
+    const source = witness(entry.seen, payload.session_id, incoming);
+    const windows = mergeWindows(entry.record?.windows, incoming, now, source);
+    if (signature(windows) !== signature(entry.record?.windows)) changed = true;
+    entry.record = { windows, at: now };
     this.dirty = true;
     return changed;
-  }
-
-  /**
-   * What kind of evidence this post is, judged against the same session's previous post,
-   * and then remembered as that session's latest.
-   *
-   * - `fresh` — a window this session reported last time reads differently now. That is a
-   *   new API response and nothing else: Claude Code builds `rate_limits` from one
-   *   process-wide reading that each response's `anthropic-ratelimit-unified-*` headers
-   *   **replace wholesale** (`applyWindowReadings` in the binary, v2.1.280), so between two
-   *   responses every render repeats it exactly. Measured on v2.1.280 in the sandbox's
-   *   `alpha`: a 5-second `refreshInterval` rendered the same two windows byte for byte
-   *   before, across and after a turn. And because one response carries every window, one
-   *   window moving vouches for the rest of the same post — which matters, because the
-   *   percentages are integers and the weekly one can sit still for hours while the
-   *   five-hour one ticks.
-   * - `repeat` — known, and nothing it reported last time has moved. An idle re-post.
-   * - `first` — an id this store has not seen. **Not evidence either way**, and the reason
-   *   is measured rather than cautious: `/clear` mints a new `session_id` inside the same
-   *   process and its very first render carries that process's held reading — a sleeper's
-   *   copy under a brand-new name (captured: the old id and the new one posting identical
-   *   windows in the same second). A new session's first post is usually fresh too; there
-   *   is no telling which, so it becomes a baseline and moves nothing until it moves.
-   * - `anonymous` — no usable `session_id` at all. Nothing Claude Code sends, but nothing
-   *   stops a script posting here, and there is no witness to read, so it gets the rule
-   *   this store had before there was one.
-   *
-   * A window that *disappears* is deliberately not a witness. Claude Code filters every
-   * window whose `resets_at` has passed on its own clock, so a sleeping session's five-hour
-   * window vanishes from its payload with no response at all; counting that as movement
-   * would let the sleeper's weekly copy through once, every five hours. Only a window
-   * present in both posts is compared.
-   *
-   * **In memory, on purpose.** A restart loses every baseline, and all that costs is one
-   * post per session: each becomes `first` again, which moves nothing, so a panel restarted
-   * among sleepers holding a pre-reset copy keeps what it had on disk rather than taking
-   * theirs — the case a persisted map would exist for is already the safe one. Keeping the
-   * file to `{windows, at}` also means a rollback reads it unchanged; `TaskStore`'s erasure
-   * is what happens to a field an older reader has never heard of.
-   *
-   * Bounded by count, oldest out: an open session re-posts every minute and so stays near
-   * the end, and one evicted by a flood simply comes back as `first` — the safe kind.
-   */
-  #witness(sessionId, incoming) {
-    const id = typeof sessionId === 'string' && sessionId !== '' && sessionId.length <= MAX_ID ? sessionId : null;
-    if (id === null) return 'anonymous';
-
-    const before = this.#seen.get(id);
-    this.#seen.delete(id);
-    this.#seen.set(id, incoming);
-    if (this.#seen.size > MAX_SESSIONS) this.#seen.delete(this.#seen.keys().next().value);
-
-    if (!before) return 'first';
-    return Object.keys(incoming).some((k) => before[k] && !sameReading(before[k], incoming[k])) ? 'fresh' : 'repeat';
   }
 
   stop() {
     clearInterval(this.timer);
     this.#flush();
   }
+}
+
+/** An account uuid as `.claude.json` spells it: a non-empty string of a sane length. */
+function validUuid(v) {
+  return typeof v === 'string' && v !== '' && v.length <= MAX_ID;
+}
+
+/**
+ * What kind of evidence this post is, judged against the same session's previous post **on
+ * the same account** (`seen` is that account's own map, T10), and then remembered as that
+ * session's latest.
+ *
+ * - `fresh` — a window this session reported last time reads differently now. That is a
+ *   new API response and nothing else: Claude Code builds `rate_limits` from one
+ *   process-wide reading that each response's `anthropic-ratelimit-unified-*` headers
+ *   **replace wholesale** (`applyWindowReadings` in the binary, v2.1.280), so between two
+ *   responses every render repeats it exactly. Measured on v2.1.280 in the sandbox's
+ *   `alpha`: a 5-second `refreshInterval` rendered the same two windows byte for byte
+ *   before, across and after a turn. And because one response carries every window, one
+ *   window moving vouches for the rest of the same post — which matters, because the
+ *   percentages are integers and the weekly one can sit still for hours while the
+ *   five-hour one ticks.
+ * - `repeat` — known, and nothing it reported last time has moved. An idle re-post.
+ * - `first` — an id this account has not seen. **Not evidence either way**, and the reason
+ *   is measured rather than cautious: `/clear` mints a new `session_id` inside the same
+ *   process and its very first render carries that process's held reading — a sleeper's
+ *   copy under a brand-new name (captured: the old id and the new one posting identical
+ *   windows in the same second). A new session's first post is usually fresh too; there
+ *   is no telling which, so it becomes a baseline and moves nothing until it moves. A
+ *   session moved here from the other account is a `first` too, which is T10's whole fix.
+ * - `anonymous` — no usable `session_id` at all. Nothing Claude Code sends, but nothing
+ *   stops a script posting here, and there is no witness to read, so it gets the rule
+ *   this store had before there was one.
+ *
+ * A window that *disappears* is deliberately not a witness. Claude Code filters every
+ * window whose `resets_at` has passed on its own clock, so a sleeping session's five-hour
+ * window vanishes from its payload with no response at all; counting that as movement
+ * would let the sleeper's weekly copy through once, every five hours. Only a window
+ * present in both posts is compared.
+ *
+ * **In memory, on purpose.** A restart loses every baseline, and all that costs is one
+ * post per session: each becomes `first` again, which moves nothing, so a panel restarted
+ * among sleepers holding a pre-reset copy keeps what it had on disk rather than taking
+ * theirs — the case a persisted map would exist for is already the safe one. Keeping
+ * session ids out of the file also means a rollback reads it unchanged; `TaskStore`'s
+ * erasure is what happens to a field an older reader has never heard of.
+ *
+ * Bounded by count, oldest out: an open session re-posts every minute and so stays near
+ * the end, and one evicted by a flood simply comes back as `first` — the safe kind.
+ */
+function witness(seen, sessionId, incoming) {
+  const id = typeof sessionId === 'string' && sessionId !== '' && sessionId.length <= MAX_ID ? sessionId : null;
+  if (id === null) return 'anonymous';
+
+  const before = seen.get(id);
+  seen.delete(id);
+  seen.set(id, incoming);
+  if (seen.size > MAX_SESSIONS) seen.delete(seen.keys().next().value);
+
+  if (!before) return 'first';
+  return Object.keys(incoming).some((k) => before[k] && !sameReading(before[k], incoming[k])) ? 'fresh' : 'repeat';
 }
 
 function isPlainObject(v) {
@@ -296,7 +411,7 @@ function windowsFrom(raw, read) {
  * carry readings hours apart, which is the whole bug — so freshness is read off the data:
  * a five-hour window that reset since the sleeping session last looked has a *later*
  * `resetsAt` than the one that session remembers. That, and the sender's own history
- * (`#witness`) inside one window, are the only orderings the payload actually carries.
+ * (`witness`) inside one window, are the only orderings the payload actually carries.
  */
 function mergeWindows(stored, incoming, now, source) {
   const out = {};
@@ -319,7 +434,7 @@ function mergeWindows(stored, incoming, now, source) {
  * **Within one window, the witness.** Equal resets are the same window read twice, and the
  * data cannot say which read is newer: the weekly window is long enough that a session
  * asleep for hours still holds the *current* one, so its reset matches exactly. Only the
- * sender can say, and `#witness` asks it — did your own reading move since your last post?
+ * sender can say, and `witness` asks it — did your own reading move since your last post?
  *
  * - `fresh` wins, **in either direction**. A new API response is the newest thing there is,
  *   and a lower number from one is a real drop. This is the manual usage reset: it zeroed

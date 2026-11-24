@@ -58,7 +58,7 @@
 import { forgeMarkupFor } from '../forge-mark.js';
 import { needsKind } from '../notify.js';
 import { ghostSend, PHONE_TABS, phoneTab } from '../prefs.js';
-import { formatReset, formatResetClock24, staleness, windowsOf } from '../quota.js';
+import { accountRows, formatReset, formatResetClock24, staleness, windowsOf } from '../quota.js';
 /* The one spelling of what a row is called, which is the name the Standalones list draws,
    the name its screen's header carries, and the name every room chip and delivery header
    already gives that same session. */
@@ -120,6 +120,9 @@ const state = {
    * record at all. Nothing is drawn then — not a zero, not a grey placeholder.
    */
   rateLimits: null,
+  /** One entry per account (`rateLimitsByAccount`), or null from a panel that predates it —
+   *  `accountRows` then draws `rateLimits` alone, as the phone always did. */
+  rateLimitsByAccount: null,
   /**
    * Every room, open and archived, as `list()` hands them over — or null until the first
    * frame that carries the key.
@@ -254,6 +257,7 @@ function handle(msg) {
     // `?? null` rather than `||`: the server sends the key on every roster frame and its
     // absence means an older panel, which reads the same as "no record yet" here.
     state.rateLimits = msg.rateLimits ?? null;
+    state.rateLimitsByAccount = Array.isArray(msg.rateLimitsByAccount) ? msg.rateLimitsByAccount : null;
     // `'rooms' in msg`, never `msg.rooms &&`: an empty array is a real answer and the most
     // common one. See the field's own note in `state`.
     if ('rooms' in msg) state.rooms = msg.rooms || [];
@@ -1578,8 +1582,21 @@ const QUOTA_WINDOWS = new Map([
 /** Tapped open, showing each window's reset time and how old the reading is. */
 let quotaOpen = false;
 
-function quotaWindows(now) {
-  return windowsOf(state.rateLimits, now).filter((w) => QUOTA_WINDOWS.has(w.key));
+/**
+ * The accounts that get a row, each with its own drawable windows — `accountRows` decides
+ * which and how they are labelled, shared with the desktop so the two never disagree. One
+ * row per account (the default always, another only while it has live sessions); a row with
+ * nothing drawable is dropped here, by `windowsOf`'s rule.
+ */
+function quotaAccounts(now) {
+  return accountRows(state.rateLimitsByAccount, state.rateLimits)
+    .map((acct) => ({
+      acct,
+      wins: windowsOf(acct.record, now).filter((w) => QUOTA_WINDOWS.has(w.key)),
+      dim: staleness(acct.record, now) === 'dim',
+      age: relativeTime(acct.record.at) || 'now',
+    }))
+    .filter((a) => a.wins.length);
 }
 
 /** The reset label for one window: a 24-hour clock time for `five_hour` (the maintainer's
@@ -1603,13 +1620,18 @@ function resetLabel(win, now) {
  * a quiet phone is about once a minute.
  */
 function quotaSignature(now) {
-  const wins = quotaWindows(now);
-  if (!wins.length) return '-';
-  const dim = staleness(state.rateLimits, now) === 'dim';
+  const accts = quotaAccounts(now);
+  if (!accts.length) return '-';
   return [
     quotaOpen ? 'open' : 'shut',
-    dim ? `dim:${relativeTime(state.rateLimits.at)}` : 'live',
-    ...wins.map((w) => `${w.key}:${Math.round(w.pct)}:${w.tone}:${resetLabel(w, now)}`),
+    ...accts.map((a) =>
+      [
+        a.acct.key,
+        a.acct.label ?? '',
+        a.dim ? `dim:${a.age}` : 'live',
+        ...a.wins.map((w) => `${w.key}:${Math.round(w.pct)}:${w.tone}:${resetLabel(w, now)}`),
+      ].join(','),
+    ),
   ].join('|');
 }
 
@@ -1621,51 +1643,62 @@ function quotaSignature(now) {
  * something wrong in the one slot on this screen a reader would trust without checking.
  */
 function renderQuota(now) {
-  const record = state.rateLimits;
-  const wins = quotaWindows(now);
-  if (!wins.length) {
+  const accts = quotaAccounts(now);
+  if (!accts.length) {
     el.quota.replaceChildren();
     el.quota.hidden = true;
     return;
   }
 
-  const dim = staleness(record, now) === 'dim';
-  const age = relativeTime(record.at) || 'now';
+  const kids = [];
+  for (const { acct, wins, dim, age } of accts) {
+    const row = document.createElement('span');
+    // Dimmed per account: two accounts are two feeds, and one going quiet says nothing
+    // about the other.
+    row.className = `m-quota-row${dim ? ' is-dim' : ''}`;
+    // The nickname, only when two accounts are shown (`accountRows`) — a lone row is the
+    // default account's, the pair this header always drew.
+    if (acct.label) {
+      const name = document.createElement('span');
+      name.className = 'm-quota-acct';
+      name.textContent = acct.label;
+      row.appendChild(name);
+    }
+    row.append(...wins.map((w) => quotaGauge(w, now, age)));
 
-  const row = document.createElement('span');
-  row.className = 'm-quota-row';
-  row.append(...wins.map((w) => quotaGauge(w, now, age)));
+    /*
+     * A dim record's age goes into the visible line rather than staying in the tooltip. The
+     * feed is event-driven — a bench measured two status-line renders in five and a half
+     * minutes with nothing else happening — so a bar that has been sitting still for hours
+     * looks exactly like a live one, and that is the whole reason the record carries `at`.
+     * Fifteen minutes is `staleness`'s call, not this file's.
+     */
+    if (dim && !quotaOpen) {
+      const stale = document.createElement('span');
+      stale.className = 'm-quota-age';
+      stale.textContent = age;
+      row.appendChild(stale);
+    }
+    kids.push(row);
 
-  /*
-   * A dim record's age goes into the visible line rather than staying in the tooltip. The
-   * feed is event-driven — a bench measured two status-line renders in five and a half
-   * minutes with nothing else happening — so a bar that has been sitting still for hours
-   * looks exactly like a live one, and that is the whole reason the record carries `at`.
-   * Fifteen minutes is `staleness`'s call, not this file's.
-   */
-  if (dim && !quotaOpen) {
-    const stale = document.createElement('span');
-    stale.className = 'm-quota-age';
-    stale.textContent = age;
-    row.appendChild(stale);
-  }
-
-  const kids = [row];
-  if (quotaOpen) {
-    const asOf = document.createElement('span');
-    asOf.className = 'm-quota-as-of';
-    asOf.textContent = `as of ${age}`;
-    kids.push(asOf);
+    if (quotaOpen) {
+      const asOf = document.createElement('span');
+      asOf.className = 'm-quota-as-of';
+      asOf.textContent = `as of ${age}`;
+      kids.push(asOf);
+    }
   }
 
   el.quota.replaceChildren(...kids);
   el.quota.hidden = false;
-  el.quota.classList.toggle('is-dim', dim);
+  el.quota.classList.toggle('is-dim', accts.some((a) => a.dim));
   el.quota.classList.toggle('is-open', quotaOpen);
   el.quota.setAttribute('aria-expanded', quotaOpen ? 'true' : 'false');
   el.quota.setAttribute(
     'aria-label',
-    `Rate limits, ${wins.map((w) => `${QUOTA_WINDOWS.get(w.key)} ${Math.round(w.pct)}% used`).join(', ')}`,
+    `Rate limits, ${accts
+      .map(({ acct, wins }) => `${acct.label ? `${acct.label}: ` : ''}${wins.map((w) => `${QUOTA_WINDOWS.get(w.key)} ${Math.round(w.pct)}% used`).join(', ')}`)
+      .join('; ')}`,
   );
 }
 

@@ -167,3 +167,41 @@ export function formatResetClock24(resetsAt) {
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
 }
+
+/**
+ * Which accounts get a gauge row, in what order, and under what label — for both clients,
+ * so the desktop and the phone can never disagree about whose row is on screen.
+ *
+ * `list` is the roster frame's `rateLimitsByAccount` (`[{uuid, nickname, folder, default,
+ * live, windows, at}]`). The maintainer's shape (the multi-account plan, item 7): **the
+ * default account's row always shows; any other account's shows only while it has live
+ * sessions**, and each row's numbers are only ever its own account's. Default first, the
+ * rest by label, so two rows never swap places between paints.
+ *
+ * A row is labelled with the account's nickname (its folder name when it has none) **only
+ * when more than one row is shown** — a single row is the default account's, exactly the
+ * gauge this panel drew before there were two, and a label there would name nothing it
+ * needs telling apart from.
+ *
+ * `fallback` is the frame's plain `rateLimits`, used only when `list` is absent — a frame
+ * from a panel that predates the field draws its one gauge as it always did.
+ *
+ * Returns `[{key, label, record, default}]`; `record` is the `{windows, at}` every other
+ * function in this file takes. A row whose record has nothing drawable is still returned —
+ * the caller draws nothing for it, by `windowsOf`'s rule.
+ */
+export function accountRows(list, fallback = null) {
+  if (!Array.isArray(list)) {
+    return fallback ? [{ key: 'default', label: null, record: fallback, default: true }] : [];
+  }
+  const shown = list.filter((r) => r && typeof r === 'object' && (r.default || r.live));
+  const name = (r) => (typeof r.nickname === 'string' && r.nickname) || (typeof r.folder === 'string' && r.folder) || 'account';
+  shown.sort((a, b) => Number(Boolean(b.default)) - Number(Boolean(a.default)) || name(a).localeCompare(name(b)));
+  const labelled = shown.length > 1;
+  return shown.map((r, i) => ({
+    key: r.uuid ? `a:${r.uuid}` : r.default ? 'default' : `i:${i}`,
+    label: labelled ? name(r) : null,
+    record: { windows: r.windows, at: r.at },
+    default: Boolean(r.default),
+  }));
+}

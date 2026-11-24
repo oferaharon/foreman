@@ -1105,6 +1105,33 @@ body.row-dragging * { cursor: row-resize !important; }
    survive an empty block and leave a hole where the feature is switched off. */
 .rail-quota:empty { display: none; }
 
+/* One account's gauges (`renderQuota`, one block per account — the default always, another
+   only while it has live sessions). Its own column with the rows' old spacing, so a single
+   account draws exactly as the band did before there were two; the band's own gap, a beat
+   wider, is what separates two accounts. Dimming is per block, because two accounts are two
+   feeds and one going quiet says nothing about the other. */
+.quota-acct {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.rail-quota:has(> .quota-acct + .quota-acct) { gap: 0.55rem; }
+
+/* The account's nickname (or folder), drawn only when two accounts are shown. The window
+   label's register — mono, uppercase — one step fainter, so it reads as a heading over the
+   bars rather than as a third bar's name. */
+.quota-account {
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* The tone is set once, here, and read as `currentColor` by both the percentage and the
    bar's fill — so a row cannot go amber in its text and stay neutral in its bar. Neutral
    is `--ink-faint`, which is this stylesheet's own "present but not asking for anything"
@@ -1182,7 +1209,7 @@ body.row-dragging * { cursor: row-resize !important; }
    number is still there, still where it was, and plainly no longer being fed — and the age
    comes out of the tooltip and onto the screen, because at that point it is the fact you
    need rather than a detail you could go looking for. */
-.rail-quota.is-dim .quota-fill {
+.quota-acct.is-dim .quota-fill {
   background: transparent;
   border: 1px solid currentColor;
 }
