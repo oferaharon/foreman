@@ -114,6 +114,10 @@ async function answerStopAndExit(paneId, d) {
  * in a folder about to be deleted, and `Stay` is the orphan. That choice is the lead's,
  * recorded in the team's decisions, and the maintainer may reverse it.
  *
+ * And for a **move to another account** (`server/move-session.js`), the one other caller: a
+ * move's confirm says in words that background work stops, because the conversation is copied
+ * once the session is gone, and work left running detached would answer to nothing that moved.
+ *
  * What it will not do:
  *   - answer a box it did not raise. The caller refuses a pane that is holding anything
  *     *before* this runs, and `sendText` refuses again, so any box seen here came up after

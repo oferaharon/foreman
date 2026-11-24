@@ -664,3 +664,33 @@ settings. `bypassConfirmProblem` (`server/account.js`) reads the target dir's ow
 restore, and before the `/exit` for restart-one, relaunch-all and a sleep. Only that one file
 is read, so a key set in some other settings layer is refused anyway — the safe direction. The
 default dir is never asked, which is what keeps its launches byte-identical.
+
+## A move to another account is one-way, and the original is final only after `/exit`
+
+**Moving a session copies its conversation and never touches the original (the maintainer's
+answer to the multi-account plan's Q2), and a move never overwrites (the plan's item 8) — so
+moving the same session *back* is refused, by construction: the original it left behind is
+sitting at exactly the path the return trip would write.** Demonstrated in the sandbox on
+v2.1.331: a default-account `alpha` session moved to the second account through the panel's own
+button recalled its codeword there, and its bin box then offered `move to default…` disabled,
+with that reason. `planMove` (`server/move-session.js`) refuses it before anything ends; the
+confirm says so in its list of what does not travel. The choices for ever allowing a round trip
+— replace the old copy only when it is byte-for-byte a prefix of the moving one, or rename it
+aside first — both write the original Q2 protects, so neither is a code change's call.
+
+**Hash the original after the name has left tmux, not when you press the button.** `/exit`
+itself appends to the transcript, and so does any turn still finishing, so a hash taken
+before the press differs from the original afterwards and reads as "the move changed it". The
+honest checks are the two the bench used: the copy's first `<size of the original>` bytes hash
+the same as the original, and the original's hash is unchanged from just after the move to
+after the moved session has spoken again on the other account. `copyConversation` checks the
+first at copy time, file by file, and refuses on a mismatch.
+
+**`wx`, never a plain write.** Every file is created exclusively, so a target that appeared
+between the plan's check and the copy (another move, a hand `cp`) fails the move rather than
+being clobbered — and what was already written is reported by path, never deleted, because a
+partial copy is the human's to look at. The copy keeps a fresh mtime on purpose: the scan
+prefers the newer of one session id seen under two roots, and that must be the copy. MEASURED
+on node 26 here: `fs.copyFile` and `cp` give a fresh mtime as well; `cp -p` or a `utimes` would
+not.
+

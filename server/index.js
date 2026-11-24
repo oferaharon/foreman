@@ -122,6 +122,7 @@ import {
   shortPath,
 } from './account.js';
 import { installAccount, installRows, installStatus, installTarget, resolveInstallKey } from './account-install.js';
+import { moveSession, moveTargets, planMove } from './move-session.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
@@ -5726,6 +5727,124 @@ app.post('/api/sessions/:id/relaunch', async (req, res) => {
       'Start it again from + new.',
     name,
   });
+});
+
+/* ------------------------------------------------- move to another account --- */
+
+/*
+ * Moving one session to another Claude account (the multi-account plan's item 8). The steps
+ * and every refusal are `server/move-session.js`'s; these two routes only fetch what it needs
+ * — the live row, the pane as read now, the known dirs — and hand it the panel's own `/exit`,
+ * relaunch and pin machinery. The account is always a **key** into the detected dirs, never a
+ * path: the panel is LAN-reachable with no authentication, by ruling (the plan's T7).
+ */
+
+/** The accounts this row could move to, by key, each with why it can't when it can't. */
+async function moveChoices(session) {
+  const dirs = registry.configDirs.list();
+  const choices = await launchAccountChoices(dirs, { nicknames: accountNicknames });
+  return { dirs, targets: moveTargets(session, choices, dirs) };
+}
+
+/**
+ * Whether the bin's box may offer **Move to <account>…** for this row. Asked before the box is
+ * drawn, restart-one's rule, so it never offers a move the endpoint would then refuse. The pane
+ * itself is judged at the press. `offered: false` with no targets means there is no other
+ * signed-in account, and the box shows nothing at all.
+ */
+app.get('/api/sessions/:id/move', async (req, res) => {
+  const session = registry.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'Unknown session.' });
+  const { targets } = await moveChoices(session);
+  const out = targets.map((t) => {
+    const plan = planMove(session, { targetDir: t.dir, targetLabel: t.label });
+    return { key: t.key, label: t.label, ok: !plan.error, why: plan.why ?? null, reason: plan.error ?? null };
+  });
+  res.json({
+    offered: out.some((t) => t.ok),
+    targets: out,
+    from: session.account?.nickname || session.account?.folder || null,
+    lead: session.team?.role === 'lead',
+  });
+});
+
+/**
+ * Move it: `/exit`, wait for the name, copy the conversation into the other account, check the
+ * copy byte for byte, resume it there under the same name and pin, and say so. The original is
+ * never touched (the maintainer's answer to Q2). Shares `relaunching` with relaunch, restore
+ * and wake, so none of them can overlap.
+ *
+ * The status code is the outcome: 200 moved; 4xx refused with the session left as it was; 500
+ * closed and then stopped part-way, with the message saying exactly where and how to get it
+ * back on the old account.
+ */
+app.post('/api/sessions/:id/move', async (req, res) => {
+  if (hibernator.sleeping) return res.status(409).json({ error: 'A session is being put to sleep right now — try again in a few seconds.' });
+  if (relaunching || restoring) {
+    return res.status(409).json({ error: 'A relaunch, restore, wake or move is already running — try again when it finishes.' });
+  }
+  relaunching = true;
+
+  let out;
+  try {
+    await registry.refresh().catch(() => {});
+    const session = registry.get(req.params.id);
+    if (!session) {
+      const asleep = hibernation.bySessionId(req.params.id);
+      out = asleep
+        ? { ok: false, status: 409, error: planMove(null, { asleep: true }).error }
+        : { ok: false, status: 404, error: 'Unknown session.' };
+    } else {
+      const { targets } = await moveChoices(session);
+      const target = targets.find((t) => t.key === Number(req.body?.account));
+      if (!target) {
+        out = { ok: false, status: 400, error: 'That isn’t an account this session can move to — reopen the box and pick again.' };
+      } else {
+        const live = await readPaneState(session.paneId).catch(() => null);
+        const plan = planMove(session, { targetDir: target.dir, targetLabel: target.label, live });
+        if (plan.error) {
+          out = { ok: false, status: plan.status, error: plan.error, why: plan.why };
+        } else {
+          const terminal = typeof req.body?.terminal === 'boolean' ? req.body.terminal : Boolean(session.attached);
+          out = await moveSession(
+            plan,
+            session,
+            {
+              pinnedNames,
+              exit: (t) =>
+                exitAndWait(t, {
+                  sendText,
+                  sendKeys,
+                  capturePane: (paneId) => capturePane(paneId, 40),
+                  readPaneState,
+                  liveSessionNames,
+                }),
+              startEntries,
+              reserved: asleepNames,
+              post: ({ text, lead, folder }) => {
+                console.log(`move: ${text}`);
+                if (lead) room.post(folder, { from: 'panel', to: 'lead', kind: 'system', event: 'moved', text });
+              },
+            },
+            { terminal },
+          );
+        }
+      }
+    }
+  } catch (err) {
+    // Every step inside `moveSession` catches its own failures, so this is a safety net that
+    // does not know how far the move got — so it does not guess.
+    out = { ok: false, status: 500, error: `The move stopped part-way: ${err.message}. Check the rail for whether it is still running.` };
+  } finally {
+    relaunching = false;
+  }
+
+  await registry.refresh().catch(() => {});
+  broadcastRoster();
+
+  if (!out.ok) return res.status(out.status).json({ error: out.error, why: out.why ?? out.stage ?? null });
+  const made = out.paneId ? registry.byPane(out.paneId) : null;
+  res.json({ ok: true, name: out.name, lead: out.lead, from: out.from, to: out.to, sessionId: made?.id ?? null });
 });
 
 /* ------------------------------------------------------------ hibernation --- */

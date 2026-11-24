@@ -837,6 +837,19 @@ body.row-dragging * { cursor: row-resize !important; }
 .restart-choice.is-busy .restart-choice-label { color: var(--working); }
 .restart-choice:disabled { opacity: 0.5; cursor: default; }
 
+/* The move confirm (`confirmMove`): the bin box's own type, plus one list of what does not
+   travel. Mono at the hint's size, so it reads as the same voice as the lines above it. */
+.move-modal .move-head { margin-bottom: 0.2rem; }
+.move-list {
+  margin: 0 0 0.4rem;
+  padding-left: 1.1rem;
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  line-height: 1.45;
+  color: var(--ink-muted);
+}
+.move-list li + li { margin-top: 0.2rem; }
+
 /* ---------------------------------------------------- settings modal --- */
 
 /* Wider than a form (`.modal`, 24rem) and narrower than a document (`.is-wide`, 44rem):
