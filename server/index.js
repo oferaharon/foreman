@@ -110,7 +110,8 @@ import {
   NICKNAME_MAX,
   NICKNAME_RULE,
 } from './settings-file.js';
-import { AccountReader, KnownConfigDirs } from './account.js';
+import { AccountReader, KnownConfigDirs, shortPath } from './account.js';
+import { installAccount, installRows, installTarget, resolveInstallKey } from './account-install.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
@@ -5002,6 +5003,41 @@ app.patch('/api/config', (req, res) => {
     restartRequired,
     restartReason: reasons.join('; '),
   });
+});
+
+/* ------------------------------------------------- account installs --- */
+
+/*
+ * The status hook and the status-line wrapper, per Claude config dir (`account-install.js`).
+ * A second account reads only its own `settings.json`, so until that file holds both entries
+ * its sessions send the panel nothing. The settings box lists every known dir with what its
+ * file holds, and **a human presses Install** — never automatic, by ruling (Q4), because the
+ * write reaches that account's running sessions within seconds.
+ *
+ * `:key` is an index into `KnownConfigDirs` — the default first, then every dir seen on a
+ * live pane's own process — and never a path: this port answers the LAN with no auth, so a
+ * folder named by the request would be a settings file written wherever it said. A GET
+ * creates nothing on disk.
+ */
+app.get('/api/accounts/install', (req, res) => {
+  res.json({ port: PORT, dirs: installRows(registry.configDirs.list(), { port: PORT }) });
+});
+
+app.post('/api/accounts/:key/install', (req, res) => {
+  const dirs = registry.configDirs.list();
+  const pick = resolveInstallKey(req.params.key, req.body, dirs);
+  if (!pick.ok) return res.status(pick.status).json({ error: pick.error });
+  const target = installTarget(pick.dir);
+  let out;
+  try {
+    out = installAccount(target, { port: PORT });
+  } catch (err) {
+    return res.status(500).json({ error: `Install failed: ${err.message}` });
+  }
+  if (!out.ok) return res.status(409).json({ error: out.message, code: out.code });
+  console.log(`[accounts] installed into ${target.configDir}${out.changed ? '' : ' (already in place)'}`);
+  const row = installRows(dirs, { port: PORT })[Number(req.params.key)];
+  res.json({ ok: true, changed: out.changed, backup: shortPath(out.backup), wrote: out.wrote.map((f) => shortPath(f)), row });
 });
 
 /* ------------------------------------------------------------ groups --- */

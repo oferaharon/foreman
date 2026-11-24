@@ -9,11 +9,12 @@
  * the original, unchanged.
  *
  * **Everything here is pure.** No `fs`, no `process`, no imports at all —
- * `install-statusline.js` is the shell that reads files, writes them and prints. That
- * split is not tidiness: `install-hook.js` calls `install()` at module scope with no
- * guard, which is why `bin/foreman-panel.js` has to *spawn* it and why it has no test at
- * all. A test file that imported this one must not rewrite anybody's
- * `~/.claude/settings.json` as a side effect of being loaded.
+ * `install-statusline.js` is the shell that reads files, writes them and prints, and
+ * `account-install.js` decides which files those are for a given config dir. That split is
+ * not tidiness: `install-hook.js` used to call `install()` at module scope with no guard,
+ * so nothing could import it — and a test file, or the settings box's Install endpoint,
+ * that imported this one must not rewrite anybody's `settings.json` as a side effect of
+ * being loaded. `hook-settings.js` is the hook's half of the same split.
  *
  * ## Five things measured before any of this was written
  *

@@ -294,3 +294,27 @@ export function invokedDirectly(metaUrl) {
     return path.resolve(entry) === self;
   }
 }
+
+/**
+ * The Install endpoint's whole input check, here so it is tested without a server: `:key`
+ * must be the decimal index of a dir in `dirs` (the `KnownConfigDirs` list), and the body
+ * must be empty. **No path is ever accepted** — not as the key (`%2F`-encoded or not), not
+ * in the body — because the panel is LAN-reachable with no authentication, and a request
+ * naming a folder would get a settings file written wherever it said.
+ * `{ok: true, dir}` or `{ok: false, status, error}`.
+ */
+export function resolveInstallKey(key, body, dirs) {
+  if (body && typeof body === 'object' && Object.keys(body).length) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'This takes no body. The folder is chosen by its number in the panel’s own list of config folders, never by a path.',
+    };
+  }
+  if (typeof key !== 'string' || !/^(0|[1-9][0-9]{0,3})$/.test(key)) {
+    return { ok: false, status: 400, error: 'The key is the number of a config folder in the panel’s own list, never a path.' };
+  }
+  const dir = dirs[Number(key)];
+  if (!dir) return { ok: false, status: 404, error: `No config folder ${key} — the panel knows ${dirs.length}.` };
+  return { ok: true, dir };
+}

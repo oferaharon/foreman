@@ -236,6 +236,7 @@ import {
 // the band is a pure module that cannot import this one.
 import { ctxEl, ctxFor } from './ctx.js';
 import { accountTagEl } from './account-tag.js';
+import { installConfirmLines, installRowView } from './account-install.js';
 // The bots band and the bot pane's conversation list: the order, the two lines of a row, the
 // in-place patch, and the settings list's facts. Pure and node-tested like `rooms-band.js`,
 // whose `place` it imports — a row already in place is never moved.
@@ -2599,6 +2600,7 @@ async function openSettings() {
       'folder’s name as a tag; once one is running, its account can be named here.';
   acSec.append(acHint);
   body.append(acSec);
+  acSec.append(accountInstallBlock());
 
   /* ────────────────────────────────────────────────────────────── notifications ── */
 
@@ -6400,6 +6402,149 @@ function forgetBtn(s) {
     confirmForget(s);
   };
   return btn;
+}
+
+/*
+ * Live status per Claude config folder — the settings box's block under Account tags.
+ *
+ * One row per folder the panel knows (`GET /api/accounts/install`): the default, then every
+ * other `CLAUDE_CONFIG_DIR` it has seen on a live pane. Each row reads two facts off that
+ * folder's own `settings.json` and offers **Install** when either is missing. Nothing installs
+ * by itself (the maintainer's ruling): the button opens a confirm saying what is written,
+ * that the account's running sessions pick it up within seconds, and which status-line
+ * command the wrapper will run, and only that confirm's button writes. The row posts back its
+ * *index* in the panel's list, never a path. Fetched on its own, after the box is drawn, so a
+ * slow read never holds the rest of the settings box.
+ */
+function accountInstallBlock() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-installs';
+  const cap = document.createElement('p');
+  cap.className = 'settings-installs-cap';
+  cap.textContent = 'Live status, per config folder';
+  const list = document.createElement('div');
+  const note = document.createElement('p');
+  note.className = 'settings-flag';
+  note.textContent = 'Reading each folder’s settings…';
+  wrap.append(cap, list, note);
+
+  const paint = (rows) => {
+    list.replaceChildren();
+    for (const row of rows) {
+      const v = installRowView(row);
+      const r = document.createElement('div');
+      r.className = `settings-model settings-install is-${v.tone}`;
+      const name = document.createElement('span');
+      name.className = 'settings-account-name';
+      name.textContent = v.title;
+      name.title = row.settingsPath;
+      const facts = document.createElement('span');
+      facts.className = 'settings-install-facts';
+      for (const f of v.facts) {
+        const fact = document.createElement('span');
+        fact.textContent = f.text;
+        if (!f.ok) fact.className = 'is-missing';
+        facts.append(fact);
+      }
+      r.append(name, facts);
+      if (v.offer) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ghost-btn';
+        btn.textContent = v.label;
+        btn.onclick = () => confirmAccountInstall(row, (fresh) => {
+          paint(rows.map((x) => (x.key === fresh.key ? fresh : x)));
+        });
+        r.append(btn);
+      } else if (v.blocked) {
+        facts.title = v.blocked;
+      }
+      list.append(r);
+    }
+    note.textContent = rows.some((x) => !installRowView(x).offer && installRowView(x).tone === 'missing')
+      ? 'A folder whose settings the panel cannot safely write says why in its hover.'
+      : 'Without both, a session on that folder’s account shows no live status and no exact binding. Nothing is installed until you press Install.';
+  };
+
+  fetch('/api/accounts/install')
+    .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`The panel answered ${res.status}.`))))
+    .then((out) => paint(Array.isArray(out.dirs) ? out.dirs : []))
+    .catch((err) => {
+      note.textContent = `Could not read the config folders: ${err.message}`;
+    });
+  return wrap;
+}
+
+/** The Install confirm: every line of `installConfirmLines`, then the one button that writes. */
+function confirmAccountInstall(row, onDone) {
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  const box = document.createElement('div');
+  box.className = 'modal';
+  const h = document.createElement('h2');
+  h.textContent = row.isDefault ? 'Install into the default account?' : `Install into ${row.folder}?`;
+  const where = document.createElement('p');
+  where.className = 'field-hint';
+  where.textContent = row.configDir;
+  box.append(h, where);
+  for (const line of installConfirmLines(row)) {
+    const p = document.createElement('p');
+    p.className = 'field-hint';
+    p.textContent = line;
+    box.append(p);
+  }
+  const note = document.createElement('p');
+  note.className = 'modal-note';
+  const btns = document.createElement('div');
+  btns.className = 'modal-row';
+  const cancel = document.createElement('button');
+  cancel.className = 'ghost-btn';
+  cancel.textContent = 'cancel';
+  const go = document.createElement('button');
+  go.className = 'ghost-btn';
+  go.textContent = 'install';
+  btns.append(cancel, go);
+  box.append(note, btns);
+
+  const close = () => {
+    back.remove();
+    document.removeEventListener('keydown', onKey, true);
+  };
+  function onKey(e) {
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      close();
+    }
+  }
+  document.addEventListener('keydown', onKey, true);
+  cancel.onclick = close;
+  back.onmousedown = (e) => {
+    if (e.target === back) close();
+  };
+  go.onclick = async () => {
+    go.disabled = true;
+    cancel.disabled = true;
+    note.className = 'modal-note';
+    note.textContent = 'Installing…';
+    try {
+      const res = await fetch(`/api/accounts/${encodeURIComponent(row.key)}/install`, { method: 'POST' });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(out.error || `The panel refused (${res.status}).`);
+      if (out.row) onDone(out.row);
+      note.textContent = out.changed
+        ? `Done.${out.backup ? ` Backup: ${out.backup}` : ''}`
+        : 'Already in place — nothing in the settings file changed.';
+      cancel.textContent = 'close';
+      cancel.disabled = false;
+    } catch (err) {
+      note.className = 'modal-note err';
+      note.textContent = err.message;
+      cancel.disabled = false;
+    }
+  };
+  back.append(box);
+  document.body.append(back);
+  go.focus();
 }
 
 /**

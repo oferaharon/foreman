@@ -1016,6 +1016,22 @@ body.row-dragging * { cursor: row-resize !important; }
 .settings-account-name { flex: none; color: var(--ink-muted); cursor: help; }
 .settings-account-input { flex: 0 1 14rem; }
 
+/* Live status per config folder, under the account tags: the folder, its two facts read off
+   that folder's own settings.json, and Install when either is missing. A missing fact is
+   the decision colour; the button is the only thing in the row that writes. */
+.settings-installs { margin-top: 0.8rem; }
+.settings-installs-cap {
+  margin: 0 0 0.35rem;
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  color: var(--ink-muted);
+}
+.settings-install + .settings-install { margin-top: 0.35rem; }
+.settings-install .settings-account-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-install-facts { display: flex; flex-direction: column; flex: none; margin-left: auto; text-align: right; }
+.settings-install-facts .is-missing { color: var(--decision); }
+.settings-install .ghost-btn { flex: none; }
+
 /* The launch model: a label and the team panel's own select wrapper, so the two pickers
    that draw from one model list also look like one control. */
 .settings-model {
