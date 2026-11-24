@@ -60,7 +60,7 @@ import { SESSION_ID_RE, UNKNOWN_ACCOUNT_WHY, isLeadEntry, relaunchOne } from './
  * so the sequence is tested against a temp tree (`test/move-session.test.js`).
  */
 
-/** The account's name in words: its nickname, else its folder (`default`, `.claude-c4l`). Never an email. */
+/** The account's name in words: its nickname, else its folder (`default`, `.claude-work`). Never an email. */
 export function accountLabel(account, dir, home = os.homedir()) {
   if (account?.nickname) return account.nickname;
   if (account?.folder) return account.folder;
