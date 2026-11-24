@@ -291,6 +291,6 @@ its transcript under `~/.claude/projects`.
 main-account `-p` run in the folder still bound it to its own; and the mirror — a main-account
 pane alone, then a second-account `-p` run — stayed `pane-only`.
 
-**What still reads only the default root** is item 3 of the multi-account plan, not this
-fence: the peer registry (`peers.js`, `observe.js`), the plan-file route and the `/` command
-menu.
+**The other readers of an account's folder** — the peer registry (`peers.js`, `observe.js`), the
+plan-file route and the `/` command menu — read the pane's own account the same way, one spelling
+from `server/account.js`; the list is in [accounts](accounts.md#a-second-account-keeps-everything-in-its-own-folder-and-reads-none-of-the-defaults).

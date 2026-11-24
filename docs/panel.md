@@ -140,28 +140,9 @@ restart never blanks a live gauge — but the store only flushes to disk every t
 so a hard kill inside that window can lose the very latest reading, and a genuinely fresh
 install with no file yet shows nothing until the first payload arrives.
 
-**One set of bars per account.** Two Claude subscriptions on one Mac are two quotas, so
-each account gets its own pair, and a pair's numbers come only from its own account's
-sessions. A status-line payload names no account; what it does carry, on every render, is
-`transcript_path`, filed under its own config folder — so the panel reads that folder's
-signed-in account (`accountOfPayload`, `server/account.js`) and keys the reading to it. A
-payload whose folder is not one the panel knows, whose account file cannot be read, or
-which has no path at all is **ignored**, never folded into the default's bars: blank beats
-another account's quota. Each account keeps its own witness memory too, which matters for a
-session moved between accounts — it keeps its `session_id`, and its first post on the new
-account is a baseline there rather than a "fresh" reading against the old account's numbers
-([rate-limits#a-moved-session-keeps-its-id](traps/rate-limits.md#a-moved-session-keeps-its-id)).
-
-What draws is decided once, in `web/quota.js`'s `accountRows`, for both clients: the
-**default** account's pair always (when it has a reading), and any other account's pair
-**only while that account has a live session on the roster**. With one pair on screen it is
-drawn exactly as before, unlabelled; with two, each is headed by the account's nickname (the
-settings box's account names), or its folder name when it has none. Each pair dims on its
-own age, since one account going quiet says nothing about the other. The roster frame
-carries the list as `rateLimitsByAccount` beside the old `rateLimits`, which stays the
-default account's record for older tabs; on disk `rate-limits.json` keeps that record
-top-level and the others under `accounts`, and a rollback build drops `accounts` on its next
-write (each comes back with its account's next post).
+**Two accounts, two sets of bars.** With a second account signed in, each account gets
+its own pair, and a pair's numbers come only from its own account's sessions — see
+[Usage gauges per account](#usage-gauges-per-account).
 
 **There is deliberately no notification for a gauge crossing into red.**
 [Notifications](#notifications) covers a session waiting on you — a prompt, a question, a
@@ -1023,12 +1004,34 @@ hints (`/rc`, "new task? /clear to save…"), so scraping it would report `unkno
 of the time. It's shown as a quiet scale rather than in green/amber/red, since it is a
 setting and not a warning.
 
-### Which account a session runs on
+### Accounts
 
-A second Claude account on one Mac runs through `CLAUDE_CONFIG_DIR` (an alias such as
-`claude-work` pointing it at `~/.claude-work`), and nothing in a session's terminal or
-transcript says which account it is on. So every session wears a small **account tag** in its
-pane header and in its rail card's **bottom-right corner** — right-aligned at the end of the
+Claude Code can be signed in to more than one subscription on the same Mac. The first lives
+in `~/.claude`, and the panel calls it the **default account**. Another is a separate config
+folder you start Claude Code with — `CLAUDE_CONFIG_DIR=~/.claude-work claude`, usually behind
+a shell alias. Each folder keeps its own login, its own conversations, its own settings and
+its own list of trusted folders, so to Claude Code they are two separate worlds that happen
+to share one machine.
+
+The panel treats each folder as an account. It shows which account every session is on,
+reads each account's conversations from the right folder, keeps the usage gauges apart,
+starts and restarts a session on the account it was on, and can move a session from one
+account to another. On a Mac with one account almost none of it shows: the account picker,
+the second gauge and the move choice only appear once the panel has seen a second signed-in
+account on a running session. The measurements behind all of it, and the traps, are in
+[`traps/accounts.md`](traps/accounts.md).
+
+**Accounts are found, never typed in.** The panel learns of a config folder by seeing a
+running session use it (`KnownConfigDirs`, `server/account.js`, remembered in `accounts.json`
+in the state dir so a folder is not forgotten in a moment with no session on it), and every
+control that takes an account takes a *position in that list*, never a folder path — the panel
+answers the local network with no login, and a request must not be able to name where Claude
+Code starts or where a settings file is written.
+
+#### Which account a session runs on
+
+Nothing in a session's terminal or transcript says which account it is on, so every
+session wears a small **account tag** in its pane header and in its rail card's **bottom-right corner** — right-aligned at the end of the
 card's *last* line: the second line on an ordinary row, the third (`lead · N tasks`,
 `worker · agent/<id>`) on a team row. It rides inside a line that exists, never a new one, so a
 team row stays three lines and every other row two (heights measured unchanged). It is the one
@@ -1059,7 +1062,25 @@ running in a session. A `PATCH /api/config` carries a delta — `{"accountNickna
 plain text, at most 32 kept. It is a label, not an exposure key, so a LAN browser may set it,
 and it applies at the next roster beat with no restart. It never joins `composerSig`.
 
-**Three more readers follow the session's own config dir** (MEASURED on v2.1.331: a
+#### Conversations and binding
+
+A session on a second account writes its conversation under *its own* folder
+(`<folder>/projects/…`) and nothing under `~/.claude`. So the panel reads the conversations of
+every known config folder, not only the default one, and a second-account session shows its
+conversation like any other.
+
+Reading a second folder had one danger, which was reproduced on the real thing before it was
+fixed: the panel used to match a lone session to "the newest conversation in this project
+folder", and a second-account session sitting alone in a folder was matched to an unrelated
+default-account run that a script had started there a moment later. So now a session is matched
+only to conversations filed under **its own account's folder**; a session whose account cannot
+be read is held to the default folder, which is exactly what the panel did before there was a
+second one; and a hook's own report of which conversation it is in is still believed over any
+guess. The check only ever *removes* candidates, and it ships with the scan, never after it
+([binding#a-second-accounts-pane-was-bound-to-the-other-accounts-file](traps/binding.md#a-second-accounts-pane-was-bound-to-the-other-accounts-file)).
+
+
+**Three more readers follow the session's own config folder** (MEASURED on v2.1.331: a
 second-account session writes nothing under `~/.claude`). Each used to read the default dir
 only and so gave a wrong answer for such a session rather than a blank one. All three take the
 dirs from `server/account.js` — `KnownConfigDirs` is the list, `peersDirOf` / `plansDirOf` the
@@ -1079,9 +1100,11 @@ spellings:
   cache is keyed on the dir as well as the folder, since one folder opened on two accounts
   offers two lists.
 
-**Live status per config folder.** A session on a second account reads only its own
-`<dir>/settings.json` — never `~/.claude/settings.json` (MEASURED on v2.1.331) — so it sends the
-panel no hook and no status line until *that* file holds the panel's two entries. Under the
+#### Install: live status for a second account
+
+A session on a second account reads only its own `<dir>/settings.json` — never
+`~/.claude/settings.json` (MEASURED on v2.1.331) — so it sends the panel no hook and no status
+line, and so no live status and no gauge, until *that* file holds the panel's two entries. Under the
 account tags, the settings box lists every config folder the panel knows (`KnownConfigDirs`:
 the default, then each `CLAUDE_CONFIG_DIR` seen on a live pane's own process) with two facts read
 off its file — `status hook: installed / out of date / missing` and `status line: wrapped /
@@ -1102,7 +1125,31 @@ says so (`borrowed`), keeps `original: null`, and uninstalling takes the key awa
 writing the borrowed command in. From a shell the same is `npm run install-hook -- --config-dir
 <dir>` and `npm run install-statusline -- --config-dir <dir>` (or `foreman-panel install-hook
 --config-dir <dir>`); `setup` stays default-only. Once installed, a second account's status line
-feeds **its own** [usage bars](#rate-limit-gauges), never the default's.
+feeds **its own** [usage bars](#usage-gauges-per-account), never the default's.
+
+#### Usage gauges per account
+
+Two Claude subscriptions on one Mac are two quotas, so each account gets its own pair, and a
+pair's numbers come only from its own account's sessions. A status-line payload names no account; what it does carry, on every render, is
+`transcript_path`, filed under its own config folder — so the panel reads that folder's
+signed-in account (`accountOfPayload`, `server/account.js`) and keys the reading to it. A
+payload whose folder is not one the panel knows, whose account file cannot be read, or
+which has no path at all is **ignored**, never folded into the default's bars: blank beats
+another account's quota. Each account keeps its own witness memory too, which matters for a
+session moved between accounts — it keeps its `session_id`, and its first post on the new
+account is a baseline there rather than a "fresh" reading against the old account's numbers
+([rate-limits#a-moved-session-keeps-its-id](traps/rate-limits.md#a-moved-session-keeps-its-id)).
+
+What draws is decided once, in `web/quota.js`'s `accountRows`, for both clients: the
+**default** account's pair always (when it has a reading), and any other account's pair
+**only while that account has a live session on the roster**. With one pair on screen it is
+drawn exactly as before, unlabelled; with two, each is headed by the account's nickname (the
+settings box's account names), or its folder name when it has none. Each pair dims on its
+own age, since one account going quiet says nothing about the other. The roster frame
+carries the list as `rateLimitsByAccount` beside the old `rateLimits`, which stays the
+default account's record for older tabs; on disk `rate-limits.json` keeps that record
+top-level and the others under `accounts`, and a rollback build drops `accounts` on its next
+write (each comes back with its account's next post).
 
 #### Starting a session on an account, and keeping it there
 
@@ -1144,6 +1191,8 @@ Three refusals come with it, all made before anything is ended:
 Trust is per account too: a folder trusted on one account is new to the other, so the first
 launch there on the second account lands on the trust gate — the ordinary gate, handled the
 ordinary way, but recorded in that account's own `.claude.json`.
+
+#### Workers on the lead's account
 
 **A worker runs on its lead's account** (the maintainer's ruling: read live, not a team
 setting and not a per-task choice). At dispatch — `task_dispatch` and `task_start`, one
@@ -1204,7 +1253,6 @@ A failure after the `/exit` stops there and says where — the exit, the copy or
 the `claude --resume <id>` that brings it back on the old account, whose copy is untouched. A
 partial copy is named and left, never deleted. A lead may be moved; its team, tasks and room
 are keyed by repo and stay put, and its running workers stay on the account they started on.
-
 ### Context pressure
 
 The context percentage is coloured on one shared rule, used by both the rail and the

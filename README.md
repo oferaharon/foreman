@@ -194,6 +194,10 @@ Some of your Claude Code agents don't live in a terminal: a cron job running `cl
 - **Snapshot, restore, relaunch all** — save the set of sessions you have open and put it
   back after a reboot, or close every one and start it again for the day you update Claude
   Code. [Docs →](docs/panel.md#snapshot-and-restore)
+- **More than one Claude account** — sessions on a second subscription are tagged, read from
+  their own folder, given their own usage gauge, and started, restarted, woken and
+  restored on the account they were on. A session can be moved from one account to another.
+  [Docs →](docs/panel.md#accounts)
 - **It stays up on its own** — the panel runs as a LaunchAgent, surviving a crash, a
   reboot and the routine restart. [Docs →](docs/running.md#running-it-under-launchd)
 

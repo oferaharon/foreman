@@ -112,7 +112,7 @@ started on a second subscription dispatches workers that spend that subscription
 no setting to disagree with it. It is said in the room (`runs on the <account> account`) when it
 is not the default, and a dispatch is refused, with nothing created, if that account has no panel
 status hook installed (settings → Account tags → Install) — a worker there would report nothing.
-`docs/panel.md`'s "Starting a session on an account" has the rest.
+[`docs/panel.md`](panel.md#workers-on-the-leads-account) has the rest.
 
 A worker outlives its PR. When it finishes it stays idle in the rail until the PR is
 merged or closed, because the first thing that happens to a PR is somebody wanting a
