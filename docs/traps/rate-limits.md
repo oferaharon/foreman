@@ -96,3 +96,20 @@ endpoint hands the whole payload through unfiltered on purpose, for issue #52. T
 other field read is `session_id`, as the key to that session's own last window readings
 (the witness above), held in memory only: it never reaches the file or the record the
 roster carries, and `test/rate-limits.test.js` reads the file back to say so.
+
+## A second config dir's wrapper must read as a wrapper
+
+**`looksLikeAWrapper` matched exactly `statusline-wrapper.sh`, so the day a second config dir
+got `statusline-wrapper-<folder>.sh` it would have wrapped another dir's wrapper.** The
+function exists to refuse that — a wrapper of a wrapper posts every render twice and nests the
+original one level deeper on each run — and a basename match on the one unsuffixed name could
+not see the new form at all. It now reads both (`wrapperNameIn`, `server/statusline.js`), and
+`test/account-install.test.js` installs into a dir whose `statusLine` points at another dir's
+wrapper, then at the default's, and asserts both are refused with nothing written, hook
+included. Two inside rules came with it. The suffix drops dots (`.claude-work` → `claude-work`,
+`x.sh` → `x-sh`), because `isOurs` is a substring match and with dots kept folder `x`'s
+wrapper name is a substring of folder `x.sh`'s. And two folders whose names still clean up
+alike (`~/a/.cfg`, `~/b/cfg`) are refused rather than sharing a record: the sidecar names the
+dir it belongs to, and the other's original would be lost. A borrowed default command that is
+itself a wrapper is never borrowed, for the same double-post reason.
+

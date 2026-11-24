@@ -1,0 +1,11 @@
+{
+  "session_id": "0a11ce00-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/someone/.claude-work/projects/-Users-someone-foreman-sandbox-alpha/0a11ce00-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/Users/someone/foreman-sandbox/alpha",
+  "scratchpad_dir": "/private/tmp/claude-502/-Users-someone-foreman-sandbox-alpha/0a11ce00-0000-4000-8000-000000000001/scratchpad",
+  "prompt_id": "0b0b0b0b-0000-4000-8000-000000000002",
+  "permission_mode": "auto",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "reply with the single word ok",
+  "session_title": "alpha-second"
+}

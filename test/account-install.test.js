@@ -398,3 +398,31 @@ test('the confirm says what is written, that live sessions pick it up, and what 
   assert.match(foreign.blocked, /another Foreman wrapper/);
   assert.match(installConfirmLines({ ...row, runs: null, runsBorrowed: false }).join('\n'), /blank row/);
 });
+
+/* ------------------------------------------------- T13: the account witness --- */
+
+/*
+ * Neither payload names an account. What says which one a hook or a status-line render came
+ * from is `transcript_path`, whose root is the config dir (MEASURED on v2.1.331, multi-account
+ * plan M6). These are real captures from a sandbox `alpha` session on a second account,
+ * driven by a `--settings` file built from this installer's output — paths, ids, the
+ * percentages and the cost rewritten to fakes, every key kept. The per-account gauges key on
+ * this field; a Claude Code that dropped it would show here first rather than as blank bars.
+ */
+const FIXTURES = path.join(REPO, 'test', 'fixtures');
+const PAYLOADS = ['hook-SessionStart', 'hook-UserPromptSubmit', 'hook-Stop', 'hook-SessionEnd', 'statusline'];
+
+test('every hook and status-line payload carries transcript_path under its own config dir', async () => {
+  const { configDirOfTranscript } = await import('../server/account.js');
+  for (const name of PAYLOADS) {
+    const payload = JSON.parse(fs.readFileSync(path.join(FIXTURES, `payload-${name}.json`), 'utf8'));
+    assert.equal(typeof payload.transcript_path, 'string', `${name} has transcript_path`);
+    assert.equal(configDirOfTranscript(payload.transcript_path), '/Users/someone/.claude-work', name);
+    assert.equal(typeof payload.session_id, 'string', `${name} has session_id`);
+    for (const key of Object.keys(payload)) assert.doesNotMatch(key, /account|email|org/i, `${name} names no account`);
+  }
+  const line = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'payload-statusline.json'), 'utf8'));
+  assert.deepEqual(Object.keys(line.rate_limits).sort(), ['five_hour', 'seven_day']);
+  const hook = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'payload-hook-Stop.json'), 'utf8'));
+  assert.equal(hook.hook_event_name, 'Stop');
+});
