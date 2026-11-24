@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
-import { HOME } from './config.js';
+import { DEFAULT_CONFIG_DIR } from './account.js';
 
 /**
  * The slash commands a session will actually accept.
@@ -10,9 +10,15 @@ import { HOME } from './config.js';
  *
  *   built-ins  read out of the installed CLI itself, so the list tracks whatever
  *              version is on this machine instead of rotting in a hardcoded array
- *   plugins    `~/.claude/plugins/**\/commands/*.md`
+ *   plugins    `<config dir>/plugins/**\/commands/*.md`
  *   skills     any `SKILL.md`, which Claude Code exposes as `/name`
- *   user/project  `~/.claude/commands` and `<cwd>/.claude/commands`
+ *   user/project  `<config dir>/commands` and `<cwd>/.claude/commands`
+ *
+ * **`<config dir>` is the session's own** — `~/.claude` unless the pane runs on another
+ * account (`CLAUDE_CONFIG_DIR`), whose commands, skills and plugins are its own folder's:
+ * offering the default's to it is offering a command the session does not have. The built-ins
+ * are the one CLI everyone shares, so they are read once whatever the dir. `<cwd>/.claude/…`
+ * is the *project's* folder, not an account's, and is the same for both.
  *
  * The alternative — typing `/` into a live pane and scraping the popup — would clobber
  * whatever the user had half-typed there. Not worth it for a convenience feature.
@@ -21,7 +27,7 @@ import { HOME } from './config.js';
 const CLI_CANDIDATES = [
   '/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe',
   '/usr/local/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe',
-  path.join(HOME, '.claude/local/node_modules/@anthropic-ai/claude-code/bin/claude.exe'),
+  path.join(DEFAULT_CONFIG_DIR, 'local/node_modules/@anthropic-ai/claude-code/bin/claude.exe'),
 ];
 
 /**
@@ -123,8 +129,8 @@ async function fromMarkdownDir(dir, source, namePrefix = '') {
   return out;
 }
 
-async function pluginCommands() {
-  const root = path.join(HOME, '.claude/plugins');
+async function pluginCommands(configDir) {
+  const root = path.join(configDir, 'plugins');
   const out = [];
   const walk = async (dir, depth) => {
     if (depth > 6) return;
@@ -145,8 +151,8 @@ async function pluginCommands() {
   return out;
 }
 
-async function skillCommands() {
-  const roots = [path.join(HOME, '.claude/skills'), path.join(HOME, '.claude/plugins')];
+async function skillCommands(configDir) {
+  const roots = [path.join(configDir, 'skills'), path.join(configDir, 'plugins')];
   const out = [];
   const walk = async (dir, depth) => {
     if (depth > 7) return;
@@ -183,17 +189,21 @@ async function skillCommands() {
 let cache = { at: 0, byCwd: new Map() };
 const TTL_MS = 60_000;
 
-/** Every command offered in this working directory, de-duplicated, name-sorted. */
-export async function listCommands(cwd) {
+/**
+ * Every command offered in this working directory on this config dir, de-duplicated,
+ * name-sorted. `configDir` is absolute and absent for the default account — the cache is
+ * keyed on both, because one folder opened on two accounts offers two different lists.
+ */
+export async function listCommands(cwd, configDir = DEFAULT_CONFIG_DIR) {
   if (Date.now() - cache.at > TTL_MS) cache = { at: Date.now(), byCwd: new Map() };
-  const key = cwd || '';
+  const key = `${configDir}\0${cwd || ''}`;
   if (cache.byCwd.has(key)) return cache.byCwd.get(key);
 
   const [b, p, s, user, project] = await Promise.all([
     builtins(),
-    pluginCommands(),
-    skillCommands(),
-    fromMarkdownDir(path.join(HOME, '.claude/commands'), 'user'),
+    pluginCommands(configDir),
+    skillCommands(configDir),
+    fromMarkdownDir(path.join(configDir, 'commands'), 'user'),
     cwd ? fromMarkdownDir(path.join(cwd, '.claude/commands'), 'project') : [],
   ]);
 
