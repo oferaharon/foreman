@@ -58,6 +58,42 @@ export const WRAPPER_FILENAME = 'statusline-wrapper.sh';
 /** The record of what was replaced, beside it. */
 export const SIDECAR_FILENAME = 'statusline.json';
 
+/*
+ * **One wrapper and one sidecar per settings file.** A second Claude account
+ * (`CLAUDE_CONFIG_DIR`) reads its own `settings.json` and never the default one (MEASURED,
+ * v2.1.331), so each config dir is wrapped on its own, with its own record of what *its*
+ * file held. The default dir keeps the two names above, unsuffixed, so a rollback past this
+ * build still finds its files; every other dir gets `statusline-wrapper-<folder>.sh` and
+ * `statusline-<folder>.json`, `<folder>` being `configDirSuffix` of its path.
+ */
+
+/**
+ * The suffix a non-default config dir's files carry: its folder name, leading dots dropped
+ * and anything outside `[A-Za-z0-9_-]` turned into `-` — `~/.claude-work` → `claude-work`.
+ * The dot rule is load-bearing rather than cosmetic: with dots kept, folder `x` and folder
+ * `x.sh` would name `statusline-wrapper-x.sh` and `statusline-wrapper-x.sh.sh`, and the
+ * first is a substring of the second, which is exactly the match `isOurs` makes. Two dirs
+ * that still spell the same suffix are told apart by the sidecar, which records whose it is
+ * (`configDir`), and the installer refuses rather than share one.
+ *
+ * Pure string work, no `path`: this module has no imports.
+ */
+export function configDirSuffix(configDir) {
+  const base = String(configDir || '').replace(/\/+$/, '').split('/').pop() || '';
+  const clean = base.replace(/^\.+/, '').replace(/[^A-Za-z0-9_-]/g, '-').replace(/^-+/, '');
+  return clean || 'config';
+}
+
+/** The wrapper's file name for a suffix, or the default's for none. */
+export function wrapperFilenameFor(suffix = null) {
+  return suffix ? `statusline-wrapper-${suffix}.sh` : WRAPPER_FILENAME;
+}
+
+/** The sidecar's file name for a suffix, or the default's for none. */
+export function sidecarFilenameFor(suffix = null) {
+  return suffix ? `statusline-${suffix}.json` : SIDECAR_FILENAME;
+}
+
 /**
  * The generated script's format version, recorded in the sidecar.
  *
@@ -95,6 +131,7 @@ export const REFUSALS = {
   BAD_STATUS_LINE: 'BAD_STATUS_LINE',
   UNKNOWN_TYPE: 'UNKNOWN_TYPE',
   FOREIGN_WRAPPER: 'FOREIGN_WRAPPER',
+  SIDECAR_CLASH: 'SIDECAR_CLASH',
 };
 
 const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -142,9 +179,36 @@ export function isOurs(command, wrapperPath) {
  * install's sidecar is the only thing that knows what the real original was.
  */
 export function looksLikeAWrapper(command) {
-  if (typeof command !== 'string') return false;
-  const name = WRAPPER_FILENAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[\\s'"/])${name}(\\s|['"]|$)`).test(command);
+  return wrapperNameIn(command) !== null;
+}
+
+/**
+ * What a settings file's status line is, for the settings box: `wrapped` (this install's
+ * wrapper), `foreign` (some other Foreman wrapper — another state dir's, or another config
+ * dir's), `missing` (anything else, including no key) or `unreadable` (a file that did not
+ * parse, which is `null` here as it is for the planners).
+ */
+export function statusLineState(settings, wrapperPath) {
+  if (!isPlainObject(settings)) return 'unreadable';
+  const current = settings.statusLine;
+  if (!isPlainObject(current)) return 'missing';
+  if (isOurs(current.command, wrapperPath)) return 'wrapped';
+  if (looksLikeAWrapper(current.command)) return 'foreign';
+  return 'missing';
+}
+
+/**
+ * The wrapper file name a command points at — `statusline-wrapper.sh` or any per-dir
+ * `statusline-wrapper-<folder>.sh` — or `null`. **Both forms, and that is the trap**: this
+ * matched the unsuffixed name alone until a second config dir got its own wrapper, and a
+ * check that cannot see the suffixed form lets one dir's settings be pointed at another
+ * dir's wrapper and wrapped again, which nests the POST and the original one level deeper
+ * — the exact failure this function exists to refuse.
+ */
+export function wrapperNameIn(command) {
+  if (typeof command !== 'string') return null;
+  const m = /(?:^|[\s'"/])(statusline-wrapper(?:-[A-Za-z0-9_-]+)?\.sh)(?=\s|['"]|$)/.exec(command);
+  return m ? m[1] : null;
 }
 
 /**
@@ -159,20 +223,40 @@ export function looksLikeAWrapper(command) {
  * only its `command` is used, and it is spliced in **verbatim as a line of bash**, which
  * is precisely what Claude Code was going to do with it.
  */
-export function wrapperScript({ original = null, port } = {}) {
-  const command = isPlainObject(original) && typeof original.command === 'string'
+export function wrapperScript({ original = null, port, borrowed = null, target = null } = {}) {
+  const own = isPlainObject(original) && typeof original.command === 'string'
     ? original.command.trim()
     : '';
+  // A config dir with no status line of its own runs the default account's, so both
+  // terminals look alike (the maintainer's ruling, Q1 (b) of the multi-account plan).
+  const lent = !own && isPlainObject(borrowed) && typeof borrowed.command === 'string'
+    ? borrowed.command.trim()
+    : '';
+  const command = own || lent;
+
+  // The default dir's header is the one every earlier install wrote, byte for byte; a
+  // per-dir wrapper names its own record, its own settings file and the flag that reaches it.
+  const about = target
+    ? [
+      `# The panel's Install button (Settings → Account tags), or`,
+      `# \`npm run install-statusline -- --config-dir ${target.configDir}\`, rewrites this file`,
+      `# from <STATE_DIR>/${target.sidecarName}, and \`npm run uninstall-statusline -- --config-dir\``,
+      `# with the same folder puts the original back into ${target.settingsPath}`,
+      '# and deletes this file. Anything typed here is lost at the next install.',
+    ]
+    : [
+      '# `npm run install-statusline` rewrites this file from <STATE_DIR>/statusline.json,',
+      '# and `npm run uninstall-statusline` puts the original command back into',
+      '# ~/.claude/settings.json and deletes this file. Anything typed here is lost at the',
+      '# next install.',
+    ];
 
   const head = [
     '#!/usr/bin/env bash',
     '#',
     '# Generated by Foreman — do not edit.',
     '#',
-    '# `npm run install-statusline` rewrites this file from <STATE_DIR>/statusline.json,',
-    '# and `npm run uninstall-statusline` puts the original command back into',
-    '# ~/.claude/settings.json and deletes this file. Anything typed here is lost at the',
-    '# next install.',
+    ...about,
     '#',
     '# It hands the panel a copy of the JSON Claude Code already sends its status line and',
     '# changes nothing else: stdout, stderr and the exit code below are the original',
@@ -196,10 +280,20 @@ export function wrapperScript({ original = null, port } = {}) {
     '',
   ];
 
-  const tail = command
+  const tail = own
     ? [
       '# The original command, verbatim, fed the payload it would have read from stdin.',
       '# `exit $?` is the pipeline\'s status, which is the original\'s.',
+      `printf '%s' "$payload" | ${command}`,
+      'exit $?',
+      '',
+    ]
+    : command
+    ? [
+      '# This settings file had no status line of its own, so this runs the default',
+      "# account's, as it was recorded when this was generated — so both accounts' terminals",
+      '# draw the same line. Uninstalling takes the key away again; it never writes this',
+      '# command into that settings file.',
       `printf '%s' "$payload" | ${command}`,
       'exit $?',
       '',
@@ -260,6 +354,17 @@ function checkStatusLine(statusLine, where) {
  *   `changed`    whether `settings.json` needs writing at all
  *   `notes`      lines to print
  *   `warnings`   lines to print that somebody has to read
+ *
+ * Two inputs only a non-default config dir passes, and the default's plan is byte-identical
+ * without them:
+ *
+ *   `target`     `{configDir, settingsPath, sidecarName}` — whose files these are. Recorded
+ *                in the sidecar as `configDir`, and a sidecar that names another dir is
+ *                refused rather than shared (two folders whose names clean up alike).
+ *   `borrowed`   the default account's own `statusLine` object, for a file that has none:
+ *                the wrapper runs it, the sidecar records it as `borrowed`, and `original`
+ *                stays `null` — so `--remove` takes the key away rather than writing the
+ *                main account's command into this file.
  */
 export function planInstall({
   settings,
@@ -268,6 +373,8 @@ export function planInstall({
   port,
   now = Date.now(),
   refreshInterval = DEFAULT_REFRESH_INTERVAL,
+  target = null,
+  borrowed = null,
 } = {}) {
   if (!isPlainObject(settings)) {
     return refuse(
@@ -288,13 +395,41 @@ export function planInstall({
   // sidecar is the only record of the real original, so this is refused rather than
   // wrapped a second time.
   if (!alreadyWrapped && isPlainObject(current) && looksLikeAWrapper(current.command)) {
+    const name = wrapperNameIn(current.command);
     return refuse(
       REFUSALS.FOREIGN_WRAPPER,
-      `statusLine.command already points at a ${WRAPPER_FILENAME} that is not this one ` +
+      `statusLine.command already points at a ${name} that is not this one ` +
       `(${current.command}). That is another Foreman install's wrapper, and only its own ` +
       'sidecar knows what the original command was. Run `uninstall-statusline` with that ' +
-      'install\'s FOREMAN_STATE_DIR first. Nothing has been changed.',
+      'install\'s FOREMAN_STATE_DIR' +
+      (name === WRAPPER_FILENAME ? '' : ' and the --config-dir it was installed for') +
+      ' first. Nothing has been changed.',
     );
+  }
+
+  if (target && isPlainObject(sidecar) && typeof sidecar.configDir === 'string' &&
+      sidecar.configDir !== target.configDir) {
+    return refuse(
+      REFUSALS.SIDECAR_CLASH,
+      `${target.sidecarName} already records the status line of ${sidecar.configDir}, not ` +
+      `${target.configDir}: two config folders whose names spell the same suffix. Refusing to ` +
+      'share one record between them, because the other folder\'s original would be lost. ' +
+      'Nothing has been changed.',
+    );
+  }
+
+  // The default account's command, lent to a file with none of its own. Never another
+  // wrapper — running one from here would post every render twice.
+  let lend = null;
+  if (isPlainObject(borrowed) && typeof borrowed.command === 'string' && borrowed.command.trim()) {
+    if (looksLikeAWrapper(borrowed.command) || checkStatusLine(borrowed, 'the default status line')) {
+      warnings.push(
+        `The default account's status line (${borrowed.command}) is not a plain command this ` +
+        'installer can run, so nothing is borrowed and this terminal line stays blank.',
+      );
+    } else {
+      lend = structuredClone(borrowed);
+    }
   }
 
   const bad = checkStatusLine(current, 'statusLine');
@@ -308,6 +443,14 @@ export function planInstall({
     original = isPlainObject(sidecar) && isPlainObject(sidecar.original) ? sidecar.original : null;
     if (isPlainObject(sidecar) && sidecar.original === null) {
       notes.push('Already wrapped; regenerating. The sidecar records that there was no status line to wrap.');
+    } else if (!original && lend) {
+      warnings.push(
+        `Already wrapped, but ${target?.sidecarName || SIDECAR_FILENAME} is missing or ` +
+        'unreadable, so what this file held before is not known. Regenerating as though it ' +
+        'held nothing, so the default account\'s line is run and `--remove` takes the key ' +
+        'away. If it had one, it is in a timestamped `settings.backup-foreman-*.json` ' +
+        'beside settings.json.',
+      );
     } else if (!original) {
       warnings.push(
         `Already wrapped, but ${SIDECAR_FILENAME} is missing or unreadable — the original ` +
@@ -323,7 +466,8 @@ export function planInstall({
     if (staleOriginal) return staleOriginal;
   } else {
     original = isPlainObject(current) ? structuredClone(current) : null;
-    if (!original) {
+    // With a loan there is something to run, and the note below says what.
+    if (!original && !lend) {
       warnings.push(
         'There is no statusLine in settings.json, so there is nothing to wrap and the ' +
         'wrapper prints nothing. Claude Code keeps a footer row for an empty status line ' +
@@ -360,17 +504,34 @@ export function planInstall({
 
   const next = { ...settings, statusLine: nextStatusLine };
 
+  // Only when this file has nothing of its own does the loan apply.
+  const borrowedNow = original ? null : lend;
+  if (borrowedNow) {
+    notes.push(
+      `This settings file has no status line of its own, so the wrapper runs the default ` +
+      `account's: ${borrowedNow.command}`,
+    );
+  }
+
+  const record = {
+    original,
+    port: Number(port),
+    wrappedAt: new Date(now).toISOString(),
+    version: WRAPPER_VERSION,
+    addedRefreshInterval,
+  };
+  // Keys only a per-dir install writes, so the default's sidecar stays the shape it was.
+  if (target) {
+    record.configDir = target.configDir;
+    record.borrowed = borrowedNow;
+  }
+
   return {
     ok: true,
     settings: next,
-    sidecar: {
-      original,
-      port: Number(port),
-      wrappedAt: new Date(now).toISOString(),
-      version: WRAPPER_VERSION,
-      addedRefreshInterval,
-    },
-    script: wrapperScript({ original, port }),
+    sidecar: record,
+    script: wrapperScript({ original, port, borrowed: borrowedNow, target }),
+    borrowed: borrowedNow,
     command: nextStatusLine.command,
     original,
     addedRefreshInterval,
