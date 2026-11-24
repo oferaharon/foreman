@@ -1,11 +1,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { PEER_SESSIONS_DIR, SESSION_PREFIX } from './config.js';
+import { SESSION_PREFIX } from './config.js';
+import { DEFAULT_CONFIG_DIR, peersDirOf } from './account.js';
 
 /**
- * Reads Claude Code's own peer-session registry (`PEER_SESSIONS_DIR`) — the directory
+ * Reads Claude Code's own peer-session registry — `<config dir>/sessions/`, the directory
  * `ListAgents` reads to build its roster, one `<pid>.json` per live session, gone within
- * seconds of that session exiting. Nothing in this repo reads it today.
+ * seconds of that session exiting.
+ *
+ * **There is one registry per config dir, not one per machine** (MEASURED on v2.1.331: a
+ * second-account session registers under `<its dir>/sessions/<pid>.json` and writes nothing
+ * under `~/.claude/sessions`). So every reader here takes a list of registry folders — the
+ * known config dirs' `peersDirOf` — and a pid is looked up in each in turn: a pid is unique
+ * on the machine, so the first file that exists is the right one, and the default dir's is
+ * asked first, which is exactly what a machine with one account has always done.
  *
  * Every entry comes from a process this code does not control, so every read here fails
  * closed rather than throws: a file can vanish between `readdir` and `readFile`, arrive
@@ -26,11 +34,26 @@ function tmuxFields(tmux) {
   return { tmuxSession: session || null, paneId: pane ? pane[0] : null };
 }
 
+/** The default dir's registry — what a reader with no known-dirs list asks. */
+export const DEFAULT_PEER_DIRS = Object.freeze([peersDirOf(DEFAULT_CONFIG_DIR)]);
+
+/** One registry folder or several, as a list. */
+const asList = (dirs) => (Array.isArray(dirs) ? dirs : [dirs]);
+
 /**
  * One peer's registry entry, or `null` if it cannot be read as one — absent file,
- * unparseable JSON, or a record with no usable shape. Never throws.
+ * unparseable JSON, or a record with no usable shape. Never throws. `dirs` is one registry
+ * folder or a list of them (`peersDirOf` of each known config dir), asked in order.
  */
-export function readPeer(pid, dir = PEER_SESSIONS_DIR) {
+export function readPeer(pid, dirs = DEFAULT_PEER_DIRS) {
+  for (const dir of asList(dirs)) {
+    const peer = readPeerIn(pid, dir);
+    if (peer) return peer;
+  }
+  return null;
+}
+
+function readPeerIn(pid, dir) {
   let raw;
   try {
     raw = fs.readFileSync(path.join(dir, `${pid}.json`), 'utf8');
@@ -62,19 +85,21 @@ export function readPeer(pid, dir = PEER_SESSIONS_DIR) {
  * picker's source: the roster is, per the discovery's own warning against
  * `ListAgents`-shaped thinking.
  */
-export function listPeers(dir = PEER_SESSIONS_DIR) {
-  let names;
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return [];
-  }
+export function listPeers(dirs = DEFAULT_PEER_DIRS) {
   const peers = [];
-  for (const name of names) {
-    const match = name.match(PID_JSON_RE);
-    if (!match) continue;
-    const peer = readPeer(match[1], dir);
-    if (peer) peers.push(peer);
+  for (const dir of asList(dirs)) {
+    let names;
+    try {
+      names = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      const match = name.match(PID_JSON_RE);
+      if (!match) continue;
+      const peer = readPeerIn(match[1], dir);
+      if (peer) peers.push(peer);
+    }
   }
   return peers;
 }

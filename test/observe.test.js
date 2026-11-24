@@ -82,7 +82,7 @@ function bench({ rows, records = [], file = 'inbox.jsonl' } = {}) {
   const observer = new Observer({
     store,
     roster: () => roster,
-    peersDir,
+    peersDirs: [peersDir],
     retryMs: 1,
     now: () => NOW,
   });
@@ -277,7 +277,7 @@ test('a sender that joins to no roster row at all is refused', () => {
   // not by filtering a list of names.
 
   assert.equal(b.observer.ingest(FROM_ALPHA, b.roster[0], NOW), null);
-  assert.deepEqual(resolveSender({ fromPid: 50048, from: 'alpha' }, b.roster, { peersDir: b.peersDir }), {
+  assert.deepEqual(resolveSender({ fromPid: 50048, from: 'alpha' }, b.roster, { peersDirs: [b.peersDir] }), {
     row: null,
     fromSource: 'unknown',
   });
@@ -290,7 +290,7 @@ test('a registry entry joins by pane, or by tmux session when the pane has moved
   // pane the roster no longer has while naming a session it plainly does. Session names
   // are the contract that survives; the pane id is not.
   registry(b.peersDir, 50048, { name: 'alpha', pane: '%999' });
-  assert.equal(resolveSender({ fromPid: 50048, from: 'alpha' }, b.roster, { peersDir: b.peersDir }).fromSource, 'registry');
+  assert.equal(resolveSender({ fromPid: 50048, from: 'alpha' }, b.roster, { peersDirs: [b.peersDir] }).fromSource, 'registry');
 });
 
 test('a registry entry that joins to nothing still falls through to the name rung', () => {
@@ -302,7 +302,7 @@ test('a registry entry that joins to nothing still falls through to the name run
     path.join(b.peersDir, '50048.json'),
     JSON.stringify({ pid: 50048, sessionId: 'sid-ghost', name: 'ghost', tmux: 'somebody-else:@1.%999' }),
   );
-  const { row: found, fromSource } = resolveSender({ fromPid: 50048, from: 'alpha' }, b.roster, { peersDir: b.peersDir });
+  const { row: found, fromSource } = resolveSender({ fromPid: 50048, from: 'alpha' }, b.roster, { peersDirs: [b.peersDir] });
   assert.equal(fromSource, 'name');
   assert.equal(found.label, 'alpha');
 });

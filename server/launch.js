@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { SESSION_PREFIX } from './config.js';
 import { TMUX_ENV, tmuxPath } from './tmux.js';
-import { bypassConfirmProblem, checkedLaunchDir, launchConfigDir } from './account.js';
+import { DEFAULT_CONFIG_DIR, bypassConfirmProblem, checkedLaunchDir, launchConfigDir } from './account.js';
 
 const run = promisify(execFile);
 
@@ -134,7 +134,7 @@ const CLAUDE_CANDIDATES = [
   '/opt/homebrew/bin/claude',
   '/usr/local/bin/claude',
   path.join(os.homedir(), '.local/bin/claude'),
-  path.join(os.homedir(), '.claude/local/claude'),
+  path.join(DEFAULT_CONFIG_DIR, 'local', 'claude'),
   '/usr/bin/claude',
 ];
 
