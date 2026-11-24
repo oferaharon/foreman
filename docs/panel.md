@@ -140,6 +140,29 @@ restart never blanks a live gauge — but the store only flushes to disk every t
 so a hard kill inside that window can lose the very latest reading, and a genuinely fresh
 install with no file yet shows nothing until the first payload arrives.
 
+**One set of bars per account.** Two Claude subscriptions on one Mac are two quotas, so
+each account gets its own pair, and a pair's numbers come only from its own account's
+sessions. A status-line payload names no account; what it does carry, on every render, is
+`transcript_path`, filed under its own config folder — so the panel reads that folder's
+signed-in account (`accountOfPayload`, `server/account.js`) and keys the reading to it. A
+payload whose folder is not one the panel knows, whose account file cannot be read, or
+which has no path at all is **ignored**, never folded into the default's bars: blank beats
+another account's quota. Each account keeps its own witness memory too, which matters for a
+session moved between accounts — it keeps its `session_id`, and its first post on the new
+account is a baseline there rather than a "fresh" reading against the old account's numbers
+([rate-limits#a-moved-session-keeps-its-id](traps/rate-limits.md#a-moved-session-keeps-its-id)).
+
+What draws is decided once, in `web/quota.js`'s `accountRows`, for both clients: the
+**default** account's pair always (when it has a reading), and any other account's pair
+**only while that account has a live session on the roster**. With one pair on screen it is
+drawn exactly as before, unlabelled; with two, each is headed by the account's nickname (the
+settings box's account names), or its folder name when it has none. Each pair dims on its
+own age, since one account going quiet says nothing about the other. The roster frame
+carries the list as `rateLimitsByAccount` beside the old `rateLimits`, which stays the
+default account's record for older tabs; on disk `rate-limits.json` keeps that record
+top-level and the others under `accounts`, and a rollback build drops `accounts` on its next
+write (each comes back with its account's next post).
+
 **There is deliberately no notification for a gauge crossing into red.**
 [Notifications](#notifications) covers a session waiting on you — a prompt, a question, a
 plan, the trust gate — and stops there on purpose. A rate limit is an account-wide fact,
@@ -1056,8 +1079,30 @@ spellings:
   cache is keyed on the dir as well as the folder, since one folder opened on two accounts
   offers two lists.
 
-Not yet per-dir: the status hook and the status line are installed into `~/.claude/settings.json`
-only (`SETTINGS_PATH`), so a second account has no live status until its own settings carry them.
+**Live status per config folder.** A session on a second account reads only its own
+`<dir>/settings.json` — never `~/.claude/settings.json` (MEASURED on v2.1.331) — so it sends the
+panel no hook and no status line until *that* file holds the panel's two entries. Under the
+account tags, the settings box lists every config folder the panel knows (`KnownConfigDirs`:
+the default, then each `CLAUDE_CONFIG_DIR` seen on a live pane's own process) with two facts read
+off its file — `status hook: installed / out of date / missing` and `status line: wrapped /
+missing / another wrapper` — and an **Install** button when either is missing
+(`GET /api/accounts/install`, `POST /api/accounts/:key/install`, `server/account-install.js`).
+**Nothing installs by itself** (the maintainer's ruling): the button opens a confirm that says
+what is written and where the backup goes, that the account's *running* sessions pick it up
+within seconds, and which status-line command the wrapper will run. `:key` is the folder's index
+in the panel's own list and never a path — this port answers the LAN with no auth — and a body,
+or anything path-shaped in the key, is refused. One write per press, backed up beside the file
+first; a second press changes nothing.
+
+Each settings file gets its own wrapper and record under the state dir: the default keeps
+`statusline-wrapper.sh` / `statusline.json`, any other folder `statusline-wrapper-<folder>.sh` /
+`statusline-<folder>.json`. A folder with **no status line of its own runs the default
+account's**, read from the default's record, so both terminals draw the same line; its record
+says so (`borrowed`), keeps `original: null`, and uninstalling takes the key away rather than
+writing the borrowed command in. From a shell the same is `npm run install-hook -- --config-dir
+<dir>` and `npm run install-statusline -- --config-dir <dir>` (or `foreman-panel install-hook
+--config-dir <dir>`); `setup` stays default-only. Once installed, a second account's status line
+feeds **its own** [usage bars](#rate-limit-gauges), never the default's.
 
 #### Starting a session on an account, and keeping it there
 

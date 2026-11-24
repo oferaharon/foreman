@@ -76,6 +76,21 @@ before** rather than skipping the event, which is what stopped that header (and 
 fix to the command) from reaching a machine that had already run the installer once. See the
 socket trap below for the second half of the same lesson.
 
+## `install-hook.js` installed at import
+
+**`server/install-hook.js` called `install()` at module scope, so nothing could import it — an
+endpoint or a test that loaded it would have rewritten the default account's
+`~/.claude/settings.json` as a side effect.** That is why the CLI shim spawned it and why its
+only tests were subprocesses aimed at a throwaway `HOME`. It became a blocker the day an
+endpoint had to install the hook into a *second* account's config dir: the endpoint must call
+it. Split the way `statusline.js` / `install-statusline.js` already were — what the entry is and
+what an install does to a settings object in `server/hook-settings.js` (pure, no imports), the
+per-dir paths, backup and combined write in `server/account-install.js`, and `install-hook.js`
+reduced to argv and printing behind `invokedDirectly()`. The default dir's output was checked
+byte for byte against a capture of the old code in a scratch `HOME`, and
+`test/account-install.test.js` imports both installers from a child and asserts the settings
+file's hash, the absence of any backup and the absence of the state dir afterwards.
+
 ## A pane id is only meaningful relative to one tmux server
 
 **A pane id is only meaningful relative to one tmux server, and the hook used not to say

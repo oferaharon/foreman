@@ -143,9 +143,11 @@ test('a service verb outside a Homebrew install refuses, and names the command t
 // ------------------------------------------------------------------------- the spawn ---
 
 /*
- * **`server/install-hook.js` runs on import.** It calls `install()` at module scope with
- * no `invokedDirectly()` guard, so a shim that imported it would register a hook in
- * `~/.claude/settings.json` as a side effect of printing its own help.
+ * **`server/install-hook.js` used to run on import.** It called `install()` at module scope
+ * with no `invokedDirectly()` guard, so a shim that imported it would have registered a hook
+ * in `~/.claude/settings.json` as a side effect of printing its own help. It has the guard
+ * now (`test/account-install.test.js` proves an import writes nothing), and the shim still
+ * spawns it, for its exit code.
  *
  * Both halves are proved against a scratch `$HOME`, never the real one: help writes
  * nothing, and the subcommand writes the hook.

@@ -109,7 +109,17 @@ import {
   NICKNAME_MAX,
   NICKNAME_RULE,
 } from './settings-file.js';
-import { AccountReader, KnownConfigDirs, launchAccountChoices, peersDirOf, recordConfigDir, rowConfigDir } from './account.js';
+import {
+  AccountReader,
+  KnownConfigDirs,
+  accountOfPayload,
+  launchAccountChoices,
+  peersDirOf,
+  recordConfigDir,
+  rowConfigDir,
+  shortPath,
+} from './account.js';
+import { installAccount, installRows, installTarget, resolveInstallKey } from './account-install.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
@@ -493,14 +503,20 @@ app.post('/hook', (req, res) => {
  * not a change: `at` moves on every arrival, and re-broadcasting to keep a browser-computed
  * age fresh would rebuild the rail on every render of every status line on the machine.
  */
-app.post('/status', (req, res) => {
+app.post('/status', async (req, res) => {
   res.status(204).end();
   try {
-    if (rateLimits.ingest(req.body || {})) broadcastRoster();
+    const body = req.body || {};
+    if (rateLimits.ingest(body, Date.now(), await statusAccount(body))) broadcastRoster();
   } catch {
     /* never let a malformed payload take the server down */
   }
 });
+
+/** Whose quota a payload is about — `accountOfPayload`'s header (`account.js`) has the rules. */
+function statusAccount(body) {
+  return accountOfPayload(body, { known: registry.configDirs?.list() ?? [], reader: accountReader });
+}
 
 /* -------------------------------------------------------------- uploads --- */
 
@@ -5041,6 +5057,41 @@ app.patch('/api/config', (req, res) => {
   });
 });
 
+/* ------------------------------------------------- account installs --- */
+
+/*
+ * The status hook and the status-line wrapper, per Claude config dir (`account-install.js`).
+ * A second account reads only its own `settings.json`, so until that file holds both entries
+ * its sessions send the panel nothing. The settings box lists every known dir with what its
+ * file holds, and **a human presses Install** — never automatic, by ruling (Q4), because the
+ * write reaches that account's running sessions within seconds.
+ *
+ * `:key` is an index into `KnownConfigDirs` — the default first, then every dir seen on a
+ * live pane's own process — and never a path: this port answers the LAN with no auth, so a
+ * folder named by the request would be a settings file written wherever it said. A GET
+ * creates nothing on disk.
+ */
+app.get('/api/accounts/install', (req, res) => {
+  res.json({ port: PORT, dirs: installRows(registry.configDirs.list(), { port: PORT }) });
+});
+
+app.post('/api/accounts/:key/install', (req, res) => {
+  const dirs = registry.configDirs.list();
+  const pick = resolveInstallKey(req.params.key, req.body, dirs);
+  if (!pick.ok) return res.status(pick.status).json({ error: pick.error });
+  const target = installTarget(pick.dir);
+  let out;
+  try {
+    out = installAccount(target, { port: PORT });
+  } catch (err) {
+    return res.status(500).json({ error: `Install failed: ${err.message}` });
+  }
+  if (!out.ok) return res.status(409).json({ error: out.message, code: out.code });
+  console.log(`[accounts] installed into ${target.configDir}${out.changed ? '' : ' (already in place)'}`);
+  const row = installRows(dirs, { port: PORT })[Number(req.params.key)];
+  res.json({ ok: true, changed: out.changed, backup: shortPath(out.backup), wrote: out.wrote.map((f) => shortPath(f)), row });
+});
+
 /* ------------------------------------------------------------ groups --- */
 
 /*
@@ -6515,12 +6566,38 @@ rooms.on('post', () => broadcastRoster());
    its own liveness tick is what notices a helper that stopped saying hello. */
 bots.on('change', () => broadcastRoster());
 
+/**
+ * The usage gauges, one entry per account: `[{uuid, nickname, folder, default, live,
+ * windows, at}]`, the default dir's account first. A sibling of `rateLimits` rather than a
+ * replacement — old tabs and an older phone read that field, and it still carries the default
+ * account's record. `live` is "some roster row runs on this account", which is what lets the
+ * rail draw a second account's row only while it has sessions; the default's always draws.
+ * Which rows to draw and how to label them is `web/quota.js`'s (`accountRows`), not this.
+ */
+function rateLimitsByAccount(sessions) {
+  const live = new Map();
+  for (const s of sessions || []) if (s?.account?.uuid) live.set(s.account.uuid, s.account);
+  return rateLimits.byAccount().map((r) => {
+    const a = r.uuid ? live.get(r.uuid) : null;
+    return {
+      uuid: r.uuid,
+      nickname: (r.uuid && accountNicknames[r.uuid]) || null,
+      folder: a?.folder ?? r.folder ?? (r.default ? 'default' : null),
+      default: r.default,
+      live: Boolean(a),
+      windows: r.windows,
+      at: r.at,
+    };
+  });
+}
+
 function rosterFrame(sessions = registry.list()) {
   return {
     sessions,
     groups: groups.list(),
     snapshot: snapshotSummary(sessions),
     rateLimits: rateLimits.get(),
+    rateLimitsByAccount: rateLimitsByAccount(sessions),
     sharedRoom: sharedSummary(),
     /*
      * Every room, open and archived, from **memory only** — `list()` folds `unseen`,

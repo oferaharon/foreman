@@ -14,7 +14,6 @@ export const PORT = Number(process.env.FOREMAN_PORT || 48770);
 
 export const HOME = os.homedir();
 export const PROJECTS_DIR = path.join(HOME, '.claude', 'projects');
-export const SETTINGS_PATH = path.join(HOME, '.claude', 'settings.json');
 /**
  * Claude Code's user config — where MCP servers are registered. **Read, never written**:
  * the panel copies a chosen entry into a lead's `mcp.json` and asks it which forge tools

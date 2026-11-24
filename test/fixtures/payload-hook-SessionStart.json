@@ -1,0 +1,10 @@
+{
+  "session_id": "0a11ce00-0000-4000-8000-000000000001",
+  "transcript_path": "/Users/someone/.claude-work/projects/-Users-someone-foreman-sandbox-alpha/0a11ce00-0000-4000-8000-000000000001.jsonl",
+  "cwd": "/Users/someone/foreman-sandbox/alpha",
+  "scratchpad_dir": "/private/tmp/claude-502/-Users-someone-foreman-sandbox-alpha/0a11ce00-0000-4000-8000-000000000001/scratchpad",
+  "hook_event_name": "SessionStart",
+  "source": "startup",
+  "model": "claude-haiku-5-5",
+  "session_title": "alpha-second"
+}

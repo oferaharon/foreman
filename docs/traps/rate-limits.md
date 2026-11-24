@@ -70,10 +70,38 @@ Three measured details decide the edges, and each is pinned by a test:
 
 The memory is id → last readings, **in memory only**, bounded by count. A restart forgets
 every baseline and costs one post per session, which is the safe direction — nobody's first
-post moves a bar — and the file stays `{windows, at}`, so a rollback reads it unchanged.
+post moves a bar — and the file's top level stays `{windows, at}` (the default account's), so
+a rollback reads it unchanged.
 The honest limit: two sessions answered a moment apart can post out of order and leave the
 bar a point low until either posts again. It cannot flap, and refusing a fresh drop to rule
 it out is exactly the rule that stranded the 95%.
+
+## A moved session keeps its id
+
+**A conversation moved to the other Claude account keeps its `session_id` (MEASURED on
+v2.1.331: a transcript copied into the second account's folder and resumed there carried one
+`sessionId` throughout), so one witness memory across accounts would read its first post on
+the new account as `fresh` and move that account's bar on the old account's numbers.** The
+witness compares a session's post against *its own previous post*; with one map, that
+previous post was made against a different quota, and any difference between the two
+accounts' readings — which is to say every difference — looks like a new API response. So
+`server/rate-limits.js` keeps everything per account: the windows, the `fresher` merge and
+the `seen` map, keyed by the account uuid the payload resolves to. On the new account the
+moved session is an id never seen there, which is a `first` — a baseline that moves nothing,
+the same verdict `/clear` gets for the same reason.
+
+**And the account is read off `transcript_path`, which is the only witness a payload has
+(MEASURED on v2.1.331, pinned in `test/fixtures/payload-statusline.json`).** Neither the
+status line nor a hook names an account; the transcript path is filed under its own config
+folder, and that folder's `.claude.json` names the signed-in account. Only a folder the panel
+already knows is read — a path out of a request body is never a file this port reads on its
+say-so, and the port answers the LAN with no auth — and a payload that resolves to nobody is
+**ignored**, never folded into the default. A Claude Code that one day stopped sending
+`transcript_path` would therefore blank every gauge rather than mix two quotas, which is the
+safe direction and the one a reader would notice. `test/account-gauges.test.js` pins the
+interleaved two-account case, the moved session, the pathless payload, and the file in both
+shapes: the default account's record stays top-level as `{windows, at}` so a rollback reads
+it, the others ride in `accounts`, and a rollback drops `accounts` on its next write.
 
 ## Unix seconds, not milliseconds
 
@@ -96,3 +124,20 @@ endpoint hands the whole payload through unfiltered on purpose, for issue #52. T
 other field read is `session_id`, as the key to that session's own last window readings
 (the witness above), held in memory only: it never reaches the file or the record the
 roster carries, and `test/rate-limits.test.js` reads the file back to say so.
+
+## A second config dir's wrapper must read as a wrapper
+
+**`looksLikeAWrapper` matched exactly `statusline-wrapper.sh`, so the day a second config dir
+got `statusline-wrapper-<folder>.sh` it would have wrapped another dir's wrapper.** The
+function exists to refuse that — a wrapper of a wrapper posts every render twice and nests the
+original one level deeper on each run — and a basename match on the one unsuffixed name could
+not see the new form at all. It now reads both (`wrapperNameIn`, `server/statusline.js`), and
+`test/account-install.test.js` installs into a dir whose `statusLine` points at another dir's
+wrapper, then at the default's, and asserts both are refused with nothing written, hook
+included. Two inside rules came with it. The suffix drops dots (`.claude-work` → `claude-work`,
+`x.sh` → `x-sh`), because `isOurs` is a substring match and with dots kept folder `x`'s
+wrapper name is a substring of folder `x.sh`'s. And two folders whose names still clean up
+alike (`~/a/.cfg`, `~/b/cfg`) are refused rather than sharing a record: the sidecar names the
+dir it belongs to, and the other's original would be lost. A borrowed default command that is
+itself a wrapper is never borrowed, for the same double-post reason.
+

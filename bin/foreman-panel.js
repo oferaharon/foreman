@@ -21,10 +21,12 @@
  *
  * ## Two things that would each be a bug
  *
- * **`server/install-hook.js` runs on import.** It calls `install()` / `remove()` at module
- * scope with no `invokedDirectly()` guard — unlike `install-agent.js`, which grew one so
- * its `jobEnvironment` could be tested. So the hook subcommands **spawn** it as a child.
- * Imported, `foreman-panel --help` would register a hook in `~/.claude/settings.json`.
+ * **The installers are spawned, never imported.** `server/install-hook.js` used to call
+ * `install()` at module scope with no guard, so importing it from here would have registered
+ * a hook in `~/.claude/settings.json` on `foreman-panel --help`. Both installers now end on
+ * an `invokedDirectly()` guard, and they are still spawned: a refusal exits non-zero, and
+ * `passThrough` is what turns a child's exit code into this one's. `--config-dir <dir>`
+ * passes straight through to either, for a second account's `CLAUDE_CONFIG_DIR`.
  *
  * **`restart` is `brew services restart`, never `launchctl kickstart -k`.** This project's
  * most-repeated launchd finding is that `kickstart` does not re-read the plist, which is
@@ -50,7 +52,7 @@ const COMMANDS = [
   ['start', 'start the background service'],
   ['stop', 'stop the background service'],
   ['restart', 'restart the background service — do this after `brew upgrade`'],
-  ['install-hook', "register the status hook in ~/.claude/settings.json (once, per machine)"],
+  ['install-hook', 'register the status hook in ~/.claude/settings.json (`--config-dir <dir>` for another account)'],
   ['uninstall-hook', 'remove it again'],
   ['install-statusline', 'wrap the status line so the panel sees the rate-limit numbers'],
   ['uninstall-statusline', 'put the original status line back'],
@@ -241,8 +243,8 @@ const [, , command, ...rest] = process.argv;
 switch (command) {
   // The one command after `brew install`. Its body is `server/setup-command.js`, which
   // spawns the same installers the subcommands below spawn — this is the order, not a
-  // second implementation. Imported rather than spawned because, unlike `install-hook.js`,
-  // it does nothing at import: `runSetup` is a function and the module has no bottom.
+  // second implementation. Imported rather than spawned because it does nothing at
+  // import: `runSetup` is a function and the module has no bottom.
   case 'setup': {
     const { runSetup } = await import('../server/setup-command.js');
     process.exit(await runSetup());
@@ -264,9 +266,9 @@ switch (command) {
     ]);
     break;
 
-  // `install-statusline.js` has the `invokedDirectly()` guard its sibling lacks, so
-  // importing it would be safe — it is spawned anyway, because a refusal there exits
-  // non-zero and `passThrough` is what turns a child's exit code into this one's.
+  // Both installers have the `invokedDirectly()` guard, so importing would be safe — they
+  // are spawned anyway, because a refusal exits non-zero and `passThrough` is what turns a
+  // child's exit code into this one's.
   case 'install-statusline':
   case 'uninstall-statusline':
     passThrough(process.execPath, [

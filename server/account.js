@@ -114,11 +114,44 @@ export function sameConfigDir(a, b) {
   return Boolean(a && b) && path.resolve(a) === path.resolve(b);
 }
 
+/**
+ * Whose quota a status-line payload is about: the signed-in account of the config dir its
+ * `transcript_path` is filed under — the only account witness a payload carries (the
+ * multi-account plan's M6 and T13, pinned in `test/fixtures/payload-statusline.json`).
+ *
+ * `null` — and the gauges then ignore the payload — when there is no path, the path sits
+ * under no **known** config dir (`known`, `KnownConfigDirs#list()`: a path out of a request
+ * body is never a file the panel reads on its own say-so, T7), the dir's account file is
+ * unreadable, or nobody is signed in there. Never the default as a fallback: folding an
+ * unknown payload into the default account's gauge is exactly what this exists to end.
+ *
+ * @param {any} payload the status-line JSON, unfiltered
+ * @param {{known: string[], reader: {accountForDir: (dir: string) => Promise<any>}}} deps
+ */
+export async function accountOfPayload(payload, { known, reader }) {
+  const dir = knownConfigDir(configDirOfTranscript(payload?.transcript_path), known);
+  if (!dir) return null;
+  const account = await reader.accountForDir(dir);
+  return account?.uuid ? account : null;
+}
+
 /** `/bin/ps`, absolute: launchd's `PATH` resolves it anyway, but nothing here should depend on that. */
 const PS = '/bin/ps';
 
 /** How long a stat of an account file is trusted before it is asked again. */
 export const ACCOUNT_RECHECK_MS = 5000;
+
+/** How long a file `accountForDir` asked for survives `forPanes`' prune with no pane on it. */
+export const ASKED_KEEP_MS = 10 * 60 * 1000;
+
+/**
+ * The entry of `known` (absolute config dirs) that names the same folder as `dir`, or
+ * `null`. What stands between a path a request body names and a file the panel reads.
+ */
+export function knownConfigDir(dir, known) {
+  if (typeof dir !== 'string' || !path.isAbsolute(dir)) return null;
+  return (known || []).find((k) => sameConfigDir(k, dir)) ?? null;
+}
 
 /**
  * `ps -A -o pid=,ppid=,comm=` → `Map<pid, {ppid, comm}>`. `comm` can be a full path with
@@ -293,6 +326,10 @@ export class AccountReader {
     this.claudeOf = new Map(); // pane pid -> claude pid
     this.dirOf = new Map(); // claude pid -> {configDir, explicit} | null
     this.files = new Map(); // account file -> {checkedAt, mtimeMs, size, account}
+    // account file -> when `accountForDir` last asked for it: such a file is kept through
+    // `forPanes`' prune for a while, so a status line posting from a session with no pane on
+    // the roster (a plain terminal) does not re-parse a half-megabyte file every minute.
+    this.asked = new Map();
     this.seen = new Map(); // accountUuid -> account, as of the last call
     // paneId -> {configDir, explicit}, as of the last call: the binding fence's input. Kept
     // apart from the account, because the dir is known from the process even when the
@@ -357,7 +394,9 @@ export class AccountReader {
       out.set(p.paneId, account);
       if (account?.uuid) seen.set(account.uuid, account);
     }
-    for (const f of this.files.keys()) if (!usedFiles.has(f)) this.files.delete(f);
+    const askedSince = this.now() - ASKED_KEEP_MS;
+    for (const [f, at] of this.asked) if (at < askedSince) this.asked.delete(f);
+    for (const f of this.files.keys()) if (!usedFiles.has(f) && !this.asked.has(f)) this.files.delete(f);
     this.seen = seen;
     this.paneDirs = paneDirs;
     return out;
@@ -376,6 +415,30 @@ export class AccountReader {
   explicitDirs() {
     const other = [...this.paneDirs.values()].filter((d) => isOtherConfigDir(d, this.home));
     return [...new Set(other.map((d) => d.configDir))];
+  }
+
+  /**
+   * The account a config dir is signed into, through the same file cache `forPanes` uses —
+   * what the usage gauges key a status-line payload on (`configDirOfTranscript` of its
+   * `transcript_path` → this). `null` when it is not knowable, and the caller ignores the
+   * payload then rather than guessing: the dir is not absolute, its account file is
+   * unreadable, or nobody is signed in there (`uuid: null`, which the caller also refuses).
+   *
+   * The default dir is read as the default — `~/.claude.json`, beside it rather than inside
+   * it (measured, see the header). The caller is the one that checks the dir is a *known*
+   * one: a path out of a request body is never a file this reads on its own say-so.
+   */
+  async accountForDir(configDir) {
+    if (typeof configDir !== 'string' || !path.isAbsolute(configDir)) return null;
+    const abs = path.resolve(configDir);
+    const dir = { configDir: abs, explicit: !sameConfigDir(abs, defaultConfigDirFor(this.home)) };
+    const file = accountFileFor(dir, this.home);
+    this.asked.set(file, this.now());
+    try {
+      return await this.#account(file, dir);
+    } catch {
+      return null;
+    }
   }
 
   /** The signed-in accounts on the roster right now, for the settings box. */

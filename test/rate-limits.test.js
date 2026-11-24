@@ -3,7 +3,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-import { RateLimitStore } from '../server/rate-limits.js';
+import { RateLimitStore as AccountStore } from '../server/rate-limits.js';
+
+/*
+ * Every single-account rule below is a rule about **one account's** gauges, so these tests
+ * feed one: a fake default-dir account (never a real uuid — this is a public repo). The
+ * per-account split itself is pinned at the end of the file, against `AccountStore` directly.
+ */
+const DEFAULT_ACCOUNT = { uuid: '00000000-0000-4000-8000-00000000000d', explicit: false, folder: 'default' };
+class RateLimitStore extends AccountStore {
+  ingest(payload, now, account = DEFAULT_ACCOUNT) {
+    return super.ingest(payload, now, account);
+  }
+}
 
 function tmpStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'foreman-rate-limits-'));
@@ -61,11 +73,13 @@ test('nothing but the windows is kept — no cost, no USD, no session id', () =>
   s.stop();
 
   // The session id is read — it is the key to that session's own last reading — but only in
-  // memory. The file is exactly what it was before there was a witness, which is also what
-  // lets an older build read it back unchanged.
+  // memory. The file's top level is still `{windows, at}` for the default account, which is
+  // what lets an older build read it back unchanged; the per-account copies ride beside it.
   const disk = fs.readFileSync(file, 'utf8');
   assert.ok(!/usd|cost|session|model|context|abc|0\.3027715|37615/i.test(disk), disk);
-  assert.deepEqual(Object.keys(JSON.parse(disk)), ['windows', 'at']);
+  const json2 = JSON.parse(disk);
+  assert.deepEqual(Object.keys(json2), ['windows', 'at', 'defaultAccount', 'accounts']);
+  assert.deepEqual(Object.keys(json2.accounts[DEFAULT_ACCOUNT.uuid]), ['windows', 'at']);
 });
 
 test('a later payload updates the window it names and leaves the others alone', () => {

@@ -1,24 +1,33 @@
 #!/usr/bin/env node
 /**
- * Wraps (or unwraps) the `statusLine` command in ~/.claude/settings.json, so the panel
- * gets a copy of the JSON Claude Code already hands it and the terminal line is unchanged.
+ * Wraps (or unwraps) the `statusLine` command in ~/.claude/settings.json — or, with
+ * `--config-dir <dir>`, in `<dir>/settings.json` for a second account — so the panel gets
+ * a copy of the JSON Claude Code already hands it and the terminal line is unchanged.
+ *
+ * **One wrapper per settings file.** The default dir's are `statusline-wrapper.sh` and
+ * `statusline.json` under the state dir, as they always were; any other dir's carry its
+ * folder name (`statusline-wrapper-<folder>.sh`, `statusline-<folder>.json`), each
+ * recording what *that* file held. A dir with no status line of its own runs the default
+ * account's command, read from the default's record, so both terminals look alike — and
+ * `--remove` there takes the key away rather than writing the borrowed command in.
  *
  * The reasoning about *what* to write is next door in `server/statusline.js`, which is
  * pure and has no imports at all. This file is argument parsing, file I/O and printing,
  * and that is the whole of the split.
  *
- * **It does not install anything at import.** `install-hook.js` calls `install()` at
- * module scope with no guard — which is why `bin/foreman-panel.js` has to spawn it, and
- * why it has no test. Copy that shape here and the first `node --test` run would rewrite
- * the maintainer's real `~/.claude/settings.json`. The `invokedDirectly()` guard at the
- * bottom is the same one `install-agent.js` grew for the same reason.
+ * **It does not install anything at import.** `install-hook.js` used to call `install()`
+ * at module scope with no guard — so it could only ever be spawned, never imported — and
+ * copying that shape here would have had the first `node --test` run rewrite the
+ * maintainer's real `~/.claude/settings.json`. The `invokedDirectly()` guard at the bottom
+ * is the one `install-agent.js` grew for the same reason, and `install-hook.js` has it too
+ * now.
  *
  * **The hooks block is not touched.** Same file, different feature: the settings object is
  * copied with `statusLine` replaced and everything else — `hooks` above all — carried
  * through untouched. A whole-object rewrite that dropped a hook would be invisible until
  * a session stopped binding.
  *
- * **The backup goes beside `settings.json`**, as `settings.backup-foreman-<ms>.json`,
+ * **The backup goes beside the `settings.json` it writes**, as `settings.backup-foreman-<ms>.json`,
  * which is where `install-hook.js` already puts one. Not the state dir. One habit, one
  * place to look, and a person hunting for what they had before does not need to be told
  * which of two directories this particular installer chose.
@@ -29,19 +38,19 @@
  * settings first, then delete the files.
  */
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import { SETTINGS_PATH, STATE_DIR, PORT } from './config.js';
+import { PORT } from './config.js';
+import { planInstall, planRemove } from './statusline.js';
 import {
-  SIDECAR_FILENAME,
-  WRAPPER_FILENAME,
-  planInstall,
-  planRemove,
-} from './statusline.js';
-
-const WRAPPER_PATH = path.join(STATE_DIR, WRAPPER_FILENAME);
-const SIDECAR_PATH = path.join(STATE_DIR, SIDECAR_FILENAME);
+  backupSettings,
+  borrowedStatusLine,
+  configDirArg,
+  installTarget,
+  invokedDirectly,
+  readJsonObject,
+  readSettings,
+  writeSettings,
+} from './account-install.js';
 
 /**
  * The settings file, or the fact that it could not be read.
@@ -50,49 +59,13 @@ const SIDECAR_PATH = path.join(STATE_DIR, SIDECAR_FILENAME);
  * both planners refuse on, rather than a `{}` that would merge into nothing and write a
  * two-key file over somebody's typo.
  */
-function loadSettings() {
-  let raw;
+function loadSettings(file) {
   try {
-    raw = fs.readFileSync(SETTINGS_PATH, 'utf8');
+    return readSettings(file).settings;
   } catch (err) {
-    if (err.code === 'ENOENT') return {};
-    console.error(`Could not read ${SETTINGS_PATH} (${err.code}).`);
+    console.error(`Could not read ${file} (${err.code}).`);
     process.exit(1);
   }
-  try {
-    const parsed = JSON.parse(raw);
-    // A settings file that parses to an array or a string is not a settings file, and the
-    // planners say so by name rather than spreading it into an object.
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
-
-function loadSidecar() {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(SIDECAR_PATH, 'utf8'));
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    // Missing, or nonsense. Both mean "no record", and both are handled by the planners —
-    // loudly, because the original is only recoverable from the timestamped backups.
-    return null;
-  }
-}
-
-function backup() {
-  if (!fs.existsSync(SETTINGS_PATH)) return null;
-  const dest = path.join(
-    path.dirname(SETTINGS_PATH),
-    `settings.backup-foreman-${Date.now()}.json`,
-  );
-  fs.copyFileSync(SETTINGS_PATH, dest);
-  return dest;
-}
-
-function save(settings) {
-  fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
-  fs.writeFileSync(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 /** Print a plan's `notes` and `warnings`. Warnings are the ones somebody has to read. */
@@ -106,50 +79,55 @@ function refused(plan) {
   process.exit(1);
 }
 
-function install() {
+function install(target) {
   const plan = planInstall({
-    settings: loadSettings(),
-    sidecar: loadSidecar(),
-    wrapperPath: WRAPPER_PATH,
+    settings: loadSettings(target.settingsPath),
+    // Missing, or nonsense. Both mean "no record", and both are handled by the planners —
+    // loudly, because the original is only recoverable from the timestamped backups.
+    sidecar: readJsonObject(target.sidecarPath),
+    wrapperPath: target.wrapperPath,
     port: PORT,
+    // Only a non-default dir passes these; the default's plan is byte-identical without.
+    target: target.isDefault ? null : target,
+    borrowed: borrowedStatusLine(target),
   });
   if (!plan.ok) refused(plan);
 
-  fs.mkdirSync(STATE_DIR, { recursive: true });
+  fs.mkdirSync(target.stateDir, { recursive: true });
   // The script and its record before the settings that name them, so there is never a
   // moment where `statusLine.command` points at a file that is not there.
-  fs.writeFileSync(WRAPPER_PATH, plan.script, { mode: 0o755 });
+  fs.writeFileSync(target.wrapperPath, plan.script, { mode: 0o755 });
   // `writeFileSync`'s mode is ignored for a file that already exists, so say it again.
-  fs.chmodSync(WRAPPER_PATH, 0o755);
-  fs.writeFileSync(SIDECAR_PATH, `${JSON.stringify(plan.sidecar, null, 2)}\n`);
+  fs.chmodSync(target.wrapperPath, 0o755);
+  fs.writeFileSync(target.sidecarPath, `${JSON.stringify(plan.sidecar, null, 2)}\n`);
 
   let bak = null;
   if (plan.changed) {
-    bak = backup();
-    save(plan.settings);
+    bak = backupSettings(target.settingsPath);
+    writeSettings(target.settingsPath, plan.settings);
     console.log('Wrapped the status line.');
   } else {
     console.log('Status line already wrapped — regenerated the wrapper, settings.json unchanged.');
   }
-  console.log(`  wrapper: ${WRAPPER_PATH}`);
-  console.log(`  record:  ${SIDECAR_PATH}`);
+  console.log(`  wrapper: ${target.wrapperPath}`);
+  console.log(`  record:  ${target.sidecarPath}`);
   say(plan);
   if (bak) console.log(`  backup:  ${bak}`);
   console.log('\nThe terminal line is unchanged. Running sessions pick this up at their next render.');
 }
 
-function remove() {
+function remove(target) {
   const plan = planRemove({
-    settings: loadSettings(),
-    sidecar: loadSidecar(),
-    wrapperPath: WRAPPER_PATH,
+    settings: loadSettings(target.settingsPath),
+    sidecar: readJsonObject(target.sidecarPath),
+    wrapperPath: target.wrapperPath,
   });
   if (!plan.ok) refused(plan);
 
   let bak = null;
   if (plan.changed) {
-    bak = backup();
-    save(plan.settings);
+    bak = backupSettings(target.settingsPath);
+    writeSettings(target.settingsPath, plan.settings);
     console.log('Unwrapped the status line.');
   } else {
     console.log('Nothing to unwrap in settings.json.');
@@ -157,7 +135,7 @@ function remove() {
   say(plan);
 
   // Settings first, then the files — the opposite order to install, for the same reason.
-  for (const file of [WRAPPER_PATH, SIDECAR_PATH]) {
+  for (const file of [target.wrapperPath, target.sidecarPath]) {
     if (!fs.existsSync(file)) continue;
     fs.rmSync(file, { force: true });
     console.log(`  removed: ${file}`);
@@ -165,17 +143,13 @@ function remove() {
   if (bak) console.log(`  backup:  ${bak}`);
 }
 
-function invokedDirectly() {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  const self = fileURLToPath(import.meta.url);
-  try {
-    return fs.realpathSync(entry) === fs.realpathSync(self);
-  } catch {
-    return path.resolve(entry) === self;
+if (invokedDirectly(import.meta.url)) {
+  const arg = configDirArg(process.argv.slice(2));
+  if (arg.error) {
+    console.error(arg.error);
+    process.exit(2);
   }
-}
-
-if (invokedDirectly()) {
-  process.argv.includes('--remove') ? remove() : install();
+  const target = installTarget(arg.configDir);
+  if (!target.isDefault) console.log(`Config dir: ${target.configDir}`);
+  process.argv.includes('--remove') ? remove(target) : install(target);
 }
