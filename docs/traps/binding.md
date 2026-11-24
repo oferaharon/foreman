@@ -230,3 +230,52 @@ session that simply exited (no sleep record) still leaves a file the lone-pane r
 a receipt-less sibling, if that file is newer than the sibling's own. A sleeper is claimed
 because the panel still owns it; an exited stranger is the ownership guard's job, and that
 guard only fires on a titled file.
+
+## A second account's pane was bound to the other account's file
+
+**A second Claude account (`CLAUDE_CONFIG_DIR`) files its transcripts under its own
+`<dir>/projects/`, never `~/.claude/projects`, and rule 3 had no notion of an account — so a
+second-account pane alone in a folder was bound, by inference, to a main-account `claude -p`
+run from that folder — FIXED with an account fence, MEASURED before and after on Claude Code
+v2.1.331.**
+
+The shape. The roster scanned only `~/.claude/projects`, so a second-account row showed no
+conversation — and the moment anything on the main account wrote a fresh file in that folder
+(a `-p` run from a script or another app: no tmux, no hooks), the lone-pane rule handed it to
+the second-account pane. Scanning the second root alone would fix the blank and open the
+mirror: a main pane alone adopting a second-account run. So the scan and the fence ship
+together, always.
+
+**Before**, on main: a scratch panel on a scratch tmux server, a Haiku session in the
+sandbox's `alpha` on the second account, not yet spoken to; then a main-account `claude -p`
+in `alpha` with hooks off. The roster read `foreman-alpha-two <the -p run's id> inferred %0`,
+its transcript under `~/.claude/projects`.
+
+**The fix** (`sameAccount` in `binding.js`, fed by `probe`'s `configDir` and the pane's
+`configDir` from `AccountReader`):
+
+- **A pane binds only transcripts under the root its own process runs with**, in rules 1b
+  (replay), 2 (label) and 3 (inference), and in `unboundReason` — a file on another account
+  is no candidate, so such a pane reads `new`, not `ambiguous`.
+- **A pane whose root is unknown is held to the default root** — `ps` failed, another user's
+  process — which is exactly the behaviour from before there was a second root.
+- **A hook receipt is still authoritative**: it is the session naming its own file.
+- **The fence only ever removes candidates.** Freshness, siblings (a pane on another account
+  in the same folder still makes it crowded) and the sleeper claim are untouched.
+- **The roots scanned** are the default plus every explicit dir `AccountReader` has seen on a
+  live pane, persisted in `STATE_DIR/accounts.json` (unknown keys carried through, never
+  pruned) — detected, never typed in. The reader runs before the scan, so a dir seen for the
+  first time is scanned on that same poll. `server/account.js` is the one spelling of every
+  root (`projectsDirOf`, `configDirOfTranscript`, `peersDirOf`, `DEFAULT_CONFIG_DIR`);
+  `config.js`'s `PROJECTS_DIR` is the default's name, pinned equal by a test. The roster's
+  `account.dir` is absolute; `account.configDir` is `~`-shortened for display and must never
+  be fed to a `path.join` or a shell.
+
+**After**, same bench on this branch: the same pane read `pane-only`; once spoken to it bound
+`inferred` to its own transcript under the second root; a panel restart with a *newer*
+main-account `-p` run in the folder still bound it to its own; and the mirror — a main-account
+pane alone, then a second-account `-p` run — stayed `pane-only`.
+
+**What still reads only the default root** is item 3 of the multi-account plan, not this
+fence: the peer registry (`peers.js`, `observe.js`), the plan-file route and the `/` command
+menu.

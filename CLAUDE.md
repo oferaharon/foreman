@@ -62,7 +62,7 @@ There is no API. Everything is assembled from three places:
 | Source | Gives |
 | --- | --- |
 | `tmux list-panes -a` | the session roster, and the channel to type into |
-| `~/.claude/projects/**/*.jsonl` | message history, already structured |
+| `<every known config dir>/projects/**/*.jsonl` | message history, already structured — `~/.claude` plus each `CLAUDE_CONFIG_DIR` seen on a live pane |
 | Claude Code hooks → `POST /hook` | live status, and pane↔session binding |
 
 `server/` is one module per concern. The ones with real subtlety all have tests: on the
@@ -276,6 +276,13 @@ transcript really lives in, and the hook receipts that overrule every heuristic.
   `~/.claude/projects/<cwd with each slash as a dash>`, which is named at launch and never
   rewritten.
   [binding#a-transcripts-cwd-moves](docs/traps/binding.md#a-transcripts-cwd-moves)
+- `server/binding.js` (`sameAccount`) · `server/account.js` (`KnownConfigDirs`,
+  `configDirOfTranscript`) · `server/sessions.js` (`#scanTranscripts`) — **A second account
+  files its transcripts under its own `<dir>/projects/`, and rule 3 bound a lone
+  second-account pane to a main-account `-p` run — FIXED, MEASURED on v2.1.331.** Every known
+  root is scanned and every rule but a hook binds a pane only within its own root; unknown is
+  the default root. The scan never ships without the fence.
+  [binding#a-second-accounts-pane-was-bound-to-the-other-accounts-file](docs/traps/binding.md#a-second-accounts-pane-was-bound-to-the-other-accounts-file)
 - `server/binding.js` · `web/asleep.js` (`wokenSession`) · `web/m/asleep.js` (`wokenRow`) —
   **A sleeper's `/exit` record makes its transcript the newest file in its folder, so after a
   panel restart a sibling pane with no hook receipt was bound to it by inference — FIXED,
