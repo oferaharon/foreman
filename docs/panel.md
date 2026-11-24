@@ -1056,8 +1056,31 @@ spellings:
   cache is keyed on the dir as well as the folder, since one folder opened on two accounts
   offers two lists.
 
-Not yet per-dir: the status hook and the status line are installed into `~/.claude/settings.json`
-only (`SETTINGS_PATH`), so a second account has no live status until its own settings carry them.
+**Live status per config folder.** A session on a second account reads only its own
+`<dir>/settings.json` — never `~/.claude/settings.json` (MEASURED on v2.1.331) — so it sends the
+panel no hook and no status line until *that* file holds the panel's two entries. Under the
+account tags, the settings box lists every config folder the panel knows (`KnownConfigDirs`:
+the default, then each `CLAUDE_CONFIG_DIR` seen on a live pane's own process) with two facts read
+off its file — `status hook: installed / out of date / missing` and `status line: wrapped /
+missing / another wrapper` — and an **Install** button when either is missing
+(`GET /api/accounts/install`, `POST /api/accounts/:key/install`, `server/account-install.js`).
+**Nothing installs by itself** (the maintainer's ruling): the button opens a confirm that says
+what is written and where the backup goes, that the account's *running* sessions pick it up
+within seconds, and which status-line command the wrapper will run. `:key` is the folder's index
+in the panel's own list and never a path — this port answers the LAN with no auth — and a body,
+or anything path-shaped in the key, is refused. One write per press, backed up beside the file
+first; a second press changes nothing.
+
+Each settings file gets its own wrapper and record under the state dir: the default keeps
+`statusline-wrapper.sh` / `statusline.json`, any other folder `statusline-wrapper-<folder>.sh` /
+`statusline-<folder>.json`. A folder with **no status line of its own runs the default
+account's**, read from the default's record, so both terminals draw the same line; its record
+says so (`borrowed`), keeps `original: null`, and uninstalling takes the key away rather than
+writing the borrowed command in. From a shell the same is `npm run install-hook -- --config-dir
+<dir>` and `npm run install-statusline -- --config-dir <dir>` (or `foreman-panel install-hook
+--config-dir <dir>`); `setup` stays default-only. Until the usage bars are split per account,
+a second account's status line feeds the same one set of bars, which then show whichever
+account spoke last — the confirm says so.
 
 ### Context pressure
 

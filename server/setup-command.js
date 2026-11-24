@@ -37,6 +37,13 @@
  * floor down — and for the same reason: two panels on one port is the silent failure this
  * project has already been bitten by.
  *
+ * **The default config dir only, deliberately.** Both installers take `--config-dir` for a
+ * second Claude account, and this does not pass it: `setup` is the first run after
+ * `brew install`, when the panel has never seen a session and so knows no other config dir,
+ * and a second account's install reaches that account's *running* sessions within seconds —
+ * a press a human makes in Settings → Account tags once the panel has seen one, or
+ * `foreman-panel install-hook --config-dir <dir>` by hand. Never a side effect of setup.
+ *
  * **It starts no session and touches no pane.** The whole of what it changes is
  * `~/.claude/settings.json`, through the two existing installers that back it up first,
  * and the Homebrew service. Nothing here knows what tmux is.
@@ -48,7 +55,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { PORT, SETTINGS_PATH } from './config.js';
+import { PORT } from './config.js';
+import { installTarget } from './account-install.js';
 import { FORMULA, brewBinary, panelIsHomebrew } from './homebrew.js';
 import { onPath } from './forge.js';
 
@@ -147,7 +155,8 @@ export async function runSetup({
   fail = (line) => console.error(line),
   node = process.execPath,
   serverDir = SERVER_DIR,
-  settingsPath = SETTINGS_PATH,
+  // The default config dir's settings file, spelled where every installer spells it.
+  settingsPath = installTarget().settingsPath,
   port = PORT,
   probeBudgetMs = 10_000,
   runningBudgetMs = 1_000,
