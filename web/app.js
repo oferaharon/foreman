@@ -3263,6 +3263,11 @@ async function openSnapshot() {
       // nothing to resume, and comes back empty whichever button you press.
       st.textContent = entry.resumable ? '' : 'no history';
       if (!entry.resumable) st.title = 'No transcript bound to this pane — it comes back fresh either way.';
+      // The account fence: the server names a row it will leave running, and why.
+      if (entry.skip) {
+        st.textContent = 'stays running';
+        st.title = `Left alone: ${entry.skip}.`;
+      }
 
       r.append(name, where, st);
       list.append(r);

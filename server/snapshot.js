@@ -4,6 +4,7 @@ import { STATE_DIR } from './config.js';
 import { WORKTREES_DIR } from './worktree.js';
 import { isLeadName, slugFor, uniqueSessionName } from './launch.js';
 import { isTrustGate } from '../web/trust-gate.js';
+import { OTHER_ACCOUNT_WHY, onOtherAccount } from './account.js';
 
 const FILE = path.join(STATE_DIR, 'snapshot.json');
 
@@ -178,7 +179,7 @@ export function relaunchEntries(sessions = [], { resume = false } = {}) {
   const live = new Map();
   for (const s of sessions || []) if (s?.tmuxSession) live.set(s.tmuxSession, s);
 
-  return benchEntries(sessions).map((entry) => {
+  return entriesOf(sessions, { fenced: true }).map((entry) => {
     const s = entry.tmuxSession ? live.get(entry.tmuxSession) : null;
     // `transcriptPath` is the witness that this row has a history at all; the id shape is
     // the witness that what we hold is a session id rather than a `pane-19`. Both, because
@@ -261,6 +262,11 @@ export function relaunchOne(session, { mode, live = null } = {}) {
         'Its lead dispatches a new one.',
     );
   }
+  // The account fence: nothing has been ended, and nothing will be. Before `relaunchEntries`
+  // so the entry it would build for this row is never in hand to be started by mistake.
+  if (onOtherAccount(session)) {
+    return refuse(409, 'account', `Not restarted: ${OTHER_ACCOUNT_WHY}. It was left as it is.`);
+  }
 
   const [entry] = relaunchEntries([session], { resume: mode === 'resume' });
   if (!entry) return refuse(400, 'folder', 'There is no folder to start it again in.');
@@ -291,14 +297,30 @@ export function relaunchOne(session, { mode, live = null } = {}) {
  * `paneCwd`, never `cwd`: the transcript's `cwd` is rewritten when a session changes
  * directory mid-conversation, and relaunching into where a session wandered to would put
  * it under a different rail heading — and so out of the group you filed it under.
+ *
+ * **A row on another Claude account is left out** (`onOtherAccount`, the account fence): a
+ * save replays plain `claude`, which would start it fresh on the default account under the
+ * old name. Nothing is lost by the omission that the save could have kept — the session
+ * itself is untouched and still running.
  */
-export function benchEntries(sessions = []) {
+export const benchEntries = (sessions = []) => entriesOf(sessions, { fenced: false });
+
+/**
+ * The one walk behind `benchEntries` and `relaunchEntries`. `fenced` keeps the rows the
+ * account fence refuses, each carrying `skip` — the reason, in words — so a relaunch can
+ * *report* them like any other row it leaves alone rather than dropping them silently; a
+ * save passes `false` and never sees them.
+ */
+function entriesOf(sessions, { fenced }) {
   const out = [];
   for (const s of sessions) {
     const folder = s?.paneCwd;
     if (!folder) continue; // nothing to relaunch into
     if (!isBenchRow(s)) continue;
+    const other = onOtherAccount(s);
+    if (other && !fenced) continue;
     out.push({
+      ...(other ? { skip: OTHER_ACCOUNT_WHY } : {}),
       folder,
       slug: slugFor(s.tmuxSession, folder),
       tmuxSession: s.tmuxSession || null,
@@ -548,7 +570,11 @@ export class SnapshotStore {
     // `extra` and the rail's drift dot stays lit for as long as a team is working — which
     // would turn "your snapshot has gone stale" into background noise exactly when the
     // panel is busiest.
-    const live = new Set(sessions.filter(isBenchRow).map((s) => s.tmuxSession).filter(Boolean));
+    // …and without the rows a save leaves out (`onOtherAccount`), or a session on another
+    // account would read as `extra` for as long as it ran and keep the dot lit.
+    const live = new Set(
+      sessions.filter((s) => isBenchRow(s) && !onOtherAccount(s)).map((s) => s.tmuxSession).filter(Boolean),
+    );
     for (const name of asleep) if (name) live.add(name);
     const saved = new Set(this.snap.sessions.map((e) => e.tmuxSession).filter(Boolean));
     return {

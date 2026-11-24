@@ -117,6 +117,32 @@ export function configDirFromPs(output, home = os.homedir()) {
   return { configDir: path.resolve(dir), explicit: true };
 }
 
+/**
+ * Why a row on another account is left alone by every path that would start it again.
+ * One sentence, spelled once: restart-one's refusal, relaunch-all's skip and hibernation's
+ * verdict all say it, and the rail shows it.
+ */
+export const OTHER_ACCOUNT_WHY = 'it runs on another Claude account; the panel can’t start it there yet';
+
+/**
+ * **The account fence.** Is this roster row positively known to run on a config dir other
+ * than the default one?
+ *
+ * Every launch path here starts plain `claude`, which is the default account, and a
+ * `--resume` of a conversation that lives in another account's folder fails with "No
+ * conversation found" after the old session has already been `/exit`ed — the session is
+ * gone (measured, see `docs/traps/accounts.md`). So anything that would end a session in
+ * order to start it again asks this first. It is one predicate so there is one spelling of
+ * "another account" (`docs/traps/one-spelling.md`); the day launches carry an account it is
+ * lifted from here and from nowhere else.
+ *
+ * Only a *known* answer fires it. `account: null` — `ps` failed, the process is gone, the
+ * environment was unreadable — behaves exactly as it did before the fence existed: unknown
+ * is not "another account", and a fence that fired on a doubt would refuse every session
+ * the moment `ps` hiccupped.
+ */
+export const onOtherAccount = (row) => row?.account?.explicit === true;
+
 /** Where that config dir's account record lives — measured, see the header. */
 export function accountFileFor({ configDir, explicit }, home = os.homedir()) {
   return explicit ? path.join(configDir, '.claude.json') : path.join(home, '.claude.json');
@@ -162,6 +188,10 @@ export function readAccount(text, { configDir, explicit }, home = os.homedir()) 
   const base = {
     configDir: shortPath(configDir, home),
     folder: explicit ? path.basename(configDir) : 'default',
+    // Another account's folder, as against the default one — what `onOtherAccount` reads. An
+    // explicit `CLAUDE_CONFIG_DIR` that *is* `~/.claude` is not another folder: its
+    // conversations are the default's, so a plain `claude --resume` finds them.
+    explicit: Boolean(explicit) && path.resolve(configDir) !== path.join(home, '.claude'),
   };
   const o = json.oauthAccount;
   const uuid = typeof o?.accountUuid === 'string' && o.accountUuid ? o.accountUuid : null;

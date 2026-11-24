@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { STATE_DIR } from './config.js';
 import { isLeadName, slugFor } from './launch.js';
 import { MAX_PER_PANE } from './queue.js';
+import { OTHER_ACCOUNT_WHY, onOtherAccount } from './account.js';
 import { SESSION_ID_RE, heldBy, isBenchRow, relaunchOne } from './snapshot.js';
 
 export { HIBERNATE_CHOICES, DEFAULT_HIBERNATE, hibernateMs, isHibernateChoice } from '../web/hibernate-choices.js';
@@ -59,6 +60,11 @@ export function sleepVerdict(row, ctx = {}) {
 
   // (a) Never a worker — `isBenchRow`, the allow-list, and nothing written beside it.
   if (!isBenchRow(row)) return no('worker', 'it is a worker');
+
+  // The account fence: a wake is a plain `claude --resume`, which would look for this
+  // conversation in the default account's folder and not find it. Known-other only; an
+  // unknown account is judged as before.
+  if (onOtherAccount(row)) return no('account', OTHER_ACCOUNT_WHY);
 
   // (b) A lead with a live worker. Rows, not task records: a pending task has no session,
   // and a worker whose task closed under it is still a worker in this lead's repo.
