@@ -50,9 +50,10 @@ const run = promisify(execFile);
  * names — `~/.claude` when it is unset — and everything account-shaped hangs off it: its
  * transcripts in `<dir>/projects/<cwd with each slash as a dash>/<id>.jsonl` (MEASURED on
  * v2.1.331: a second-account session writes *nothing* under `~/.claude/projects`), its peer
- * registry in `<dir>/sessions/`. Nothing else in `server/` works out a projects root, a
- * config dir from a path, or "is this the default dir"; `config.js`'s `PROJECTS_DIR` and
- * `PEER_SESSIONS_DIR` are the default dir's spellings and a test pins them to these.
+ * registry in `<dir>/sessions/`, its plan files in `<dir>/plans/`, its slash commands, skills and
+ * plugins beside them. Nothing else in `server/` works out a projects root, a config dir from
+ * a path, or "is this the default dir"; `config.js`'s `PROJECTS_DIR` is the default dir's
+ * spelling and a test pins it to these.
  */
 
 /** The config dir Claude Code uses when `CLAUDE_CONFIG_DIR` is unset, for a given home. */
@@ -71,6 +72,11 @@ export function projectsDirOf(configDir) {
 /** Where a config dir keeps its peer registry (`<pid>.json` per live session). */
 export function peersDirOf(configDir) {
   return path.join(configDir, 'sessions');
+}
+
+/** Where a config dir keeps the plan files plan mode writes (`<dir>/plans/<name>.md`). */
+export function plansDirOf(configDir) {
+  return path.join(configDir, 'plans');
 }
 
 /**

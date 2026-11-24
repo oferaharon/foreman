@@ -1036,6 +1036,26 @@ running in a session. A `PATCH /api/config` carries a delta — `{"accountNickna
 plain text, at most 32 kept. It is a label, not an exposure key, so a LAN browser may set it,
 and it applies at the next roster beat with no restart. It never joins `composerSig`.
 
+**Three more readers follow the session's own config dir** (MEASURED on v2.1.331: a
+second-account session writes nothing under `~/.claude`). Each used to read the default dir
+only and so gave a wrong answer for such a session rather than a blank one. All three take the
+dirs from `server/account.js` — `KnownConfigDirs` is the list, `peersDirOf` / `plansDirOf` the
+spellings:
+
+- **The peer registry** (`peers.js`, `observe.js`'s `resolveSender`) is read from every known
+  dir's `sessions/`, the default's first. A pid is unique on the machine, so the first file
+  that exists is the right one. The observer is handed a function, so a dir noted since boot is
+  read the next time its session speaks.
+- **The plan file** a plan-approval box names (`GET /api/sessions/:id/plan-file`,
+  `plan-file.js`) is served from `<known dir>/plans/` — the box prints `~/<that dir>/plans/…`.
+  Still bounded: the only inputs are the pane's own scraped line and the panel's list of
+  detected dirs, never a path from the request, and the check is on the resolved path.
+- **The `/` menu** (`commands.js`) reads `commands/`, `skills/` and `plugins/` from the pane's
+  own dir when the row is on another account, and `~/.claude` for a default or unknown one. The
+  built-ins are the one CLI and are read once; `<cwd>/.claude/commands` is the project's. The
+  cache is keyed on the dir as well as the folder, since one folder opened on two accounts
+  offers two lists.
+
 **Live status per config folder.** A session on a second account reads only its own
 `<dir>/settings.json` — never `~/.claude/settings.json` (MEASURED on v2.1.331) — so it sends the
 panel no hook and no status line until *that* file holds the panel's two entries. Under the

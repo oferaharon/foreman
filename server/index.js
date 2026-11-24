@@ -1,7 +1,6 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { execFile } from 'node:child_process';
-import os from 'node:os';
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -110,7 +109,7 @@ import {
   NICKNAME_MAX,
   NICKNAME_RULE,
 } from './settings-file.js';
-import { AccountReader, KnownConfigDirs, shortPath } from './account.js';
+import { AccountReader, KnownConfigDirs, peersDirOf, onOtherAccount, shortPath } from './account.js';
 import { installAccount, installRows, installTarget, resolveInstallKey } from './account-install.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
@@ -165,6 +164,7 @@ import { saveUpload, resolveImage, pruneImages } from './uploads.js';
 import { rotateLogs, rotationLines, LOG_OUT, LOG_ERR } from './logs.js';
 import { FORMULA, panelIsHomebrew } from './homebrew.js';
 import { listCommands } from './commands.js';
+import { readPlanFile } from './plan-file.js';
 import { findFiles } from './files.js';
 import { scanImages, readImage } from './images.js';
 import { scanAgents, agentList } from './agents.js';
@@ -319,7 +319,13 @@ hibernation.on('changed', () => broadcastRoster());
  * It is handed `registry.list` rather than a snapshot: the sweep runs a minute apart and a
  * roster captured at construction would be yesterday's.
  */
-const observer = new Observer({ store: sharedRoom, roster: () => registry.list() });
+// One peer registry per config dir (`peers.js`), asked afresh: a second account's dir is noted
+// at the first poll that sees a pane on it, which is after this line runs.
+const observer = new Observer({
+  store: sharedRoom,
+  roster: () => registry.list(),
+  peersDirs: () => registry.configDirs.list().map(peersDirOf),
+});
 
 /** The observer's 60-second backstop, started in the boot block and stopped on SIGTERM.
  *  Declared here so the shutdown handler — which is written above the boot block — names a
@@ -1165,27 +1171,14 @@ app.post('/api/sessions/:id/plan', async (req, res) => {
  * The plan file the box names, so you can read what you're approving.
  *
  * The path comes off scraped terminal text, which is not a source to hand to `readFile` —
- * so it is resolved and then refused unless it lands inside `~/.claude/plans`.
+ * so it is resolved and then refused unless it lands inside the `plans/` folder of a known
+ * config dir (`plan-file.js`): the default's, or another account's.
  */
 app.get('/api/sessions/:id/plan-file', async (req, res) => {
   const session = registry.get(req.params.id);
   if (!session?.plan?.planPath) return res.status(404).json({ error: 'No plan file to read.' });
-
-  const raw = session.plan.planPath.replace(/^~(?=\/|$)/, os.homedir());
-  const file = path.resolve(raw);
-  const root = path.join(os.homedir(), '.claude', 'plans');
-  if (file !== root && !file.startsWith(`${root}${path.sep}`)) {
-    return res.status(400).json({ error: 'That path is not in ~/.claude/plans.' });
-  }
-
-  try {
-    const stat = await fsp.stat(file);
-    if (!stat.isFile()) return res.status(404).json({ error: 'Not a file.' });
-    if (stat.size > 256 * 1024) return res.status(413).json({ error: 'That plan is too big to show.' });
-    res.json({ path: session.plan.planPath, markdown: await fsp.readFile(file, 'utf8') });
-  } catch {
-    res.status(404).json({ error: 'That plan file is not there any more.' });
-  }
+  const { status, body } = await readPlanFile(session.plan.planPath, registry.configDirs.list());
+  res.status(status).json(body);
 });
 
 /** The permission modes a session can be put into, for the composer's picker. */
@@ -5984,7 +5977,9 @@ app.get('/api/sessions/:id/commands', async (req, res) => {
   const session = registry.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'Unknown session.' });
   try {
-    res.json({ commands: await listCommands(session.cwd) });
+    // A session on another account has that account's commands, skills and plugins, not the
+    // default's; the dir is the one detected off its process. Anything else reads `~/.claude`.
+    res.json({ commands: await listCommands(session.cwd, onOtherAccount(session) ? session.account.dir : undefined) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

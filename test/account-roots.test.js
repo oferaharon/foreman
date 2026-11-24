@@ -15,7 +15,7 @@ import {
   projectsDirOf,
   sameConfigDir,
 } from '../server/account.js';
-import { PEER_SESSIONS_DIR, PROJECTS_DIR } from '../server/config.js';
+import { PROJECTS_DIR } from '../server/config.js';
 import { probe } from '../server/transcript.js';
 
 /*
@@ -27,13 +27,13 @@ import { probe } from '../server/transcript.js';
 const HOME = '/Users/tester';
 const SESSION = '0f0f0f0f-1111-4222-8333-444444444444';
 
-test('the default dir is ~/.claude, and config.js’s two constants are its spellings', () => {
+test('the default dir is ~/.claude, and config.js’s PROJECTS_DIR is its spelling', () => {
   assert.equal(defaultConfigDirFor(HOME), '/Users/tester/.claude');
   assert.equal(DEFAULT_CONFIG_DIR, path.join(os.homedir(), '.claude'));
-  // `PROJECTS_DIR` and `PEER_SESSIONS_DIR` stay as the default root's names; they must never
-  // drift from the helpers that compute every other root's.
+  // `PROJECTS_DIR` stays as the default root's name; it must never drift from the helper that
+  // computes every other root's. (`PEER_SESSIONS_DIR` is gone: the peer readers take the known
+  // dirs through `peersDirOf`, so there is no second spelling of the default's.)
   assert.equal(PROJECTS_DIR, projectsDirOf(DEFAULT_CONFIG_DIR));
-  assert.equal(PEER_SESSIONS_DIR, peersDirOf(DEFAULT_CONFIG_DIR));
 });
 
 test('a transcript’s root is the folder above its projects/ — either account', () => {

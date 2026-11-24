@@ -19,8 +19,9 @@
  * account's *running* sessions within seconds (MEASURED, M7), which is the point and is
  * exactly why it is a press and not a side effect.
  *
- * **The default dir is byte-identical to before.** Its settings path is `config.js`'s
- * `SETTINGS_PATH`, its wrapper and sidecar keep their unsuffixed names, and the plans the
+ * **The default dir is byte-identical to before.** Its settings path is
+ * `~/.claude/settings.json` (`installTarget()` is the one spelling of it — `config.js`'s old
+ * `SETTINGS_PATH` is gone), its wrapper and sidecar keep their unsuffixed names, and the plans the
  * pure halves (`hook-settings.js`, `statusline.js`) hand back for it carry no new key.
  */
 import fs from 'node:fs';

@@ -13,7 +13,7 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'se
 /*
  * The real installer, in a real subprocess, against a real `settings.json` in a throwaway
  * `HOME` — never the maintainer's own file, which is what this thing exists to rewrite.
- * `os.homedir()` reads `$HOME` on POSIX, which is what makes `SETTINGS_PATH` redirectable;
+ * `os.homedir()` reads `$HOME` on POSIX, which is what makes the default settings path redirectable;
  * the first test proves that rather than trusting it, because every other test here is
  * worthless if the child was pointed at the real file instead.
  *

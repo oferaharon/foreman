@@ -55,7 +55,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
-import { PORT, SETTINGS_PATH } from './config.js';
+import { PORT } from './config.js';
+import { installTarget } from './account-install.js';
 import { FORMULA, brewBinary, panelIsHomebrew } from './homebrew.js';
 import { onPath } from './forge.js';
 
@@ -154,7 +155,8 @@ export async function runSetup({
   fail = (line) => console.error(line),
   node = process.execPath,
   serverDir = SERVER_DIR,
-  settingsPath = SETTINGS_PATH,
+  // The default config dir's settings file, spelled where every installer spells it.
+  settingsPath = installTarget().settingsPath,
   port = PORT,
   probeBudgetMs = 10_000,
   runningBudgetMs = 1_000,
