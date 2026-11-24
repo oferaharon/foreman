@@ -133,6 +133,14 @@ in `~/.claude.json` and three sessions answering their gates at once can lose on
 last writer. Benched: two folders came back straight into their history, the third came
 back on the gate and resumed correctly the moment it was answered.
 
+**Trust is per account, so a launch on a second account lands on the gate in folders the
+first account trusted long ago — MEASURED on v2.1.331.** Each config dir keeps its own trust
+records in its own `.claude.json` (the default dir's is `~/.claude.json`, beside `~/.claude/`;
+another's is `<dir>/.claude.json`). Benched: a lead started on the second account in `beta` —
+trusted on the default account — came up on the unnumbered gate, read by the panel as the
+trust gate as usual. So every folder is new to a second account once, `⧉`, relaunch and
+restore included, and the last-writer race above now has a second file to lose an answer in.
+
 ## The name a launch mints is a contract
 
 **The name a launch mints is a contract, so `launch.js` is a port and not a rewrite.**
@@ -629,3 +637,30 @@ its rows from it. The picker's labels (`30 min`, `1 h`, …) sit in the same fil
 reason. A second literal anywhere is a picker offering a choice the server answers 400 to, or
 a choice the server would take that nobody can pick — the
 [one-spelling](one-spelling.md) family.
+
+## A snapshot entry is rebuilt from a field list, twice
+
+**`SnapshotStore` keeps only the fields it names, in `#load` and again in `save`, so a field
+added to one list and not the other is dropped without a sound.** `configDir` — the account a
+saved session restores on — is in both, and `test/account-launch.test.js` round-trips it
+through the disk. Missing from either, a second-account session restores fresh on the
+**default** account under its old name, which looks like a working restore until you read the
+account tag. A build from before the field drops it on its next save the same way, so a bench
+saved after rolling back restores every session on the default account; re-save it after
+rolling forward. `HibernateStore` is the opposite shape (it carries unknown keys through), and
+a sleep record without `configDir` is read by its transcript's root, then as the default
+(`recordConfigDir`).
+
+## Bypass onto another account stops on a warning the panel will not answer
+
+**A `--dangerously-skip-permissions` launch on a config dir whose `settings.json` lacks
+`skipDangerousModePermissionPrompt` opens a *WARNING: Claude Code running in Bypass
+Permissions mode* box before the composer, cursor on `No, exit` — MEASURED on v2.1.331, at 220
+and 70 columns (`test/fixtures/dialog-bypass-confirm{,-narrow}.txt`).** It parses as a `dialog`
+with no prompt, so nothing in the panel offers to answer it, and by the maintainer's ruling
+nothing should: the panel never answers it and never writes that key into another account's
+settings. `bypassConfirmProblem` (`server/account.js`) reads the target dir's own
+`settings.json` and refuses the launch instead — in `createSession` for `+ new`, `⧉` and a
+restore, and before the `/exit` for restart-one, relaunch-all and a sleep. Only that one file
+is read, so a key set in some other settings layer is refused anyway — the safe direction. The
+default dir is never asked, which is what keeps its launches byte-identical.

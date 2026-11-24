@@ -529,6 +529,17 @@ Evidence: [`docs/traps/launch.md`](docs/traps/launch.md).
   whose trust was never recorded lands on the trust gate.** Three sessions answering their
   gates at once can lose one to the last writer.
   [launch#a-relaunch-into-a-folder-whose-trust-was-never-recorded](docs/traps/launch.md#a-relaunch-into-a-folder-whose-trust-was-never-recorded)
+- `server/snapshot.js` (`SnapshotStore#load`, `save`) · `server/account.js`
+  (`recordConfigDir`) — **A snapshot entry is rebuilt from a field list, twice, so a
+  `configDir` missing from either restores a second-account session on the default
+  account.** Absent means the default; a rollback drops it on its next save.
+  [launch#a-snapshot-entry-is-rebuilt-from-a-field-list-twice](docs/traps/launch.md#a-snapshot-entry-is-rebuilt-from-a-field-list-twice)
+- `server/account.js` (`bypassConfirmProblem`, `resumeRootProblem`) · `server/launch.js`
+  (`claudeCommand`, `createSession`) · `test/fixtures/dialog-bypass-confirm*.txt` — **Bypass
+  onto another account stops on a startup warning the panel will not answer, and a resume onto
+  the wrong account finds nothing — both MEASURED on v2.1.331.** Refused before anything ends;
+  the key is never written; trust is per account too, so the gate comes back once per folder.
+  [launch#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer](docs/traps/launch.md#bypass-onto-another-account-stops-on-a-warning-the-panel-will-not-answer)
 - `server/launch.js` (`sessionName`, `slugFor`, `isLeadName`, `uniqueSessionName`) — **The
   name a launch mints is a contract, so `launch.js` is a port and not a rewrite.** `-ilc`,
   not `-lc`, and the bare word `claude`, never an exec of the resolved path — and the prefix
@@ -1333,8 +1344,8 @@ open group-room pane wears the same funnel, painted from that one value by `pain
 it and the band's always agree.
 
 **Snapshot / restore** (`server/snapshot.js`) keeps one slot in `~/.foreman/snapshot.json`,
-written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned}` per
-session, replayed a lead through `launchLead` and everything else through `createSession`. It
+written on a button press: `{folder, slug, tmuxSession, skipPermissions, pinned, configDir}`
+per session (`configDir` the Claude account, `null` the default), replayed a lead through `launchLead` and everything else through `createSession`. It
 holds **no groups** — those are folder-keyed and outlive any one session, so they survive on
 their own and a copy would be a second source of truth — and **no queue**, because a message
 written for a conversation that no longer exists must never be replayed into a fresh one.
