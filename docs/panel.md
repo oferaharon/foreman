@@ -1143,8 +1143,30 @@ Three refusals come with it, all made before anything is ended:
 
 Trust is per account too: a folder trusted on one account is new to the other, so the first
 launch there on the second account lands on the trust gate — the ordinary gate, handled the
-ordinary way, but recorded in that account's own `.claude.json`. Workers are not here yet: a
-dispatch still starts every worker on the default account.
+ordinary way, but recorded in that account's own `.claude.json`.
+
+**A worker runs on its lead's account** (the maintainer's ruling: read live, not a team
+setting and not a per-task choice). At dispatch — `task_dispatch` and `task_start`, one
+handler — the panel finds the lead's roster row for that repo's folder and takes its dir the
+way `⧉` does (`rowConfigDir`), then starts the worker there (`resolveWorkerAccount`,
+`server/dispatch.js`). A default lead's dispatch is unchanged: no field set, no room line, the
+launch string byte-identical. A worker on another account gets an `event: 'account'` room line
+(`Worker <id> runs on the <nickname or folder> account, its lead's.` — never an email or an id,
+drawn plain like the model and effort lines) and its task record keeps the dir as `configDir`
+(`null` meaning the default).
+
+The dispatch is **refused, before a worktree exists**, when it could not honestly follow the
+lead: the lead's account has no panel status hook in its `settings.json` (a worker there
+reports nothing — no transitions, no stuck detection, no exact binding — so the message says to
+press **Install** in settings → Account tags; an out-of-date hook is refused the same way); the
+lead is positively on another account but its dir cannot be read; two lead rows in the folder
+disagree; or the dir is not one the panel detected on a live pane. A refusal leaves nothing
+behind — no checkout, no task record — and a `pending` task being started stays `pending`.
+**No lead row at all** (a dispatch from the API with no lead running) is the one default: there
+is no account to follow, which is what every dispatch did before; once the panel knows of a second
+account it says so in the room. Workers never launch with bypass, so the bypass warning above
+cannot reach one, and the fresh trust gate every new worktree lands on is answered by the same
+guarded cursor walk on either account.
 
 #### Moving a session to another account
 

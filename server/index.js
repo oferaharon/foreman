@@ -70,6 +70,8 @@ import {
   answerTrustGate,
   resolveWorkerModel,
   resolveWorkerEffort,
+  resolveWorkerAccount,
+  leadRowsFor,
   WORKER_MODELS,
   WORKER_EFFORTS,
   workerModelNames,
@@ -119,7 +121,7 @@ import {
   rowConfigDir,
   shortPath,
 } from './account.js';
-import { installAccount, installRows, installTarget, resolveInstallKey } from './account-install.js';
+import { installAccount, installRows, installStatus, installTarget, resolveInstallKey } from './account-install.js';
 import { moveSession, moveTargets, planMove } from './move-session.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
@@ -2079,6 +2081,18 @@ app.post('/api/team/dispatch', async (req, res) => {
     });
   }
 
+  // The worker's account is its lead's, read live off the lead's row — the maintainer's
+  // ruling (Q3 of the multi-account plan). Resolved here, with the rest of the request and
+  // before `createWorktree`, because past that line a refused task leaves a checkout behind
+  // as evidence: a lead on an account with no status hook must be turned away with nothing on
+  // disk, and a promotion must stay `pending` with its brief intact.
+  const account = resolveWorkerAccount({
+    leads: leadRowsFor(registry.list(), repo),
+    knownDirs: registry.configDirs.list(),
+    hookOf: (dir) => installStatus(installTarget(dir), PORT).hook,
+  });
+  if (account.error) return res.status(account.status || 409).json({ error: account.error });
+
   let wt;
   try {
     await pruneWorktrees(repo);
@@ -2118,6 +2132,9 @@ app.post('/api/team/dispatch', async (req, res) => {
     // then also launched without the flag.
     effort: effort.effort,
     effortReason: effortReason || null,
+    // Where it ran — absolute, `null` for the default account. Stored on the record so the
+    // account a worker was started on survives its lead moving or closing.
+    configDir: account.configDir,
   };
   const task = pending
     ? tasks.update(label, {
@@ -2229,6 +2246,10 @@ app.post('/api/team/dispatch', async (req, res) => {
         '--model', model.model,
         ...(effort.effort ? ['--effort', effort.effort] : []),
       ],
+      // The lead's account: a validated, known dir or `null`, never a request field. Workers
+      // never launch with bypass, so `bypassConfirmProblem` has nothing to refuse here.
+      configDir: account.configDir,
+      knownDirs: registry.configDirs.list(),
     });
 
     // Every worktree is a fresh folder, so the trust gate is expected, once. The answer
@@ -2283,6 +2304,19 @@ app.post('/api/team/dispatch', async (req, res) => {
         from: 'panel', to: 'lead', kind: 'system', about: label, event: 'effort',
         text: `Worker ${label} launched at ${effort.effort} effort, not the default ${effort.defaultEffort} — ${effortReason}`,
       });
+    }
+
+    // Another account is said out loud, the way a model or effort departure is: the worker
+    // spends that subscription's quota and the maintainer should be able to see it. Named by
+    // nickname or folder, never an email or an id. `event: 'account'` is the stamp, and the
+    // room gives it no colour of its own, like `model` and `effort` — a fact to read.
+    if (account.configDir) {
+      room.post(repo, {
+        from: 'panel', to: 'lead', kind: 'system', about: label, event: 'account',
+        text: `${kind === 'plan' ? 'Planner' : 'Worker'} ${label} runs on the ${account.name} account, its lead's.`,
+      });
+    } else if (account.note) {
+      room.post(repo, { from: 'panel', to: 'lead', kind: 'system', about: label, event: 'account', text: account.note });
     }
 
     broadcastRoster();
