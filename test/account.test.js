@@ -112,6 +112,7 @@ test('a relative CLAUDE_CONFIG_DIR is unknown, since its cwd is not ours to see'
 test('a signed-in account file gives uuid, email, plan and the folder', () => {
   const a = readAccount(signedIn(UUID_A, 'alpha@example.com'), { configDir: '/Users/tester/.claude', explicit: false }, HOME);
   assert.deepEqual(a, {
+    dir: '/Users/tester/.claude',
     configDir: '~/.claude',
     folder: 'default',
     explicit: false,
@@ -131,6 +132,7 @@ test('a dir nobody has logged into reads as not signed in, with its folder name'
   const fresh = JSON.stringify({ firstStartTime: '2026-11-22T00:00:00.000Z', userID: 'x', migrationVersion: 3 });
   const a = readAccount(fresh, { configDir: '/Users/tester/.claude-work', explicit: true }, HOME);
   assert.deepEqual(a, {
+    dir: '/Users/tester/.claude-work',
     configDir: '~/.claude-work',
     folder: '.claude-work',
     explicit: true,
@@ -319,6 +321,40 @@ test('a file caught unparseable keeps the last good answer until it parses again
     await fsp.utimes(file, later, later);
     b.tick(6000);
     assert.equal((await b.reader.forPanes(PANES)).get('%0').uuid, UUID_A);
+  } finally {
+    await fsp.rm(b.home, { recursive: true, force: true });
+  }
+});
+
+test('the reader keeps each pane’s config dir, absolute, even where the account file is unreadable', async () => {
+  const b = await bench();
+  try {
+    // The work dir's account file goes away: no tag for that pane, but the dir is still known —
+    // the binding fence must not loosen because a label could not be drawn.
+    await fsp.rm(path.join(b.home, '.claude-work', '.claude.json'));
+    const got = await b.reader.forPanes(PANES);
+    assert.equal(got.get('%1'), null);
+    assert.equal(b.reader.configDirOf('%0'), path.join(b.home, '.claude'));
+    assert.equal(b.reader.configDirOf('%1'), path.join(b.home, '.claude-work'));
+    assert.equal(b.reader.configDirOf('%9'), null);
+    // Only the explicit one is a candidate for the known list; the default is always on it.
+    assert.deepEqual(b.reader.explicitDirs(), [path.join(b.home, '.claude-work')]);
+    // A pane that left the roster takes its dir with it.
+    await b.reader.forPanes([PANES[0]]);
+    assert.equal(b.reader.configDirOf('%1'), null);
+    assert.deepEqual(b.reader.explicitDirs(), []);
+  } finally {
+    await fsp.rm(b.home, { recursive: true, force: true });
+  }
+});
+
+test('the roster’s account carries an absolute dir beside the ~-shortened one', async () => {
+  const b = await bench();
+  try {
+    const got = await b.reader.forPanes(PANES);
+    assert.equal(got.get('%0').dir, path.join(b.home, '.claude'));
+    assert.equal(got.get('%0').configDir, '~/.claude');
+    assert.equal(path.isAbsolute(got.get('%0').dir), true);
   } finally {
     await fsp.rm(b.home, { recursive: true, force: true });
   }
