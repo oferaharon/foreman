@@ -5321,6 +5321,13 @@ async function relaunchBench(entries, { terminal, emit = () => {} }) {
   const exiting = [];
   for (const entry of entries) {
     const step = { folder: entry.folder, slug: entry.slug, name: entry.tmuxSession, phase: 'exit' };
+    // The account fence (`relaunchEntries` marks the rows): left alone before anything is
+    // read or typed. It is still running, so `restoreSessions` skips its live name below.
+    if (entry.skip) {
+      skipped.set(entry.tmuxSession, entry.skip);
+      emit({ ...step, state: 'skipped', reason: entry.skip });
+      continue;
+    }
     if (!entry.paneId) {
       skipped.set(entry.tmuxSession, 'no pane to close');
       emit({ ...step, state: 'skipped', reason: 'no pane to close' });
@@ -5405,6 +5412,7 @@ app.get('/api/relaunch', async (_req, res) => {
       tmuxSession: e.tmuxSession,
       lead: e.slug === 'lead',
       resumable: Boolean(e.resume),
+      skip: e.skip ?? null,
     })),
   });
 });
