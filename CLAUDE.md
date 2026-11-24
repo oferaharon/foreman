@@ -1205,6 +1205,13 @@ own fields mean, and what is deliberately never kept out of it. Evidence:
   ever kept.** Enforced by what the store's `ingest` reads out of the body, not by a filter on
   the route — the endpoint hands the whole payload through unfiltered on purpose.
   [rate-limits#the-dollar-figure-is-never-kept](docs/traps/rate-limits.md#the-dollar-figure-is-never-kept)
+- `server/rate-limits.js` (`witness`, `ingest`) · `server/account.js` (`accountOfPayload`,
+  `accountForDir`) · `web/quota.js` (`accountRows`) — **A moved session keeps its
+  `session_id`, so one witness memory across accounts would read its first post on the other
+  account as `fresh` — the gauges are per account in every part, keyed off `transcript_path`,
+  the only account witness a payload has.** No resolvable account is ignored, never folded
+  into the default; the default's record stays top-level for a rollback.
+  [rate-limits#a-moved-session-keeps-its-id](docs/traps/rate-limits.md#a-moved-session-keeps-its-id)
 - `server/statusline.js` (`looksLikeAWrapper`, `wrapperNameIn`, `configDirSuffix`) ·
   `server/account-install.js` — **`looksLikeAWrapper` matched exactly `statusline-wrapper.sh`,
   so the day a second config dir got `statusline-wrapper-<folder>.sh` it would have wrapped

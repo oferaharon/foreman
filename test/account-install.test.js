@@ -386,7 +386,8 @@ test('the confirm says what is written, that live sessions pick it up, and what 
   assert.match(text, /~\/\.claude-beta\/settings\.json, after a backup beside it/);
   assert.match(text, /within seconds/);
   assert.match(text, /runs the default account’s, so both terminals look alike: bash \/scratch\/alpha\/line\.sh/);
-  assert.match(text, /usage bars are one set for now/);
+  assert.match(text, /usage bars are its own/);
+  assert.doesNotMatch(text, /whichever account spoke last/);
   const view = installRowView(row);
   assert.deepEqual(view.facts.map((f) => f.text), ['status hook: missing', 'status line: missing']);
   assert.equal(view.offer, true);

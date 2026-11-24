@@ -171,7 +171,7 @@ import { slateActive, slateButton, visibleEntries } from './room-slate.js';
 // the same two bars off the same record, and a desktop going amber at one number while a
 // phone goes amber at another is the `isLeadName` lesson in another costume. Nothing here
 // may define a threshold, a format or a staleness rule of its own.
-import { windowsOf, staleness, formatReset } from './quota.js';
+import { windowsOf, staleness, formatReset, accountRows } from './quota.js';
 // One colour per speaker in the shared room, keyed on the session's name. The fifth shared
 // pure module in `web/`, node-tested like the four above it — and the reason it is a module
 // rather than four lines here is the same one every time: the name→hue map has to be
@@ -281,6 +281,9 @@ const state = {
   // been wrapped, an API-key account, or simply a panel that has been up for less time
   // than any session has taken a turn. It draws nothing.
   rateLimits: null,
+  // One entry per account (`rateLimitsByAccount`), or null from a panel that predates it —
+  // `accountRows` then falls back to `rateLimits` alone.
+  rateLimitsByAccount: null,
   // The shared room, **as a summary and nothing else**: `{unseen, lastAt}`, or nulls until
   // a frame has carried one. A sibling of `sessions` like the groups and the rate limits,
   // and for the sharpest version of that reason — this one summarises a
@@ -1388,6 +1391,9 @@ function handle(msg) {
     // field being present at all so a frame from a panel that predates it leaves whatever
     // we have alone rather than blanking it.
     if ('rateLimits' in msg) state.rateLimits = msg.rateLimits;
+    // `in`, for `rateLimits`' reason: an empty array is an ordinary answer, and a frame
+    // without the field (an older panel) must leave the one-gauge fallback in charge.
+    if ('rateLimitsByAccount' in msg) state.rateLimitsByAccount = Array.isArray(msg.rateLimitsByAccount) ? msg.rateLimitsByAccount : null;
     // `in`, not a truth test, for `rateLimits`' reason one line up: a summary of
     // `{unseen: 0, lastAt: null}` is the ordinary answer for a room nothing has been said
     // in yet, and a truth test would read that as "the frame didn't mention it" and pin
@@ -5532,6 +5538,13 @@ function refocusGrip(paneId) {
  * server keeps the latest, and it rides the roster frame as `rateLimits`. This is the
  * whole of what the desktop does with it.
  *
+ * **One block per account** since a second Claude subscription can run on this Mac: the
+ * frame's `rateLimitsByAccount` carries each account's own record (a payload is keyed to its
+ * account by the config dir its `transcript_path` sits under, server-side), and
+ * `accountRows` decides which blocks draw — the default always, another only while it has
+ * live sessions — and labels them by nickname only when there are two. `rateLimits` is the
+ * fallback for a frame from a panel that predates the split.
+ *
  * **Every number-to-text and number-to-tone decision is `web/quota.js`'s**, not this
  * function's: which windows are worth drawing at all, 50 and 75, `2h10m` versus `Mon 5PM`, and
  * where fifteen minutes makes a record old. The phone draws the same pair from the same
@@ -5566,49 +5579,83 @@ const QUOTA_TICK_MS = 30_000;
 let quotaSig = null;
 
 function renderQuota(now = Date.now()) {
-  const record = state.rateLimits;
-  const windows = windowsOf(record, now).filter((w) => DRAWN_WINDOWS.has(w.key));
-  const dim = staleness(record, now) === 'dim';
-  // The one string the tick exists for. In the signature whether it is on screen or in the
-  // tooltip, because a tooltip nobody repainted is a stale answer waiting under a cursor —
-  // which is the whole of what an "as of" line is for.
-  const age = agoText(record?.at);
+  // One block per account (`accountRows`: the default always, another only while it has
+  // live sessions, labelled only when there are two), each read from its own record and
+  // dimmed by its own age — two accounts are two feeds, and one going quiet says nothing
+  // about the other.
+  const blocks = accountRows(state.rateLimitsByAccount, state.rateLimits)
+    .map((acct) => {
+      const windows = windowsOf(acct.record, now).filter((w) => DRAWN_WINDOWS.has(w.key));
+      return {
+        acct,
+        windows,
+        dim: staleness(acct.record, now) === 'dim',
+        // The one string the tick exists for. In the signature whether it is on screen or in
+        // the tooltip, because a tooltip nobody repainted is a stale answer waiting under a
+        // cursor — which is the whole of what an "as of" line is for.
+        age: agoText(acct.record?.at),
+      };
+    })
+    .filter((b) => b.windows.length);
 
   // Ordinary punctuation for the join, and every field the face reads is in it: `mergeSig`
   // once joined its rows with three literal control bytes that every editor drew as an
   // empty string, and a field drawn but not signed is a block that stops repainting on a
-  // real change.
-  const sig = windows.length
-    ? [dim ? 'dim' : 'live', age, ...windows.map((w) => [w.key, w.pct, w.tone, formatReset(w.resetsAt, now)].join('|'))].join('~')
+  // real change. The rows are in it — label included — so a second account arriving or
+  // leaving repaints.
+  const sig = blocks.length
+    ? blocks
+        .map((b) =>
+          [
+            b.acct.key,
+            b.acct.label ?? '',
+            b.dim ? 'dim' : 'live',
+            b.age,
+            ...b.windows.map((w) => [w.key, w.pct, w.tone, formatReset(w.resetsAt, now)].join('|')),
+          ].join('~'),
+        )
+        .join('^')
     : 'none';
   if (sig === quotaSig) return;
   quotaSig = sig;
 
-  el.railQuota.classList.toggle('is-dim', dim && windows.length > 0);
-
-  if (!windows.length) {
+  if (!blocks.length) {
     // `:empty` is what hides the band, so emptying it is the whole of drawing nothing.
     el.railQuota.replaceChildren();
-    el.railQuota.removeAttribute('title');
     return;
   }
 
+  const frag = document.createDocumentFragment();
+  for (const b of blocks) frag.append(quotaAccount(b, now));
+  el.railQuota.replaceChildren(frag);
+}
+
+/** One account's gauges: its label (only when there are two), its bars, and its own age. */
+function quotaAccount({ acct, windows, dim, age }, now) {
+  const block = document.createElement('div');
+  block.className = `quota-acct${dim ? ' is-dim' : ''}`;
+  const whose = acct.label ? `${acct.label}'s limits` : "The account's limits";
   // Live, the age is the tooltip's whole job. Dim, it is already on screen a line below,
   // so the tooltip says the thing that is not visible instead: why a number can sit still
   // for an hour without anything being wrong.
-  el.railQuota.title = dim
-    ? `The account's limits, as of ${age} — the numbers only arrive while a session is taking a turn.`
-    : `The account's limits, as of ${age}`;
+  block.title = dim
+    ? `${whose}, as of ${age} — the numbers only arrive while a session is taking a turn.`
+    : `${whose}, as of ${age}`;
 
-  const frag = document.createDocumentFragment();
-  for (const win of windows) frag.append(quotaRow(win, now));
+  if (acct.label) {
+    const label = document.createElement('div');
+    label.className = 'quota-account';
+    label.textContent = acct.label;
+    block.append(label);
+  }
+  for (const win of windows) block.append(quotaRow(win, now));
   if (dim) {
     const line = document.createElement('div');
     line.className = 'quota-age';
     line.textContent = `as of ${age}`;
-    frag.append(line);
+    block.append(line);
   }
-  el.railQuota.replaceChildren(frag);
+  return block;
 }
 
 /** The two windows this panel has anything to draw for. See `renderQuota`'s header for

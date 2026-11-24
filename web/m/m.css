@@ -297,6 +297,23 @@ select {
   gap: 0.5rem;
 }
 
+/* The account's nickname at the head of its row, drawn only when two accounts are shown
+   (`accountRows` in `web/quota.js`). Capped and ellipsised so a long nickname gives up room
+   rather than widening the header — a header wider than the viewport is a horizontal scroll
+   a phone cannot get back out of. `m-quota-acct` is grepped against the four sheets below
+   `m.css` and appears in none of them (rail-and-groups#the-phones-five-stylesheets). */
+.m-quota-acct {
+  max-width: 4.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  line-height: 1;
+  color: var(--ink-muted);
+  align-self: center;
+}
+
 /*
  * One gauge. `--gauge` is the tone, set once here and read by the bar and by the label, so
  * a tone change cannot colour one and miss the other. The default is `--ink-faint` rather
@@ -371,7 +388,7 @@ select {
  * still true, it is just no longer news — and the age moves out of the tooltip and onto the
  * line beside it, which is the only thing on this screen that says so.
  */
-.m-quota.is-dim .m-quota-fill {
+.m-quota-row.is-dim .m-quota-fill {
   background: color-mix(in srgb, var(--gauge) 45%, transparent);
 }
 
