@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { BACKFILL_BYTES } from './config.js';
 import { normalizeRecord, stitch } from './normalize.js';
 import { unwrapPasted } from './pasted-content.js';
+import { configDirOfTranscript } from './account.js';
 
 /**
  * Read a byte range and return whole JSON lines, dropping any leading partial.
@@ -85,6 +86,10 @@ export async function probe(file) {
     // every slash as a dash>`, stamped at launch and never rewritten. That makes it the
     // only stable answer to "which pane could this be", which is what binding needs.
     projectDir: path.basename(path.dirname(file)),
+    // Which account's config dir this transcript lives under — the root above `/projects/`.
+    // The binding fence's input (`binding.js`): a second account's session writes only under
+    // its own root, so a pane binds only files from the root its own process runs with.
+    configDir: configDirOfTranscript(file),
     gitBranch: null,
     version: null,
     title: null,

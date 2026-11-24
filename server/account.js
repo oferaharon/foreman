@@ -35,13 +35,68 @@
  * The email rides the roster for the hover and is never the visible tag (`web/account-tag.js`).
  */
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { runsClaude } from './tmux.js';
+import { STATE_DIR } from './config.js';
 
 const run = promisify(execFile);
+
+/*
+ * **The one spelling of account roots.** A config dir is the folder `CLAUDE_CONFIG_DIR`
+ * names — `~/.claude` when it is unset — and everything account-shaped hangs off it: its
+ * transcripts in `<dir>/projects/<cwd with each slash as a dash>/<id>.jsonl` (MEASURED on
+ * v2.1.331: a second-account session writes *nothing* under `~/.claude/projects`), its peer
+ * registry in `<dir>/sessions/`. Nothing else in `server/` works out a projects root, a
+ * config dir from a path, or "is this the default dir"; `config.js`'s `PROJECTS_DIR` and
+ * `PEER_SESSIONS_DIR` are the default dir's spellings and a test pins them to these.
+ */
+
+/** The config dir Claude Code uses when `CLAUDE_CONFIG_DIR` is unset, for a given home. */
+export function defaultConfigDirFor(home = os.homedir()) {
+  return path.join(home, '.claude');
+}
+
+/** `~/.claude`, absolute. */
+export const DEFAULT_CONFIG_DIR = defaultConfigDirFor();
+
+/** Where a config dir keeps its transcripts. */
+export function projectsDirOf(configDir) {
+  return path.join(configDir, 'projects');
+}
+
+/** Where a config dir keeps its peer registry (`<pid>.json` per live session). */
+export function peersDirOf(configDir) {
+  return path.join(configDir, 'sessions');
+}
+
+/**
+ * The config dir a transcript belongs to: the folder above the nearest `projects` ancestor
+ * of the file, or `null` when the path has none (or is not absolute).
+ *
+ * *Nearest*, walking up from the file, because a config dir may itself sit under a folder
+ * called `projects`; the folder a transcript is filed under is a cwd encoded with dashes,
+ * which starts with a dash and so is never the bare word. A subagent's transcript
+ * (`<id>/subagents/…`) walks up to the same root as its parent's.
+ */
+export function configDirOfTranscript(file) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) return null;
+  let dir = path.dirname(path.resolve(file));
+  for (;;) {
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    if (path.basename(dir) === 'projects') return parent;
+    dir = parent;
+  }
+}
+
+/** Do two config dirs name the same folder? Both absolute; `null` is never the same as anything. */
+export function sameConfigDir(a, b) {
+  return Boolean(a && b) && path.resolve(a) === path.resolve(b);
+}
 
 /** `/bin/ps`, absolute: launchd's `PATH` resolves it anyway, but nothing here should depend on that. */
 const PS = '/bin/ps';
@@ -108,7 +163,7 @@ export function configDirFromPs(output, home = os.homedir()) {
   let value = null;
   for (let m = re.exec(line); m; m = re.exec(line)) value = m[1];
   if (value == null || value.trim() === '') {
-    return { configDir: path.join(home, '.claude'), explicit: false };
+    return { configDir: defaultConfigDirFor(home), explicit: false };
   }
   let dir = value.trim();
   if (dir === '~') dir = home;
@@ -160,6 +215,10 @@ export function readAccount(text, { configDir, explicit }, home = os.homedir()) 
   }
   if (!json || typeof json !== 'object' || Array.isArray(json)) return null;
   const base = {
+    // Absolute, for anything that computes with it (a scan root, a binding fence, a launch).
+    // `configDir` beside it is `~`-shortened for display and must never be fed back into a
+    // `path.join` or a shell argument — a literal `~` is not a home directory there.
+    dir: configDir,
     configDir: shortPath(configDir, home),
     folder: explicit ? path.basename(configDir) : 'default',
   };
@@ -215,6 +274,10 @@ export class AccountReader {
     this.dirOf = new Map(); // claude pid -> {configDir, explicit} | null
     this.files = new Map(); // account file -> {checkedAt, mtimeMs, size, account}
     this.seen = new Map(); // accountUuid -> account, as of the last call
+    // paneId -> {configDir, explicit}, as of the last call: the binding fence's input. Kept
+    // apart from the account, because the dir is known from the process even when the
+    // account file beside it is unreadable — and the fence must not loosen for that.
+    this.paneDirs = new Map();
     this.calls = { table: 0, env: 0, read: 0 }; // what the cache let through, for the tests
   }
 
@@ -255,6 +318,7 @@ export class AccountReader {
 
     const seen = new Map();
     const usedFiles = new Set();
+    const paneDirs = new Map();
     for (const p of list) {
       const claude = this.claudeOf.get(p.pid);
       if (!claude) {
@@ -266,6 +330,7 @@ export class AccountReader {
         out.set(p.paneId, null);
         continue;
       }
+      paneDirs.set(p.paneId, dir);
       const file = accountFileFor(dir, this.home);
       usedFiles.add(file);
       const account = await this.#account(file, dir);
@@ -274,7 +339,22 @@ export class AccountReader {
     }
     for (const f of this.files.keys()) if (!usedFiles.has(f)) this.files.delete(f);
     this.seen = seen;
+    this.paneDirs = paneDirs;
     return out;
+  }
+
+  /**
+   * The absolute config dir this pane's `claude` runs with, as of the last `forPanes`, or
+   * `null` when that is not knowable (no process found, `ps` refused, another user's
+   * process). A `null` is read by the binding fence as the default dir — today's behaviour.
+   */
+  configDirOf(paneId) {
+    return this.paneDirs.get(paneId)?.configDir ?? null;
+  }
+
+  /** Every explicit (`CLAUDE_CONFIG_DIR`-set) dir on a live pane as of the last call. */
+  explicitDirs() {
+    return [...new Set([...this.paneDirs.values()].filter((d) => d.explicit).map((d) => d.configDir))];
   }
 
   /** The signed-in accounts on the roster right now, for the settings box. */
@@ -334,4 +414,87 @@ export function withNickname(account, nicknames = {}) {
   if (!account) return null;
   const nickname = account.uuid && typeof nicknames?.[account.uuid] === 'string' ? nicknames[account.uuid] : null;
   return { ...account, nickname };
+}
+
+/** `STATE_DIR/accounts.json` — the config dirs the panel has seen on a live pane. */
+export const ACCOUNTS_FILE = path.join(STATE_DIR, 'accounts.json');
+
+/**
+ * The **known config dirs**: the default, plus every explicit dir `AccountReader` has seen on
+ * a live pane, persisted so a dir stays scanned through a moment with nothing running on it
+ * (its transcripts are still somebody's conversation to bind once a pane comes back).
+ *
+ * Detected, never typed in: the only writer is `note`, fed from the process table. The file
+ * is `{dirs: [absolute paths], …}` and is rewritten wholesale with **unknown keys carried
+ * through**, so a later build's fields survive a rollback's rewrite. An unparseable file is
+ * left exactly where it is and never replaced — the dirs noted while it is unreadable are
+ * held in memory for the run. Dirs are never pruned: a dir that has gone from disk costs one
+ * failed `readdir` a poll.
+ */
+export class KnownConfigDirs {
+  constructor({ file = ACCOUNTS_FILE, defaultDir = DEFAULT_CONFIG_DIR } = {}) {
+    this.file = file;
+    this.defaultDir = path.resolve(defaultDir);
+    this.extra = {}; // unknown top-level keys, carried through
+    this.dirs = [];
+    this.writable = true;
+    this.#load();
+  }
+
+  #load() {
+    let text;
+    try {
+      text = fs.readFileSync(this.file, 'utf8');
+    } catch (err) {
+      if (err.code !== 'ENOENT') this.writable = false;
+      return;
+    }
+    let json;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+    if (!json || typeof json !== 'object' || Array.isArray(json)) {
+      this.writable = false;
+      return;
+    }
+    const { dirs, ...rest } = json;
+    this.extra = rest;
+    for (const d of Array.isArray(dirs) ? dirs : []) this.#add(d);
+  }
+
+  #add(dir) {
+    if (typeof dir !== 'string' || !path.isAbsolute(dir)) return false;
+    const abs = path.resolve(dir);
+    if (sameConfigDir(abs, this.defaultDir) || this.dirs.includes(abs)) return false;
+    this.dirs.push(abs);
+    return true;
+  }
+
+  /** Record dirs seen on live panes. Writes only when something new was learned. */
+  note(dirs) {
+    let changed = false;
+    for (const d of dirs || []) if (this.#add(d)) changed = true;
+    if (changed) this.#flush();
+    return changed;
+  }
+
+  /** The default dir first, then every explicit one, in the order they were first seen. */
+  list() {
+    return [this.defaultDir, ...this.dirs];
+  }
+
+  #flush() {
+    if (!this.writable) return;
+    try {
+      fs.mkdirSync(path.dirname(this.file), { recursive: true });
+      // Same directory, so the rename is a rename and not a silent copy-then-delete.
+      const tmp = `${this.file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, `${JSON.stringify({ ...this.extra, dirs: this.dirs }, null, 2)}\n`);
+      fs.renameSync(tmp, this.file);
+    } catch {
+      /* the list is still right in memory; the next new dir tries again */
+    }
+  }
 }

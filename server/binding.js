@@ -29,6 +29,15 @@
  *
  * And one exclusion on top of all three, for the one exited session the panel still owns:
  *
+ *   Accounts — a second Claude account (`CLAUDE_CONFIG_DIR`) files its transcripts under
+ *   its own root, never under `~/.claude/projects` (MEASURED, docs/traps/binding.md). Scan
+ *   both roots with no fence and a second-account pane alone in a folder is handed a
+ *   main-account `claude -p` run from that folder by rule 3 — reproduced on main before
+ *   this fence existed — and the mirror is just as possible. So every rule but a hook
+ *   receipt binds a pane only to transcripts under the root its own process runs with, and
+ *   a pane whose root is unknown is held to the default root: exactly the behaviour from
+ *   before there was more than one root. The fence only ever removes candidates.
+ *
  *   Sleepers — a hibernated session's transcript is *claimed* by its sleep record. Its
  *   `/exit` record makes that file the newest in its folder, so it passes freshness, and
  *   after a panel restart a receipt-less sibling left alone there was handed it by rule 3
@@ -37,6 +46,8 @@
  *   which is the wake, in the window before its record is deleted. The claim is the
  *   record's: wake and forget delete it, and the claim goes with it.
  */
+
+import { DEFAULT_CONFIG_DIR, sameConfigDir } from './account.js';
 
 const lower = (s) => (s ? String(s).toLowerCase() : null);
 
@@ -66,6 +77,22 @@ function sameWorkspace(pane, meta) {
 }
 
 /**
+ * Is this transcript on this pane's account?
+ *
+ * The pane's side is the config dir its `claude` process runs with (`pane.configDir`, from
+ * `AccountReader`), and **unknown is the default dir** — `ps` failed, another user's
+ * process, a pane the reader has not seen yet — which keeps such a pane exactly where it
+ * was before any second root was scanned. The transcript's side is `probe`'s `configDir`,
+ * the root above `/projects/`; a meta without one (a fixture, a probe from before it was
+ * carried) is the default root's, which is the only root there was.
+ *
+ * Applied in every rule but the hook receipt, which is the session naming its own file.
+ */
+function sameAccount(pane, meta) {
+  return sameConfigDir(pane.configDir || DEFAULT_CONFIG_DIR, meta.configDir || DEFAULT_CONFIG_DIR);
+}
+
+/**
  * Could this title have been produced by the wrapper's `<repo>-<branch>` default
  * rather than by a session label?
  *
@@ -84,8 +111,8 @@ function looksBranchDerived(meta, pane) {
 
 /**
  * @param {object}   args
- * @param {Array}    args.panes             {paneId, cwd, label, createdMs}
- * @param {Array}    args.metas             {sessionId, cwd, title, mtime}
+ * @param {Array}    args.panes             {paneId, cwd, label, createdMs, configDir?}
+ * @param {Array}    args.metas             {sessionId, cwd, title, mtime, configDir?}
  * @param {Function} args.hookBindingFor    paneId -> sessionId | null
  * @param {Function} args.rememberedFor      paneId -> sessionId | {sessionId, confidence} | null
  * @param {Array}    args.sleeping          sleep records {name, sessionId, transcriptPath, sleptAt}
@@ -131,6 +158,7 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
     // existed (or by a panel build without it) does not get to keep it.
     if (heldBySleeper(pane, meta)) continue;
     if (!sameWorkspace(pane, meta)) continue;
+    if (!sameAccount(pane, meta)) continue;
     if (pane.createdMs && meta.mtime < pane.createdMs) continue;
     // Keep the confidence it was earned with — a label match does not decay to a guess
     // just because it is being remembered rather than recomputed.
@@ -157,6 +185,7 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
       .filter(
         (m) =>
           sameWorkspace(pane, m) &&
+          sameAccount(pane, m) &&
           !claimed.has(m.sessionId) &&
           !heldBySleeper(pane, m) &&
           lower(m.title) === lower(pane.label) &&
@@ -189,6 +218,7 @@ export function bindPanes({ panes, metas, hookBindingFor = () => null, remembere
     const candidates = metas
       .filter((m) => {
         if (!sameWorkspace(pane, m) || claimed.has(m.sessionId)) return false;
+        if (!sameAccount(pane, m)) return false;
         if (heldBySleeper(pane, m)) return false;
         if (pane.createdMs && m.mtime < pane.createdMs) return false;
         // Still never take a file that names a different live pane.
@@ -292,7 +322,11 @@ export function unboundReason(pane, metas, sleeping = []) {
   // A sleeper's transcript is no candidate either: it is not this pane's to be unsure about.
   const heldBySleeper = sleeperClaim(sleeping);
   const hasCandidate = metas.some(
-    (m) => sameWorkspace(pane, m) && !heldBySleeper(pane, m) && (!pane.createdMs || m.mtime >= pane.createdMs),
+    (m) =>
+      sameWorkspace(pane, m) &&
+      sameAccount(pane, m) &&
+      !heldBySleeper(pane, m) &&
+      (!pane.createdMs || m.mtime >= pane.createdMs),
   );
   return hasCandidate ? 'ambiguous' : 'new';
 }

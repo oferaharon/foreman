@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fsp from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
-import { PROJECTS_DIR, RECENT_WINDOW_MS, ROSTER_POLL_MS, SESSION_PREFIX } from './config.js';
+import { RECENT_WINDOW_MS, ROSTER_POLL_MS, SESSION_PREFIX } from './config.js';
 import { listClaudePanes, readGhost, readPaneState } from './tmux.js';
 import { bindPanes, unboundReason } from './binding.js';
 import { defaultSessionTitle } from './git.js';
@@ -11,7 +11,7 @@ import { slugFor, isLeadName } from './launch.js';
 import { OPEN_STATES } from './tasks.js';
 import { rememberGhost } from './ghost.js';
 import { forgeSummary } from './forge.js';
-import { withNickname } from './account.js';
+import { DEFAULT_CONFIG_DIR, projectsDirOf, withNickname } from './account.js';
 
 /*
  * A lead is recognised by the naming contract, not by a stored flag — `isLeadName` in
@@ -213,6 +213,9 @@ export class SessionRegistry extends EventEmitter {
     // `null`, which draws no tag.
     this.accounts = null;
     this.nicknames = () => ({});
+    // The known config dirs (`KnownConfigDirs`, `account.js`), set by index.js: every root
+    // whose `projects/` is scanned. Without it only the default root is, as before.
+    this.configDirs = null;
     this.timer = null;
   }
 
@@ -304,22 +307,34 @@ export class SessionRegistry extends EventEmitter {
     return workerTeam(task, this.stuckFor ? Boolean(this.stuckFor(task.id)) : false);
   }
 
+  /**
+   * Every recent transcript under every known config dir's `projects/` — the default root
+   * and each second account's (`account.js`). Which root a file came from rides on its meta
+   * as `configDir`, and `binding.js` fences on it, so scanning a second root never hands its
+   * files to a pane on another account.
+   */
   async #scanTranscripts() {
-    let projectDirs;
-    try {
-      projectDirs = await fsp.readdir(PROJECTS_DIR, { withFileTypes: true });
-    } catch {
-      return [];
-    }
+    const roots = this.configDirs ? this.configDirs.list() : [DEFAULT_CONFIG_DIR];
+    const projectDirs = [];
+    await Promise.all(
+      roots.map(async (root) => {
+        const projects = projectsDirOf(root);
+        try {
+          for (const d of await fsp.readdir(projects, { withFileTypes: true })) {
+            if (d.isDirectory()) projectDirs.push(path.join(projects, d.name));
+          }
+        } catch {
+          /* a root with no projects yet, or gone — nothing to scan there */
+        }
+      }),
+    );
 
     const cutoff = Date.now() - RECENT_WINDOW_MS;
     const candidates = [];
 
     await Promise.all(
       projectDirs
-        .filter((d) => d.isDirectory())
-        .map(async (d) => {
-          const dir = path.join(PROJECTS_DIR, d.name);
+        .map(async (dir) => {
           let entries;
           try {
             entries = await fsp.readdir(dir);
@@ -421,7 +436,18 @@ export class SessionRegistry extends EventEmitter {
 
 
   async refresh() {
-    const [metas, panes] = await Promise.all([this.#scanTranscripts(), listClaudePanes()]);
+    const panes = await listClaudePanes();
+
+    // Which account each pane runs on, read *before* the scan: a config dir seen here for the
+    // first time joins the known list now, so this very poll scans its root rather than the
+    // next one. Per pane, cached per process inside the reader — a quiet poll runs no
+    // subprocess here.
+    const accountOf = this.accounts ? await this.accounts.forPanes(panes).catch(() => new Map()) : new Map();
+    for (const p of panes) p.configDir = this.accounts?.configDirOf?.(p.paneId) ?? null;
+    this.configDirs?.note(this.accounts?.explicitDirs?.() ?? []);
+    const nicknames = this.nicknames() || {};
+
+    const metas = await this.#scanTranscripts();
 
     // Drop queues for panes that are gone, before anything reads one — but never on an
     // empty roster. `tmux` returns nothing at all when its server is down or hiccups, and
@@ -441,7 +467,9 @@ export class SessionRegistry extends EventEmitter {
       }
     }
 
-    // Latest file wins if a session id somehow appears twice.
+    // Latest file wins if a session id appears twice. With more than one root scanned this
+    // has one legitimate case: a conversation moved to another account is a copy of the same
+    // file under the other root, same session id, and the copy is the one still being written.
     const bySession = new Map();
     for (const m of metas) {
       const prev = bySession.get(m.sessionId);
@@ -464,10 +492,6 @@ export class SessionRegistry extends EventEmitter {
       ),
       forgesFor(panes.map((p) => p.cwd)),
     ]);
-
-    // Per pane, cached per process inside the reader — a quiet poll runs no subprocess here.
-    const accountOf = this.accounts ? await this.accounts.forPanes(panes).catch(() => new Map()) : new Map();
-    const nicknames = this.nicknames() || {};
 
     const sleeping = this.sleepers() || [];
     const { bound: paneOf, unbound: unboundPanes } = bindPanes({

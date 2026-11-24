@@ -110,7 +110,7 @@ import {
   NICKNAME_MAX,
   NICKNAME_RULE,
 } from './settings-file.js';
-import { AccountReader } from './account.js';
+import { AccountReader, KnownConfigDirs } from './account.js';
 import { humanName } from './human-name.js';
 import { workerBrief, plannerBrief } from './worker-brief.js';
 import { RoomStore } from './room.js';
@@ -249,6 +249,9 @@ const accountReader = new AccountReader();
 let accountNicknames = readNicknames(readConfigFile(CONFIG_FILE).config);
 registry.accounts = accountReader;
 registry.nicknames = () => accountNicknames;
+// The config dirs whose transcripts the roster scans: the default, plus every explicit one
+// seen on a live pane, persisted in `STATE_DIR/accounts.json`. Detected, never typed in.
+registry.configDirs = new KnownConfigDirs();
 
 /** The sleepers' names — what every launch passes as `reserved`, except a wake. */
 const asleepNames = () => hibernation.names();

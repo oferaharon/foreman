@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { bindPanes, unboundReason } from '../server/binding.js';
+import { DEFAULT_CONFIG_DIR } from '../server/account.js';
 
 const CWD = '/Code/Alpha';
 const T = (h) => Date.UTC(2026, 7, 24, h); // hour -> ms, for readable fixtures
@@ -483,4 +484,109 @@ test('sleeper: the claim is the record’s — gone with wake or forget, the ord
   // claim — decide it. (Freshness still lets it through here; that is the old behaviour, and
   // a forgotten sleeper is no longer the panel's to protect.)
   assert.equal(bindPanes({ panes, metas, sleeping: [] }).bound.has('s-sleepy'), true);
+});
+
+/* ───────────────────────────────────────────────────────────── the account fence ── */
+
+/*
+ * Two Claude accounts on one machine: the default config dir and a second one named by
+ * `CLAUDE_CONFIG_DIR`. Each files its transcripts under its own `<dir>/projects/` (MEASURED,
+ * v2.1.331), so a meta's root is the folder above `projects/` and a pane's is the dir its
+ * process runs with. Fake paths and ids only.
+ */
+const MAIN = '/Users/tester/.claude';
+const TWO = '/Users/tester/.claude-two';
+const FOLDER = '-Code-Alpha';
+
+const onRoot = (m, root) => ({
+  ...m,
+  projectDir: FOLDER,
+  path: `${root}/projects/${FOLDER}/${m.sessionId}.jsonl`,
+  configDir: root,
+});
+const paneOn = (p, root) => ({ ...p, configDir: root });
+
+test('account: M8 — a second-account pane alone in a folder is not handed a main-account -p run', () => {
+  // The measured shape, reproduced on main before the fence: a second-account pane alone in
+  // the sandbox folder, its own conversation not yet written; then a main-account `claude -p`
+  // ran in that folder with no tmux and no hooks. Rule 3 bound the pane to it, `inferred`.
+  const second = paneOn(pane('%4', 'alpha-two', 9), TWO);
+  const printRun = onRoot({ ...meta('5e5e5e5e-0000-4000-8000-000000000001', 'reply with one word', 10), title: null }, MAIN);
+  const { bound, unbound } = bind([second], [printRun]);
+  assert.equal(bound.size, 0);
+  assert.deepEqual(unbound.map((p) => p.paneId), ['%4']);
+  // And it says `new`, not `ambiguous`: a file on another account is no candidate at all.
+  assert.equal(unboundReason(second, [printRun]), 'new');
+});
+
+test('account: the mirror — a main pane alone is not handed a second-account run', () => {
+  const main = paneOn(pane('%1', 'alpha-main', 9), MAIN);
+  const otherRun = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000002', null, 10), TWO);
+  const { bound } = bind([main], [otherRun]);
+  assert.equal(bound.size, 0);
+  assert.equal(unboundReason(main, [otherRun]), 'new');
+});
+
+test('account: a pane whose dir is unknown is held to the default root — today’s behaviour', () => {
+  const unknown = pane('%2', 'alpha-x', 9); // no configDir: ps failed, or not read yet
+  const otherRun = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000003', null, 11), TWO);
+  // The default root is this machine's own `~/.claude` — what an unknown pane falls back to.
+  const mainRun = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000004', null, 10), DEFAULT_CONFIG_DIR);
+  const { bound } = bind([unknown], [otherRun, mainRun]);
+  assert.equal(bound.has(otherRun.sessionId), false);
+  assert.equal(bound.get(mainRun.sessionId).confidence, 'inferred');
+});
+
+test('account: a second-account pane binds its own transcript by label', () => {
+  const second = paneOn(pane('%4', 'alpha-two', 9), TWO);
+  const own = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000005', 'alpha-two', 10), TWO);
+  // A main-account file with the same title, newer, is not a rival: it is on another account.
+  const sameName = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000006', 'alpha-two', 11), MAIN);
+  const { bound } = bind([second], [own, sameName]);
+  assert.equal(bound.get(own.sessionId).confidence, 'label');
+  assert.equal(bound.has(sameName.sessionId), false);
+});
+
+test('account: a second-account pane alone binds its own transcript by inference, past a newer main-account run', () => {
+  const second = paneOn(pane('%4', 'alpha-two', 9), TWO);
+  const own = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000007', 'Alpha', 10), TWO);
+  const printRun = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000008', null, 12), MAIN);
+  const { bound } = bind([second], [own, printRun]);
+  assert.equal(bound.get(own.sessionId).confidence, 'inferred');
+  assert.equal(bound.has(printRun.sessionId), false);
+});
+
+test('account: a remembered binding across accounts is not replayed', () => {
+  // A binding made before the fence existed (M8 in a running panel) does not get to keep it.
+  const second = paneOn(pane('%4', 'alpha-two', 9), TWO);
+  const printRun = onRoot(meta('5e5e5e5e-0000-4000-8000-000000000009', null, 10), MAIN);
+  const { bound } = bindPanes({
+    panes: [second],
+    metas: [printRun],
+    rememberedFor: () => ({ sessionId: printRun.sessionId, confidence: 'inferred' }),
+  });
+  assert.equal(bound.size, 0);
+});
+
+test('account: a hook receipt still binds across roots — it is the session naming its own file', () => {
+  const unknown = pane('%2', 'alpha-x', 9);
+  const own = onRoot(meta('5e5e5e5e-0000-4000-8000-00000000000a', null, 10), TWO);
+  const { bound } = bind([unknown], [own], (p) => (p === '%2' ? own.sessionId : null));
+  assert.equal(bound.get(own.sessionId).confidence, 'hook');
+});
+
+test('account: a sibling on another account still makes the folder crowded — the fence loosens nothing', () => {
+  const main = paneOn(pane('%1', 'alpha-main', 9), MAIN);
+  const second = paneOn(pane('%4', 'alpha-two', 9), TWO);
+  const mainRun = onRoot(meta('5e5e5e5e-0000-4000-8000-00000000000b', 'Alpha', 10), MAIN);
+  const secondRun = onRoot(meta('5e5e5e5e-0000-4000-8000-00000000000c', 'Alpha', 10), TWO);
+  const { bound } = bind([main, second], [mainRun, secondRun]);
+  assert.equal(bound.size, 0);
+});
+
+test('account: freshness still holds inside one account', () => {
+  const second = paneOn(pane('%4', 'alpha-two', 12), TWO);
+  const stale = onRoot(meta('5e5e5e5e-0000-4000-8000-00000000000d', 'alpha-two', 10), TWO);
+  const { bound } = bind([second], [stale]);
+  assert.equal(bound.size, 0);
 });
