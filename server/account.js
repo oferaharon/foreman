@@ -93,6 +93,16 @@ export function configDirOfTranscript(file) {
   }
 }
 
+/**
+ * Is this `configDirFromPs` answer another account's folder rather than the default one?
+ * An explicit `CLAUDE_CONFIG_DIR` that *is* `~/.claude` is not: its conversations are the
+ * default's. The one spelling of "non-default dir" — the roster's `account.explicit` (what
+ * `onOtherAccount` reads) and the known-dirs list are both this.
+ */
+export function isOtherConfigDir({ configDir, explicit } = {}, home = os.homedir()) {
+  return Boolean(explicit) && Boolean(configDir) && !sameConfigDir(configDir, defaultConfigDirFor(home));
+}
+
 /** Do two config dirs name the same folder? Both absolute; `null` is never the same as anything. */
 export function sameConfigDir(a, b) {
   return Boolean(a && b) && path.resolve(a) === path.resolve(b);
@@ -250,7 +260,7 @@ export function readAccount(text, { configDir, explicit }, home = os.homedir()) 
     // Another account's folder, as against the default one — what `onOtherAccount` reads. An
     // explicit `CLAUDE_CONFIG_DIR` that *is* `~/.claude` is not another folder: its
     // conversations are the default's, so a plain `claude --resume` finds them.
-    explicit: Boolean(explicit) && path.resolve(configDir) !== path.join(home, '.claude'),
+    explicit: isOtherConfigDir({ configDir, explicit }, home),
   };
   const o = json.oauthAccount;
   const uuid = typeof o?.accountUuid === 'string' && o.accountUuid ? o.accountUuid : null;
@@ -382,9 +392,10 @@ export class AccountReader {
     return this.paneDirs.get(paneId)?.configDir ?? null;
   }
 
-  /** Every explicit (`CLAUDE_CONFIG_DIR`-set) dir on a live pane as of the last call. */
+  /** Every other-account dir on a live pane as of the last call — `account.explicit`'s rule. */
   explicitDirs() {
-    return [...new Set([...this.paneDirs.values()].filter((d) => d.explicit).map((d) => d.configDir))];
+    const other = [...this.paneDirs.values()].filter((d) => isOtherConfigDir(d, this.home));
+    return [...new Set(other.map((d) => d.configDir))];
   }
 
   /** The signed-in accounts on the roster right now, for the settings box. */

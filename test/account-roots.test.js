@@ -10,6 +10,7 @@ import {
   KnownConfigDirs,
   configDirOfTranscript,
   defaultConfigDirFor,
+  isOtherConfigDir,
   peersDirOf,
   projectsDirOf,
   sameConfigDir,
@@ -169,4 +170,12 @@ test('an unparseable file is never replaced; what is learned meanwhile lives in 
   } finally {
     await fsp.rm(s.dir, { recursive: true, force: true });
   }
+});
+
+test('one spelling of “another account’s folder”: an explicit ~/.claude is not one', () => {
+  assert.equal(isOtherConfigDir({ configDir: `${HOME}/.claude-two`, explicit: true }, HOME), true);
+  assert.equal(isOtherConfigDir({ configDir: `${HOME}/.claude`, explicit: true }, HOME), false);
+  assert.equal(isOtherConfigDir({ configDir: `${HOME}/.claude/`, explicit: true }, HOME), false);
+  assert.equal(isOtherConfigDir({ configDir: `${HOME}/.claude-two`, explicit: false }, HOME), false);
+  assert.equal(isOtherConfigDir(null ?? undefined, HOME), false);
 });
