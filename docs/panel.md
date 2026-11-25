@@ -115,9 +115,10 @@ red from 75% up. A bar and its percentage share one `currentColor`, so a row can
 amber in its text and neutral in its fill.
 
 A reset reads as a countdown inside a day — `2h 53m`, or `45m` under an hour with nothing
-to separate — and as a weekday plus the hour beyond it, `Mon 5PM`. The phone's five-hour
-bar is the one exception: it shows the clock time it actually resets at, `23:10`, because a
-countdown glanced at once an hour never reads as anything but "still running out."
+to separate — and as a weekday plus the hour beyond it, `Mon 5PM`. The desktop puts the
+local clock time after a countdown, `1h 44m (14:30)`; the weekday form already says when. The
+phone's five-hour bar shows only that clock time, `23:10`, because a countdown glanced at
+once an hour never reads as anything but "still running out."
 
 A reading older than fifteen minutes draws dim, its own age printed underneath — `as of
 12m ago` — because the feed only moves when some session on the machine takes a turn: a

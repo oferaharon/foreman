@@ -154,11 +154,11 @@ export function formatReset(resetsAt, now = Date.now()) {
 }
 
 /** `23:10`, `09:05` — the local wall-clock time of `resetsAt` in 24-hour form, zero-padded
- *  both sides. The phone's own choice for the five-hour bar (issue #51 follow-up): every
- *  other reset label on this shared record stays a duration or the 12-hour style above, so
- *  this is deliberately not wired into `formatReset` itself — that function is the desktop's
- *  and the weekly bar's and must not change shape for one client's one window. Same guard as
- *  `formatReset`: an unreadable `resetsAt` answers `''`, never a throw. */
+ *  both sides. The phone draws it alone on the five-hour bar (issue #51 follow-up) and the
+ *  desktop after its countdown (`formatResetWithClock`). Deliberately not wired into
+ *  `formatReset` itself — both clients read that one, and it must not change shape for one
+ *  client's labels. Same guard as `formatReset`: an unreadable `resetsAt` answers `''`,
+ *  never a throw. */
 export function formatResetClock24(resetsAt) {
   const resetMs = Number(resetsAt) * 1000;
   if (!Number.isFinite(resetMs)) return '';
@@ -166,6 +166,16 @@ export function formatResetClock24(resetsAt) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${hours}:${minutes}`;
+}
+
+/** `1h 44m (14:30)` — the desktop rail's reset label: `formatReset`'s countdown with the
+ *  clock time behind it. Only where that countdown is a duration (under a day away); the
+ *  weekday form (`Mon 5PM`) already says when. An unreadable `resetsAt` answers `''`, with
+ *  no parentheses. */
+export function formatResetWithClock(resetsAt, now = Date.now()) {
+  const label = formatReset(resetsAt, now);
+  if (!label || Number(resetsAt) * 1000 - now >= DAY_MS) return label;
+  return `${label} (${formatResetClock24(resetsAt)})`;
 }
 
 /**

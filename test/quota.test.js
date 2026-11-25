@@ -9,6 +9,7 @@ import {
   staleness,
   formatReset,
   formatResetClock24,
+  formatResetWithClock,
 } from '../web/quota.js';
 
 /*
@@ -243,6 +244,32 @@ test('formatResetClock24 on an unreadable resetsAt answers an empty string, not 
   assert.doesNotThrow(() => formatResetClock24(undefined));
   assert.equal(formatResetClock24(undefined), '');
   assert.equal(formatResetClock24('not-a-number'), '');
+});
+
+/* ──────────────────────────────────────────────── formatResetWithClock ─── */
+
+test('formatResetWithClock puts the clock after a duration', () => {
+  const now = new Date(2026, 8, 4, 12, 46, 0).getTime();
+  assert.equal(formatResetWithClock(localResetsAt(14, 30), now), '1h 44m (14:30)');
+  assert.equal(formatResetWithClock(localResetsAt(13, 31), now), '45m (13:31)');
+});
+
+test('formatResetWithClock adds nothing to the weekday form, from exactly a day out', () => {
+  for (const ahead of [DAY_MS(), 3 * DAY_MS()]) {
+    const resetsAt = Math.round((NOW + ahead) / 1000);
+    const now = resetsAt * 1000 - ahead;
+    assert.equal(formatResetWithClock(resetsAt, now), `${WEEKDAY(resetsAt)} ${HOUR12(resetsAt)}`);
+  }
+});
+
+test('formatResetWithClock just under a day still reads as a duration, with its clock', () => {
+  const resetsAt = Math.round(NOW / 1000) + 23 * 3600;
+  assert.equal(formatResetWithClock(resetsAt, NOW), `${formatReset(resetsAt, NOW)} (${HOUR24(resetsAt)})`);
+});
+
+test('formatResetWithClock on an unreadable resetsAt draws no parentheses', () => {
+  assert.equal(formatResetWithClock(undefined, NOW), '');
+  assert.equal(formatResetWithClock('not-a-number', NOW), '');
 });
 
 function DAY_MS() {
