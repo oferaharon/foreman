@@ -171,7 +171,7 @@ import { slateActive, slateButton, visibleEntries } from './room-slate.js';
 // the same two bars off the same record, and a desktop going amber at one number while a
 // phone goes amber at another is the `isLeadName` lesson in another costume. Nothing here
 // may define a threshold, a format or a staleness rule of its own.
-import { windowsOf, staleness, formatReset, accountRows } from './quota.js';
+import { windowsOf, staleness, formatResetWithClock, accountRows } from './quota.js';
 // One colour per speaker in the shared room, keyed on the session's name. The fifth shared
 // pure module in `web/`, node-tested like the four above it — and the reason it is a module
 // rather than four lines here is the same one every time: the name→hue map has to be
@@ -5642,7 +5642,7 @@ function renderQuota(now = Date.now()) {
             b.acct.label ?? '',
             b.dim ? 'dim' : 'live',
             b.age,
-            ...b.windows.map((w) => [w.key, w.pct, w.tone, formatReset(w.resetsAt, now)].join('|')),
+            ...b.windows.map((w) => [w.key, w.pct, w.tone, formatResetWithClock(w.resetsAt, now)].join('|')),
           ].join('~'),
         )
         .join('^')
@@ -5693,7 +5693,7 @@ function quotaAccount({ acct, windows, dim, age }, now) {
  *  why an unrecognised third one is left out rather than guessed at. */
 const DRAWN_WINDOWS = new Set(['five_hour', 'seven_day']);
 
-/** `5h 42% · resets 2h10m`, over a hairline bar. The tone is set once on the row and read
+/** `5h 42% · resets 2h 10m (14:30)`, over a hairline bar. The tone is set once on the row and read
  *  as `currentColor` by both the percentage and the fill, so a row can never be amber in
  *  its text and neutral in its bar. */
 function quotaRow(win, now) {
@@ -5716,7 +5716,7 @@ function quotaRow(win, now) {
 
   const reset = document.createElement('span');
   reset.className = 'quota-reset';
-  reset.textContent = `· resets ${formatReset(win.resetsAt, now)}`;
+  reset.textContent = `· resets ${formatResetWithClock(win.resetsAt, now)}`;
 
   line.append(name, pct, reset);
 

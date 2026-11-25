@@ -1198,9 +1198,10 @@ body.row-dragging * { cursor: row-resize !important; }
   color: var(--ink);
 }
 
-/* At the rail's 14rem floor `5H 100% · RESETS 4H59M` is the longest line this can draw and
-   it still fits; the reset is the half that gives way first if a future format is longer,
-   because the percentage is the half you came here for. */
+/* `5H 100% · RESETS 23H 59M (19:39)` is about the longest line this can draw. It fits from a
+   16rem rail up (measured; the default is 20rem); at 15rem and the 14rem floor it ends in an
+   ellipsis, losing the clock first. The reset is the half that gives way, because the
+   percentage is the half you came here for. */
 .quota-reset {
   min-width: 0;
   overflow: hidden;
