@@ -3706,6 +3706,7 @@ app.get('/api/shared-room', (req, res) => {
  */
 const ROOM_FAULTS = new Map([
   ['bad-name', 400],
+  ['bad-description', 400],
   ['bad-member', 400],
   ['bad-sender', 400],
   ['bad-poster', 400],
@@ -3877,7 +3878,9 @@ app.post('/api/rooms', (req, res) => {
 
   let room;
   try {
-    room = rooms.create(String(req.body?.name ?? ''), members);
+    room = rooms.create(String(req.body?.name ?? ''), members, {
+      description: req.body?.description ?? null,
+    });
   } catch (err) {
     return roomFault(res, err);
   }
@@ -3887,7 +3890,7 @@ app.post('/api/rooms', (req, res) => {
 });
 
 /**
- * Rename, add or remove a member, archive or unarchive. One route rather than four,
+ * Rename, describe, add or remove a member, archive or unarchive. One route rather than four,
  * because every one of them is the same press on the same card and none of them can happen
  * to a room that is not there.
  *
@@ -3906,6 +3909,8 @@ app.patch('/api/rooms/:id', (req, res) => {
   let room = null;
   try {
     if (req.body?.name !== undefined) room = rooms.rename(id, String(req.body.name));
+    // Empty, blank or null clears it — there is no separate "remove" key.
+    if (req.body?.description !== undefined) room = rooms.describe(id, req.body.description);
 
     if (req.body?.add !== undefined) {
       const who = String(req.body.add ?? '').trim();

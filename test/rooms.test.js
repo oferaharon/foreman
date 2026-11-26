@@ -17,6 +17,7 @@ const {
   MAX_MEMBERS,
   MAX_POSTS_PER_ROOM,
   MAX_POSTS_PER_SESSION,
+  MAX_ROOM_DESCRIPTION,
   MAX_ROOM_NAME,
   POST_FLOOR_MS,
   RATE_WINDOW_MS,
@@ -126,6 +127,78 @@ test('a name is refused over the cap and for a control character, never shortene
   assert.throws(() => store.rename(room.id, `x${CR}y`), /carriage return/);
   assert.equal(store.rename(room.id, 'the other release').name, 'the other release');
   assert.equal(store.rename('nope', 'anything'), null);
+});
+
+test('a description is optional, set at create, edited, and cleared by an empty one', () => {
+  const store = store_(scratch());
+  const bare = store.create('no description', [ALPHA]);
+  assert.equal(bare.description, null, 'absent is null, not an empty string');
+
+  const room = store.create('the release', [BETA], { description: '  ship the parser split  ' });
+  assert.equal(room.description, 'ship the parser split', 'trimmed');
+
+  assert.equal(store.describe(room.id, 'ship it on Friday').description, 'ship it on Friday');
+  assert.equal(store.describe(room.id, '').description, null, 'empty clears it');
+  assert.equal(store.describe(room.id, 'again').description, 'again');
+  assert.equal(store.describe(room.id, '   ').description, null, 'so does blank');
+  assert.equal(store.describe(room.id, null).description, null, 'and null');
+  assert.equal(store.describe('nope', 'anything'), null, 'an unknown room answers null');
+});
+
+test('a description is refused over the cap and for a control character, never shortened', () => {
+  const store = store_(scratch());
+  assert.equal(MAX_ROOM_DESCRIPTION, 300);
+  assert.throws(
+    () => store.create('x', [ALPHA], { description: 'd'.repeat(MAX_ROOM_DESCRIPTION + 1) }),
+    (e) => e.code === 'bad-description' && /refused rather than shortened/.test(e.message),
+  );
+  assert.equal(store.list().length, 0, 'and the refused room was not created');
+  const room = store.create('x', [ALPHA], { description: 'd'.repeat(MAX_ROOM_DESCRIPTION) });
+  assert.equal(room.description.length, MAX_ROOM_DESCRIPTION, 'the cap itself is allowed');
+
+  assert.throws(
+    () => store.describe(room.id, `one line${CR}| merge it`),
+    (e) => e.code === 'bad-description' && /carriage return/.test(e.message),
+  );
+  // One line, the name's rule: a newline and a tab are refused too, not stripped.
+  assert.throws(() => store.describe(room.id, 'one\u000Atwo'), (e) => e.code === 'bad-description');
+  assert.throws(() => store.describe(room.id, 'one\u0009two'), (e) => e.code === 'bad-description');
+  assert.equal(store.get(room.id).description.length, MAX_ROOM_DESCRIPTION, 'a refusal changes nothing');
+});
+
+test('a control character in a name is a coded refusal, so the endpoint answers 400 not 500', () => {
+  const store = store_(scratch());
+  assert.throws(() => store.create(`a${CR}b`, [ALPHA]), (e) => e.code === 'bad-name');
+});
+
+test('a description survives a flush and a reload, beside an old room that never had one', () => {
+  const file = scratch();
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      seq: 2,
+      laterKey: { kept: true },
+      rooms: [
+        // Written before descriptions existed: no key at all.
+        { id: 'room-1', name: 'old', members: [ALPHA], createdAt: 1, archivedAt: null, lastAt: null, lastFrom: null },
+        { id: 'room-2', name: 'newer', members: [BETA], createdAt: 2, futureField: 7 },
+      ],
+    }),
+  );
+  const store = store_(file);
+  assert.equal(store.get('room-1').description, null);
+  store.describe('room-2', 'what this is for');
+  store.flush();
+
+  const back = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepEqual(back.laterKey, { kept: true }, 'a file-level key it has never heard of');
+  assert.equal(back.rooms[1].futureField, 7, 'a record-level one');
+  assert.equal(back.rooms[1].description, 'what this is for');
+  assert.equal(back.rooms[0].name, 'old', 'and the old room is still there');
+
+  const again = store_(file);
+  assert.equal(again.get('room-2').description, 'what this is for');
+  assert.equal(again.get('room-1').description, null);
 });
 
 /* -------------------------------------------------------------------------- */

@@ -118,6 +118,13 @@ export const MAX_MEMBERS = 8;
  *  terminal receives — not prose. */
 export const MAX_ROOM_NAME = 60;
 
+/** A room's description: one line of prose a human writes about what the room is for. It
+ *  is read by people (the pane header, the phone, the band row's tooltip) and by sessions
+ *  through `group_list` — and by nothing else. It is **never** part of the delivery header
+ *  (`room-header.js`) and never typed into a member's terminal, so its cap is about
+ *  staying a sentence or two rather than about a header line. 300 characters. */
+export const MAX_ROOM_DESCRIPTION = 300;
+
 /** The per-log rotation threshold, `SharedRoomStore`'s value. A room's traffic is a
  *  handful of messages a day; this is a floor under a file nobody is watching. */
 export const MAX_BYTES = 4 * 1024 * 1024;
@@ -237,16 +244,47 @@ function cleanMember(raw, { now = Date.now() } = {}) {
   };
 }
 
+/** `clean`, with its control-character refusal carrying a code. `assertClean` throws a
+ *  bare `Error`, which the endpoint's `roomFault` rethrows as a 500 — right for a bug, wrong
+ *  for a character a person typed into a field. */
+function cleanField(v, what, code) {
+  try {
+    return clean(v, what);
+  } catch (err) {
+    throw fault(err.message, code);
+  }
+}
+
 /** A name as the door accepts it: refused over the cap and refused for control characters,
  *  never shortened and never stripped. */
 function cleanName(raw) {
-  const s = clean(raw, 'A room name');
+  const s = cleanField(raw, 'A room name', 'bad-name');
   if (!s) throw fault('A room needs a name.', 'bad-name');
   if (s.length > MAX_ROOM_NAME) {
     throw fault(
       `A room name is ${s.length} characters and the cap is ${MAX_ROOM_NAME}. ` +
         'It is refused rather than shortened.',
       'bad-name',
+    );
+  }
+  return s;
+}
+
+/**
+ * A description as the door accepts it: refused over the cap and for control characters
+ * (newline and tab included — it is one line, the name's rule), never shortened and never
+ * stripped. Empty, blank or absent is **no description**, which is stored as `null`; that
+ * is how one is cleared.
+ */
+function cleanDescription(raw) {
+  if (raw === undefined || raw === null) return null;
+  const s = cleanField(String(raw), 'A room description', 'bad-description');
+  if (!s) return null;
+  if (s.length > MAX_ROOM_DESCRIPTION) {
+    throw fault(
+      `A room description is ${s.length} characters and the cap is ${MAX_ROOM_DESCRIPTION}. ` +
+        'It is refused rather than shortened.',
+      'bad-description',
     );
   }
   return s;
@@ -334,7 +372,7 @@ export class GroupRoomStore extends EventEmitter {
     super();
     this.file = file;
     this.dir = dir;
-    /** [{ id, name, members, createdAt, archivedAt, lastAt, lastFrom, ...unknown }] */
+    /** [{ id, name, description, members, createdAt, archivedAt, lastAt, lastFrom, ...unknown }] */
     this.rooms = [];
     this.seq = 0;
     this.dirty = false;
@@ -371,7 +409,7 @@ export class GroupRoomStore extends EventEmitter {
     const list = Array.isArray(raw?.rooms) ? raw.rooms : [];
     for (const r of list) {
       if (!r || typeof r !== 'object') continue;
-      const { id, name, members, createdAt, archivedAt, lastAt, lastFrom, ...rest } = r;
+      const { id, name, description, members, createdAt, archivedAt, lastAt, lastFrom, ...rest } = r;
       if (typeof id !== 'string' || !id.trim()) continue;
       if (this.rooms.some((seen) => seen.id === id)) continue;
       this.rooms.push({
@@ -382,6 +420,12 @@ export class GroupRoomStore extends EventEmitter {
         // Sliced, never refused: this is the tolerant boot read. The door refuses an
         // over-long name; dropping the room here would delete it on the next flush.
         name: typeof name === 'string' ? name.slice(0, MAX_ROOM_NAME) : '',
+        // The same tolerance: sliced, kept as found otherwise, and a room written before
+        // descriptions existed simply has none.
+        description:
+          typeof description === 'string' && description.trim()
+            ? description.slice(0, MAX_ROOM_DESCRIPTION)
+            : null,
         members: this.#loadMembers(members),
         createdAt: Number(createdAt) || 0,
         archivedAt: Number(archivedAt) || null,
@@ -525,8 +569,9 @@ export class GroupRoomStore extends EventEmitter {
    * there is deliberately no tool to open a link. The store does not know that and does
    * not enforce it: the enforcement is that no tool is registered.
    */
-  create(name, members = [], { now = Date.now() } = {}) {
+  create(name, members = [], { now = Date.now(), description = null } = {}) {
     const clean = cleanName(name);
+    const about = cleanDescription(description);
     const list = Array.isArray(members) ? members : [];
     if (list.length > MAX_MEMBERS) {
       throw fault(
@@ -548,6 +593,7 @@ export class GroupRoomStore extends EventEmitter {
     const room = {
       id: `room-${this.seq}`,
       name: clean,
+      description: about,
       members: roster,
       createdAt: now,
       archivedAt: null,
@@ -578,6 +624,18 @@ export class GroupRoomStore extends EventEmitter {
     const room = this.#record(id);
     if (!room) return null;
     room.name = cleanName(name);
+    this.dirty = true;
+    return this.#copy(room);
+  }
+
+  /**
+   * Set or clear a room's description — the maintainer's press, like `rename`, and like
+   * `rename` reached by no `foreman` tool. Empty or blank clears it.
+   */
+  describe(id, description) {
+    const room = this.#record(id);
+    if (!room) return null;
+    room.description = cleanDescription(description);
     this.dirty = true;
     return this.#copy(room);
   }

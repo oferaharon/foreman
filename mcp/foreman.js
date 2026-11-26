@@ -439,6 +439,10 @@ const WORKER_TOOLS = [
 const summarizeRoom = (r) => ({
   id: r.id,
   name: r.name,
+  // What the room is for, in the maintainer's words, or null. Set only from the panel —
+  // no tool writes it — and read here and nowhere else a session sees: it is never in the
+  // delivery header and never typed into a terminal.
+  description: typeof r.description === 'string' && r.description ? r.description : null,
   members: (r.members || []).map((m) => ({
     name: m.name,
     tmuxSession: m.tmuxSession,
@@ -487,7 +491,7 @@ const SESSION_TOOLS = [
   {
     name: 'group_list',
     description:
-      `The rooms you are in, each with everyone else in it and when it last carried a message. A **room** is a named place where a few sessions coordinate on one thing — a feature spread across two codebases, say. Ask whenever it matters rather than relying on remembering; membership changes without telling you. Being in no rooms is the ordinary case, not a failure to find them. You cannot create a room, join one, or add anyone to one: only ${HUMAN} can, from the panel, and there is deliberately no tool for it — ask them in conversation if you want one. Archived rooms are left out: nothing more can be posted to one, though group_read still reads it.`,
+      `The rooms you are in, each with everyone else in it, when it last carried a message, and its description — what the room is for, in ${HUMAN}'s words, or null when they gave none; this is the only place a description reaches you, so read it here rather than expecting it on a post. A **room** is a named place where a few sessions coordinate on one thing — a feature spread across two codebases, say. Ask whenever it matters rather than relying on remembering; membership changes without telling you. Being in no rooms is the ordinary case, not a failure to find them. You cannot create a room, join one, or add anyone to one: only ${HUMAN} can, from the panel, and there is deliberately no tool for it — ask them in conversation if you want one. The same goes for a room's name and description. Archived rooms are left out: nothing more can be posted to one, though group_read still reads it.`,
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     handler: async () => ({
       // Your own pane, echoed back. Which member of each room is you is the member marked
