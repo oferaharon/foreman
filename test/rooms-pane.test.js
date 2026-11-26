@@ -421,7 +421,8 @@ test('the tally is a line of its own, under the name, with the controls left on 
    *
    * So: built as a child of the header rather than of `.head-meta` (or nothing has moved at
    * all, and the header looks identical while the tally is back beside the buttons), and the
-   * grid rows are stated in the stylesheet — the tally on row 2 spanning to the right edge,
+   * grid rows are stated in the stylesheet — the tally on row 3 (under the description)
+   * spanning to the right edge,
    * the controls pinned to row 1.
    */
   const build = fn('buildGroupHead');
@@ -431,7 +432,8 @@ test('the tally is a line of its own, under the name, with the controls left on 
 
   assert.match(styles, /\.main-head\.is-group \{[^}]*display: grid;/);
   const tally = styles.slice(styles.indexOf('.main-head.is-group .group-tally {'));
-  assert.match(tally.slice(0, tally.indexOf('}')), /grid-column: 2 \/ -1;[\s\S]*grid-row: 2;/);
+  // Row 3 since rooms grew a description, which sits on row 2 between the name and the tally.
+  assert.match(tally.slice(0, tally.indexOf('}')), /grid-column: 2 \/ -1;[\s\S]*grid-row: 3;/);
   assert.match(styles, /\.main-head\.is-group \.head-meta \{ grid-column: 3; grid-row: 1; \}/);
   // `.main-head` and `.app.split .main-head` both set `gap` as a shorthand, so each of them
   // sets the row gap too — and the split one out-specifies a bare `.main-head.is-group`.
@@ -441,6 +443,25 @@ test('the tally is a line of its own, under the name, with the controls left on 
   // And the tally is still the same node `renderGroupHead` writes, so nothing about the
   // repaint changed with the line it sits on.
   assert.match(fn('renderGroupHead'), /els\.stat\.textContent = `\$\{n\} message/);
+});
+
+test('the description sits under the name, edits in place, and an empty commit clears it', () => {
+  const build = fn('buildGroupHead');
+  assert.match(build, /about\.className = 'group-about';/);
+  assert.match(build, /head\.append\(about\);/, 'off the header, never inside `.head-meta`');
+  const about = styles.slice(styles.indexOf('.main-head.is-group .group-about {'));
+  assert.match(about.slice(0, about.indexOf('}')), /grid-column: 2 \/ -1;[\s\S]*grid-row: 2;/);
+
+  const head = fn('renderGroupHead');
+  assert.match(head, /if \(!view\.groupDescribing\)/, 'a repaint mid-edit must not put the line back');
+  assert.match(head, /'add a description'/, 'with none, the line is how one is added');
+
+  const edit = fn('startGroupDescribe');
+  assert.match(edit, /input\.maxLength = MAX_ROOM_DESCRIPTION;/);
+  // `next !== before`, with no `next &&` in front of it: an empty commit is a real answer
+  // here — it clears — where the rename refuses an empty name.
+  assert.match(edit, /if \(commit && next !== before\) patchGroup\(\{ description: next \}, btn\);/);
+  assert.match(edit, /input\.onblur = \(\) => done\(false\);/, 'walking away cancels');
 });
 
 test('remove and archive both go through `armConfirm`', () => {

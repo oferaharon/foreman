@@ -18,6 +18,7 @@ import {
   membersSig,
   quietText,
   removeQuestion,
+  roomAbout,
   roomsListView,
   roomsSig,
 } from '../web/m/rooms.js';
@@ -166,10 +167,31 @@ test('a room with nobody in it says so rather than drawing an empty strip', () =
 test('the signature moves on every fact the row draws', () => {
   const base = roomsSig([room()]);
   assert.notEqual(base, roomsSig([room({ name: 'renamed' })]), 'the name');
+  assert.notEqual(base, roomsSig([room({ description: 'what it is for' })]), 'the description');
   assert.notEqual(base, roomsSig([room({ unseen: 2 })]), 'the unseen count');
   assert.notEqual(base, roomsSig([room({ members: [member('alpha-main')] })]), 'the membership');
   assert.notEqual(base, roomsSig([room({ archivedAt: 9 })]), 'archived');
   assert.notEqual(base, roomsSig([room(), room({ id: 'r2', name: 'other' })]), 'a second room');
+});
+
+test('a description is drawn under the name on the list and on the room screen, and only when there is one', () => {
+  assert.equal(roomAbout(room({ description: '  for the parser  ' })), 'for the parser');
+  assert.equal(roomAbout(room({ description: null })), '');
+  assert.equal(roomAbout(room()), '', 'a room from before descriptions has none');
+  assert.equal(roomAbout(null), '');
+
+  // The list row: a line of its own, and the membership moves to row 3 only when it is there.
+  // A slice rather than `fn`: the brace walk stops at the destructured parameter.
+  const row = between(roomsCode, 'function roomRow(', 'function foldRow(');
+  assert.match(row, /if \(about\) \{[\s\S]*body\.classList\.add\('m-room-has-about'\)[\s\S]*line\.className = 'm-room-about';/);
+  assert.match(css, /\.m-room-body\.m-room-has-about \.m-room-meta \{ grid-row: 3; \}/);
+
+  // The room screen: between the name and the members, hidden with none, painted on the
+  // same beat as the name so a description edited at the Mac reaches an open screen.
+  const head = fn('renderHead', roomsCode);
+  assert.match(head, /el\.about\.hidden = !about;/);
+  assert.match(roomsCode, /head\.append\(top, el\.about, el\.sub\);/);
+  assert.match(css, /\.m-room-head-about\[hidden\]/, 'its `[hidden]` is listed with the others');
 });
 
 test('the signature carries no raw timestamp', () => {

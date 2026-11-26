@@ -1769,8 +1769,19 @@ codebase talking to another would be unbuildable if the list only offered what i
 you. The tally reads `2 of 8`, and `Make the room` stays off until there is a name *and* a
 member.
 
-No session can create a room, join one, or add or remove anybody — there is deliberately no
-tool for any of it. Membership is who may type into whose terminal, and that is your call to
+**A room can carry a description** — one optional line saying what it is for, set in that same
+box under the name, at most 300 characters, refused rather than shortened over that and for any
+control character (a newline included), exactly as the name is. It is for reading, not for
+delivery: it shows under the name in the room pane's header, under the name on the phone (the
+Rooms list and the room screen), and as the line under the name in the rooms band row's hover —
+and a session sees it **only** through `group_list`. It is never in the header line a member's
+terminal receives and never typed into anyone. Edit it in place in the room pane's header the
+way the name is renamed (Enter saves, Escape or clicking away cancels); with none, that line
+reads `add a description`, and saving it empty removes it. No tool writes it, the same as the
+name and the membership.
+
+No session can create a room, join one, add or remove anybody, or rename or describe one —
+there is deliberately no tool for any of it. Membership is who may type into whose terminal, and that is your call to
 make, never a session's to make for you. A session that wants a room asks you in conversation.
 
 **Who can be in one:** ordinary sessions and team leads. Workers are excluded structurally —
@@ -1842,8 +1853,8 @@ was typed a copy.
 
 **The three tools a member gets**, and nothing else:
 
-- `group_list` — which rooms this session is in, who else is in each, and when each last
-  carried a message. No arguments. Being in none is the ordinary case, not a failure.
+- `group_list` — which rooms this session is in, who else is in each, when each last
+  carried a message, and each room's `description` (or `null`). No arguments. Being in none is the ordinary case, not a failure.
 - `group_post` — `{id, text}`. Say it once; everyone else gets a copy — or only the members an
   `@name` in the text names — and you never get your own back.
 - `group_read` — `{id, since?}`. Everything after a cursor (capped at 200), or roughly the
@@ -1888,7 +1899,8 @@ session list above it 6rem of its own, so a short window clamps the band without
 the height you chose. The height is kept in this browser, and a double-click on the
 grip puts the band back to its own content height.
 
-**A room in a pane.** Click a row. The header carries the name (click it to rename), a chip per
+**A room in a pane.** Click a row. The header carries the name (click it to rename), the
+description under it (click it to edit; `add a description` when there is none), a chip per
 member with a live status dot, an `✕` to remove one and a `+` to add, an archive control and a
 fold (see [Folding the side panels](#folding-the-side-panels)); every destructive one asks
 before it acts. Each post is a bubble with the speaker's colour on

@@ -54,7 +54,8 @@ const GAMMA = { tmuxSession: 'foreman-gamma-master', name: 'gamma-master', paneI
  */
 const ROOMS = [
   {
-    id: 'rm-1', name: 'the parser split', members: [ALPHA, BETA, GAMMA], memberCount: 3,
+    id: 'rm-1', name: 'the parser split', description: 'alpha and beta share one parser now',
+    members: [ALPHA, BETA, GAMMA], memberCount: 3,
     createdAt: 1, archivedAt: null, lastAt: 25, lastFrom: 'beta-main',
     // The panel's own badge — the maintainer's seen mark, never a session's.
     seq: 25, unseen: 3, seenAt: 12,
@@ -1293,6 +1294,17 @@ test('group_list answers the rooms this pane is in, and leaves archived ones out
   // the two is no longer a way to tell.
   assert.deepEqual(body.rooms[0].members.map((m) => m.you === true), [true, false, false]);
   assert.ok(!('you' in body.rooms[0].members[1]), 'absent rather than false on everybody else');
+});
+
+test('group_list carries each room’s description, and says so in its own description', async () => {
+  const [room] = out(await call(session, 190, 'group_list')).rooms;
+  assert.equal(room.description, 'alpha and beta share one parser now');
+  const list = (await toolsOf(session, 191)).find((t) => t.name === 'group_list');
+  assert.match(list.description, /description/);
+  assert.match(list.description, /name and description/, 'and that only a human sets one');
+  // And a tool that writes one does not exist — the name's and the membership's rule.
+  const names = (await toolsOf(session, 192)).map((t) => t.name);
+  for (const absent of ['group_describe', 'group_rename', 'group_edit']) assert.ok(!names.includes(absent));
 });
 
 test('group_list drops the maintainer’s seen mark, which is not a session’s to read', async () => {

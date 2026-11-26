@@ -10,13 +10,18 @@ import {
   countLine,
   createReason,
   MAX_MEMBERS,
+  MAX_ROOM_DESCRIPTION,
   MAX_ROOM_NAME,
   orderForHere,
   roomParticipants,
   rowFolder,
   rowName,
 } from '../web/rooms-create.js';
-import { MAX_MEMBERS as SERVER_MAX_MEMBERS, MAX_ROOM_NAME as SERVER_MAX_ROOM_NAME } from '../server/rooms.js';
+import {
+  MAX_MEMBERS as SERVER_MAX_MEMBERS,
+  MAX_ROOM_DESCRIPTION as SERVER_MAX_ROOM_DESCRIPTION,
+  MAX_ROOM_NAME as SERVER_MAX_ROOM_NAME,
+} from '../server/rooms.js';
 
 /*
  * The create-room modal.
@@ -223,6 +228,7 @@ test('the client’s caps are the server’s, held together by this assertion an
   // would have taken; one above it ships a control that always ends in a 400.
   assert.equal(MAX_MEMBERS, SERVER_MAX_MEMBERS);
   assert.equal(MAX_ROOM_NAME, SERVER_MAX_ROOM_NAME);
+  assert.equal(MAX_ROOM_DESCRIPTION, SERVER_MAX_ROOM_DESCRIPTION);
 });
 
 /* ================================================= the modal, driven ===== */
@@ -361,6 +367,7 @@ function liftCreateRoom() {
     'openGroupRoom',
     'fetch',
     'MAX_MEMBERS',
+    'MAX_ROOM_DESCRIPTION',
     'MAX_ROOM_NAME',
     'canCreate',
     'capRefusal',
@@ -397,6 +404,7 @@ function openBox({ sessions = [ALPHA, BETA, GAMMA], open = null, post = null, ca
     (id) => opened.push(id),
     fetchStub,
     MAX_MEMBERS,
+    MAX_ROOM_DESCRIPTION,
     MAX_ROOM_NAME,
     canCreate,
     capRefusal,
@@ -421,6 +429,7 @@ function openBox({ sessions = [ALPHA, BETA, GAMMA], open = null, post = null, ca
     opened,
     escape,
     name: one(back, 'field-cap').children.find((c) => c.tagName === 'INPUT'),
+    about: all(back, 'field-cap')[1].children.find((c) => c.tagName === 'INPUT'),
     note: one(back, 'modal-note'),
     tally: one(back, 'room-pick-tally'),
     rows: all(back, 'room-pick-row'),
@@ -451,6 +460,23 @@ test('the box opens with a name field, one row per participant, and the button o
   assert.equal(ui.tally.textContent, '0 of 8');
   assert.equal(ui.name.focused, true, 'the first field takes the caret');
   assert.equal(ui.name.maxLength, MAX_ROOM_NAME);
+});
+
+test('the description is optional: omitted from the request when blank, trimmed when not', async () => {
+  let ui = openBox();
+  assert.equal(ui.about.maxLength, MAX_ROOM_DESCRIPTION);
+  type(ui.name, 'the release');
+  tick(ui.rows[0]);
+  ui.about.value = '   ';
+  await ui.create.onclick();
+  assert.ok(!('description' in ui.posts[0].payload), 'a room made without one is the request it always was');
+
+  ui = openBox();
+  type(ui.name, 'the release');
+  tick(ui.rows[0]);
+  ui.about.value = '  one parser for alpha and beta ';
+  await ui.create.onclick();
+  assert.equal(ui.posts[0].payload.description, 'one parser for alpha and beta');
 });
 
 test('workers are not offered, and the rows carry ids rather than positions', () => {

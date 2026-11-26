@@ -462,6 +462,30 @@ test('the membership lives on the hover, and archived says so first', () => {
   assert.match(arch.split('\n')[1], /archived/);
 });
 
+test('a description is the hover line under the name, and a room without one has no such line', () => {
+  const t = roomTitle(room('r1', 'alpha ↔ beta', { description: 'one parser for both' }));
+  assert.deepEqual(t.split('\n').slice(0, 2), ['alpha ↔ beta', 'one parser for both']);
+  const bare = roomTitle(room('r1', 'alpha ↔ beta', { description: null }));
+  assert.match(bare.split('\n')[1], /alpha-main, beta-main/, 'straight to the members');
+  const arch = roomTitle(room('r1', 'alpha ↔ beta', { description: 'for', archivedAt: 5 }), { archived: true });
+  assert.match(arch.split('\n')[2], /archived/, 'the description still comes first after the name');
+});
+
+test('a changed description re-signs the band and patches the same row’s title in place', () => {
+  const before = room('r1', 'alpha ↔ beta', { description: 'old' });
+  const after = room('r1', 'alpha ↔ beta', { description: 'new' });
+  assert.notEqual(bandSig([before]), bandSig([after]), 'or the tooltip keeps saying what it was for');
+  withDom(() => {
+    const list = container();
+    patchBand(list, [before]);
+    const row = list.children[0];
+    assert.match(row.title, /\nold\n/);
+    patchBand(list, [after]);
+    assert.equal(list.children[0], row, 'the row is patched, never rebuilt or moved');
+    assert.match(row.title, /\nnew\n/);
+  });
+});
+
 /* ------------------------------------------ patched in place, not rebuilt --- */
 
 test('the band draws nothing at all for an empty list', () => {

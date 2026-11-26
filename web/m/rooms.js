@@ -196,6 +196,8 @@ export function roomsSig(rooms = [], { archivedOpen: open = false } = {}) {
             'room',
             e.room.id,
             e.room.name,
+            // The description is drawn on the row, so a changed one must repaint it.
+            roomAbout(e.room),
             memberStrip(e.room),
             unseenText(e.room.unseen),
             e.archived ? 1 : 0,
@@ -203,6 +205,11 @@ export function roomsSig(rooms = [], { archivedOpen: open = false } = {}) {
     )
     .join('~');
 }
+
+/** A room's description as it is drawn: its own words trimmed, or `''` for none. Only a
+ *  human sets one (the `+ room` dialog and the desktop room header); nothing here edits it. */
+export const roomAbout = (room) =>
+  typeof room?.description === 'string' ? room.description.trim() : '';
 
 /**
  * The Rooms tab's body, in the same `{sig, startable, nodes}` contract the other two answer.
@@ -339,6 +346,17 @@ function roomRow(room, { archived = false, onOpen } = {}) {
   name.className = 'm-room-name';
   name.textContent = room.name;
   body.append(name);
+
+  // What the room is for, under its name — only when it has one, so a room without a
+  // description keeps the two-line row it always had.
+  const about = roomAbout(room);
+  if (about) {
+    body.classList.add('m-room-has-about');
+    const line = document.createElement('span');
+    line.className = 'm-room-about';
+    line.textContent = about;
+    body.append(line);
+  }
 
   if (unseen) {
     body.classList.add('has-badge');
@@ -632,6 +650,12 @@ function build(host) {
 
   top.append(el.back, el.title, el.conn);
 
+  // What the room is for, between its name and who is in it. Hidden with none, so a room
+  // without a description keeps the header height it always had.
+  el.about = document.createElement('div');
+  el.about.className = 'm-room-head-about';
+  el.about.hidden = true;
+
   /*
    * Row 2: who is in here, whether it still takes posts, and the two controls that change
    * either — the membership `+` and `archive`.
@@ -660,7 +684,7 @@ function build(host) {
 
   el.sub.append(el.subWho, el.members);
 
-  head.append(top, el.sub);
+  head.append(top, el.about, el.sub);
 
   /* --- the log --- */
 
@@ -779,6 +803,10 @@ function renderHead() {
 
   el.title.textContent = room?.name || (view.answered ? 'no such room' : 'room');
   el.title.title = room?.name || '';
+  const about = roomAbout(room);
+  el.about.textContent = about;
+  el.about.title = about;
+  el.about.hidden = !about;
 
   const parts = [];
   if (room?.archivedAt) parts.push('archived');

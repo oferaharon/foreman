@@ -440,6 +440,58 @@ test('a room renames, takes a member, gives one back, and archives', async (t) =
   assert.equal(res.body.room.archivedAt, null);
 });
 
+test('a description is set at create, edited and cleared by PATCH, and read back by both GETs', async () => {
+  // No members needed: a room has a maximum and no minimum, so this runs without the bench.
+  let res = await api('POST', '/api/rooms', { name: 'described', members: [], description: ' what it is for ' });
+  assert.equal(res.status, 200);
+  const { id } = res.body.room;
+  assert.equal(res.body.room.description, 'what it is for');
+
+  assert.equal((await api('GET', `/api/rooms/${id}`)).body.room.description, 'what it is for');
+  assert.equal(
+    (await api('GET', '/api/rooms')).body.rooms.find((r) => r.id === id).description,
+    'what it is for',
+  );
+
+  res = await api('PATCH', `/api/rooms/${id}`, { description: 'something else' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.room.description, 'something else');
+  assert.equal(res.body.room.name, 'described', 'and the name is untouched');
+
+  res = await api('PATCH', `/api/rooms/${id}`, { description: '' });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.room.description, null, 'empty clears it');
+
+  // A rename alone leaves a description where it was.
+  await api('PATCH', `/api/rooms/${id}`, { description: 'kept' });
+  res = await api('PATCH', `/api/rooms/${id}`, { name: 'renamed' });
+  assert.equal(res.body.room.description, 'kept');
+
+  res = await api('POST', '/api/rooms', { name: 'bare', members: [] });
+  assert.equal(res.body.room.description, null, 'omitted is none');
+});
+
+test('a bad description is a 400 with its code, at create and at edit, and changes nothing', async () => {
+  const before = (await api('GET', '/api/rooms')).body.rooms.length;
+  let res = await api('POST', '/api/rooms', { name: 'too long', members: [], description: 'd'.repeat(301) });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'bad-description');
+  assert.match(res.body.error, /cap is 300/);
+  assert.equal((await api('GET', '/api/rooms')).body.rooms.length, before, 'no room was created');
+
+  const { id } = (await api('POST', '/api/rooms', { name: 'clean', members: [], description: 'ok' })).body.room;
+  res = await api('PATCH', `/api/rooms/${id}`, { description: 'one\u000DNOT QUOTED' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'bad-description');
+  assert.match(res.body.error, /carriage return/);
+  assert.equal((await api('GET', `/api/rooms/${id}`)).body.room.description, 'ok');
+
+  // The name's own control-character refusal is a 400 too, not the 500 an uncoded throw was.
+  res = await api('PATCH', `/api/rooms/${id}`, { name: 'a\u000Db' });
+  assert.equal(res.status, 400);
+  assert.equal(res.body.code, 'bad-name');
+});
+
 test('removing somebody who is not in the room is a 404 about the member', async (t) => {
   if (!bench) return t.skip('no scratch tmux bench on this machine');
   const room = await makeRoom('one member', ['alpha-main']);
