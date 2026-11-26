@@ -196,6 +196,7 @@ import {
   countLine,
   createReason,
   MAX_MEMBERS,
+  MAX_ROOM_DESCRIPTION,
   MAX_ROOM_NAME,
   orderForHere,
   roomParticipants,
@@ -4967,6 +4968,24 @@ function openCreateRoom() {
     'What the room is called, in the rail and in the line every member’s terminal receives.';
   box.append(hint);
 
+  // Optional, and read only by people and by `group_list` — never typed into a terminal,
+  // which is why its hint says so: a reader deciding what to write should know who sees it.
+  const aboutCap = document.createElement('label');
+  aboutCap.className = 'field-cap';
+  aboutCap.textContent = 'Description (optional)';
+  const about = document.createElement('input');
+  about.type = 'text';
+  about.placeholder = 'e.g. one parser shared by alpha and beta';
+  about.maxLength = MAX_ROOM_DESCRIPTION;
+  aboutCap.append(about);
+  box.append(aboutCap);
+
+  const aboutHint = document.createElement('p');
+  aboutHint.className = 'field-hint';
+  aboutHint.textContent =
+    'What the room is for. Shown in its header and in the list members read with group_list — never typed into a terminal.';
+  box.append(aboutHint);
+
   /* ------------------------------------------------------------ the list --- */
 
   const listCap = document.createElement('div');
@@ -5096,6 +5115,9 @@ function openCreateRoom() {
     if (note.textContent) say('');
     sync();
   };
+  about.oninput = () => {
+    if (note.textContent) say('');
+  };
 
   sync();
 
@@ -5119,7 +5141,8 @@ function openCreateRoom() {
   // refused. With nothing ticked it says why instead of submitting, which is the one
   // keystroke a person is most likely to try on a card whose second half they have not
   // noticed yet.
-  name.onkeydown = (e) => {
+  // The description field is held to the same rule — it is the field just above the list.
+  name.onkeydown = about.onkeydown = (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
     if (canCreate(name.value, picked.size)) return void submit();
@@ -5135,6 +5158,9 @@ function openCreateRoom() {
       const made = await postJSON('/api/rooms', {
         name: name.value.trim(),
         members: [...picked],
+        // Omitted rather than sent empty, so a room made without one is exactly the request
+        // it always was.
+        ...(about.value.trim() ? { description: about.value.trim() } : {}),
       });
       close();
       // Items 9/10's hook. The room exists on disk and in the next roster frame either way;
@@ -8831,6 +8857,8 @@ function createPane(slot, host) {
     // Is the name being edited in place? One boolean, because the input replaces the heading
     // and a repaint mid-edit must not put the heading back under the caret.
     groupRenaming: false,
+    // The same for the description line under it, for the same reason.
+    groupDescribing: false,
     // Is the `+` popover open? Built from the roster when it opens and repainted on the beat,
     // because whether a session is still addressable moves without anybody touching it.
     groupAddOpen: false,
@@ -9881,6 +9909,7 @@ function createPane(slot, host) {
     view.groupFollowH = null;
     view.groupOpenKeys.clear();
     view.groupRenaming = false;
+    view.groupDescribing = false;
     view.groupAddOpen = false;
     view.groupArchivedDrawn = null;
     // A held refusal belongs to the press that raised it and a press in flight belongs to the
@@ -10126,9 +10155,22 @@ function createPane(slot, host) {
     const meta = document.createElement('div');
     meta.className = 'head-meta';
 
+    /*
+     * The description, under the name and above the tally, and it edits in place the way
+     * the name renames — a button that swaps for an input. With no description it says
+     * `add a description` in the faint type, because the line is also the only way to set
+     * one after the room exists. What it is *not*: it is never in the line a member's
+     * terminal receives, and no session can write it; `group_list` is where one reads it.
+     */
+    const about = document.createElement('button');
+    about.type = 'button';
+    about.className = 'group-about';
+    about.onclick = () => startGroupDescribe(about);
+    head.append(about);
+
     const stat = document.createElement('div');
     stat.className = 'head-status group-status group-tally';
-    view.groupHeadEl = { name, stat, meta };
+    view.groupHeadEl = { name, about, stat, meta };
     head.append(stat);
 
     /*
@@ -10261,6 +10303,14 @@ function createPane(slot, host) {
       els.name.textContent = room.name || 'room';
       els.name.title = `Rename “${room.name || 'room'}”`;
     }
+    if (!view.groupDescribing) {
+      const text = typeof room.description === 'string' ? room.description : '';
+      els.about.textContent = text || 'add a description';
+      els.about.classList.toggle('is-empty', !text);
+      // The full text on hover too: the line ellipsises, and a description is the part of
+      // this header most likely to be longer than the pane is wide.
+      els.about.title = text ? `${text}\n\nClick to edit — clear it to remove it.` : 'Say what this room is for';
+    }
 
     const n = view.groupEntries.length;
     const members = room.members?.length || 0;
@@ -10383,6 +10433,50 @@ function createPane(slot, host) {
     }
     for (const p of panes) p.renderHead();
     if (here) pinGroup(); // the note above the list may have come or gone
+  }
+
+  /**
+   * Swap the description line for an input — `startGroupRename`'s shape exactly: Enter
+   * commits, Escape and blur cancel. The one difference is that an empty commit is a real
+   * answer here: it **clears** the description, where an empty name is refused.
+   */
+  function startGroupDescribe(btn) {
+    const room = groupLive();
+    if (!room || view.groupDescribing) return;
+    view.groupDescribing = true;
+
+    const before = typeof room.description === 'string' ? room.description : '';
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'group-about-edit';
+    input.placeholder = 'What this room is for — empty removes it';
+    // A courtesy; `server/rooms.js` refuses over the cap rather than shortening.
+    input.maxLength = MAX_ROOM_DESCRIPTION;
+    input.value = before;
+
+    const done = (commit) => {
+      if (!view.groupDescribing) return;
+      view.groupDescribing = false;
+      const next = input.value.trim();
+      if (input.isConnected) input.replaceWith(btn);
+      renderGroupHead();
+      if (commit && next !== before) patchGroup({ description: next }, btn);
+    };
+
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        done(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        done(false);
+      }
+    };
+    input.onblur = () => done(false);
+
+    btn.replaceWith(input);
+    input.focus();
+    input.select();
   }
 
   /** Swap the heading for an input, and put it back whatever happens next. */

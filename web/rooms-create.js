@@ -44,6 +44,10 @@ export const MAX_MEMBERS = 8;
  *  server refuses over it rather than shortening, and that sentence is what is shown. */
 export const MAX_ROOM_NAME = 60;
 
+/** The description cap, mirrored the same way and for the same reason. Optional, one line;
+ *  the server refuses over it, and a control character, rather than shortening. */
+export const MAX_ROOM_DESCRIPTION = 300;
+
 /**
  * Who can be put in a room, off the roster.
  *

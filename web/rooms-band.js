@@ -148,6 +148,10 @@ export function bandSig(
         'room',
         e.room.id,
         e.room.name,
+        // Drawn only on the hover, but a hover that does not re-sign is a tooltip that keeps
+        // saying what the room *was* for. A changed description patches the row's `title` in
+        // place, like every other field here; no row moves for it.
+        e.room.description || '',
         e.room.memberCount,
         e.room.unseen,
         e.room.lastAt,
@@ -172,13 +176,17 @@ export function unseenText(n) {
 }
 
 /** The row's hover, which is where the membership actually lives — the face has room for a
- *  number and nothing else. Archived says so first, because it is the thing about the room
+ *  number and nothing else. The description, when there is one, is the line under the name.
+ *  Archived says so first, because it is the thing about the room
  *  that changes what you can do with it. `live` is `roomLiveness`'s answer, and its sentence
  *  rides on the hover as well as on the dot's own `title`: the dot is seven pixels wide, and a
  *  fact that is only a colour on a target that small is a fact most readers never get. */
 export function roomTitle(room, { archived = false, live = null } = {}) {
   const names = (Array.isArray(room?.members) ? room.members : []).map(memberLabel).filter(Boolean);
   const lines = [room?.name || 'room'];
+  // What the room is for, straight under its name — the maintainer's own words, so the
+  // first thing the hover says after what the room is called.
+  if (typeof room?.description === 'string' && room.description.trim()) lines.push(room.description.trim());
   if (archived) lines.push('archived — read it, but nothing more is typed into anyone');
   lines.push(names.length ? names.join(', ') : 'no members');
   if (live && live.total) lines.push(livenessText(live));

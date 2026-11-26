@@ -6502,11 +6502,50 @@ button.bg-agent:focus-visible { outline: 2px solid var(--accent); outline-offset
    that already rely on their own flex container doing the shrinking. */
 .main-head.is-group .confirm { max-width: 9rem; }
 
+/* The description, on its own line between the name and the tally (rows 2 and 3), and
+   like the name it edits in place — so a button styled as text, with the same dotted
+   underline on hover. One line, ellipsised; the full text is on its `title`. Empty, it reads
+   `add a description` in the faint type, since this line is also how one is added. */
+.main-head.is-group .group-about {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: text;
+}
+.main-head.is-group .group-about.is-empty { color: var(--ink-faint); font-style: italic; }
+.main-head.is-group .group-about:hover { text-decoration: underline dotted var(--rule-strong); }
+.main-head.is-group .group-about-edit {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  min-width: 0;
+  padding: 0.05rem 0.35rem;
+  border: 1px solid var(--rule-strong);
+  border-radius: 5px;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.8rem;
+}
+.main-head.is-group .group-about-edit:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--rule-strong));
+}
+
 /* The tally, in the same muted meta type as every other secondary line in a pane header —
    it used to *be* one of `.head-meta`'s children and reads identically now it is not. */
 .main-head.is-group .group-tally {
   grid-column: 2 / -1;
-  grid-row: 2;
+  grid-row: 3;
   font-family: var(--mono);
   font-size: 0.68rem;
   color: var(--ink-faint);
