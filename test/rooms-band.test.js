@@ -802,7 +802,13 @@ test('the app re-arms one expiry timer on every patch, and the timer only religh
   assert.equal((code.match(/roomsTickTimer = setTimeout/g) || []).length, 1, 'exactly one band timer');
   assert.match(schedule, /relightBand\(el\.roomsList, state\.rooms\)/);
   assert.ok(!/patchBand|replaceChildren|roomsSig/.test(strip(schedule)), 'the timer never rebuilds the band');
-  assert.match(styles, /\.room-mark\.is-lit\s*\{\s*color:\s*var\(--accent\);\s*\}/, 'lit is the accent token');
+  assert.match(styles, /\.room-mark\.is-lit\s*\{\s*color:\s*var\(--room-lit\);/, 'lit is its own green token');
+  // Defined for the light root, the system-dark block and the explicit dark theme, and never
+  // the members dot's `--idle`, which sits right beside it and means something else.
+  const lit = [...text('web/tokens.css').matchAll(/--room-lit:\s*(#[0-9a-f]{6});/g)].map((m) => m[1]);
+  assert.equal(lit.length, 3);
+  assert.equal(lit[1], lit[2], 'the two dark blocks agree');
+  assert.doesNotMatch(text('web/tokens.css'), new RegExp(`--idle:\\s*(${lit.join('|')})`));
 });
 
 /* ------------------------------------------------------------- the age --- */
