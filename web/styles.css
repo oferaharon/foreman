@@ -7440,6 +7440,36 @@ button.bg-agent:focus-visible { outline: 2px solid var(--accent); outline-offset
    column back and move every number on the row. */
 .room-filter.is-none { visibility: hidden; }
 
+/* The row's archive control, just left of the funnel and in its grammar — a 1.1rem column,
+   no padding, no margin. Unlike the funnel it is drawn only on the row's hover or keyboard
+   focus: it takes something away, and one on every row at rest is a column of things to
+   mis-press. The column is reserved either way, so nothing moves when it appears. Keyboard
+   focus and not `:focus-within`, or a row once clicked would keep it lit. */
+.room-archive {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.1rem;
+  padding: 0;
+  color: var(--ink-faint);
+  opacity: 0;
+}
+.room-row:hover .room-archive,
+.room-row:focus-visible .room-archive,
+.room-row:has(:focus-visible) .room-archive { opacity: 1; }
+.room-archive:hover { color: var(--decision); }
+/* An archived room: the column is kept and nothing is in it — `.room-filter.is-none`. */
+.room-archive.is-none { visibility: hidden; }
+
+/* Armed (`armConfirm`): the question names the room, so it takes the name's place and the
+   numbers' too, and the funnel stays where it was. The answers carry no vertical padding or
+   line of their own, so the row is the height it was. */
+.room-row:has(.confirm) :is(.room-name, .room-age, .room-count, .room-unseen) { display: none; }
+.room-row .confirm { flex: 1; align-items: center; }
+.room-row .confirm-q { flex: 1; }
+.room-row :is(.confirm-yes, .confirm-no) { padding-block: 0; line-height: 1.1; }
+
 /* The archived fold: the rail's group heading in miniature, down to the caret, because it
    does the one thing that heading does. A sibling of the rows it opens rather than a box
    around them — see `bandEntries` — so nothing has to be taken apart to be patched. */

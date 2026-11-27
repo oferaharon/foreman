@@ -1888,7 +1888,9 @@ spelling (`now`, `5m`, `3h`, `2d`), moved on by the same timer as the `◎`; a r
 spoken in shows none. Archived rooms fold into a
 collapsed `archived · N`, and an archived row carries its age but no dot. Every open row ends
 in a **funnel** that narrows the rail to the room's members (the rail filter, above); pressing it
-never opens the room. The band's head and
+never opens the room. Just left of it, on the row's hover or keyboard focus, an **archive** control
+asks `archive “<name>”?` in the row itself and archives the room on `yes`, again without opening
+it; an archived row has no such control. The band's head and
 its `+ room` are in the rail even when there are no rooms at all — a control that only appears
 once you have used it is a control nobody finds.
 

@@ -4627,8 +4627,30 @@ function renderRoomsBand() {
     onOpen: openGroupRoom,
     onToggleArchived: toggleArchivedRooms,
     onFilter: (id) => setRailFilter(id ? roomFilterValue(id) : ''),
+    onArchive: armRoomArchive,
+    // A question still standing in a row the band is about to move or drop is answered for.
+    onLeaving: disarmConfirm,
   });
   scheduleRoomsTick();
+}
+
+/** The row's archive control: the room pane header's question and its request, asked from
+ *  the rail without opening the room. */
+function armRoomArchive(room, btn) {
+  armConfirm(btn, `archive “${room.name || 'this room'}”?`, () => archiveRoom(room.id, btn));
+}
+
+/** Nothing is drawn from the answer: the `PATCH` broadcasts a roster frame, and the band and
+ *  any pane on the room repaint off that. */
+async function archiveRoom(id, btn) {
+  btn.disabled = true;
+  try {
+    await postJSONMethod('PATCH', `/api/rooms/${encodeURIComponent(id)}`, { archived: true });
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /** The band's one pending timer — the next lit `◎` going out or the next age changing its

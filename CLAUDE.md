@@ -1559,7 +1559,8 @@ is `handed`**, never *delivered* and never *read*. **State is under `STATE_DIR`*
 rollback past this feature deletes rooms — `TaskStore`'s erasure) and `rooms/<id>.jsonl`
 append-only, never rewritten. And **nothing about rooms joins `composerSig`**, because a
 message landing in a room would otherwise take the textarea out from under whoever is typing.
-Archiving closes a room to posts and deletes nothing; the rail band folds archived ones away
+Archiving closes a room to posts and deletes nothing — from the pane header or from an open
+row's own control in the band, both behind the same two-step confirm; the rail band folds archived ones away
 and its head is deliberately outside the `has-rooms` gate, since `+ room` is the only way to
 make the first one. **`@name` decides who gets a copy** (the maintainer's ruling of 2026-11-20,
 reversing 2026-09-05's "narrows nothing") — a post naming members is typed to those members
