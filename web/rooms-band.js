@@ -44,6 +44,8 @@ import { ageText } from './group-summary.js';
 import { asleepMembers, memberRow } from './rooms-pane.js';
 // The rail filter's glyph, the group header's own (`web/funnel-icon.js`).
 import { funnelIcon } from './funnel-icon.js';
+// The row's archive control.
+import { archiveIcon } from './archive-icon.js';
 
 /** The archived fold's own key in the flat entry list. Rooms take `room:<id>`, so no room
  *  id can ever collide with it — the store's ids are opaque but the prefix is ours. */
@@ -371,7 +373,10 @@ const liveClass = (live) => (live ? `room-live is-${live.state}` : 'room-live');
  */
 const parts = new WeakMap();
 
-/** One room, as a node with six spans, a funnel and nothing measured. Built once per room
+/** The rows last drawn in the archived half — how `patchBand` knows one has crossed over. */
+const wasArchived = new WeakSet();
+
+/** One room, as a node with six spans, two controls and nothing measured. Built once per room
  *  and patched thereafter — see `patchBand`.
  *
  *  The order is the reading order: the two marks (activity, then who is alive), the name —
@@ -379,10 +384,11 @@ const parts = new WeakMap();
  *  and how many unseen. The age sits against the name because it is about the conversation;
  *  the stylesheet holds it a little further off the count than the row's own gap, because
  *  `3h 2` at one gap read on the bench as one figure. The funnel is last, the rightmost
- *  thing on the row, where the group header keeps its own.
+ *  thing on the row, where the group header keeps its own, and the archive control sits just
+ *  before it.
  *
- *  **The row is a `div role="button"`, no longer a `<button>`, because the funnel inside it
- *  is a real one** and interactive content cannot nest — the session row's own move and its
+ *  **The row is a `div role="button"`, no longer a `<button>`, because the controls inside it
+ *  are real ones** and interactive content cannot nest — the session row's own move and its
  *  own reason (rail-and-groups#the-row-is-not-a-button). The keyboard half a `<button>` gave
  *  for free is wired by hand in `patchBand`. */
 function buildRow(key) {
@@ -420,6 +426,13 @@ function buildRow(key) {
   unseen.className = 'room-unseen';
   row.append(unseen);
 
+  // Close the room to posts without opening it. Asks first — see `paintArchive`.
+  const archive = document.createElement('button');
+  archive.type = 'button';
+  archive.className = 'room-archive';
+  archive.append(archiveIcon());
+  row.append(archive);
+
   // Narrow the rail to this room's members. Built once with the row and patched like every
   // other part of it, so a press — which focuses it — never costs the row its node.
   const filter = document.createElement('button');
@@ -428,7 +441,7 @@ function buildRow(key) {
   filter.append(funnelIcon());
   row.append(filter);
 
-  parts.set(row, { mark, live, name, age, count, unseen, filter });
+  parts.set(row, { mark, live, name, age, count, unseen, archive, filter });
   return row;
 }
 
@@ -466,9 +479,17 @@ function buildFold(key) {
  * one day would need nothing here to change. A node is moved only when it is not already
  * where it belongs, and that is a measurement rather than tidiness — see `place`.
  *
- * `handlers.onOpen(id)` and `handlers.onToggleArchived()` are the only two ways out. They
- * are re-bound on every patch rather than only at build, because a handler closing over a
- * stale room record is exactly the class of bug the reuse is otherwise inviting.
+ * **A row that crosses between the open rooms and the archived ones is taken out first
+ * too**, and put back where it now belongs — same node. Left in place, it would sit at an
+ * index a survivor belongs at, and every row behind it would be moved round it while the
+ * control that archived it may still hold focus: the scroll jump again. Out of the list it
+ * holds none.
+ *
+ * `onOpen(id)`, `onToggleArchived()`, `onFilter(id)` and `onArchive(room, button)` are the
+ * ways out. They are re-bound on every patch rather than only at build, because a handler
+ * closing over a stale room record is exactly the class of bug the reuse is otherwise
+ * inviting. `onLeaving(node)` is called before a node is taken out for either reason above,
+ * so the caller can put back anything of its own it has standing in the row.
  */
 export function patchBand(list, rooms = [], opts = {}) {
   const {
@@ -477,6 +498,8 @@ export function patchBand(list, rooms = [], opts = {}) {
     onOpen = null,
     onToggleArchived = null,
     onFilter = null,
+    onArchive = null,
+    onLeaving = null,
     sessions = [],
     asleep = [],
     filterId = null,
@@ -491,13 +514,17 @@ export function patchBand(list, rooms = [], opts = {}) {
   // node sits at an index a survivor belongs at, and `place` would then move every row
   // behind it, a focused one included. None of these nodes is reused, so taking them out
   // before the pass removes nothing that is re-created in the same beat.
-  const wanted = new Set(entries.map((entry) => entry.key));
+  const wanted = new Map(entries.map((entry) => [entry.key, entry]));
   const have = new Map();
   for (const node of [...list.children]) {
     const key = node.dataset?.roomKey;
     if (!key) continue;
-    if (wanted.has(key)) have.set(key, node);
-    else node.remove();
+    const entry = wanted.get(key);
+    if (entry) have.set(key, node);
+    const crossed = entry?.kind === 'room' && Boolean(entry.archived) !== wasArchived.has(node);
+    if (entry && !crossed) continue;
+    onLeaving?.(node);
+    node.remove();
   }
 
   const drawn = [];
@@ -520,7 +547,9 @@ export function patchBand(list, rooms = [], opts = {}) {
 
     const { room } = entry;
     const row = found || buildRow(entry.key);
-    const { mark, live, name, age, count, unseen, filter } = parts.get(row);
+    const { mark, live, name, age, count, unseen, archive, filter } = parts.get(row);
+    if (entry.archived) wasArchived.add(row);
+    else wasArchived.delete(row);
     mark.className = markClass(isRecent(room, now));
     // Archived rows get no dot (`roomLiveness` answers `null`), and lose every word the
     // dot carried on a reused node — a row archived under the cursor keeps its node.
@@ -559,11 +588,41 @@ export function patchBand(list, rooms = [], opts = {}) {
       e.preventDefault();
       onOpen?.(room.id);
     };
+    paintArchive(archive, room, entry.archived, onArchive);
     paintFilter(filter, room, filterState(room, { archived: entry.archived, live: facts, sessions, asleep, filterId }), onFilter);
     place(list, row, drawn.length);
     drawn.push(row);
   }
   return drawn;
+}
+
+/**
+ * The archive control's face. An open room's asks the caller — which asks the maintainer;
+ * nothing here archives. The press stops at the button, so it never also opens the room, and
+ * a real button answers its own Enter and Space with a click (the row's `onkeydown` ignores
+ * keys aimed at anything but itself).
+ *
+ * An archived room has no such control: the button stays in the row, invisible, out of the
+ * tab order and bound to nothing, so its numbers line up with the open rows' above —
+ * `.room-filter.is-none`'s reason. Unarchiving stays in the room's own header.
+ */
+function paintArchive(btn, room, archived, onArchive) {
+  btn.className = archived ? 'room-archive is-none' : 'room-archive';
+  btn.tabIndex = archived ? -1 : 0;
+  if (archived) {
+    btn.setAttribute('aria-hidden', 'true');
+    btn.removeAttribute('aria-label');
+    btn.title = '';
+    btn.onclick = null;
+    return;
+  }
+  btn.removeAttribute('aria-hidden');
+  btn.setAttribute('aria-label', `Archive ${room.name}`);
+  btn.title = `Archive ${room.name}: nothing more can be posted to it, and everything in it stays readable.`;
+  btn.onclick = (e) => {
+    e?.stopPropagation?.();
+    onArchive?.(room, btn);
+  };
 }
 
 /**

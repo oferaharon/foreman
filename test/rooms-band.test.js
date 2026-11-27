@@ -802,7 +802,13 @@ test('the app re-arms one expiry timer on every patch, and the timer only religh
   assert.equal((code.match(/roomsTickTimer = setTimeout/g) || []).length, 1, 'exactly one band timer');
   assert.match(schedule, /relightBand\(el\.roomsList, state\.rooms\)/);
   assert.ok(!/patchBand|replaceChildren|roomsSig/.test(strip(schedule)), 'the timer never rebuilds the band');
-  assert.match(styles, /\.room-mark\.is-lit\s*\{\s*color:\s*var\(--accent\);\s*\}/, 'lit is the accent token');
+  assert.match(styles, /\.room-mark\.is-lit\s*\{\s*color:\s*var\(--room-lit\);/, 'lit is its own green token');
+  // Defined for the light root, the system-dark block and the explicit dark theme, and never
+  // the members dot's `--idle`, which sits right beside it and means something else.
+  const lit = [...text('web/tokens.css').matchAll(/--room-lit:\s*(#[0-9a-f]{6});/g)].map((m) => m[1]);
+  assert.equal(lit.length, 3);
+  assert.equal(lit[1], lit[2], 'the two dark blocks agree');
+  assert.doesNotMatch(text('web/tokens.css'), new RegExp(`--idle:\\s*(${lit.join('|')})`));
 });
 
 /* ------------------------------------------------------------- the age --- */
@@ -892,7 +898,7 @@ test('a row draws its age beside its name, and an archived row draws one too', (
     const rows = list.children.filter((c) => /^room-row\b/.test(c.className));
     const [spoken, quiet, gone] = rows;
     const names = spoken.children.map((c) => c.className.split(' ')[0]);
-    assert.deepEqual(names, ['room-mark', 'room-live', 'room-name', 'room-age', 'room-count', 'room-unseen', 'room-filter']);
+    assert.deepEqual(names, ['room-mark', 'room-live', 'room-name', 'room-age', 'room-count', 'room-unseen', 'room-archive', 'room-filter']);
     assert.equal(span(spoken, 'room-age').textContent, '3h');
     assert.match(span(spoken, 'room-age').title, /^last post /);
     assert.equal(span(quiet, 'room-age').textContent, '', 'no posts, no age');
@@ -1455,4 +1461,153 @@ test('the band’s head is not spelled like a folder heading — measured, not e
   // with an open group's tint for the same meaning.
   const list = styles.match(/\.rooms-list \{[^}]*\}/)[0];
   assert.ok(!/background/.test(list));
+});
+
+/* ------------------------------------------------ the archive control --- */
+
+const archiveBtn = (row) => row.children.find((c) => c.className.startsWith('room-archive'));
+
+test('an open row offers to archive, and an archived row does not', () => {
+  withDom(() => {
+    const list = container();
+    const asked = [];
+    patchBand(list, [room('r1', 'alpha'), room('r2', 'gamma', { archivedAt: 5 })], {
+      archivedCollapsed: false,
+      onArchive: (r) => asked.push(r.id),
+    });
+    const [open, , gone] = list.children;
+
+    const on = archiveBtn(open);
+    assert.equal(on.className, 'room-archive');
+    assert.equal(on.type, 'button');
+    assert.equal(on.tabIndex, 0);
+    assert.equal(on.attrs['aria-label'], 'Archive alpha');
+    assert.equal(open.children.at(-1).className, 'room-filter', 'the funnel stays rightmost');
+
+    // The column is kept for alignment, and there is nothing in it to press or tab to.
+    const off = archiveBtn(gone);
+    assert.equal(off.className, 'room-archive is-none');
+    assert.equal(off.onclick, null);
+    assert.equal(off.tabIndex, -1);
+    assert.equal(off.attrs['aria-hidden'], 'true');
+    assert.equal(off.attrs['aria-label'], undefined);
+    assert.match(styles, /\.room-archive\.is-none \{ visibility: hidden; \}/);
+    assert.deepEqual(asked, [], 'drawing the control asks nothing');
+  });
+});
+
+test('a press or a key on the archive control never opens the room', () => {
+  withDom(() => {
+    const list = container();
+    const opened = [];
+    const asked = [];
+    patchBand(list, [room('r1', 'alpha')], {
+      onOpen: (id) => opened.push(id),
+      onArchive: (r, btn) => asked.push([r.name, btn]),
+    });
+    const [row] = list.children;
+    const btn = archiveBtn(row);
+
+    let stopped = 0;
+    btn.onclick({ stopPropagation: () => (stopped += 1) });
+    assert.equal(stopped, 1, 'the press stops at the control');
+    assert.deepEqual(asked, [['alpha', btn]]);
+
+    // A real button turns Enter and Space into a click of its own; the row must neither
+    // answer the bubbled key nor cancel that default.
+    for (const key of ['Enter', ' ']) {
+      let prevented = false;
+      row.onkeydown({ key, target: btn, preventDefault: () => (prevented = true) });
+      assert.equal(prevented, false);
+    }
+    assert.deepEqual(opened, []);
+  });
+});
+
+test('a row crossing into the fold is taken out first, so no sibling moves round it', () => {
+  withDom(() => {
+    const list = container();
+    const left = [];
+    const opts = { archivedCollapsed: false, onLeaving: (n) => left.push(n.dataset.roomKey) };
+    const old = room('r9', 'old', { archivedAt: 1 });
+    const rooms = [room('r1', 'a'), room('r2', 'b'), room('r3', 'c'), old];
+    patchBand(list, rooms, opts);
+    const before = [...list.children];
+    const target = before[0];
+
+    list.moves = 0;
+    patchBand(list, [{ ...rooms[0], archivedAt: 9 }, rooms[1], rooms[2], old], opts);
+    assert.deepEqual(left, ['room:r1']);
+    assert.equal(list.moves, 1, 'only the crossing row is inserted');
+    assert.deepEqual(list.children, [before[1], before[2], before[3], target, before[4]], 'same nodes');
+
+    // And back the other way, as the header's unarchive does it.
+    list.moves = 0;
+    patchBand(list, rooms, opts);
+    assert.equal(list.moves, 1);
+    assert.deepEqual(list.children, before);
+    assert.equal(archiveBtn(target).className, 'room-archive');
+
+    // A row that stays where it is is never reported as leaving.
+    left.length = 0;
+    patchBand(list, rooms, opts);
+    assert.deepEqual(left, []);
+  });
+});
+
+test('arming asks first, and yes archives exactly once', () => {
+  // `armConfirm` and the row's two functions, run for real out of `web/app.js`.
+  const node = () => {
+    const n = {
+      children: [],
+      parent: null,
+      isConnected: true,
+      setAttribute() {},
+      focus() {},
+      append: (...kids) => kids.forEach((k) => ((k.parent = n), n.children.push(k))),
+      contains: (x) => x === n || n.children.some((c) => c.contains(x)),
+      replaceWith(other) {
+        const at = n.parent.children.indexOf(n);
+        n.parent.children.splice(at, 1, other);
+        other.parent = n.parent;
+        other.isConnected = true;
+        n.parent = null;
+        n.isConnected = false;
+      },
+    };
+    return n;
+  };
+  // `fn` stops at the first two-space brace, which cuts a `try` in half; these are all top level.
+  const topLevel = (name) => app.match(new RegExp(`\\n(?:async )?function ${name}\\([\\s\\S]*?\\n\\}`))[0];
+  const sent = [];
+  const build = new Function(
+    'document', 'postJSONMethod', 'toast',
+    `const CONFIRM_MS = 4000; let confirmArmed = null;
+     ${['disarmConfirm', 'armConfirm', 'armRoomArchive', 'archiveRoom'].map(topLevel).join('')}
+     return { armRoomArchive, disarmConfirm };`,
+  );
+  const { armRoomArchive, disarmConfirm } = build(
+    { createElement: node, activeElement: null },
+    async (...args) => sent.push(args),
+    assert.fail,
+  );
+
+  const row = node();
+  const btn = node();
+  row.append(btn);
+
+  armRoomArchive(room('r1', 'alpha'), btn);
+  let [group] = row.children;
+  let [q, , no] = group.children;
+  assert.equal(q.textContent, 'archive “alpha”?');
+  no.onclick();
+  assert.deepEqual(row.children, [btn]);
+  assert.deepEqual(sent, [], 'one press, or a no, archives nothing');
+
+  armRoomArchive(room('r1', 'alpha'), btn);
+  [group] = row.children;
+  group.children[1].onclick();
+  disarmConfirm();
+  assert.deepEqual(sent, [['PATCH', '/api/rooms/r1', { archived: true }]]);
+  assert.deepEqual(row.children, [btn]);
 });

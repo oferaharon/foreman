@@ -101,6 +101,18 @@ room's own rule one section up, stops it too, but in `renderRail` the read lands
 `el.railList.replaceChildren`, so it would force a layout of the whole rail on every band
 patch and the restore another: exactly the repaint-that-measures this file warns about.
 
+**A row that changes section is the one row that has to move, and it goes out of the list
+first.** Archiving takes a room from the open list into the fold, and unarchiving brings it
+back. Left in place, that node sits at an index a survivor belongs at, so `place` moves every
+row behind it round it. `patchBand` therefore removes a crossing row with the stale ones,
+before the pass, and inserts the same node where it now belongs. MEASURED on Chrome 155
+(headless), nine open rooms and one archived, the fold open, a focused row at the top of the
+scrolled band archived by a request from the page: without that, `scrollTop` went 28, 111 and
+83 → 134, the end of the list; with it, each gave up one row's height (28 → 1, 111 → 83,
+83 → 56), which is anchoring holding the neighbours still. A press on the row's own archive
+control held `scrollTop` exactly either way, because disabling the button for the request
+drops its focus.
+
 ## A clamp that can't be measured
 
 **A clamp that can't be measured can't be trusted.** `-webkit-line-clamp` is what the room
