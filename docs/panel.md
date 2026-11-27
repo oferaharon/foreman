@@ -1875,8 +1875,8 @@ posting is read from the tool server's own environment, so a session cannot post
 **The rail band** sits above the peer-messages row, newest *created* room on top (never by
 activity, so a post moves nothing; open rooms above archived, the order applying within each; rooms
 with no creation stamp or an equal one fall back to the reverse of the store's order): one row per open room with its name, member
-count and a count of what has arrived since anybody last opened it. Its `◎` lights in the accent
-colour while the room's last post is under ten minutes old — the one sign of activity on a room
+count and a count of what has arrived since anybody last opened it. Its `◎` lights bright green,
+with a soft glow, while the room's last post is under ten minutes old — the one sign of activity on a room
 you have already opened — and goes out on its own timer when the ten minutes run out, without
 repainting the row. Beside it, a dot says whether the room's members are still running: **green**
 when every member's session is live, **amber** when some have gone, **grey** when none is left —

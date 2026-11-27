@@ -15,6 +15,11 @@
   --code-bg: #f0f0f5;
   --mode-edits: #1d7d86;
 
+  /* A room's `◎` while something has just been posted in it (`.room-mark.is-lit`). Its own
+     token rather than `--idle`: the members dot beside it is `--idle`, and the two say
+     different things. As bright as it can be while still clearing 3:1 on `--surface`. */
+  --room-lit: #00a62b;
+
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
@@ -227,6 +232,7 @@
     --decision: #e8746e;
     --code-bg: #14151c;
     --mode-edits: #4fc3cf;
+    --room-lit: #2bff6a;
 
     /* Same ring, dark values — measured against this theme's `--ground` (#111219) and
        this theme's status/accent colours. See the light block above for how N=7 was
@@ -296,6 +302,7 @@
   --decision: #e8746e;
   --code-bg: #14151c;
   --mode-edits: #4fc3cf;
+  --room-lit: #2bff6a;
 
   /* Same ring and same numbers as the `prefers-color-scheme` block above — this is the
      explicit-choice mirror of it, so `data-theme="dark"` wins over the media query the
